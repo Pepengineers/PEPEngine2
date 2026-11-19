@@ -6,6 +6,7 @@
 #include <thread>
 #include <chrono>
 #include <climits>
+#include <algorithm>
 namespace BistroRender {
 namespace {
 std::atomic<uint64_t> NextIncarnation{1};
@@ -15,9 +16,9 @@ size_t Index(Queue queue) {
 }
 bool Equal(LUID a,LUID b) { return a.HighPart==b.HighPart && a.LowPart==b.LowPart; }
 }
-QueueSubmission::QueueSubmission(GDX12Device& primary,GDX12Device* secondary)
-    : _devices{&primary,secondary},_incarnation(NextIncarnation.fetch_add(1)) {
-    if(secondary && Equal(primary.GetAdapterLuid(),secondary->GetAdapterLuid()))
+QueueSubmission::QueueSubmission(GDX12Device& primary,std::unique_ptr<GDX12Device> secondary)
+    : _secondary(std::move(secondary)),_devices{&primary,_secondary.get()},_incarnation(NextIncarnation.fetch_add(1)) {
+    if(_secondary && Equal(primary.GetAdapterLuid(),_secondary->GetAdapterLuid()))
         throw std::invalid_argument("two distinct physical adapter LUIDs required");
     for(Id d=0;d<2;++d) if(_devices[d]) _identities[d]=_devices[d]->GetDevice();
     for(Id d=0;d<2;++d) if(_devices[d]) for(auto q:{Queue::Direct,Queue::Compute,Queue::Copy}) {
@@ -28,7 +29,7 @@ QueueSubmission::QueueSubmission(GDX12Device& primary,GDX12Device* secondary)
                 D3D12_COMMAND_LIST_TYPE_COPY : D3D12_COMMAND_LIST_TYPE_COMPUTE);
             t.Queue=t.Owned.get();
         }
-        if(secondary) {
+        if(_secondary) {
             ThrowIfFailed(Device(d).GetDevice()->CreateFence(0,
                 D3D12_FENCE_FLAG_SHARED | D3D12_FENCE_FLAG_SHARED_CROSS_ADAPTER,IID_PPV_ARGS(&t.Shared)));
             HANDLE handle=nullptr;
@@ -50,10 +51,39 @@ QueueSubmission::~QueueSubmission() {
         t.Owned.release(); t.Shared.Detach(); t.Remote.Detach();
         if(t.Queue) t.Queue->GetCommandQueue()->AddRef();
     }
+    _secondary.release();
 }
 GDX12Device& QueueSubmission::Device(Id id) const {
     if(id>1 || !_devices[id]) throw std::invalid_argument("unconfigured device context");
     return *_devices[id];
+}
+QueueSubmission::TransferBuffer QueueSubmission::CreateTransferBuffer(uint64_t bytes) const {
+    if (!bytes) throw std::invalid_argument("empty cross-adapter buffer");
+    auto* primary = Device(0).GetDevice().Get();
+    auto* secondary = Device(1).GetDevice().Get();
+    const auto desc = CD3DX12_RESOURCE_DESC::Buffer(bytes, D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER);
+    const auto a = primary->GetResourceAllocationInfo(0, 1, &desc);
+    const auto b = secondary->GetResourceAllocationInfo(0, 1, &desc);
+    if (a.SizeInBytes == UINT64_MAX || b.SizeInBytes == UINT64_MAX)
+        throw std::runtime_error("cross-adapter buffer allocation is unsupported");
+    D3D12_HEAP_DESC heap{};
+    heap.SizeInBytes = (std::max)(a.SizeInBytes, b.SizeInBytes);
+    heap.Alignment = (std::max)(a.Alignment, b.Alignment);
+    heap.Properties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+    heap.Flags = D3D12_HEAP_FLAG_SHARED | D3D12_HEAP_FLAG_SHARED_CROSS_ADAPTER;
+    TransferBuffer buffer;
+    ThrowIfFailed(secondary->CreateHeap(&heap, IID_PPV_ARGS(&buffer.Heaps[1])));
+    HANDLE handle = nullptr;
+    ThrowIfFailed(secondary->CreateSharedHandle(buffer.Heaps[1].Get(), nullptr, GENERIC_ALL, nullptr, &handle));
+    const auto opened = primary->OpenSharedHandle(handle, IID_PPV_ARGS(&buffer.Heaps[0]));
+    CloseHandle(handle);
+    ThrowIfFailed(opened);
+    for (Id id = 0; id < 2; ++id) {
+        ThrowIfFailed(Device(id).GetDevice()->CreatePlacedResource(buffer.Heaps[id].Get(), 0, &desc,
+            D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&buffer.Resources[id])));
+        ValidateResource(id, buffer.Resources[id].Get());
+    }
+    return buffer;
 }
 void QueueSubmission::Check() const {
     if(_quarantined.load()) throw std::runtime_error("submission domain quarantined");

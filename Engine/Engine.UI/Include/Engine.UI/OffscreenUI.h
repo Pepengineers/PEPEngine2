@@ -6,6 +6,7 @@
 #include <vector>
 
 struct ImDrawData;
+struct ImDrawList;
 class GDX12CommandList;
 class GDX12Device;
 
@@ -16,7 +17,8 @@ namespace Engine::UI
 
     // Called on the ImGui owner thread while the source draw data and atlas are live.
     std::shared_ptr<const DrawData> CaptureDrawData(const ImDrawData& source);
-    std::shared_ptr<const DrawData> CaptureScreenFrame();
+    // A separate game overlay is inserted after the screen background and underneath interactive windows.
+    std::shared_ptr<const DrawData> CaptureScreenFrame(ImDrawList* gameOverlay = nullptr);
 
     inline constexpr DXGI_FORMAT OffscreenFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 

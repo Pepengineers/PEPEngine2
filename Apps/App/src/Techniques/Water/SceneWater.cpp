@@ -23,7 +23,12 @@ void SceneWater::SetRetirement(std::function<void()> retire)
 }
 void SceneWater::Prepare(float delta)
 {
-	_instances = _collector.CollectScene(delta);
+	if (!_surface.HasRetirement())
+	{
+		throw std::logic_error("Water requires executor-owned resource retirement");
+	}
+	_work.Commands.clear();
+	_surface.PrepareFrame(_collector.CollectScene(delta));
 }
 void SceneWater::Packet(Graph& graph, std::vector<ID3D12Resource*>& bindings, const char* name,
                         const std::vector<GDX12ResourceAccess>& resources,
@@ -65,14 +70,8 @@ void SceneWater::Packet(Graph& graph, std::vector<ID3D12Resource*>& bindings, co
 	_work.AddOwned(graph, name, std::move(accesses), bindings, std::move(record),
 	               "Water recording cannot submit private queue signals", {}, target);
 }
-void SceneWater::AppendSurface(Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12Texture* opaqueDepth,
-                               GDX12Texture* opaqueMotion)
+void SceneWater::SetSceneInputs(GDX12Texture* opaqueDepth, GDX12Texture* opaqueMotion)
 {
-	if (!_surface.HasRetirement())
-	{
-		throw std::logic_error("Water requires executor-owned resource retirement");
-	}
-	_work.Commands.clear();
 	if (!opaqueDepth->GetWidth() || !opaqueDepth->GetHeight() || opaqueDepth->GetWidth() != opaqueMotion->GetWidth() ||
 	    opaqueDepth->GetHeight() != opaqueMotion->GetHeight() || opaqueMotion->GetFormat() != DXGI_FORMAT_R16G16_FLOAT)
 	{
@@ -80,25 +79,33 @@ void SceneWater::AppendSurface(Graph& graph, std::vector<ID3D12Resource*>& bindi
 	}
 	_depth = opaqueDepth;
 	_motion = opaqueMotion;
-	_surface.PrepareFrame(std::move(_instances));
+}
+void SceneWater::AppendSimulation(Graph& graph, std::vector<ID3D12Resource*>& bindings)
+{
+	const Queue queue = AsyncWater.GetValue() ? Queue::Compute : Queue::Direct;
 	if (_surface.NeedsSimulation())
 	{
 		Packet(graph, bindings, "water seed / SPH hash-sort-density-integrate", _surface.GetSimulationBufferAccesses(),
-		       [this](auto* commands) { _surface.ExecuteSimulation(commands); },
-		       AsyncWater.GetValue() ? Queue::Compute : Queue::Direct);
+		       [this](auto* commands) { _surface.ExecuteSimulation(commands); }, queue);
+	}
+	if (!_surface.DrawSources().empty())
+	{
+		Packet(graph, bindings, "water pack position and speed", _surface.GetPackAccesses(),
+		       [this](auto* commands) { _surface.PackDrawSources(commands); }, queue);
 	}
 }
 void SceneWater::AppendDraw(Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12Texture* hdr,
                             D3D12_CPU_DESCRIPTOR_HANDLE depth)
 {
-	if (!_surface.IsRendering())
+	const auto& sources = _surface.DrawSources();
+	if (sources.empty())
 	{
 		return;
 	}
-	auto accesses = _surface.NativeSurfaceAccesses();
+	auto accesses = _surface.NativeSurfaceAccesses(sources);
 	accesses.push_back({hdr->GetResource(), GDX12AccessMode::ReadWrite, D3D12_RESOURCE_STATE_RENDER_TARGET});
 	accesses.push_back({_depth->GetResource(), GDX12AccessMode::ReadWrite, D3D12_RESOURCE_STATE_DEPTH_WRITE});
-	Packet(graph, bindings, "water draw / MGPU unlit opaque particles", accesses,
-	       [this, hdr, depth](auto* commands) { _surface.DrawParticles(commands, hdr, depth); });
+	Packet(graph, bindings, "water draw unlit opaque particles", accesses,
+	       [this, hdr, depth, sources](auto* commands) { _surface.DrawParticles(commands, hdr, depth, sources); });
 }
 } // namespace BistroRender

@@ -6,9 +6,9 @@ namespace BistroRender {
 // One immutable grid/adapter generation; the scene owner drains before replacement.
 class CloudPictureTexture {
 public:
-    CloudPictureTexture(GDX12DeviceResources& primary, UINT width, UINT height, int adapter);
+    CloudPictureTexture(GDX12DeviceResources& primary, UINT width, UINT height,
+                        std::shared_ptr<QueueSubmission>, bool remote);
     ~CloudPictureTexture();
-    const std::shared_ptr<QueueSubmission>& Submissions() const;
     void Prepare(UINT frameSlot, double totalTime);
     GDX12Texture* Texture(UINT frameSlot) const;
     void Append(Graph&, std::vector<ID3D12Resource*>&);

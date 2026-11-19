@@ -10,6 +10,7 @@ struct GDX12FluidParticlePass::State
 	GDX12FluidSolver::Buffers Solver;
 	GDX12FluidSolver::Head SolverHead;
 	std::unique_ptr<GDX12UploadBuffer<GDX12FluidParameters>> Constants;
+	std::vector<std::unique_ptr<GDX12UploadBuffer<XMFLOAT4>>> DisplaySlots;
 	std::shared_ptr<const std::vector<GDX12FluidParticle>> Source;
 	uint64_t Revision = 0;
 	uint64_t SettingsRevision = 0;
@@ -20,6 +21,8 @@ namespace
 {
 constexpr UINT ParameterSlotsPerFrame = 2; // Simulation and draw can read different radii in the same frame.
 constexpr UINT BillboardVertexCount = 4;
+constexpr UINT PackThreads = 128;
+static_assert(sizeof(XMFLOAT4) == 16, "Must match the water display payload");
 static_assert(sizeof(GDX12FluidParameters) == 336, "Must match FluidParameters.hlsli");
 } // namespace
 GDX12FluidParticlePass::GDX12FluidParticlePass(GDX12DeviceResources& resources, RenderPipelineCommonData& common)
@@ -60,6 +63,15 @@ void GDX12FluidParticlePass::CreatePipelines()
 	desc.RTVFormats[0] = DXGI_FORMAT_R16G16B16A16_FLOAT;
 	desc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
 	ThrowIfFailed(_resources.Device->GetDevice()->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&_particleDraw)));
+
+	GDX12RootSignatureDesc pack;
+	pack.Constants = {1};
+	pack.NumSingleSRVSlots = 1;
+	pack.NumSingleUAVSlots = 1;
+	_packRoot = std::make_unique<GDX12RootSignature>(_resources.Device, pack);
+	const D3D_SHADER_MACRO packDefines[] = {{"FLUID_PACK_DISPLAY", "1"}, {nullptr, nullptr}};
+	_packDisplay = GDX12RenderHelpers::CreateComputePipeline(
+	    _resources.Device, _packRoot.get(), APP_SHADERS_FOLDER "FluidParticleDraw.hlsl", "PackCS", packDefines);
 }
 void GDX12FluidParticlePass::PrepareStates()
 {
@@ -171,6 +183,7 @@ std::vector<GDX12ResourceAccess> GDX12FluidParticlePass::GetSimulationBufferAcce
 
 void GDX12FluidParticlePass::PrepareFrame(std::vector<GDX12FluidInstance> instances)
 {
+	_drawSources.clear();
 	_instances = std::move(instances);
 	const auto previousControls = _controls;
 	_controls = GetFluidControls();
@@ -215,8 +228,48 @@ void GDX12FluidParticlePass::PrepareFrame(std::vector<GDX12FluidInstance> instan
 	if (_rendering)
 	{
 		CreatePipelines();
+		PrepareDrawSources();
 	}
 	_solver.Initialize(_resources.Device);
+}
+
+void GDX12FluidParticlePass::PrepareDrawSources()
+{
+	const UINT slot = _resources.CurrFrameConstantsIndex;
+	auto* heap = _resources.SRV_UAV_Heap.get();
+	for (const auto& instance : _instances)
+	{
+		const auto found = _states.find(instance.Id);
+		const auto settings = ResolveFluidSettings(instance.Component.GetSettings(), _controls.Quality);
+		if (found == _states.end() || !settings.RenderEnabled)
+		{
+			continue;
+		}
+		auto& state = *found->second;
+		if (state.DisplaySlots.empty())
+		{
+			state.DisplaySlots.resize(_resources.FrameConstants.size());
+		}
+		auto& display = state.DisplaySlots.at(slot);
+		if (!display)
+		{
+			display = std::make_unique<GDX12UploadBuffer<XMFLOAT4>>(
+			    _resources.Device, state.Solver.Count, EBufferType::Default, false);
+			display->CreateSRV(heap, heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength));
+			display->CreateUAV(heap, heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength));
+		}
+		auto parameters = MakeFluidParameters(instance.ContainerToWorld, settings);
+		if (settings.ReferenceModel)
+		{
+			parameters.Radius *= std::cbrt(std::abs(instance.ContainerToWorld.Determinant()));
+		}
+		const UINT element = ParameterSlotsPerFrame * slot + 1;
+		state.Constants->CopyData(element, parameters);
+		_drawSources.push_back({instance.Id, display.get(), &state.Constants->GetResource(),
+		                       state.Constants->GetElementAddress(element)});
+		state.WasRendered = true;
+		state.SettingsRevision = instance.Component.GetSettingsRevision();
+	}
 }
 void GDX12FluidParticlePass::ExecuteSimulation(GDX12CommandList* commands)
 {
@@ -258,13 +311,43 @@ void GDX12FluidParticlePass::ExecuteSimulation(GDX12CommandList* commands)
 	}
 }
 
-void GDX12FluidParticlePass::DrawParticles(GDX12CommandList* commands, GDX12Texture* hdr,
-                                           D3D12_CPU_DESCRIPTOR_HANDLE depth)
+std::vector<GDX12ResourceAccess> GDX12FluidParticlePass::GetPackAccesses() const
 {
-	if (!_rendering)
+	std::vector<GDX12ResourceAccess> result;
+	for (const auto& source : _drawSources)
 	{
-		return;
+		for (const auto& particles : _states.at(source.Instance)->Solver.Particles)
+		{
+			result.push_back({&particles->GetResource(), GDX12AccessMode::Read,
+			                  D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE});
+		}
+		result.push_back({&source.Particles->GetResource(), GDX12AccessMode::Write,
+		                  D3D12_RESOURCE_STATE_UNORDERED_ACCESS});
 	}
+	return result;
+}
+
+void GDX12FluidParticlePass::PackDrawSources(GDX12CommandList* commands)
+{
+	GDX12_SCOPED_EVENT(commands, "Pack water display", Colors::Aqua);
+	commands->SetDescriptorHeaps({_resources.SRV_UAV_Heap.get()});
+	commands->SetComputeRootSignature(_packRoot.get());
+	commands->SetPipelineState(_packDisplay);
+	for (const auto& source : _drawSources)
+	{
+		const auto& state = *_states.at(source.Instance);
+		const auto& particleBuffer = state.Solver.Particles[state.SolverHead.Current];
+		const UINT count = source.Particles->GetElementCount();
+		commands->GetCommandList()->SetComputeRoot32BitConstant(0, count, 0);
+		commands->SetComputeSRV(0, particleBuffer->GetSRV()->GPUHandle);
+		commands->SetComputeUAV(0, source.Particles->GetUAV()->GPUHandle);
+		commands->Dispatch((count + PackThreads - 1) / PackThreads, 1, 1);
+	}
+}
+
+void GDX12FluidParticlePass::DrawParticles(GDX12CommandList* commands, GDX12Texture* hdr,
+                                          D3D12_CPU_DESCRIPTOR_HANDLE depth, const std::vector<DrawSource>& sources)
+{
 	if (hdr->GetFormat() != DXGI_FORMAT_R16G16B16A16_FLOAT)
 	{
 		throw std::logic_error("Fluid particle draw requires RGBA16F HDR");
@@ -280,54 +363,25 @@ void GDX12FluidParticlePass::DrawParticles(GDX12CommandList* commands, GDX12Text
 	auto& frame = _resources.FrameConstants[_resources.CurrFrameConstantsIndex];
 	commands->SetGraphicsRootConstantBufferView(
 	    2, frame->CameraCB->GetElementAddress(_commonData.ActiveCameraCBufferIndex));
-	for (const auto& instance : _instances)
+	for (const auto& source : sources)
 	{
-		const auto found = _states.find(instance.Id);
-		const auto settings = ResolveFluidSettings(instance.Component.GetSettings(), _controls.Quality);
-		if (found == _states.end() || !settings.RenderEnabled)
-		{
-			continue;
-		}
-		auto& state = *found->second;
-		auto parameters = MakeFluidParameters(instance.ContainerToWorld, settings);
-		if (settings.ReferenceModel)
-		{
-			parameters.Radius *= std::cbrt(std::abs(instance.ContainerToWorld.Determinant()));
-		}
-		const UINT element = ParameterSlotsPerFrame * _resources.CurrFrameConstantsIndex + 1;
-		state.Constants->CopyData(element, parameters);
-		auto& particles = *state.Solver.Particles[state.SolverHead.Current];
-		commands->SetGraphicsRootConstantBufferView(1, state.Constants->GetElementAddress(element));
-		commands->SetGraphicsSRV(0, particles.GetSRV()->GPUHandle);
-		commands->DrawInstanced(BillboardVertexCount, particles.GetElementCount(), 0, 0);
-		state.WasRendered = true;
-		state.SettingsRevision = instance.Component.GetSettingsRevision();
+		commands->SetGraphicsRootConstantBufferView(1, source.Parameters);
+		commands->SetGraphicsSRV(0, source.Particles->GetSRV()->GPUHandle);
+		commands->DrawInstanced(BillboardVertexCount, source.Particles->GetElementCount(), 0, 0);
 	}
 }
 
-std::vector<GDX12ResourceAccess> GDX12FluidParticlePass::NativeSurfaceAccesses() const
+std::vector<GDX12ResourceAccess>
+GDX12FluidParticlePass::NativeSurfaceAccesses(const std::vector<DrawSource>& sources) const
 {
 	using Mode = GDX12AccessMode;
 	std::vector<GDX12ResourceAccess> result;
-	if (!_rendering)
-	{
-		return result;
-	}
 	result.push_back({&_resources.FrameConstants.at(_resources.CurrFrameConstantsIndex)->CameraCB->GetResource(),
 	                  Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
-	for (const auto& instance : _instances)
+	for (const auto& source : sources)
 	{
-		const auto found = _states.find(instance.Id);
-		if (!instance.Component.GetSettings().RenderEnabled || found == _states.end())
-		{
-			continue;
-		}
-		const auto& state = *found->second;
-		result.push_back({&state.Constants->GetResource(), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
-		for (const auto& particles : state.Solver.Particles)
-		{
-			result.push_back({&particles->GetResource(), Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
-		}
+		result.push_back({source.ParameterBuffer, Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
+		result.push_back({&source.Particles->GetResource(), Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE});
 	}
 	return result;
 }

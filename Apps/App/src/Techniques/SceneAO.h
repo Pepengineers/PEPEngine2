@@ -20,6 +20,15 @@ class SceneAO
     }
 
   private:
+    struct Plan;
+    struct PreparedInputs
+    {
+        GDX12Texture* Depth;
+        GDX12Texture* Normals;
+    };
+    PreparedInputs AppendPreparation(Plan&, GDX12Texture* depth, GDX12Texture* normals);
+    GDX12Texture* AppendVisibility(Plan&, const PreparedInputs&);
+
     GDX12DeviceResources& _resources;
     RenderPipelineCommonData& _common;
     GDX12AmbientOcclusionPass _pass;

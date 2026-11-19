@@ -735,15 +735,25 @@ namespace Engine::UI
         commands->ResourceBarrier({target->GetResource()->GetPresentBarrier()});
     }
 
-    std::shared_ptr<const DrawData> CaptureScreenFrame()
+    std::shared_ptr<const DrawData> CaptureScreenFrame(ImDrawList* gameOverlay)
     {
+        const auto* background = gameOverlay ? ImGui::GetBackgroundDrawList(ImGui::GetMainViewport()) : nullptr;
         const auto* data = FinalizeScreenFrame();
         if (!data) return {};
         const int frame = ImGui::GetFrameCount();
         // ImGui's dynamic atlas marks real pixel writes dirty, including pending WantCreate textures.
         if (ScreenAtlasFrame != frame && !ImGui::GetIO().Fonts->TexIsBuilt) ++ScreenAtlasGeneration;
         ScreenAtlasFrame = frame;
-        return data->TotalVtxCount ? CaptureData(*data, true) : nullptr;
+        if (!gameOverlay || gameOverlay->VtxBuffer.empty())
+            return data->TotalVtxCount ? CaptureData(*data, true) : nullptr;
+
+        ImDrawData combined = *data;
+        combined.AddDrawList(gameOverlay);
+        auto* insertion = combined.CmdLists.begin();
+        if (*insertion == background)
+            ++insertion;
+        std::rotate(insertion, combined.CmdLists.end() - 1, combined.CmdLists.end());
+        return CaptureData(combined, true);
     }
 
     void DrawReconstructionStatus(const GDX12ReconstructionStatus& status, unsigned renderWidth, unsigned renderHeight,

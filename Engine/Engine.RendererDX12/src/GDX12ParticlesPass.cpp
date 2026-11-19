@@ -274,12 +274,11 @@ void GDX12ParticlesPass::Initialize()
         throw std::invalid_argument("Particles require HDR WBOIT accumulation/revealage");
 }
 
-void GDX12ParticlesPass::BeginFrame(GDX12Texture* depth)
+void GDX12ParticlesPass::BeginFrame(GDX12Texture* depth, const GDX12ParticleRenderFrame& frame)
 {
     _resources->ParticleMotion = nullptr;
     const auto global = GetParticleSettings();
-    auto* simulation = _resources->ParticleSimulation.get();
-    if (!simulation || !simulation->_state)
+    if (global.Enabled && frame.Sources.empty())
     {
         if (_state)
         {
@@ -289,7 +288,7 @@ void GDX12ParticlesPass::BeginFrame(GDX12Texture* depth)
         }
         return;
     }
-    if (!global.Enabled || !global.DrawEnabled || !simulation->_state->Active)
+    if (!global.Enabled || !global.DrawEnabled)
     {
         if (_state)
         {
@@ -299,7 +298,6 @@ void GDX12ParticlesPass::BeginFrame(GDX12Texture* depth)
         }
         return;
     }
-    const auto& snapshot = *simulation->_state;
     if (!_state)
     {
         _state = std::make_unique<State>();
@@ -308,25 +306,29 @@ void GDX12ParticlesPass::BeginFrame(GDX12Texture* depth)
     }
     auto& state = *_state;
     state.Active = true;
-    state.ResetMotion = snapshot.ResetMotion || !state.WasEnabled || state.MotionEnabled != _motionOutputEnabled;
+    state.ResetMotion = frame.ResetMotion || !state.WasEnabled || state.MotionEnabled != _motionOutputEnabled;
     state.MotionEnabled = _motionOutputEnabled;
     if (!state.WasEnabled) _commonData->ResetUpscalerHistory = true;
     state.WasEnabled = true;
     bool sorted = false, mesh = false;
-    for (const auto& emitter : snapshot.Emitters)
+    UINT capacity = 0;
+    for (const auto& source : frame.Sources)
     {
+        const auto& emitter = source.Emitter;
+        assert(emitter.MaxParticles <= 4194304 - capacity);
+        capacity += emitter.MaxParticles;
         sorted |= emitter.Blend == ParticleBlend::SortedAlpha;
         mesh |= emitter.Geometry == ParticleGeometry::Firefly;
     }
-    const bool drawsChanged = snapshot.Capacity != state.Capacity || sorted != state.Sorted || mesh != state.Mesh;
-    const bool constantsChanged = snapshot.Emitters.size() != state.ConstantCount;
+    const bool drawsChanged = capacity != state.Capacity || sorted != state.Sorted || mesh != state.Mesh;
+    const bool constantsChanged = frame.Sources.size() != state.ConstantCount;
     if (drawsChanged || constantsChanged)
     {
         _resources->Device->GetCommandQueue()->Flush();
-        if (drawsChanged) state.AllocateDraws(_resources, snapshot.Capacity, sorted, mesh);
+        if (drawsChanged) state.AllocateDraws(_resources, capacity, sorted, mesh);
         if (constantsChanged)
         {
-            state.ConstantCount = static_cast<UINT>(snapshot.Emitters.size());
+            state.ConstantCount = static_cast<UINT>(frame.Sources.size());
             state.Constants.clear();
             for (size_t i = 0; i < _resources->FrameConstants.size(); ++i)
                 state.Constants.push_back(std::make_unique<Buffer<EmitterConstants>>(_resources->Device,
@@ -373,7 +375,7 @@ void GDX12ParticlesPass::BeginFrame(GDX12Texture* depth)
     }
     for (UINT i = 0; i < state.ConstantCount; ++i)
     {
-        const auto& emitter = snapshot.Emitters[i];
+        const auto& emitter = frame.Sources[i].Emitter;
         auto constants = MakeConstants(emitter, width, height);
         if (emitter.Texture)
         {
@@ -401,11 +403,11 @@ bool GDX12ParticlesPass::InitializeOpaque(const std::array<GDX12Texture*, 5>& gb
 }
 
 void GDX12ParticlesPass::PrepareRenderData(GDX12CommandList* commands,
-    const std::vector<uint64_t>& emitterIds, bool opaque)
+    const GDX12ParticleRenderFrame& particles, bool opaque)
 {
     if (!_state || !_state->Active) return;
     auto& state = *_state;
-    auto& simulation = *_resources->ParticleSimulation->_state;
+    assert(particles.Sources.size() == state.ConstantCount);
     if (state.MeshUploadPending)
     {
         commands->ResourceBarrier({state.FireflyVertices->GetResource().GetCopyDestBarrier()});
@@ -434,21 +436,17 @@ void GDX12ParticlesPass::PrepareRenderData(GDX12CommandList* commands,
     UAV(commands, *state.Counts);
     for (UINT i = 0; i < state.ConstantCount; ++i)
     {
-        const auto& emitter = simulation.Emitters[i];
-        if (std::find(emitterIds.begin(), emitterIds.end(), emitter.Id) == emitterIds.end()) continue;
-        assert((emitter.Blend == ParticleBlend::Opaque) == opaque);
+        const auto& source = particles.Sources[i];
+        const auto& emitter = source.Emitter;
+        if ((emitter.Blend == ParticleBlend::Opaque) != opaque) continue;
         commands->SetComputeRootConstantBufferView(2, state.Constants[_resources->CurrFrameConstantsIndex]->GetElementAddress(i));
         const UINT parameters[] = {emitter.MaxParticles, 0, state.Capacity, state.ResetMotion};
         commands->GetCommandList()->SetComputeRoot32BitConstants(0, 4, parameters, 0);
-        auto& pool = *simulation.Pools.at(emitter.Id);
-        commands->ResourceBarrier({pool.Particles->GetResource().GetNonPixelShaderResourceBarrier(),
-            pool.Alive[pool.ReadIndex]->GetResource().GetNonPixelShaderResourceBarrier(),
-            pool.Counters->GetResource().GetNonPixelShaderResourceBarrier(), pool.Args->GetResource().GetIndirectArgsBarrier()});
-        commands->SetComputeSRV(0, pool.Particles->GetSRV()->GPUHandle);
-        commands->SetComputeSRV(1, pool.Alive[pool.ReadIndex]->GetSRV()->GPUHandle);
-        commands->SetComputeSRV(2, pool.Counters->GetSRV()->GPUHandle);
+        for (UINT j = 0; j < source.SRVs.size(); ++j)
+            commands->SetComputeSRV(j, source.SRVs[j]);
         commands->SetPipelineState(state.Compute.at("Cull"));
-        commands->ExecuteIndirect(state.DispatchSignature.Get(), 1, pool.Args->GetResource().D3DResource.Get(), 24, nullptr);
+        commands->ExecuteIndirect(state.DispatchSignature.Get(), 1, source.Arguments->D3DResource.Get(),
+            source.CullArgumentsOffset, nullptr);
         UAV(commands, *state.Counts);
         UAV(commands, *state.Draws);
         UAV(commands, *state.Indices);
@@ -588,7 +586,8 @@ std::vector<GDX12Resource*> GDX12ParticlesPass::NativeResources() const
     if (s.MotionEnabled && s.MotionTexture) result.push_back(s.MotionTexture->GetResource());
     return result;
 }
-std::vector<GDX12ResourceAccess> GDX12ParticlesPass::NativePreparationAccesses() const
+std::vector<GDX12ResourceAccess> GDX12ParticlesPass::NativePreparationAccesses(
+    const GDX12ParticleRenderFrame& frame, bool opaque) const
 {
     using Mode = GDX12AccessMode;
     std::vector<GDX12ResourceAccess> result;
@@ -600,6 +599,12 @@ std::vector<GDX12ResourceAccess> GDX12ParticlesPass::NativePreparationAccesses()
     result.push_back({&s.Draws->GetResource(), Mode::ReadWrite, D3D12_RESOURCE_STATE_UNORDERED_ACCESS});
     result.push_back({&s.Constants.at(_resources->CurrFrameConstantsIndex)->GetResource(), Mode::Read,
         D3D12_RESOURCE_STATE_GENERIC_READ});
+    for (const auto& source : frame.Sources)
+    {
+        if ((source.Emitter.Blend == ParticleBlend::Opaque) != opaque) continue;
+        for (auto* input : {source.Particles, source.Alive, source.Counters, source.Arguments})
+            result.push_back({input, Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
+    }
     if (s.MeshUploadPending)
     {
         result.push_back({&s.FireflyVertices->GetResource(), Mode::Write, D3D12_RESOURCE_STATE_GENERIC_READ});

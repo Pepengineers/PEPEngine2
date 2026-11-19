@@ -11,24 +11,7 @@ class BistroRenderPipeline final : public IRenderPipeline
 {
   public:
 	void Initialize(RenderPipelineContext&) override;
-	void PrepareMaterialBindings(RenderPipelineContext& c) override
-	{
-		_executor->Begin(c.Primary.CurrFrameConstantsIndex);
-		_animationTime += (std::max)(0.0, double(c.Common.GameTimer->DeltaTime()));
-		if (_cloudPicture->UpdateSettings(
-		        [this]
-		        {
-			        _executor->Drain();
-			        _executor.reset();
-		        }))
-		{
-			_executor = std::make_unique<BistroRender::Executor>(_cloudPicture->Submissions(), 0,
-			                                                     UINT(c.Primary.FrameConstants.size()));
-			_executor->Begin(c.Primary.CurrFrameConstantsIndex);
-		}
-		_cloudPicture->Prepare(c.Primary.CurrFrameConstantsIndex, _animationTime);
-		_post->PrepareMaterials(_animationTime, _cloudPicture->Image());
-	}
+	void PrepareMaterialBindings(RenderPipelineContext&) override;
 	void DrainExecution() override
 	{
 		if (_executor)
@@ -93,6 +76,8 @@ class BistroRenderPipeline final : public IRenderPipeline
 	std::unique_ptr<BistroRender::SceneLighting> _lighting;
 	GDX12RenderPass _sceneFlags;
 	std::unique_ptr<BistroRender::ScenePostUI> _post;
+	std::shared_ptr<BistroRender::QueueSubmission> _submissions;
+	int _secondarySelection = -1;
 	std::unique_ptr<BistroRender::SceneCloudPicture> _cloudPicture;
 	std::unique_ptr<BistroRender::Executor> _executor;
 	BistroRender::Schedule _schedule;

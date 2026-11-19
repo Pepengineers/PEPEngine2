@@ -3,11 +3,14 @@
 #include "../../../../External/External.Libraries/XeGTAO/XeGTAO.h"
 #define FFX_CACAO_ENABLE_D3D12
 #include "../../../../External/External.Libraries/cacao/inc/ffx_cacao_impl.h"
+#include <cassert>
 #include <cstring>
 namespace BistroRender
 {
 namespace
 {
+constexpr State Read = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+
 AutoConsoleVariable<bool> AsyncAO(L"App.Async.AO", false,
                                   L"Run ambient occlusion passes on the local COMPUTE queue.",
                                   EConsoleVariableFlags::Default);
@@ -143,30 +146,35 @@ void SceneAO::Freeze(GDX12Texture* depth, GDX12Texture* normals, UINT& temporalI
         CheckCACAO(FFX_CACAO_D3D12UpdateSettings(grid.Cacao, &settings));
     }
 }
-void SceneAO::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings)
+struct SceneAO::Plan
 {
-    _work.Commands.clear();
-    auto& p = _pass;
-    auto& grid = p._grids[_half];
-    auto* fullDepth = p._inputs[0]->GetTexture();
-    auto* fullNormals = p._inputs[1]->GetTexture();
-    const auto id = [&](GDX12Resource* resource) {
+    SceneAO& ao;
+    Graph& graph;
+    std::vector<ID3D12Resource*>& bindings;
+    Queue target;
+
+    Id id(GDX12Resource* resource) const
+    {
         return NativeWork::ResourceFor(graph, bindings, resource->D3DResource.Get(), "AO resource");
-    };
-    const auto access = [&](GDX12Texture* texture, Mode mode, State state) {
-        return Access{id(texture->GetResource()), mode, state};
-    };
-    const UINT slot = _resources.CurrFrameConstantsIndex;
-    auto* root = p._root.get();
-    const Queue target = AsyncAO.GetValue() ? Queue::Compute : Queue::Direct;
-    auto* heap = _resources.SRV_UAV_Heap->GetHeap().Get();
-    const auto camera = _resources.FrameConstants[slot]->CameraCB->GetElementAddress(_common.ActiveCameraCBufferIndex),
-               constants = p._constants->GetElementAddress(slot), xe = p._xeConstants->GetElementAddress(slot);
-    const auto dispatch = [&](const std::string& name, UINT pipeline, UINT width, UINT height,
-                              std::vector<Access> accesses, std::array<GDX12Texture*, 7> srvs,
-                              std::array<GDX12Descriptor*, 10> uavs, UINT axis = 0, UINT final = 0,
-                              float scale = 1.f) {
-        accesses.push_back({id(&_resources.FrameConstants[slot]->CameraCB->GetResource()), Mode::Read,
+    }
+
+    Access access(GDX12Texture* texture, Mode mode, State state) const
+    {
+        return {id(texture->GetResource()), mode, state};
+    }
+
+    void dispatch(const std::string& name, UINT pipeline, UINT width, UINT height,
+                  std::vector<Access> accesses, std::array<GDX12Texture*, 7> srvs,
+                  std::array<GDX12Descriptor*, 10> uavs, UINT axis = 0, UINT final = 0,
+                  float scale = 1.f)
+    {
+        auto& p = ao._pass;
+        const UINT slot = ao._resources.CurrFrameConstantsIndex;
+        auto* root = p._root.get();
+        auto* heap = ao._resources.SRV_UAV_Heap->GetHeap().Get();
+        const auto camera = ao._resources.FrameConstants[slot]->CameraCB->GetElementAddress(ao._common.ActiveCameraCBufferIndex),
+                   constants = p._constants->GetElementAddress(slot), xe = p._xeConstants->GetElementAddress(slot);
+        accesses.push_back({id(&ao._resources.FrameConstants[slot]->CameraCB->GetResource()), Mode::Read,
                             D3D12_RESOURCE_STATE_GENERIC_READ});
         accesses.push_back({id(&p._constants->GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
         accesses.push_back({id(&p._xeConstants->GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
@@ -179,7 +187,7 @@ void SceneAO::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings)
             if (uavs[i])
                 writes[i] = uavs[i]->GPUHandle;
         auto* pso = p._pipelines[pipeline].Get();
-        return _work.Add(graph, name, std::move(accesses), [=](auto* cmd) {
+        ao._work.Add(graph, name, std::move(accesses), [=](auto* cmd) {
             cmd->SetDescriptorHeaps(1, &heap);
             cmd->SetComputeRootSignature(root->GetRootSignature().Get());
             cmd->SetPipelineState(pso);
@@ -201,23 +209,58 @@ void SceneAO::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings)
                     cmd->SetComputeRootDescriptorTable(root->GetURootParamIndex(i), writes[i]);
             cmd->Dispatch((width + 7) / 8, (height + 7) / 8, 1);
         }, {}, target);
-    };
+    }
+};
+
+void SceneAO::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings)
+{
+    _work.Commands.clear();
+    auto& p = _pass;
+    Plan plan{*this, graph, bindings, AsyncAO.GetValue() ? Queue::Compute : Queue::Direct};
     if (!_settings.IsActive() || (_width == 1 && _height == 1))
     {
-        dispatch("AO neutral fallback", p.Neutral, p._output.GetWidth(), p._output.GetHeight(),
-                 {access(&p._output, Mode::Write, UnorderedAccess)}, {}, {p._output.GetUAV()});
+        plan.dispatch("AO neutral fallback", p.Neutral, p._output.GetWidth(), p._output.GetHeight(),
+                 {plan.access(&p._output, Mode::Write, UnorderedAccess)}, {}, {p._output.GetUAV()});
         return;
     }
-    auto* depth = _half ? &grid.Depth : fullDepth;
-    const State read = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-    std::vector<Access> prepare{access(fullDepth, Mode::Read, read), access(fullNormals, Mode::Read, read),
-                                access(&grid.Normals, Mode::Write, UnorderedAccess)};
+    auto* fullDepth = p._inputs[0]->GetTexture();
+    auto* fullNormals = p._inputs[1]->GetTexture();
+    const auto inputs = AppendPreparation(plan, fullDepth, fullNormals);
+    auto* resolved = AppendVisibility(plan, inputs);
     if (_half)
-        prepare.push_back(access(depth, Mode::Write, UnorderedAccess));
-    dispatch("AO prepare normals/depth", _half ? p.PrepareHalf : p.PrepareNormals, _width, _height, prepare,
+    {
+        plan.dispatch("AO depth/normal aware upsample", p.Upsample, p._output.GetWidth(), p._output.GetHeight(),
+                      {plan.access(inputs.Depth, Mode::Read, Read), plan.access(inputs.Normals, Mode::Read, Read),
+                       plan.access(resolved, Mode::Read, Read), plan.access(fullDepth, Mode::Read, Read),
+                       plan.access(fullNormals, Mode::Read, Read), plan.access(&p._output, Mode::Write, UnorderedAccess)},
+                      {inputs.Depth, inputs.Normals, resolved, nullptr, nullptr, fullDepth, fullNormals}, {p._output.GetUAV()});
+    }
+}
+
+SceneAO::PreparedInputs SceneAO::AppendPreparation(Plan& plan, GDX12Texture* fullDepth, GDX12Texture* fullNormals)
+{
+    auto& p = _pass;
+    auto& grid = p._grids[_half];
+    auto* depth = _half ? &grid.Depth : fullDepth;
+    std::vector<Access> prepare{plan.access(fullDepth, Mode::Read, Read), plan.access(fullNormals, Mode::Read, Read),
+                                plan.access(&grid.Normals, Mode::Write, UnorderedAccess)};
+    if (_half)
+        prepare.push_back(plan.access(depth, Mode::Write, UnorderedAccess));
+    plan.dispatch("AO prepare normals/depth", _half ? p.PrepareHalf : p.PrepareNormals, _width, _height, prepare,
              {fullDepth, fullNormals},
              {nullptr, grid.Normals.GetUAV(), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
               _half ? depth->GetUAV() : nullptr});
+    return {depth, &grid.Normals};
+}
+
+GDX12Texture* SceneAO::AppendVisibility(Plan& plan, const PreparedInputs& inputs)
+{
+    auto& p = _pass;
+    auto& grid = p._grids[_half];
+    auto* depth = inputs.Depth;
+    auto* normals = inputs.Normals;
+    assert(depth->GetWidth() == _width && depth->GetHeight() == _height &&
+           normals->GetWidth() == _width && normals->GetHeight() == _height);
     GDX12Texture* visibility = nullptr;
     GDX12Texture* terms = nullptr;
     float scale = 1.f;
@@ -225,14 +268,14 @@ void SceneAO::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings)
     {
         const bool pad = (std::max)(_width, _height) < 16;
         auto* inputDepth = pad ? &grid.CacaoDepth : depth;
-        auto* inputNormals = pad ? &grid.CacaoNormals : &grid.Normals;
+        auto* inputNormals = pad ? &grid.CacaoNormals : normals;
         visibility = pad ? &grid.CacaoVisibility : &grid.Scratch[0];
         if (pad)
-            dispatch("CACAO pad small grid", p.PadCACAO, inputDepth->GetWidth(), inputDepth->GetHeight(),
-                     {access(depth, Mode::Read, read), access(&grid.Normals, Mode::Read, read),
-                      access(inputDepth, Mode::Write, UnorderedAccess),
-                      access(inputNormals, Mode::Write, UnorderedAccess)},
-                     {depth, &grid.Normals},
+            plan.dispatch("CACAO pad small grid", p.PadCACAO, inputDepth->GetWidth(), inputDepth->GetHeight(),
+                     {plan.access(depth, Mode::Read, Read), plan.access(normals, Mode::Read, Read),
+                      plan.access(inputDepth, Mode::Write, UnorderedAccess),
+                      plan.access(inputNormals, Mode::Write, UnorderedAccess)},
+                     {depth, normals},
                      {nullptr, inputNormals->GetUAV(), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
                       inputDepth->GetUAV()});
         Matrix projection = _projection;
@@ -245,9 +288,9 @@ void SceneAO::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings)
             identity.elements[i][i] = 1;
         auto* context = grid.Cacao;
         auto* output = visibility->GetResource()->D3DResource.Get();
-        _work.Add(graph, "CACAO SDK dispatch (exclusive persistent context)",
-                  {access(inputDepth, Mode::Read, read), access(inputNormals, Mode::Read, read),
-                   access(visibility, Mode::Write, UnorderedAccess)},
+        _work.Add(plan.graph, "CACAO SDK dispatch (exclusive persistent context)",
+                  {plan.access(inputDepth, Mode::Read, Read), plan.access(inputNormals, Mode::Read, Read),
+                   plan.access(visibility, Mode::Write, UnorderedAccess)},
                   [context, proj, identity, output](auto* cmd) {
                       CheckCACAO(FFX_CACAO_D3D12Draw(context, cmd, &proj, &identity));
                       const auto outputState = cmd->GetType() == D3D12_COMMAND_LIST_TYPE_COMPUTE
@@ -255,32 +298,32 @@ void SceneAO::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings)
                       const auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(
                           output, outputState, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
                       cmd->ResourceBarrier(1, &barrier);
-                  }, {}, target);
+                  }, {}, plan.target);
     }
     else if (_settings.Implementation == 2)
     {
         std::array<GDX12Descriptor*, 10> uavs{};
         for (UINT mip = 0; mip < 5; ++mip)
             uavs[2 + mip] = &grid.DepthUAVs[mip];
-        dispatch("XeGTAO depth pyramid", p.XePrefilter, grid.XeDepth.GetWidth() / 2, grid.XeDepth.GetHeight() / 2,
-                 {access(depth, Mode::Read, read), access(&grid.Normals, Mode::Read, read),
-                  access(&grid.XeDepth, Mode::Write, UnorderedAccess)},
-                 {depth, &grid.Normals}, uavs);
-        dispatch("XeGTAO main", p.XeMain, _width, _height,
-                 {access(&grid.XeDepth, Mode::Read, read), access(&grid.Normals, Mode::Read, read),
-                  access(&grid.XeTerms[0], Mode::Write, UnorderedAccess),
-                  access(&grid.XeEdges, Mode::Write, UnorderedAccess)},
-                 {depth, &grid.Normals, &grid.XeDepth},
+        plan.dispatch("XeGTAO depth pyramid", p.XePrefilter, grid.XeDepth.GetWidth() / 2, grid.XeDepth.GetHeight() / 2,
+                 {plan.access(depth, Mode::Read, Read), plan.access(normals, Mode::Read, Read),
+                  plan.access(&grid.XeDepth, Mode::Write, UnorderedAccess)},
+                 {depth, normals}, uavs);
+        plan.dispatch("XeGTAO main", p.XeMain, _width, _height,
+                 {plan.access(&grid.XeDepth, Mode::Read, Read), plan.access(normals, Mode::Read, Read),
+                  plan.access(&grid.XeTerms[0], Mode::Write, UnorderedAccess),
+                  plan.access(&grid.XeEdges, Mode::Write, UnorderedAccess)},
+                 {depth, normals, &grid.XeDepth},
                  {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, grid.XeTerms[0].GetUAV(),
                   grid.XeEdges.GetUAV()});
         UINT source = 0;
         for (int pass = 0; pass < _settings.DenoisePasses; ++pass)
         {
             const UINT target = 1 - source;
-            dispatch("XeGTAO denoise", p.XeDenoise, (_width + 1) / 2, _height,
-                     {access(&grid.XeTerms[source], Mode::Read, read), access(&grid.XeEdges, Mode::Read, read),
-                      access(&grid.XeTerms[target], Mode::Write, UnorderedAccess)},
-                     {depth, &grid.Normals, &grid.XeDepth, &grid.XeTerms[source], &grid.XeEdges},
+            plan.dispatch("XeGTAO denoise", p.XeDenoise, (_width + 1) / 2, _height,
+                     {plan.access(&grid.XeTerms[source], Mode::Read, Read), plan.access(&grid.XeEdges, Mode::Read, Read),
+                      plan.access(&grid.XeTerms[target], Mode::Write, UnorderedAccess)},
+                     {depth, normals, &grid.XeDepth, &grid.XeTerms[source], &grid.XeEdges},
                      {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, grid.XeTerms[target].GetUAV()}, 0,
                      pass + 1 == _settings.DenoisePasses);
             source = target;
@@ -291,19 +334,19 @@ void SceneAO::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings)
     }
     else
     {
-        dispatch("SSAO/HBAO visibility", _settings.Implementation == 0 ? p.SSAO : p.HBAO, _width, _height,
-                 {access(depth, Mode::Read, read), access(&grid.Normals, Mode::Read, read),
-                  access(&grid.Scratch[0], Mode::Write, UnorderedAccess)},
-                 {depth, &grid.Normals}, {grid.Scratch[0].GetUAV()});
+        plan.dispatch("SSAO/HBAO visibility", _settings.Implementation == 0 ? p.SSAO : p.HBAO, _width, _height,
+                 {plan.access(depth, Mode::Read, Read), plan.access(normals, Mode::Read, Read),
+                  plan.access(&grid.Scratch[0], Mode::Write, UnorderedAccess)},
+                 {depth, normals}, {grid.Scratch[0].GetUAV()});
         UINT source = 0;
         for (int pass = 0; pass < _settings.DenoisePasses; ++pass)
         {
             const UINT target = 1 - source;
-            dispatch("AO bilateral blur", p.Blur, _width, _height,
-                     {access(depth, Mode::Read, read), access(&grid.Normals, Mode::Read, read),
-                      access(&grid.Scratch[source], Mode::Read, read),
-                      access(&grid.Scratch[target], Mode::Write, UnorderedAccess)},
-                     {depth, &grid.Normals, &grid.Scratch[source]}, {grid.Scratch[target].GetUAV()}, pass % 2);
+            plan.dispatch("AO bilateral blur", p.Blur, _width, _height,
+                     {plan.access(depth, Mode::Read, Read), plan.access(normals, Mode::Read, Read),
+                      plan.access(&grid.Scratch[source], Mode::Read, Read),
+                      plan.access(&grid.Scratch[target], Mode::Write, UnorderedAccess)},
+                     {depth, normals, &grid.Scratch[source]}, {grid.Scratch[target].GetUAV()}, pass % 2);
             source = target;
         }
         visibility = &grid.Scratch[source];
@@ -311,17 +354,12 @@ void SceneAO::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings)
     if (!terms)
         terms = &grid.XeTerms[0];
     auto* resolved = _half ? &grid.Visibility : &p._output;
-    std::vector<Access> resolve{access(depth, Mode::Read, read), access(&grid.Normals, Mode::Read, read),
-                                access(visibility, Mode::Read, read), access(resolved, Mode::Write, UnorderedAccess)};
+    std::vector<Access> resolve{plan.access(depth, Mode::Read, Read), plan.access(normals, Mode::Read, Read),
+                                plan.access(visibility, Mode::Read, Read), plan.access(resolved, Mode::Write, UnorderedAccess)};
     if (terms)
-        resolve.push_back(access(terms, Mode::Read, read));
-    dispatch("AO resolve", p.Resolve, _width, _height, resolve, {depth, &grid.Normals, visibility, terms},
+        resolve.push_back(plan.access(terms, Mode::Read, Read));
+    plan.dispatch("AO resolve", p.Resolve, _width, _height, resolve, {depth, normals, visibility, terms},
              {resolved->GetUAV()}, 0, 0, scale);
-    if (_half)
-        dispatch("AO depth/normal aware upsample", p.Upsample, p._output.GetWidth(), p._output.GetHeight(),
-                 {access(depth, Mode::Read, read), access(&grid.Normals, Mode::Read, read),
-                  access(resolved, Mode::Read, read), access(fullDepth, Mode::Read, read),
-                  access(fullNormals, Mode::Read, read), access(&p._output, Mode::Write, UnorderedAccess)},
-                 {depth, &grid.Normals, resolved, nullptr, nullptr, fullDepth, fullNormals}, {p._output.GetUAV()});
+    return resolved;
 }
 } // namespace BistroRender

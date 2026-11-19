@@ -15,6 +15,7 @@ class SceneLighting
 	SceneLighting(GDX12DeviceResources&, RenderPipelineCommonData&);
 	~SceneLighting();
 	void Freeze(SceneGeometry&, UINT slot);
+	void AppendGpuLightGrid(Graph&, std::vector<ID3D12Resource*>&, const SceneGeometry&);
 	void AppendAO(Graph&, std::vector<ID3D12Resource*>&);
 	void Append(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, SceneEnvironment&);
 	using HDRContinuation = std::function<void(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture*)>;
@@ -23,6 +24,7 @@ class SceneLighting
 	void Submitted(uint64_t fence);
 	void Reset();
 	SceneParticles& Particles() { return _transparency->Particles(); }
+	SceneWater& Water() { return _transparency->Water(); }
 	GDX12Texture* ParticleMotion() const { return _transparency->ParticleMotion(); }
 	GDX12Texture* PostDepth() const { return _transparency->Depth(); }
 	GDX12Texture* PostMotion() const { return _transparency->Motion(); }
@@ -40,8 +42,8 @@ class SceneLighting
 		uint64_t LightRevision = 0;
 		GDX12ResourceHandle LightSource;
 		bool UploadLights = false;
+		GDX12LightGridConstants GridLayout{};
 	};
-	void AppendGpuLightGrid(Graph&, std::vector<ID3D12Resource*>&, const SceneGeometry&);
 	void AppendShadows(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, SceneEnvironment&);
 	void AppendDeferred(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, SceneEnvironment&);
 	GDX12Texture* AppendSSR(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, SceneEnvironment&);

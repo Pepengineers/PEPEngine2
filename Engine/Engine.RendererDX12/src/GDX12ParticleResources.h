@@ -87,6 +87,8 @@ namespace ParticleResources
         std::unique_ptr<Buffer<UINT>> Dead, Counters, Args;
         std::vector<std::unique_ptr<Buffer<EmitterConstants>>> Constants;
 
+        bool NeedsInitialization(uint64_t revision) const { return !Initialized || ResetRevision != revision; }
+
         Pool(GDX12DeviceResources* resources, const UINT capacity) : Capacity(capacity)
         {
             Particles = CreateBuffer<Particle>(resources, capacity);

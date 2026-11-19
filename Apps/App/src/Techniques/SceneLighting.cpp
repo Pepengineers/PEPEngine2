@@ -159,19 +159,24 @@ void SceneLighting::AppendGpuLightGrid(Graph& graph, std::vector<ID3D12Resource*
 	const auto& scene = geometry._slots.at(_slot);
 	const auto& frame = _frames.at(_slot);
 	auto& grid = _deferred._grids.at(_slot);
-	const auto layout = BuildLightGridConstants(
-	    _common.CameraProjection, _common.CameraView, _common.ActiveCameraNearPlane, _common.ActiveCameraFarPlane,
-	    frame.Width, frame.Height, _resources.LocalLights.size(), _gridSettings);
-	const UINT words =
-	    UINT((std::max)(size_t(1), size_t(layout.Size.x) * layout.Size.y * layout.Size.z * layout.Size.w));
-	grid.Masks->Resize(words);
-	grid.Constants->CopyData(0, layout);
+	const auto& layout = frame.GridLayout;
 	const auto resource = [&](GDX12Resource& value)
 	{ return NativeWork::ResourceFor(graph, bindings, value.D3DResource.Get(), "GPU light grid resource"); };
 	const Id masks = resource(grid.Masks->GetResource());
 	const Id constants = resource(grid.Constants->GetResource());
 	auto& lights = *_resources.FrameConstants.at(_slot)->ShadowLights;
 	const Id sources = resource(lights.GetResource());
+	if (frame.UploadLights)
+	{
+		auto& source = _localShadows->LightSource(_slot);
+		auto* from = source.GetResource().D3DResource.Get();
+		auto* to = lights.GetResource().D3DResource.Get();
+		const UINT64 bytes = UINT64(source.GetElementCount()) * sizeof(GDX12LocalLightConstants);
+		_work.Add(graph, "local-light snapshot upload",
+		          {{resource(source.GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ},
+		           {sources, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
+		          [=](auto* cmd) { cmd->CopyBufferRegion(to, 0, from, 0, bytes); });
+	}
 	const UINT groups = layout.Size.w ? ((layout.Size.x * layout.Size.y + LightGridThreads - 1) / LightGridThreads) *
 	                                        layout.Size.z * layout.Size.w
 	                                  : 1;
@@ -230,10 +235,8 @@ void SceneLighting::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings,
                            SceneEnvironment& environment)
 {
 	_work.Commands.clear();
-	_transparency->PrepareWater(graph, bindings, geometry, _slot);
 	AppendShadows(graph, bindings, geometry, environment);
 	PrepareDeferred(geometry, environment);
-	AppendGpuLightGrid(graph, bindings, geometry);
 	AppendAO(graph, bindings);
 	AppendDeferred(graph, bindings, geometry, environment);
 	AppendComposition(graph, bindings, geometry, environment, AppendSSR(graph, bindings, geometry, environment));
@@ -242,28 +245,13 @@ void SceneLighting::AppendShadows(Graph& graph, std::vector<ID3D12Resource*>& bi
                                   SceneEnvironment& environment)
 {
 	auto& scene = geometry._slots.at(_slot);
-	auto& frame = _frames.at(_slot);
 	auto& constants = *_resources.FrameConstants.at(_slot);
-	auto& work = _work;
-	const auto resource = [&](GDX12Resource* value)
-	{ return NativeWork::ResourceFor(graph, bindings, value->D3DResource.Get(), "lighting/SSR resource"); };
 	const auto appendGrass = [&](const GeometryTarget& view, Graph& g, std::vector<ID3D12Resource*>& resources)
 	{ geometry.AppendGrassView(g, resources, _slot, view); };
 	_sunShadows->Append(graph, bindings, _slot,
 	                    {scene.Buffers[0].Srv.GPUHandle, scene.Buffers[1].Srv.GPUHandle, scene.Buffers[2].Srv.GPUHandle,
 	                     scene.Buffers[3].Srv.GPUHandle},
 	                    scene.Draws, scene.Geometry, appendGrass);
-	if (frame.UploadLights)
-	{
-		auto& source = _localShadows->LightSource(_slot);
-		auto* lightSource = source.GetResource().D3DResource.Get();
-		auto* lightTarget = constants.ShadowLights->GetResource().D3DResource.Get();
-		const UINT64 lightBytes = UINT64(source.GetElementCount()) * sizeof(GDX12LocalLightConstants);
-		work.Add(graph, "local-light snapshot upload",
-		         {{resource(&source.GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ},
-		          {resource(&constants.ShadowLights->GetResource()), Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
-		         [=](auto* cmd) { cmd->CopyBufferRegion(lightTarget, 0, lightSource, 0, lightBytes); });
-	}
 	_localShadows->Append(graph, bindings, _slot,
 	                      {scene.Buffers[0].Srv.GPUHandle, scene.Buffers[1].Srv.GPUHandle,
 	                       scene.Buffers[2].Srv.GPUHandle, scene.Buffers[3].Srv.GPUHandle},
@@ -304,6 +292,14 @@ void SceneLighting::PrepareDeferred(SceneGeometry& geometry, SceneEnvironment& e
 
 		_forceReset = true;
 	}
+	auto& grid = _deferred._grids.at(_slot);
+	frame.GridLayout = BuildLightGridConstants(
+	    _common.CameraProjection, _common.CameraView, _common.ActiveCameraNearPlane, _common.ActiveCameraFarPlane,
+	    frame.Width, frame.Height, _resources.LocalLights.size(), _gridSettings);
+	const auto& size = frame.GridLayout.Size;
+	const UINT words = UINT((std::max)(size_t(1), size_t(size.x) * size.y * size.z * size.w));
+	grid.Masks->Resize(words);
+	grid.Constants->CopyData(0, frame.GridLayout);
 }
 void SceneLighting::AppendDeferred(Graph& graph, std::vector<ID3D12Resource*>& bindings, SceneGeometry& geometry,
                                    SceneEnvironment& environment)

@@ -194,6 +194,13 @@ void SceneEnvironment::Build()
 			             e._luts[i]->GetResource()->D3DResource->GetDesc().DepthOrArraySize != dimensions[i][2];
 		}
 		e.EnsureAtmosphere(atmosphere);
+		const bool captureResized = !_captureSkyView || resized[2];
+		if (captureResized)
+		{
+			if (!_captureSkyView)
+				_captureSkyView = std::make_unique<GDX12Texture>();
+			e.CreateTexture(*_captureSkyView, dimensions[2][0], dimensions[2][1], 1, 1, false);
+		}
 		const auto pack = [](const Vector3& v, float w) { return XMFLOAT4(v.x, v.y, v.z, w); };
 		constants.RayleighHeight = pack(atmosphere.RayleighScatteringPerKm, atmosphere.RayleighScaleHeightKm);
 		constants.MieScatteringHeight = pack(atmosphere.MieScatteringPerKm, atmosphere.MieScaleHeightKm);
@@ -254,9 +261,9 @@ void SceneEnvironment::Build()
 		captureKey.Atmosphere.w = ibl.Intensity;
 		captureKey.Mode.z = ibl.FilterSamples;
 		captureKey.Mode.w = ibl.CubeResolution;
-		changed = !_atmosphereReady || e._invalidated || e._source != state.Source || multipleChanged || resized[2] ||
+		changed = !_atmosphereReady || e._invalidated || e._source != state.Source || multipleChanged || captureResized ||
 		          differs(captureKey, _captureConstants);
-		viewChanged = !_atmosphereReady || multipleChanged || resized[2] || changed || differs(view, _viewConstants);
+		viewChanged = !_atmosphereReady || multipleChanged || resized[2] || differs(view, _viewConstants);
 		auto aerial = constants;
 		aerial.Atmosphere.z = aerial.Atmosphere.w = 0;
 		aerial.Samples.y = 0;
@@ -282,6 +289,7 @@ void SceneEnvironment::Build()
 	if (changed && state.Source != SkySource::SkyAtmosphere)
 	{
 		e.ReleaseAtmosphere();
+		_captureSkyView.reset();
 		e.PublishAtmosphereViews(false);
 	}
 	if (state.Source != SkySource::SkyBox && e._boxTexture->IsInitialized())
@@ -292,13 +300,14 @@ void SceneEnvironment::Build()
 	}
 	auto* heap = r.SRV_UAV_Heap->GetHeap().Get();
 	const auto add = [&](const std::string& name, std::vector<std::pair<GDX12Resource*, Access>> accesses,
-	                     std::function<void(ID3D12GraphicsCommandList*)> record, bool compute = true)
+	                     std::function<void(ID3D12GraphicsCommandList*)> record, bool compute = true,
+	                     WorkDomain domain = WorkDomain::Cached)
 	{
 		_work.push_back({name, std::move(accesses), [heap, record](auto* cmd)
 		                 {
 			                 cmd->SetDescriptorHeaps(1, &heap);
 			                 record(cmd);
-		                 }, compute});
+		                 }, compute, domain});
 	};
 	const auto access = [](GDX12Texture* t, Mode mode, State required)
 	{ return std::make_pair(static_cast<GDX12Resource*>(t->GetResource()), Access{Invalid, mode, required}); };
@@ -348,12 +357,13 @@ void SceneEnvironment::Build()
 	}
 	const auto sky = [&](UINT pipeline, UINT constantsIndex, std::vector<std::pair<GDX12Resource*, Access>> accesses,
 	                     UINT x, UINT y, UINT z, std::array<GDX12Texture*, 4> srvs,
-	                     std::array<GDX12Descriptor*, 4> uavs)
+	                     std::array<GDX12Descriptor*, 4> uavs, WorkDomain domain = WorkDomain::Cached)
 	{
 		auto* root = e._skyRoot.get();
 		auto* pso = e._skyPipelines[pipeline].Get();
-		const auto cb = frame.SkyCB->GetElementAddress(constantsIndex),
-		           camera = frame.CameraCB->GetElementAddress(_common.ActiveCameraCBufferIndex);
+		const auto cb = frame.SkyCB->GetElementAddress(constantsIndex);
+		// Aerial perspective is the only kernel that reads the camera buffer.
+		const auto camera = pipeline == 3 ? frame.CameraCB->GetElementAddress(_common.ActiveCameraCBufferIndex) : 0;
 		std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 4> reads{}, writes{};
 		for (UINT i = 0; i < 4; ++i)
 		{
@@ -364,14 +374,16 @@ void SceneEnvironment::Build()
 			}
 		}
 		accesses.push_back({&frame.SkyCB->GetResource(), {Invalid, Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ}});
-		accesses.push_back({&frame.CameraCB->GetResource(), {Invalid, Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ}});
+		if (camera)
+			accesses.push_back({&frame.CameraCB->GetResource(), {Invalid, Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ}});
 		add("atmosphere/source kernel " + std::to_string(pipeline), std::move(accesses),
 		    [root, pso, cb, camera, reads, writes, x, y, z](auto* cmd)
 		    {
 			    cmd->SetComputeRootSignature(root->GetRootSignature().Get());
 			    cmd->SetPipelineState(pso);
 			    cmd->SetComputeRootConstantBufferView(root->GetBRootParamIndex(0), cb);
-			    cmd->SetComputeRootConstantBufferView(root->GetBRootParamIndex(1), camera);
+			    if (camera)
+				    cmd->SetComputeRootConstantBufferView(root->GetBRootParamIndex(1), camera);
 			    for (UINT i = 0; i < 4; ++i)
 			    {
 				    cmd->SetComputeRootDescriptorTable(root->GetTRootParamIndex(i), reads[i]);
@@ -381,7 +393,7 @@ void SceneEnvironment::Build()
 				    }
 			    }
 			    cmd->Dispatch(x, y, z);
-		    });
+		    }, true, domain);
 	};
 	if (state.Source == SkySource::SkyAtmosphere)
 	{
@@ -400,8 +412,9 @@ void SceneEnvironment::Build()
 		{
 			sky(2, 1,
 			    {access(l[0].get(), Mode::Read, Read), access(l[1].get(), Mode::Read, Read),
-			     access(l[2].get(), Mode::Write, UnorderedAccess)},
-			    (l[2]->GetWidth() + 7) / 8, (l[2]->GetHeight() + 7) / 8, 1, {l[0].get(), l[1].get()}, {l[2]->GetUAV()});
+			     access(_captureSkyView.get(), Mode::Write, UnorderedAccess)},
+			    (_captureSkyView->GetWidth() + 7) / 8, (_captureSkyView->GetHeight() + 7) / 8, 1,
+			    {l[0].get(), l[1].get()}, {_captureSkyView->GetUAV()});
 		}
 	}
 	if (changed && state.Source != SkySource::Off)
@@ -413,9 +426,9 @@ void SceneEnvironment::Build()
 			std::array<GDX12Texture*, 4> inputs{};
 			if (state.Source == SkySource::SkyAtmosphere)
 			{
+				inputs = {e._luts[0].get(), e._luts[1].get(), _captureSkyView.get(), nullptr};
 				for (UINT i = 0; i < 3; ++i)
 				{
-					inputs[i] = e._luts[i].get();
 					accesses.push_back(access(inputs[i], Mode::Read, Read));
 				}
 			}
@@ -509,14 +522,13 @@ void SceneEnvironment::Build()
 	if (state.Source == SkySource::SkyAtmosphere)
 	{
 		auto& l = e._luts;
-		// The fixed capture temporarily uses SkyView; restore the camera view
-		// after capture before any visible-sky or lighting consumer reads it.
 		if (viewChanged)
 		{
 			sky(2, 0,
 			    {access(l[0].get(), Mode::Read, Read), access(l[1].get(), Mode::Read, Read),
 			     access(l[2].get(), Mode::Write, UnorderedAccess)},
-			    (l[2]->GetWidth() + 7) / 8, (l[2]->GetHeight() + 7) / 8, 1, {l[0].get(), l[1].get()}, {l[2]->GetUAV()});
+			    (l[2]->GetWidth() + 7) / 8, (l[2]->GetHeight() + 7) / 8, 1, {l[0].get(), l[1].get()}, {l[2]->GetUAV()},
+			    WorkDomain::Camera);
 		}
 		if (aerialChanged)
 		{
@@ -524,7 +536,7 @@ void SceneEnvironment::Build()
 			    {access(l[0].get(), Mode::Read, Read), access(l[1].get(), Mode::Read, Read),
 			     access(l[3].get(), Mode::Write, UnorderedAccess), access(l[4].get(), Mode::Write, UnorderedAccess)},
 			    (atmosphere.AerialWidth + 3) / 4, (atmosphere.AerialHeight + 3) / 4, (atmosphere.AerialDepth + 3) / 4,
-			    {l[0].get(), l[1].get()}, {nullptr, l[3]->GetUAV(), l[4]->GetUAV()});
+			    {l[0].get(), l[1].get()}, {nullptr, l[3]->GetUAV(), l[4]->GetUAV()}, WorkDomain::Camera);
 		}
 	}
 	if (discontinuity)
@@ -550,7 +562,8 @@ void SceneEnvironment::Append(Graph& graph, std::vector<ID3D12Resource*>& bindin
 	const bool async = AsyncComputeEnabled();
 	for (const auto& work : _work)
 	{
-		Operation operation{work.Name};
+		Operation operation{(work.Domain == WorkDomain::Cached ? "cached environment / " : "camera environment / ") +
+		                    work.Name};
 		if (async && work.Compute)
 		{
 			operation.Target = Queue::Compute;

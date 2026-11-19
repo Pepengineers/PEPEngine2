@@ -110,19 +110,16 @@ void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction)
 	auto* simulation = _resources.ParticleSimulation.get();
 	simulation->SetInteractionField(interaction);
 	simulation->BeginFrame(&_resources, _common);
+	_renderFrame = simulation->RenderFrame();
 	for (auto& group : _groups)
 	{
 		group.clear();
 	}
-	_opaque.clear();
-	_transparent.clear();
 	for (const auto& emitter : _resources.ParticleEmitters)
 	{
 		const auto inputs = emitter.DepthCollision ? Inputs::Depth
 		                  : emitter.InteractionEnabled && interaction.Resource ? Inputs::Interaction : Inputs::Frame;
 		_groups[size_t(inputs)].push_back(emitter.Id);
-		auto& draw = emitter.Blend == ParticleBlend::Opaque ? _opaque : _transparent;
-		draw.push_back(emitter.Id);
 	}
 }
 void SceneParticles::AppendSimulation(Graph& graph, std::vector<ID3D12Resource*>& bindings, Inputs inputs,
@@ -176,11 +173,11 @@ void SceneParticles::AppendOpaque(Graph& graph, std::vector<ID3D12Resource*>& bi
 	}
 	_width = depth->GetWidth();
 	_height = depth->GetHeight();
-	_pass.SetMotionOutputEnabled(!_transparent.empty() &&
+	_pass.SetMotionOutputEnabled(HasDrawSources(false) &&
 	    (GetMotionBlurSettings().Enabled || GetFrameGenerationProvider() != GDX12FrameGenerationProvider::Off ||
 	     (_common.Upscaler && (_common.Upscaler->GetFlags() & RENDER_PASS_FLAG_USE_JITTER))));
-	_pass.BeginFrame(depth);
-	if (_opaque.empty())
+	_pass.BeginFrame(depth, _renderFrame);
+	if (!HasDrawSources(true))
 	{
 		return;
 	}
@@ -193,7 +190,7 @@ void SceneParticles::AppendOpaque(Graph& graph, std::vector<ID3D12Resource*>& bi
 	{
 		return;
 	}
-	AppendPreparation(graph, bindings, _opaque, true);
+	AppendPreparation(graph, bindings, true);
 	auto accesses = DrawReads(graph, bindings, true);
 	AddAccesses(graph, bindings, accesses, _pass.NativeRasterAccesses(false));
 	for (auto* target : gbuffer)
@@ -207,26 +204,29 @@ void SceneParticles::AppendOpaque(Graph& graph, std::vector<ID3D12Resource*>& bi
 	Packet(graph, bindings, "opaque particles G-buffer and depth", std::move(accesses),
 	       [this, depth, dsv, gbuffer](auto* cmd) { _pass.DrawOpaque(cmd, depth, dsv, gbuffer); });
 }
-void SceneParticles::AppendPreparation(Graph& graph, std::vector<ID3D12Resource*>& bindings,
-                                       const std::vector<uint64_t>& ids, bool opaque)
+bool SceneParticles::HasDrawSources(bool opaque) const
 {
-	auto* simulation = _resources.ParticleSimulation.get();
+	return std::any_of(_renderFrame.Sources.begin(), _renderFrame.Sources.end(), [opaque](const auto& source)
+	                   { return (source.Emitter.Blend == ParticleBlend::Opaque) == opaque; });
+}
+void SceneParticles::AppendPreparation(Graph& graph, std::vector<ID3D12Resource*>& bindings, bool opaque)
+{
 	const UINT slot = _resources.CurrFrameConstantsIndex;
 	const auto camera =
 	    ResourceAccess(graph, bindings, &_resources.FrameConstants.at(slot)->CameraCB->GetResource(), Mode::Read);
 	std::vector<Access> preparation{camera};
-	AddAccesses(graph, bindings, preparation, _pass.NativePreparationAccesses());
-	AddResources(graph, bindings, preparation, simulation->GetPoolResources(&ids), Mode::Read);
+	AddAccesses(graph, bindings, preparation, _pass.NativePreparationAccesses(_renderFrame, opaque));
 	Packet(graph, bindings, opaque ? "opaque particles frustum cull" : "transparent particles cull and global sort",
-	       std::move(preparation), [this, ids, opaque](auto* cmd) { _pass.PrepareRenderData(cmd, ids, opaque); });
+	       std::move(preparation), [this, opaque](auto* cmd) { _pass.PrepareRenderData(cmd, _renderFrame, opaque); });
 }
 std::vector<Access> SceneParticles::DrawReads(Graph& graph, std::vector<ID3D12Resource*>& bindings, bool opaque)
 {
 	const UINT slot = _resources.CurrFrameConstantsIndex;
 	std::vector<Access> reads{
 	    ResourceAccess(graph, bindings, &_resources.FrameConstants.at(slot)->CameraCB->GetResource(), Mode::Read)};
-	for (const auto& emitter : _resources.ParticleEmitters)
+	for (const auto& source : _renderFrame.Sources)
 	{
+		const auto& emitter = source.Emitter;
 		if ((emitter.Blend == ParticleBlend::Opaque) == opaque && emitter.Texture)
 		{
 			auto* atlas = emitter.Texture->PrimaryDeviceTexture;
@@ -246,7 +246,7 @@ void SceneParticles::Prepare(Graph& graph, std::vector<ID3D12Resource*>& binding
                              GDX12Texture* accum, GDX12Texture* reveal)
 {
 	_drawReads.clear();
-	if (_transparent.empty() || _pass.NativeRasterAccesses(false).empty())
+	if (!HasDrawSources(false) || _pass.NativeRasterAccesses(false).empty())
 	{
 		return;
 	}
@@ -254,7 +254,7 @@ void SceneParticles::Prepare(Graph& graph, std::vector<ID3D12Resource*>& binding
 	_reveal = reveal;
 	_pass.SetInputs({rasterDepth, accum, reveal});
 	_pass.Initialize();
-	AppendPreparation(graph, bindings, _transparent, false);
+	AppendPreparation(graph, bindings, false);
 	_drawReads = DrawReads(graph, bindings, false);
 	_drawReads.push_back(ResourceAccess(graph, bindings, rasterDepth->GetResource(), Mode::Read));
 }
