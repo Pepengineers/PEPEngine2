@@ -1,5 +1,4 @@
 #include "SceneTextureInspector.h"
-#if defined(_DEBUG)
 #include "Common/ConsoleVariables.h"
 #include "Engine.RendererDX12/GDX12Descriptor.h"
 #include "Engine.RendererDX12/GDX12Device.h"
@@ -265,4 +264,3 @@ GDX12Texture* SceneTextureInspector::Append(Graph& graph, std::vector<ID3D12Reso
 	return &slot.Atlas;
 }
 }
-#endif

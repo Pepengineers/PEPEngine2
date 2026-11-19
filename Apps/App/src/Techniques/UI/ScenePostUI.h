@@ -23,9 +23,7 @@ class ScenePostUI
 	bool NeedsResize() const;
 	void BeginPlan()
 	{
-#ifdef _DEBUG
 		_inspector.BeginPlan();
-#endif
 		_work.Commands.clear();
 		_pendingExports = {};
 		_pendingPublished = _publishedInputs;
@@ -37,9 +35,7 @@ class ScenePostUI
 		_reconstruction.Submitted();
 	}
 	void PrepareMaterials(double animationSeconds, GDX12Texture* cloudImage);
-#ifdef _DEBUG
 	SceneTextureInspector& Textures() { return _inspector; }
-#endif
 	void ReleasePresentation();
 	void Resize(); // Caller drains the executor and the presentation queue first.
 	void Reset();
@@ -69,9 +65,7 @@ class ScenePostUI
 	RenderPipelineCommonData& _common;
 	GDX12SwapChain* _swapchain;
 	RenderModule& _render;
-#ifdef _DEBUG
 	SceneTextureInspector _inspector;
-#endif
 	GDX12Texture* _hudAtlas = nullptr;
 	std::unique_ptr<ImDrawList> _gameOverlay;
 	GDX12DepthOfFieldPass _dof;

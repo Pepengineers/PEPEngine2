@@ -1,5 +1,4 @@
 #pragma once
-#if defined(_DEBUG)
 #include "Techniques/NativeWork.h"
 #include "Engine.RendererDX12/GDX12RootSignature.h"
 #include "Engine.RendererDX12/GDX12Texture.h"
@@ -45,4 +44,3 @@ private:
 	float _padding = 12, _depthRange = 1000;
 };
 }
-#endif
