@@ -109,6 +109,23 @@ struct GDX12ParticleInteractionField
     float FloorCm = 0;
 };
 
+// Frame-local bindings on the rendering device. Storage and descriptors must outlive the draw frame.
+struct GDX12ParticleRenderSource
+{
+    GDX12ParticleEmitter Emitter;
+    GDX12Resource* Particles = nullptr;
+    GDX12Resource* Alive = nullptr;
+    GDX12Resource* Counters = nullptr;
+    GDX12Resource* Arguments = nullptr;
+    std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 3> SRVs{};
+    UINT64 CullArgumentsOffset = 0;
+};
+
+struct GDX12ParticleRenderFrame
+{
+    std::vector<GDX12ParticleRenderSource> Sources;
+    bool ResetMotion = false;
+};
 
 class GDX12ParticleSimulation
 {
@@ -120,6 +137,8 @@ public:
         const std::vector<uint64_t>* emitterIds = nullptr);
     std::vector<GDX12Resource*> GetPoolResources(const std::vector<uint64_t>* emitterIds = nullptr) const;
     std::vector<GDX12Resource*> GetConstantResources(UINT slot, const std::vector<uint64_t>* emitterIds = nullptr) const;
+    // Build the draw bindings for the result of this frame's planned simulation.
+    GDX12ParticleRenderFrame RenderFrame() const;
     void SetInteractionField(GDX12ParticleInteractionField field) { _interaction = field; }
     GDX12Resource* GetInteractionResource() const { return _interaction.Resource; }
     void Execute(GDX12CommandList* commands, GDX12DeviceResources* resources,
@@ -127,7 +146,6 @@ public:
         const std::vector<uint64_t>* emitterIds = nullptr);
 
 private:
-    friend class GDX12ParticlesPass;
     struct State;
     std::unique_ptr<State> _state;
     GDX12ParticleInteractionField _interaction;

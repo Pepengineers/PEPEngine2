@@ -35,6 +35,14 @@ ScenePostUI::~ScenePostUI()
 	_reconstruction.ClearDenendencies();
 	_output.ClearDenendencies();
 }
+void ScenePostUI::ReleasePresentation()
+{
+	_gameOverlay.reset();
+	for (auto& slot : _slots)
+	{
+		slot.CompositeOwner.reset();
+	}
+}
 bool ScenePostUI::NeedsResize() const
 {
 	return _blur.NeedsTileResize();
@@ -257,8 +265,12 @@ void ScenePostUI::AppendScreen(Graph& graph, std::vector<ID3D12Resource*>& bindi
 		_hudAtlas = texture->PrimaryDeviceTexture;
 	}
 	if (hud)
-		GameHUD::Draw(_common.GameTimer ? _common.GameTimer->TotalTime() : 0.f);
-	screen.Draw = Engine::UI::CaptureScreenFrame();
+	{
+		if (!_gameOverlay)
+			_gameOverlay = std::make_unique<ImDrawList>(ImGui::GetDrawListSharedData());
+		GameHUD::Draw(*_gameOverlay, _common.GameTimer ? _common.GameTimer->TotalTime() : 0.f);
+	}
+	screen.Draw = Engine::UI::CaptureScreenFrame(hud ? _gameOverlay.get() : nullptr);
 	Id screenId = dependency;
 	if (screen.Draw)
 	{

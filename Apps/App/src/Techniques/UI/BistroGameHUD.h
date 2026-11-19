@@ -16,12 +16,16 @@ inline AutoConsoleVariable<int> Quality(L"Render.UI.Game.Quality", 0,
     [](int value) { return value >= 0 && value <= 2; });
 inline constexpr auto Atlas = Engine::UI::UITextureId(0x42495354524f4855ull);
 
-inline void Draw(float time)
+inline void Draw(ImDrawList& list, float time)
 {
+    list._ResetForNewFrame();
     const auto display = ImGui::GetIO().DisplaySize;
     if (display.x <= 0 || display.y <= 0)
         return;
-    auto& list = *ImGui::GetBackgroundDrawList();
+    const auto* viewport = ImGui::GetMainViewport();
+    list.Flags |= ImDrawListFlags_AllowVtxOffset;
+    list.PushTexture(ImGui::GetIO().Fonts->TexRef);
+    list.PushClipRect(viewport->Pos, {viewport->Pos.x + viewport->Size.x, viewport->Pos.y + viewport->Size.y});
     const auto texture = static_cast<ImTextureID>(Atlas);
     const float icon = std::clamp(display.x * .032f, 12.f, 48.f);
     const float gap = icon * .10f;

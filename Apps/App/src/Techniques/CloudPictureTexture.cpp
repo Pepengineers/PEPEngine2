@@ -33,20 +33,6 @@ struct CloudGeneratorData
 	XMFLOAT2 RenderTargetSize{}, Padding{};
 };
 static_assert(sizeof(CloudGeneratorData) == 96, "MGPU-Noise root constants must match the shader");
-bool SameLuid(LUID a, LUID b)
-{
-	return a.HighPart == b.HighPart && a.LowPart == b.LowPart;
-}
-template <class T> ComPtr<T> Open(GDX12Device& owner, T* object, GDX12Device& other)
-{
-	HANDLE handle = nullptr;
-	ThrowIfFailed(owner.GetDevice()->CreateSharedHandle(object, nullptr, GENERIC_ALL, nullptr, &handle));
-	ComPtr<T> imported;
-	const auto hr = other.GetDevice()->OpenSharedHandle(handle, IID_PPV_ARGS(&imported));
-	CloseHandle(handle);
-	ThrowIfFailed(hr);
-	return imported;
-}
 Id PacketFor(const Schedule& schedule, Id operation)
 {
 	for (Id i = 0; i < schedule.Packets.size(); ++i)
@@ -83,15 +69,13 @@ struct CloudPictureTexture::Impl
 	{
 		std::unique_ptr<GDX12Texture> Display;
 		GDX12ResourceHandle Produced;
-		ComPtr<ID3D12Heap> SecondaryHeap, PrimaryHeap;
-		ComPtr<ID3D12Resource> SharedSecondary, SharedPrimary;
+		QueueSubmission::TransferBuffer Transfer;
 		D3D12_GPU_DESCRIPTOR_HANDLE Uav{};
 		Publication Metadata;
 		CompletionToken Ready;
 		std::array<CompletionToken, 3> Readers{};
 	};
 	GDX12DeviceResources& Primary;
-	GDX12Device Secondary;
 	std::shared_ptr<QueueSubmission> Submit;
 	std::unique_ptr<Executor> Producer;
 	std::unique_ptr<GDX12DescriptorHeap> ProducerHeap;
@@ -106,80 +90,29 @@ struct CloudPictureTexture::Impl
 	Id ImportOperation = Invalid;
 	bool Remote = false;
 
-	Impl(GDX12DeviceResources& primary, UINT width, UINT height, int adapter)
-	    : Primary(primary), Slots(primary.FrameConstants.size()), Width(width), Height(height)
+	Impl(GDX12DeviceResources& primary, UINT width, UINT height, std::shared_ptr<QueueSubmission> submit, bool remote)
+	    : Primary(primary), Submit(std::move(submit)), Slots(primary.FrameConstants.size()), Width(width), Height(height),
+	      Remote(remote)
 	{
 		if (!primary.Device || Slots.empty() || !width || !height || width > D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION ||
 		    height > D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION)
 		{
 			throw std::invalid_argument("Cloud picture grid must be nonzero and within D3D12 Texture2D limits");
 		}
-		if (adapter < -1)
-		{
-			throw std::invalid_argument("Cloud picture adapter must be -1 (primary) or a DXGI hardware index");
-		}
 		Generation = ++Generations;
 		if (!Generation)
 		{
 			throw std::overflow_error("Cloud picture generation exhausted");
 		}
-		ComPtr<IDXGIFactory6> factory;
-		ThrowIfFailed(CreateDXGIFactory2(0, IID_PPV_ARGS(&factory)));
-		ComPtr<IDXGIAdapter1> selected;
-		const LUID primaryLuid = primary.Device->GetAdapterLuid();
-		int effective = adapter;
-		if (adapter == -1)
-		{
-			for (UINT index = 0;; ++index)
-			{
-				ComPtr<IDXGIAdapter1> candidate;
-				const auto hr = factory->EnumAdapters1(index, &candidate);
-				if (hr == DXGI_ERROR_NOT_FOUND)
-				{
-					throw std::runtime_error("Cloud picture primary LUID is absent from DXGI enumeration");
-				}
-				ThrowIfFailed(hr);
-				DXGI_ADAPTER_DESC1 desc{};
-				ThrowIfFailed(candidate->GetDesc1(&desc));
-				if (SameLuid(desc.AdapterLuid, primaryLuid))
-				{
-					selected = candidate;
-					effective = int(index);
-					break;
-				}
-			}
-		}
-		else
-		{
-			const auto hr = factory->EnumAdapters1(UINT(adapter), &selected);
-			if (hr == DXGI_ERROR_NOT_FOUND)
-			{
-				throw std::invalid_argument("Cloud picture requested adapter index is unavailable");
-			}
-			ThrowIfFailed(hr);
-		}
-		DXGI_ADAPTER_DESC1 desc{};
-		ThrowIfFailed(selected->GetDesc1(&desc));
-		if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)
-		{
-			throw std::invalid_argument("Cloud picture requires a hardware adapter");
-		}
-		Remote = !SameLuid(desc.AdapterLuid, primaryLuid);
-		if (Remote)
-		{
-			ComPtr<IDXGIAdapter4> hardware;
-			ThrowIfFailed(selected.As(&hardware));
-			ThrowIfFailed(Secondary.Initialize(hardware));
-		}
-		auto& device = Remote ? Secondary : *primary.Device;
+		auto& device = Submit->Device(Remote ? 1 : 0);
+		const auto luid = device.GetAdapterLuid();
 		CheckFormat(*primary.Device, !Remote);
 		CheckFormat(device, true);
-		Submit = std::make_shared<QueueSubmission>(*primary.Device, Remote ? &Secondary : nullptr);
 		if (Remote)
 		{
 			Producer = std::make_unique<Executor>(Submit, 1, UINT(Slots.size()), 1);
 			ProducerHeap =
-			    std::make_unique<GDX12DescriptorHeap>(&Secondary, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
+			    std::make_unique<GDX12DescriptorHeap>(&device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
 			                                          UINT(Slots.size()), D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
 		}
 		GDX12RootSignatureDesc root;
@@ -208,21 +141,6 @@ struct CloudPictureTexture::Impl
 		if (primaryBytes != TransferBytes || primaryFootprint.Footprint.RowPitch != Footprint.Footprint.RowPitch)
 		{
 			throw std::runtime_error("Cloud picture adapters disagree on the transfer footprint");
-		}
-		const auto sharedDesc = CD3DX12_RESOURCE_DESC::Buffer(TransferBytes, D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER);
-		D3D12_HEAP_DESC sharedHeap{};
-		if (Remote)
-		{
-			const auto a = device.GetDevice()->GetResourceAllocationInfo(0, 1, &sharedDesc);
-			const auto b = primary.Device->GetDevice()->GetResourceAllocationInfo(0, 1, &sharedDesc);
-			if (a.SizeInBytes == UINT64_MAX || b.SizeInBytes == UINT64_MAX)
-			{
-				throw std::runtime_error("Cloud picture cross-adapter buffer sharing is unsupported");
-			}
-			sharedHeap.SizeInBytes = (std::max)(a.SizeInBytes, b.SizeInBytes);
-			sharedHeap.Alignment = (std::max)(a.Alignment, b.Alignment);
-			sharedHeap.Properties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-			sharedHeap.Flags = D3D12_HEAP_FLAG_SHARED | D3D12_HEAP_FLAG_SHARED_CROSS_ADAPTER;
 		}
 		for (UINT index = 0; index < Slots.size(); ++index)
 		{
@@ -262,21 +180,11 @@ struct CloudPictureTexture::Impl
 				device.GetDevice()->CreateUnorderedAccessView(slot.Produced.Get(), nullptr, &uav,
 				                                              ProducerHeap->GetCPUHandle(index));
 				slot.Uav = ProducerHeap->GetGPUHandle(index);
-				ThrowIfFailed(device.GetDevice()->CreateHeap(&sharedHeap, IID_PPV_ARGS(&slot.SecondaryHeap)));
-				slot.PrimaryHeap = Open(device, slot.SecondaryHeap.Get(), *primary.Device);
-				ThrowIfFailed(device.GetDevice()->CreatePlacedResource(slot.SecondaryHeap.Get(), 0, &sharedDesc,
-				                                                       D3D12_RESOURCE_STATE_COMMON, nullptr,
-				                                                       IID_PPV_ARGS(&slot.SharedSecondary)));
-				ThrowIfFailed(primary.Device->GetDevice()->CreatePlacedResource(slot.PrimaryHeap.Get(), 0, &sharedDesc,
-				                                                                D3D12_RESOURCE_STATE_COMMON, nullptr,
-				                                                                IID_PPV_ARGS(&slot.SharedPrimary)));
-				Submit->ValidateResource(0, slot.SharedPrimary.Get());
-				Submit->ValidateResource(1, slot.SharedSecondary.Get());
+				slot.Transfer = Submit->CreateTransferBuffer(TransferBytes);
 			}
 		}
-		Log::Info("RenderGraph", "CloudPicture requested=", width, "x", height, " adapter=", adapter,
-		          "; effective=", width, "x", height, " adapter=", effective, " name=", device.GetDeviceFeatures().Name,
-		          " LUID=", desc.AdapterLuid.HighPart, ":", desc.AdapterLuid.LowPart, " generation=", Generation,
+		Log::Info("RenderGraph", "CloudPicture effective=", width, "x", height, " name=", device.GetDeviceFeatures().Name,
+		          " LUID=", luid.HighPart, ":", luid.LowPart, " generation=", Generation,
 		          " format=RGBA8_UNORM linear; strict=1 remote=", Remote, " rowPitch=", Footprint.Footprint.RowPitch,
 		          " transferBytes=", Remote ? TransferBytes : 0, " slots=", Slots.size());
 	}
@@ -318,8 +226,9 @@ struct CloudPictureTexture::Impl
 	}
 };
 
-CloudPictureTexture::CloudPictureTexture(GDX12DeviceResources& primary, UINT width, UINT height, int adapter)
-    : _impl(std::make_unique<Impl>(primary, width, height, adapter))
+CloudPictureTexture::CloudPictureTexture(GDX12DeviceResources& primary, UINT width, UINT height,
+                                         std::shared_ptr<QueueSubmission> submit, bool remote)
+    : _impl(std::make_unique<Impl>(primary, width, height, std::move(submit), remote))
 {
 }
 CloudPictureTexture::~CloudPictureTexture()
@@ -333,10 +242,6 @@ CloudPictureTexture::~CloudPictureTexture()
 		OutputDebugStringA("Cloud picture drain failed; retaining the in-flight generation\n");
 		_impl.release();
 	}
-}
-const std::shared_ptr<QueueSubmission>& CloudPictureTexture::Submissions() const
-{
-	return _impl->Submit;
 }
 GDX12Texture* CloudPictureTexture::Texture(UINT frameSlot) const
 {
@@ -392,7 +297,7 @@ void CloudPictureTexture::Prepare(UINT frameSlot, double totalTime)
 	const auto parameters = p.Parameters;
 	const auto uav = slot.Uav;
 	auto* produced = slot.Produced.Get();
-	auto* shared = slot.SharedSecondary.Get();
+	auto* shared = slot.Transfer.Resources[1].Get();
 	const auto footprint = p.Footprint;
 	p.Producer->Reserve(schedule);
 	p.Producer->Execute(schedule, {produced, shared},
@@ -434,8 +339,8 @@ void CloudPictureTexture::Append(Graph& graph, std::vector<ID3D12Resource*>& bin
 	else
 	{
 		const Id input =
-		    NativeWork::ResourceFor(graph, bindings, slot.SharedPrimary.Get(), "cloud picture shared import buffer");
-		auto* shared = slot.SharedPrimary.Get();
+		    NativeWork::ResourceFor(graph, bindings, slot.Transfer.Resources[0].Get(), "cloud picture shared import buffer");
+		auto* shared = slot.Transfer.Resources[0].Get();
 		auto* display = slot.Display->GetResource()->D3DResource.Get();
 		const auto footprint = p.Footprint;
 		p.ImportOperation = p.Work.Add(graph, "cloud picture strict publication primary import",

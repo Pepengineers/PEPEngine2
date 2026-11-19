@@ -20,10 +20,16 @@ struct PacketWait { Id Packet; CompletionToken Token; };
 // already-issued signals, never promises of a future recording/submission.
 class QueueSubmission {
 public:
-    explicit QueueSubmission(GDX12Device& primary, GDX12Device* secondary = nullptr);
+    explicit QueueSubmission(GDX12Device& primary, std::unique_ptr<GDX12Device> secondary = {});
     ~QueueSubmission();
     GDX12Device& Device(Id) const;
     uint64_t Incarnation() const { return _incarnation; }
+    bool HasSecondary() const { return bool(_secondary); }
+    struct TransferBuffer {
+        std::array<ComPtr<ID3D12Heap>, 2> Heaps;
+        std::array<ComPtr<ID3D12Resource>, 2> Resources;
+    };
+    TransferBuffer CreateTransferBuffer(uint64_t bytes) const;
     void CheckHealth() const;
     bool Complete(CompletionToken) const;
     void Wait(CompletionToken) const; // drain/retirement only; never version selection
@@ -41,6 +47,7 @@ private:
     const Timeline& Resolve(CompletionToken) const;
     CompletionToken Submit(Id, BistroRender::Queue, const std::vector<ID3D12CommandList*>&,
         const std::vector<CompletionToken>&, GDX12CommandList* external = nullptr);
+    std::unique_ptr<GDX12Device> _secondary;
     std::array<GDX12Device*,2> _devices{};
     std::array<ComPtr<ID3D12Device>,2> _identities;
     std::array<std::array<Timeline,3>,2> _queues;

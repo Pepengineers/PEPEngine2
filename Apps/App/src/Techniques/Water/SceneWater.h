@@ -11,7 +11,8 @@ class SceneWater
 	SceneWater(GDX12DeviceResources&, RenderPipelineCommonData&);
 	void SetRetirement(std::function<void()> retire);
 	void Prepare(float delta);
-	void AppendSurface(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* opaqueDepth, GDX12Texture* opaqueMotion);
+	void AppendSimulation(Graph&, std::vector<ID3D12Resource*>&);
+	void SetSceneInputs(GDX12Texture* opaqueDepth, GDX12Texture* opaqueMotion);
 	void AppendDraw(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* hdr, D3D12_CPU_DESCRIPTOR_HANDLE depth);
 	GDX12Texture* Depth() const { return _depth; }
 	GDX12Texture* Motion() const { return _motion; }
@@ -21,7 +22,6 @@ class SceneWater
 	void Packet(Graph&, std::vector<ID3D12Resource*>&, const char*, const std::vector<GDX12ResourceAccess>&,
 	            std::function<void(GDX12CommandList*)>, Queue target = Queue::Direct);
 	BistroWaterRendering _collector;
-	std::vector<GDX12FluidInstance> _instances;
 	GDX12FluidParticlePass _surface;
 	NativeWork _work;
 	GDX12Texture* _depth = nullptr;

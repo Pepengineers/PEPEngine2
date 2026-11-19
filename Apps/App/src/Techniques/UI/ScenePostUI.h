@@ -33,13 +33,7 @@ class ScenePostUI
 		_reconstruction.Submitted();
 	}
 	void PrepareMaterials(double animationSeconds, GDX12Texture* cloudImage);
-	void ReleasePresentation()
-	{
-		for (auto& slot : _slots)
-		{
-			slot.CompositeOwner.reset();
-		}
-	}
+	void ReleasePresentation();
 	void Resize(); // Caller drains the executor and the presentation queue first.
 	void Reset();
 	void Append(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* hdr, GDX12Texture* depth, GDX12Texture* motion,
@@ -69,6 +63,7 @@ class ScenePostUI
 	GDX12SwapChain* _swapchain;
 	RenderModule& _render;
 	GDX12Texture* _hudAtlas = nullptr;
+	std::unique_ptr<ImDrawList> _gameOverlay;
 	GDX12DepthOfFieldPass _dof;
 	GDX12MotionBlurPass _blur;
 	GDX12ReconstructionPass _reconstruction;

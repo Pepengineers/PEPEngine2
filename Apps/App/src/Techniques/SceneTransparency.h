@@ -13,7 +13,7 @@ class SceneTransparency
   public:
 	SceneTransparency(GDX12DeviceResources&, RenderPipelineCommonData&);
 	~SceneTransparency();
-	void PrepareWater(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, UINT slot);
+	SceneWater& Water() { return _water; }
 	void SetWaterRetirement(std::function<void()> retire) { _water.SetRetirement(std::move(retire)); }
 	SceneParticles& Particles() { return _particles; }
 	GDX12Texture* Append(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, UINT slot, GDX12Texture* hdr,

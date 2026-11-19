@@ -37,6 +37,26 @@ std::vector<GDX12Resource*> GDX12ParticleSimulation::GetPoolResources(const std:
     return result;
 }
 
+GDX12ParticleRenderFrame GDX12ParticleSimulation::RenderFrame() const
+{
+    GDX12ParticleRenderFrame frame;
+    if (!_state || !_state->Active) return frame;
+    frame.ResetMotion = _state->ResetMotion;
+    frame.Sources.reserve(_state->Emitters.size());
+    for (const auto& emitter : _state->Emitters)
+    {
+        const auto& pool = *_state->Pools.at(emitter.Id);
+        // Initialization selects bank zero; an unpaused simulation then publishes the opposite bank.
+        const UINT read = pool.NeedsInitialization(emitter.ResetRevision) ? 0 : pool.ReadIndex;
+        auto& alive = *pool.Alive[read ^ UINT(!emitter.Paused)];
+        frame.Sources.push_back({emitter, &pool.Particles->GetResource(), &alive.GetResource(),
+            &pool.Counters->GetResource(), &pool.Args->GetResource(),
+            {pool.Particles->GetSRV()->GPUHandle, alive.GetSRV()->GPUHandle, pool.Counters->GetSRV()->GPUHandle},
+            2 * sizeof(D3D12_DISPATCH_ARGUMENTS)});
+    }
+    return frame;
+}
+
 void GDX12ParticleSimulation::BeginFrame(GDX12DeviceResources* resources, RenderPipelineCommonData& common)
 {
     resources->ParticleMotion = nullptr;
@@ -112,7 +132,7 @@ void GDX12ParticleSimulation::BeginFrame(GDX12DeviceResources* resources, Render
     for (const auto& emitter : emitters)
     {
         const auto& pool = *state.Pools.at(emitter.Id);
-        state.ResetMotion |= !pool.Initialized || pool.ResetRevision != emitter.ResetRevision;
+        state.ResetMotion |= pool.NeedsInitialization(emitter.ResetRevision);
     }
     if (state.ResetMotion) common.ResetUpscalerHistory = true;
     state.Emitters = std::move(emitters);
@@ -130,7 +150,7 @@ void GDX12ParticleSimulation::InitializePools(GDX12CommandList* commands, GDX12D
     {
         if (emitterIds && std::find(emitterIds->begin(), emitterIds->end(), emitter.Id) == emitterIds->end()) continue;
         auto& pool = *state.Pools.at(emitter.Id);
-        if (pool.Initialized && pool.ResetRevision == emitter.ResetRevision) continue;
+        if (!pool.NeedsInitialization(emitter.ResetRevision)) continue;
         pool.ReadIndex = 0;
         if (pool.ResetRevision != emitter.ResetRevision) pool.BurstTotal = 0;
         pool.ResetRevision = emitter.ResetRevision;

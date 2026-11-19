@@ -25,12 +25,6 @@ SceneTransparency::~SceneTransparency()
 		frame.Draw.ClearDenendencies();
 	}
 }
-void SceneTransparency::PrepareWater(Graph& graph, std::vector<ID3D12Resource*>& bindings, SceneGeometry& geometry,
-                                     UINT slot)
-{
-	_water.Prepare(_common.GameTimer ? _common.GameTimer->DeltaTime() : 0);
-	_water.AppendSurface(graph, bindings, geometry.Depth(slot), geometry.GBuffer(slot, 1));
-}
 GDX12Texture* SceneTransparency::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, SceneGeometry& geometry,
                                         UINT slot, GDX12Texture* hdr, GDX12Texture* sun, GDX12Texture* local,
                                         SceneEnvironment& environment)

@@ -1,6 +1,7 @@
 #include "SceneCloudPicture.h"
 #include "Engine.Core/Logging/Logger.h"
 #include "Common/ConsoleVariables.h"
+#include <optional>
 
 namespace BistroRender {
 namespace {
@@ -23,28 +24,26 @@ Settings Requested() { return {Enabled.GetValue(), Width.GetValue(), Height.GetV
 struct SceneCloudPicture::Impl {
     GDX12DeviceResources& Resources;
     std::unique_ptr<CloudPictureTexture> Texture;
-    std::shared_ptr<QueueSubmission> Local;
-    Settings Attempted = Requested();
-    bool Active = Attempted.Active;
+    std::optional<Settings> Attempted;
+    bool Active = false;
     GDX12Texture* CurrentImage = nullptr;
 
-    explicit Impl(RenderPipelineContext& c) : Resources(c.Primary) {
-        if (Active) Texture = std::make_unique<CloudPictureTexture>(Resources, Attempted.Width, Attempted.Height, Attempted.Adapter);
-        else Local = std::make_shared<QueueSubmission>(*Resources.Device);
-    }
-
+    explicit Impl(RenderPipelineContext& c) : Resources(c.Primary) {}
 };
 SceneCloudPicture::SceneCloudPicture(RenderPipelineContext& c) : _impl(std::make_shared<Impl>(c)) {}
 SceneCloudPicture::~SceneCloudPicture() = default;
-bool SceneCloudPicture::UpdateSettings(const std::function<void()>& drain) {
+bool SceneCloudPicture::UpdateSettings(const std::function<std::shared_ptr<QueueSubmission>(int)>& select,
+                                       const std::function<void()>& drain) {
     auto& p = *_impl;
     const auto next = Requested();
-    if (next == p.Attempted) return false;
+    if (p.Attempted && next == *p.Attempted) return false;
     p.Attempted = next;
     if (!next.Active) { p.Active = false; return false; }
     std::unique_ptr<CloudPictureTexture> replacement;
     try {
-        replacement = std::make_unique<CloudPictureTexture>(p.Resources, next.Width, next.Height, next.Adapter);
+        auto submit = select(next.Adapter);
+        replacement = std::make_unique<CloudPictureTexture>(p.Resources, next.Width, next.Height,
+                                                            submit, submit->HasSecondary());
     } catch (const std::exception& error) {
         Log::Error("RenderGraph", "Cloud picture settings rejected; retaining last valid generation: ", error.what());
         return false;
@@ -54,9 +53,6 @@ bool SceneCloudPicture::UpdateSettings(const std::function<void()>& drain) {
     p.Texture = std::move(replacement);
     p.Active = true;
     return true;
-}
-const std::shared_ptr<QueueSubmission>& SceneCloudPicture::Submissions() const {
-    return _impl->Texture ? _impl->Texture->Submissions() : _impl->Local;
 }
 void SceneCloudPicture::Prepare(UINT slot, double time) {
     auto& p = *_impl;

@@ -34,17 +34,20 @@ class SceneEnvironment
     std::vector<Access> Reads(Graph&, std::vector<ID3D12Resource*>&) const;
 
   private:
+    enum class WorkDomain { Cached, Camera };
     struct Work
     {
         std::string Name;
         std::vector<std::pair<GDX12Resource*, Access>> Accesses;
         std::function<void(ID3D12GraphicsCommandList*)> Record;
         bool Compute = false;
+        WorkDomain Domain = WorkDomain::Cached;
     };
     void Build();
     GDX12DeviceResources& _resources;
     RenderPipelineCommonData& _common;
     GDX12EnvironmentIBLPass _environment;
+    std::unique_ptr<GDX12Texture> _captureSkyView;
     GDX12CloudComponent _cloud;
     GDX12CloudInputs _cloudInput;
     std::vector<Work> _work;

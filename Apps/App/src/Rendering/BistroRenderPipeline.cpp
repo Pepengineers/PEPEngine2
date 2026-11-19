@@ -12,6 +12,34 @@ namespace
 AutoConsoleVariable<bool> AsyncQueues(L"App.Async.Queues", true,
                                       L"Place explicit local work on COMPUTE/COPY; false uses DIRECT.",
                                       EConsoleVariableFlags::Default);
+
+std::unique_ptr<GDX12Device> OpenSecondary(GDX12Device& primary, int index)
+{
+	if (index < 0)
+	{
+		return {};
+	}
+	ComPtr<IDXGIFactory6> factory;
+	ThrowIfFailed(CreateDXGIFactory2(0, IID_PPV_ARGS(&factory)));
+	ComPtr<IDXGIAdapter1> adapter;
+	ThrowIfFailed(factory->EnumAdapters1(UINT(index), &adapter));
+	DXGI_ADAPTER_DESC1 desc{};
+	ThrowIfFailed(adapter->GetDesc1(&desc));
+	if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)
+	{
+		throw std::invalid_argument("Bistro requires a hardware adapter");
+	}
+	const auto primaryLuid = primary.GetAdapterLuid();
+	if (desc.AdapterLuid.HighPart == primaryLuid.HighPart && desc.AdapterLuid.LowPart == primaryLuid.LowPart)
+	{
+		return {};
+	}
+	ComPtr<IDXGIAdapter4> hardware;
+	ThrowIfFailed(adapter.As(&hardware));
+	auto device = std::make_unique<GDX12Device>();
+	ThrowIfFailed(device->Initialize(hardware));
+	return device;
+}
 }
 
 void BistroRenderPipeline::Initialize(RenderPipelineContext& c)
@@ -30,11 +58,45 @@ void BistroRenderPipeline::Initialize(RenderPipelineContext& c)
 	_bindings.PrimaryPasses = _post->Passes();
 	_bindings.PrimaryPasses.push_back(&_sceneFlags);
 	_bindings.Reconstruction = &_post->Reconstruction();
-	_executor = std::make_unique<BistroRender::Executor>(_cloudPicture->Submissions(), 0,
+	_submissions = std::make_shared<BistroRender::QueueSubmission>(*c.Primary.Device);
+	_executor = std::make_unique<BistroRender::Executor>(_submissions, 0,
 	                                                     UINT(c.Primary.FrameConstants.size()));
 	_lighting->SetWaterRetirement([this] { _executor->Drain(); });
 	_environment->SetRetirement([this] { _executor->Drain(); });
 	Log::Info("Renderer", "Bistro packet renderer initialized; one rendering path");
+}
+
+void BistroRenderPipeline::PrepareMaterialBindings(RenderPipelineContext& c)
+{
+	auto candidate = _submissions;
+	int selection = _secondarySelection;
+	const auto select = [&](int requested)
+	{
+		if (requested != _secondarySelection)
+		{
+			auto secondary = OpenSecondary(*c.Primary.Device, requested);
+			if (secondary || _submissions->HasSecondary())
+			{
+				candidate = std::make_shared<BistroRender::QueueSubmission>(*c.Primary.Device, std::move(secondary));
+			}
+			selection = requested;
+		}
+		return candidate;
+	};
+	if (_cloudPicture->UpdateSettings(select, [this] { _executor->Drain(); }))
+	{
+		_secondarySelection = selection;
+		if (candidate != _submissions)
+		{
+			_executor = std::make_unique<BistroRender::Executor>(candidate, 0, UINT(c.Primary.FrameConstants.size()));
+			_submissions = std::move(candidate);
+		}
+	}
+	const UINT slot = c.Primary.CurrFrameConstantsIndex;
+	_executor->Begin(slot);
+	_animationTime += (std::max)(0.0, double(c.Common.GameTimer->DeltaTime()));
+	_cloudPicture->Prepare(slot, _animationTime);
+	_post->PrepareMaterials(_animationTime, _cloudPicture->Image());
 }
 
 void BistroRenderPipeline::RebuildExecution(RenderPipelineContext& c)
@@ -66,9 +128,12 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	_environment->Freeze(world && !world->IsPaused() ? delta * world->GetTimeScale() : 0);
 	_lighting->Freeze(*_geometry, slot);
 	auto& particles = _lighting->Particles();
+	auto& water = _lighting->Water();
 	using ParticleInputs = BistroRender::SceneParticles::Inputs;
 	auto* depth = _geometry->Depth(slot);
 	particles.BeginSimulation(_geometry->InteractionField());
+	water.Prepare(float(delta));
+	water.SetSceneInputs(depth, _geometry->GBuffer(slot, 1));
 	auto* target = c.BackBuffer->GetCurrentBuffer();
 	const bool singleDirect = !AsyncQueues.GetValue();
 	const bool earlyEnvironment = !singleDirect && _environment->AsyncComputeEnabled();
@@ -101,6 +166,8 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	{
 		_cloudPicture->Append(graph, resources);
 		particles.AppendSimulation(graph, resources, ParticleInputs::Frame, depth);
+		water.AppendSimulation(graph, resources);
+		_lighting->AppendGpuLightGrid(graph, resources, *_geometry);
 		if (earlyEnvironment)
 		{
 			_environment->Append(graph, resources);
