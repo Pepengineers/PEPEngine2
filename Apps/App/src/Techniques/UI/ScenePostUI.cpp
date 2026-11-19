@@ -17,6 +17,9 @@ namespace BistroRender
 {
 ScenePostUI::ScenePostUI(RenderPipelineContext& c)
     : _resources(c.Primary), _common(c.Common), _swapchain(c.BackBuffer), _render(c.Runtime),
+#ifdef _DEBUG
+      _inspector(UINT(c.Primary.FrameConstants.size())),
+#endif
       _slots(c.Primary.FrameConstants.size()),
       _exports(c.Primary.FrameConstants.size())
 {
@@ -270,6 +273,10 @@ void ScenePostUI::AppendScreen(Graph& graph, std::vector<ID3D12Resource*>& bindi
 			_gameOverlay = std::make_unique<ImDrawList>(ImGui::GetDrawListSharedData());
 		GameHUD::Draw(*_gameOverlay, _common.GameTimer ? _common.GameTimer->TotalTime() : 0.f);
 	}
+#ifdef _DEBUG
+	auto* preview = _inspector.Append(graph, bindings, _work, *_resources.Device, _resources.CurrFrameConstantsIndex,
+	    resource(target)->D3DResource.Get(), _common.ActiveCameraNearPlane, _common.ActiveCameraFarPlane);
+#endif
 	screen.Draw = Engine::UI::CaptureScreenFrame(hud ? _gameOverlay.get() : nullptr);
 	Id screenId = dependency;
 	if (screen.Draw)
@@ -287,6 +294,14 @@ void ScenePostUI::AppendScreen(Graph& graph, std::vector<ID3D12Resource*>& bindi
 		}
 		std::vector<std::pair<GDX12Resource*, Mode>> accesses{{resource(screen.Target.get()), Mode::Write}};
 		std::vector<Engine::UI::TextureBinding> hudTextures;
+#ifdef _DEBUG
+		if (preview)
+		{
+			auto* atlas = resource(preview);
+			accesses.emplace_back(atlas, Mode::Read);
+			hudTextures.push_back({SceneTextureInspector::AtlasId, atlas->D3DResource, preview->GetFormat()});
+		}
+#endif
 		if (hud)
 		{
 			auto* atlas = resource(_hudAtlas);

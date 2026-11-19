@@ -29,12 +29,11 @@ namespace Engine::UI
     {
         std::unique_ptr<GDX12DescriptorHeap> Heap;
         std::vector<UINT> FreeDescriptors;
-        bool Visible = true;
         bool FrameBegun = false;
         bool ScreenFrameReady = false;
 #ifdef _DEBUG
+        bool Visible = true;
         std::string LayoutPath;
-#endif
 
         void DrawPhysicsQuality(ConsoleModule& console)
         {
@@ -147,11 +146,18 @@ namespace Engine::UI
             if (ImGui::Begin("Settings (F1)", &Visible))
             {
                 ImGui::TextWrapped("For changes across Bistro launches, edit Configs/Startup.ini.");
+                ConsoleModule console;
+                IConsoleVariable* inspector = nullptr;
+                if (console.TryFindConsoleVariable(L"Render.Debug.SceneTextures", inspector))
+                {
+                    bool enabled = inspector->GetBool();
+                    if (ImGui::Checkbox("Scene textures", &enabled))
+                        inspector->SetFromString(enabled ? "true" : "false");
+                }
                 static ImGuiTextFilter filter;
                 filter.Draw("Search", -90);
                 static SettingsCache settings;
                 static SettingEditor editor;
-                ConsoleModule console;
                 uint64_t revision;
                 const auto variables = console.GetConsoleVariables({}, &revision);
                 settings.Update(variables, revision, filter);
@@ -204,6 +210,7 @@ namespace Engine::UI
             }
             ImGui::End();
         }
+#endif
 
         ImDrawData* FinalizeScreenFrame()
         {
@@ -616,7 +623,9 @@ namespace Engine::UI
 #endif
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
         ImGui::StyleColorsDark();
+#ifdef _DEBUG
         Visible = true;
+#endif
         try
         {
             if (!ImGui_ImplWin32_Init(window)) throw std::runtime_error("Cannot initialize ImGui Win32 backend");
@@ -662,8 +671,8 @@ namespace Engine::UI
         auto dockFlags = ImGuiDockNodeFlags_PassthruCentralNode | ImGuiDockNodeFlags_NoDockingOverCentralNode;
         if (!Visible) dockFlags |= ImGuiDockNodeFlags_KeepAliveOnly;
         ImGui::DockSpaceOverViewport(0, nullptr, dockFlags);
-#endif
         DrawSettings();
+#endif
     }
 
 
@@ -671,7 +680,8 @@ namespace Engine::UI
     void DrawWorldBox(const DirectX::BoundingBox& box, const DirectX::XMFLOAT4X4& viewProjection,
         const char* label, unsigned int color)
     {
-        if (!FrameBegun || !ImGui::GetCurrentContext()) return;
+#ifdef _DEBUG
+        if (!DebugUIVisible()) return;
         DirectX::XMFLOAT3 corners[8];
         box.GetCorners(corners);
         DirectX::XMFLOAT4 clip[8];
@@ -722,6 +732,9 @@ namespace Engine::UI
         bool visible = point.w > 0.00001f;
         for (unsigned plane = 0; plane < 6; ++plane) visible &= distance(point, plane) >= 0;
         if (visible) draw->AddText(screen(point), color, label);
+#else
+        (void)box; (void)viewProjection; (void)label; (void)color;
+#endif
     }
 
     void Render(GDX12CommandList* commands, GDX12Texture* target)
@@ -761,7 +774,8 @@ namespace Engine::UI
     void DrawReconstructionStatus(const GDX12ReconstructionStatus& status, unsigned renderWidth, unsigned renderHeight,
         unsigned outputWidth, unsigned outputHeight)
     {
-        if (!FrameBegun || !Visible) return;
+#ifdef _DEBUG
+        if (!DebugUIVisible()) return;
         ConsoleModule console;
         const auto& provider = console.FindConsoleVariable(L"Render.Upscaler.Provider");
         const auto& quality = console.FindConsoleVariable(L"Render.Upscaler.Quality");
@@ -779,6 +793,9 @@ namespace Engine::UI
             if (!status.FallbackReason.empty()) ImGui::TextWrapped("Fallback: %s", status.FallbackReason.c_str());
         }
         ImGui::End();
+#else
+        (void)status; (void)renderWidth; (void)renderHeight; (void)outputWidth; (void)outputHeight;
+#endif
     }
 
     void ShutdownUI()
@@ -798,21 +815,38 @@ namespace Engine::UI
 
     bool HandleMessage(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
     {
+#ifdef _DEBUG
         if (!ImGui::GetCurrentContext()) return false;
         const bool handled = ImGui_ImplWin32_WndProcHandler(window, message, wParam, lParam) != 0;
         if (message == WM_KEYUP && wParam == VK_F1) { Visible = !Visible; return true; }
         const auto& io = ImGui::GetIO();
         return handled || (Visible && ((message >= WM_MOUSEFIRST && message <= WM_MOUSELAST && io.WantCaptureMouse) ||
             (message >= WM_KEYFIRST && message <= WM_KEYLAST && io.WantCaptureKeyboard)));
+#else
+        (void)window; (void)message; (void)wParam; (void)lParam;
+        return false;
+#endif
     }
 
     bool WantsKeyboardInput()
     {
+#ifdef _DEBUG
         return ImGui::GetCurrentContext() && Visible && ImGui::GetIO().WantCaptureKeyboard;
+#else
+        return false;
+#endif
     }
 
     bool WantsMouseInput()
     {
+#ifdef _DEBUG
         return ImGui::GetCurrentContext() && Visible && ImGui::GetIO().WantCaptureMouse;
+#else
+        return false;
+#endif
     }
+
+#ifdef _DEBUG
+    bool DebugUIVisible() { return FrameBegun && Visible; }
+#endif
 }
