@@ -80,7 +80,7 @@ Schedule Compile(const Graph& g, bool singleDirect) {
         if(next==Invalid) throw std::invalid_argument("dependency cycle");
         const auto& op=g.Operations[next];
         const auto queue=target(op);
-        Packet p{next,{},op.Accesses,{},{},op.Lists,op.OwnerRecording,queue};
+        Packet p{next,{},op.Accesses,{},{},op.Lists,op.OwnerRecording,queue,op.Name};
         for(auto d:deps[next]) Depend(p,remap[d]);
         for(auto a:op.Accesses) {
             auto& state=states[a.Resource]; const auto& r=g.Resources[a.Resource]; const Id prev=last[a.Resource];
@@ -92,7 +92,8 @@ Schedule Compile(const Graph& g, bool singleDirect) {
             // Imported texture states can be illegal on their first COMPUTE/COPY
             // user. A DIRECT release packet owns that transition and publishes a token.
             if(!Legal(p.Target,state)) {
-                Packet release{Invalid,{}, {},{{a.Resource,state,0,false}}, {},1};
+                Packet release{Invalid,{}, {},{{a.Resource,state,0,false}}, {},1,false,Queue::Direct,
+                               op.Name + " / queue handoff"};
                 Depend(release,prev);
                 const Id token=Id(out.Packets.size()); out.Packets.push_back(std::move(release)); Depend(p,token); state=0;
             }
@@ -113,7 +114,7 @@ Schedule Compile(const Graph& g, bool singleDirect) {
             if(g.Resources[a.Resource].Decays) states[a.Resource]=0;
         }
     }
-    Packet terminal{Invalid,{}, {}, {}, {},1,false,g.TerminalQueue};
+    Packet terminal{Invalid,{}, {}, {}, {},1,false,g.TerminalQueue,"frame final states"};
     for(Id i=0;i<out.Packets.size();++i) terminal.Dependencies.push_back(i);
     for(Id r=0;r<states.size();++r) {
         const auto prev=last[r];

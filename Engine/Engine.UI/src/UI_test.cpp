@@ -437,8 +437,10 @@ namespace Engine::UI
 
         void CheckDevice(ID3D12DeviceChild& object) const
         {
+            ComPtr<ID3D12Device> device;
+            ThrowIfFailed(object.GetDevice(IID_PPV_ARGS(&device)));
             ComPtr<IUnknown> identity;
-            ThrowIfFailed(object.GetDevice(IID_PPV_ARGS(&identity)));
+            ThrowIfFailed(device.As(&identity));
             if (identity.Get() != DeviceIdentity.Get())
                 throw std::invalid_argument("Offscreen UI requires resources and commands on its own device");
         }

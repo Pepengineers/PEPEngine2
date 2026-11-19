@@ -60,8 +60,10 @@ namespace Engine::UI
 
         void CheckDevice(ID3D12DeviceChild& object) const
         {
+            ComPtr<ID3D12Device> device;
+            ThrowIfFailed(object.GetDevice(IID_PPV_ARGS(&device)));
             ComPtr<IUnknown> owner;
-            ThrowIfFailed(object.GetDevice(IID_PPV_ARGS(&owner)));
+            ThrowIfFailed(device.As(&owner));
             if (owner.Get() != Identity.Get())
                 throw std::invalid_argument("Screen composite requires device-local commands and textures");
         }
