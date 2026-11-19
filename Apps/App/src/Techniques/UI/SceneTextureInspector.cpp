@@ -1,0 +1,268 @@
+#include "SceneTextureInspector.h"
+#if defined(_DEBUG)
+#include "Common/ConsoleVariables.h"
+#include "Engine.RendererDX12/GDX12Descriptor.h"
+#include "Engine.RendererDX12/GDX12Device.h"
+#include "Engine.RendererDX12/GDX12RenderHelpers.h"
+#include "Engine.RendererDX12/GDX12TextureResource.h"
+#include "Engine.UI/UI_test.h"
+#include <imgui/imgui.h>
+#include <cctype>
+#include <unordered_map>
+
+namespace BistroRender
+{
+namespace
+{
+AutoConsoleVariable<bool> Enabled(L"Render.Debug.SceneTextures", false, L"Show the scene texture inspector in F1.");
+constexpr UINT Tile = 512;
+constexpr UINT TilesAcross = 3;
+constexpr UINT Capacity = 6;
+constexpr DXGI_FORMAT PreviewFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+using View = SceneTextureInspector::View;
+
+DXGI_FORMAT PreviewSRV(const D3D12_RESOURCE_DESC& desc)
+{
+	if (desc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D || desc.DepthOrArraySize != 1 ||
+	    desc.SampleDesc.Count != 1 || (desc.Flags & D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE))
+		return DXGI_FORMAT_UNKNOWN;
+	switch (desc.Format)
+	{
+	case DXGI_FORMAT_R32_TYPELESS:
+		return DXGI_FORMAT_R32_FLOAT;
+	case DXGI_FORMAT_R32_FLOAT:
+	case DXGI_FORMAT_R16_FLOAT:
+	case DXGI_FORMAT_R8_UNORM:
+	case DXGI_FORMAT_R16G16_FLOAT:
+	case DXGI_FORMAT_R32G32_FLOAT:
+	case DXGI_FORMAT_R16G16B16A16_FLOAT:
+	case DXGI_FORMAT_R32G32B32A32_FLOAT:
+	case DXGI_FORMAT_R11G11B10_FLOAT:
+	case DXGI_FORMAT_R8G8B8A8_UNORM:
+	case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+	case DXGI_FORMAT_R10G10B10A2_UNORM:
+		return desc.Format;
+	default:
+		return DXGI_FORMAT_UNKNOWN;
+	}
+}
+View DefaultView(const D3D12_RESOURCE_DESC& desc, DXGI_FORMAT format)
+{
+	if (desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL)
+		return View::Depth;
+	if (format == DXGI_FORMAT_R32_FLOAT || format == DXGI_FORMAT_R16_FLOAT || format == DXGI_FORMAT_R8_UNORM)
+		return View::Scalar;
+	if (format == DXGI_FORMAT_R16G16B16A16_FLOAT || format == DXGI_FORMAT_R11G11B10_FLOAT)
+		return View::HDR;
+	return View::Color;
+}
+}
+
+void SceneTextureInspector::Name(const char* name, GDX12Texture* texture, View view)
+{
+	if (!texture || !texture->IsInitialized())
+		return;
+	auto* resource = texture->GetResource()->D3DResource.Get();
+	const auto format = PreviewSRV(resource->GetDesc());
+	if (format != DXGI_FORMAT_UNKNOWN)
+		_named.push_back({name, resource, format, view});
+}
+
+std::vector<SceneTextureInspector::Source> SceneTextureInspector::Collect(Graph& graph,
+    std::vector<ID3D12Resource*>& bindings, ID3D12Resource* backBuffer)
+{
+	auto catalog = _named;
+	std::vector<const Operation*> writers(bindings.size(), nullptr);
+	for (const auto& pass : graph.Operations)
+		for (const auto access : pass.Accesses)
+			if (access.Usage != Mode::Read)
+				writers.at(access.Resource) = &pass;
+	std::unordered_map<std::string, UINT> ordinals;
+	for (Id id = 0; id < bindings.size(); ++id)
+	{
+		auto* resource = bindings[id];
+		const auto alias = std::find_if(_named.begin(), _named.end(),
+		                               [resource](const auto& source) { return source.Resource == resource; });
+		if (alias != _named.end())
+		{
+			graph.Resources[id].Name = alias->Name;
+			continue;
+		}
+		if (!writers[id] || resource == backBuffer || graph.Resources[id].Memory != Heap::Default)
+			continue;
+		const auto desc = resource->GetDesc();
+		const auto format = PreviewSRV(desc);
+		if (format == DXGI_FORMAT_UNKNOWN)
+			continue;
+		std::string name = writers[id]->Name + " / " + graph.Resources[id].Name;
+		name += " #" + std::to_string(++ordinals[name]);
+		catalog.push_back({std::move(name), resource, format, DefaultView(desc, format)});
+	}
+	std::sort(catalog.begin() + _named.size(), catalog.end(),
+	          [](const auto& a, const auto& b) { return a.Name < b.Name; });
+	return catalog;
+}
+
+GDX12Texture* SceneTextureInspector::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work,
+    GDX12Device& device, UINT index, ID3D12Resource* backBuffer, float nearPlane, float farPlane)
+{
+	if (!Enabled.GetValue() || !Engine::UI::DebugUIVisible())
+		return nullptr;
+	const auto catalog = Collect(graph, bindings, backBuffer);
+	bool open = true;
+	std::vector<Source> previews;
+	ImGui::SetNextWindowSize({730, 610}, ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowPos({345, 86}, ImGuiCond_FirstUseEver);
+	if (ImGui::Begin("Scene Textures", &open))
+	{
+		if (ImGui::Button("Depth")) _selected = {"Scene.Depth"};
+		ImGui::SameLine();
+		if (ImGui::Button("AO")) _selected = {"Scene.AO"};
+		ImGui::SameLine();
+		if (ImGui::Button("G-buffer"))
+			_selected = {"GBuffer.AlbedoMetallic", "GBuffer.NormalRoughness", "GBuffer.Motion",
+			             "GBuffer.F0Baked", "GBuffer.Emissive", "Scene.Depth"};
+		ImGui::SameLine();
+		if (ImGui::Button("Clear")) _selected.clear();
+
+		ImGui::SetNextItemWidth(90);
+		ImGui::SliderInt("Columns", &_columns, 1, 3);
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(95);
+		ImGui::SliderFloat("Padding", &_padding, 0, 32, "%.0f px");
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(115);
+		ImGui::SliderFloat("Depth range", &_depthRange, 100, 20000, "%.0f cm", ImGuiSliderFlags_Logarithmic);
+		ImGui::SetNextItemWidth(120);
+		ImGui::Combo("Channel", &_channel, "Default\0RGB\0Red\0Green\0Blue\0Alpha\0");
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(-1);
+		ImGui::InputTextWithHint("##filter", "Find a texture by name", _filter.data(), _filter.size());
+
+		ImGui::BeginChild("catalog", {0, 104}, ImGuiChildFlags_Borders);
+		const std::string_view filter(_filter.data());
+		for (const auto& source : catalog)
+		{
+			const auto match = std::search(source.Name.begin(), source.Name.end(), filter.begin(), filter.end(),
+			    [](unsigned char a, unsigned char b) { return std::tolower(a) == std::tolower(b); });
+			if (!filter.empty() && match == source.Name.end())
+				continue;
+			const auto selected = std::find(_selected.begin(), _selected.end(), source.Name);
+			bool checked = selected != _selected.end();
+			ImGui::BeginDisabled(!checked && _selected.size() == Capacity);
+			if (ImGui::Checkbox(source.Name.c_str(), &checked))
+			{
+				if (checked) _selected.push_back(source.Name);
+				else _selected.erase(selected);
+			}
+			ImGui::EndDisabled();
+		}
+		ImGui::EndChild();
+
+		ImGui::Text("%zu / %u selected", _selected.size(), Capacity);
+		ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, {_padding, _padding});
+		if (ImGui::BeginTable("previews", _columns, ImGuiTableFlags_SizingStretchSame))
+		{
+			for (const auto& name : _selected)
+			{
+				ImGui::TableNextColumn();
+				ImGui::TextUnformatted(name.c_str());
+				const auto source = std::find_if(catalog.begin(), catalog.end(),
+				                                 [&name](const auto& item) { return item.Name == name; });
+				if (source == catalog.end())
+				{
+					ImGui::TextDisabled("Unavailable this frame");
+					continue;
+				}
+				const auto desc = source->Resource->GetDesc();
+				ImGui::TextDisabled("%llu x %u", static_cast<unsigned long long>(desc.Width), desc.Height);
+				const float width = (std::max)(1.f, ImGui::GetContentRegionAvail().x);
+				const float height = width * float(desc.Height) / float(desc.Width);
+				const UINT tile = static_cast<UINT>(previews.size());
+				const float x = float(tile % TilesAcross);
+				const float y = float(tile / TilesAcross);
+				ImGui::Image(static_cast<ImTextureID>(AtlasId), {width, height},
+				             {(x + 0.5f / Tile) / TilesAcross, (y + 0.5f / Tile) / 2},
+				             {(x + 1 - 0.5f / Tile) / TilesAcross, (y + 1 - 0.5f / Tile) / 2});
+				previews.push_back(*source);
+			}
+			ImGui::EndTable();
+		}
+		ImGui::PopStyleVar();
+	}
+	ImGui::End();
+	if (!open) Enabled.SetValue(false);
+	if (previews.empty())
+		return nullptr;
+
+	if (!_pipeline)
+	{
+		GDX12RootSignatureDesc desc;
+		desc.Constants = {7};
+		desc.NumSingleSRVSlots = 1;
+		desc.NumSingleUAVSlots = 1;
+		_root = std::make_unique<GDX12RootSignature>(&device, desc);
+		_pipeline = GDX12RenderHelpers::CreateComputePipeline(&device, _root.get(),
+		                                                      APP_SHADERS_FOLDER "SceneTextureInspector.hlsl", "CS");
+	}
+	auto& slot = _slots.at(index);
+	if (!slot.Heap)
+	{
+		slot.Heap = std::make_unique<GDX12DescriptorHeap>(&device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
+		    Capacity + 1, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
+		GDX12TextureDesc desc;
+		desc.Width = Tile * TilesAcross;
+		desc.Height = Tile * 2;
+		desc.Format = PreviewFormat;
+		desc.CreateSRV = false;
+		desc.CreateUAV = true;
+		desc.UAVDesc.Format = PreviewFormat;
+		desc.UAVDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+		desc.SRV_UAV_Heap = slot.Heap.get();
+		desc.UAVHeapIndex = slot.Heap->GetAvailableIndex();
+		slot.Atlas.Initialize(desc);
+	}
+	const Id atlas = NativeWork::ResourceFor(graph, bindings, slot.Atlas.GetResource()->D3DResource.Get(), "Debug.SceneTextures");
+	std::vector<Access> accesses{{atlas, Mode::Write, UnorderedAccess}};
+	std::vector<D3D12_GPU_DESCRIPTOR_HANDLE> views;
+	std::vector<UINT> modes;
+	for (const auto& source : previews)
+	{
+		const Id id = NativeWork::ResourceFor(graph, bindings, source.Resource, source.Name);
+		if (std::none_of(accesses.begin(), accesses.end(), [id](auto access) { return access.Resource == id; }))
+			accesses.push_back({id, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE});
+		D3D12_SHADER_RESOURCE_VIEW_DESC desc{};
+		desc.Format = source.Format;
+		desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+		desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+		desc.Texture2D.MipLevels = 1;
+		const UINT descriptor = static_cast<UINT>(views.size()) + 1;
+		device.GetDevice()->CreateShaderResourceView(source.Resource, &desc, slot.Heap->GetCPUHandle(descriptor));
+		views.push_back(slot.Heap->GetGPUHandle(descriptor));
+		modes.push_back(_channel == 0 ? UINT(source.Visualization) : _channel == 1 ? 0 : UINT(_channel + 4));
+	}
+	struct Constants { UINT X, Y, Size, Mode; float Near, Far, Range; };
+	static_assert(sizeof(Constants) == 7 * sizeof(UINT));
+	const auto depthRange = _depthRange;
+	auto* heap = slot.Heap->GetHeap().Get();
+	const auto uav = slot.Atlas.GetUAV()->GPUHandle;
+	work.Add(graph, "debug scene texture previews", std::move(accesses),
+	         [this, heap, uav, views = std::move(views), modes = std::move(modes), nearPlane, farPlane, depthRange](auto* cmd)
+	         {
+		         cmd->SetDescriptorHeaps(1, &heap);
+		         cmd->SetComputeRootSignature(_root->GetRootSignature().Get());
+		         cmd->SetPipelineState(_pipeline.Get());
+		         cmd->SetComputeRootDescriptorTable(_root->GetURootParamIndex(0), uav);
+		         for (UINT i = 0; i < views.size(); ++i)
+		         {
+			         const Constants constants{i % TilesAcross * Tile, i / TilesAcross * Tile, Tile,
+			                                   modes[i], nearPlane, farPlane, depthRange};
+			         cmd->SetComputeRoot32BitConstants(0, 7, &constants, 0);
+			         cmd->SetComputeRootDescriptorTable(_root->GetTRootParamIndex(0), views[i]);
+			         cmd->Dispatch(Tile / 8, Tile / 8, 1);
+		         }
+	         });
+	return &slot.Atlas;
+}
+}
+#endif

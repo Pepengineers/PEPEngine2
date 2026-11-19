@@ -140,6 +140,18 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	const auto append = [&](BistroRender::Graph& graph, std::vector<ID3D12Resource*>& resources)
 	{
 		_post->BeginPlan();
+#ifdef _DEBUG
+		using View = BistroRender::SceneTextureInspector::View;
+		auto& textures = _post->Textures();
+		textures.Name("Scene.Depth", depth, View::Depth);
+		textures.Name("Scene.AO", _lighting->AOTexture(slot), View::Scalar);
+		textures.Name("GBuffer.AlbedoMetallic", _geometry->GBuffer(slot, 0));
+		textures.Name("GBuffer.Motion", _geometry->GBuffer(slot, 1), View::Motion);
+		textures.Name("GBuffer.NormalRoughness", _geometry->GBuffer(slot, 2), View::Normals);
+		textures.Name("GBuffer.F0Baked", _geometry->GBuffer(slot, 3));
+		textures.Name("GBuffer.Emissive", _geometry->GBuffer(slot, 4), View::HDR);
+		textures.Name("Environment.CloudPicture", _cloudPicture->Image());
+#endif
 		particles.AppendOpaque(graph, resources, *_geometry, slot);
 		if (!earlyEnvironment)
 		{
@@ -150,6 +162,14 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 		_lighting->SetHDRContinuation(
 		    [&](auto& g, auto& bindings, auto* hdr)
 		    {
+#ifdef _DEBUG
+			    textures.Name("Lighting.DeferredHDR", _lighting->DeferredHDR(), View::HDR);
+			    textures.Name("Lighting.SunShadowAtlas", _lighting->SunShadow(slot), View::Scalar);
+			    textures.Name("Environment.BRDF", _environment->Output(2)->GetTexture());
+			    textures.Name("Scene.HDR", hdr, View::HDR);
+			    textures.Name("Post.Depth", _lighting->PostDepth(), View::Depth);
+			    textures.Name("Post.Motion", _lighting->PostMotion(), View::Motion);
+#endif
 			    _post->Append(g, bindings, hdr, _lighting->PostDepth(), _lighting->PostMotion(),
 			                  _lighting->ParticleMotion(), target, finish);
 		    });

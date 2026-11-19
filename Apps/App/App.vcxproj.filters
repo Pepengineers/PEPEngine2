@@ -45,6 +45,9 @@
     <ClCompile Include="src\Techniques\Grass\SceneGrass.cpp" />
     <ClCompile Include="src\Rendering\BistroRenderPipeline.cpp" />
     <ClCompile Include="src\Techniques\UI\ScenePostUI.cpp" />
+    <ClCompile Include="src\Techniques\UI\SceneTextureInspector.cpp" />
+    <ClInclude Include="src\Techniques\UI\SceneTextureInspector.h" />
+    <None Include="Shaders\SceneTextureInspector.hlsl" />
     <ClInclude Include="src\Techniques\UI\BistroUICanvases.h" />
     <ClInclude Include="src\Techniques\UI\BistroGameHUD.h" />
     <ClInclude Include="src\Techniques\UI\BistroUIPosters.h" />
