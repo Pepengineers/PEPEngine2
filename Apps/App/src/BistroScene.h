@@ -3,6 +3,7 @@
 #include "BistroProps.h"
 #include "BistroArch.h"
 #include "Techniques/Water/BistroWaterLayout.h"
+#include "Techniques/Linden/LindenMesh.h"
 #include "Engine.Core/BenchmarkEngine.h"
 #include "App.Base/Modules/SceneManagerModule.h"
 #include "App.Base/Modules/RenderModule.h"
@@ -359,7 +360,9 @@ inline void ConfigureBistroProps(SceneManagerModule& scenes, JobSystem& jobs)
 			    }
 			    auto& render = *BenchmarkEngine::GetLocator().GetModule<RenderModule>();
 			    const auto* mesh = render.GetPrimaryGPUMesh(source.MeshHandler);
-			    const auto partition = PartitionBistroProps(*mesh->CPUMesh, name == "Interior_interior", true);
+			    auto partition = PartitionBistroProps(*mesh->CPUMesh, name == "Interior_interior", true);
+			    if (!partition.Interior)
+			        BistroRender::ExtractLinden(world, *mesh->CPUMesh, source, partition.StaticSubMeshes);
 			    const auto count = partition.Props.size();
 			    render.ReserveTransformCapacity(static_cast<UINT>(count) + 9);
 			    size_t instances = partition.StaticSubMeshes.size();

@@ -1,4 +1,5 @@
 #include "GrassCommon.hlsli"
+#include "WindSample.hlsli"
 #include "InteractionField.hlsli"
 StructuredBuffer<float4> Trail : register(t3);
 StructuredBuffer<float4> PreviousTrail : register(t4);
@@ -20,27 +21,14 @@ uint Hash(uint x)
     return x ^ (x >> 16);
 }
 float Random(uint id) { return (Hash(id) & 0x00ffffffu) / 16777216.0f; }
-float2 Field(float2 uv, bool previous)
-{
-    float2 p = clamp(uv * GridResolution - 0.5f, 0, float(GridResolution - 1));
-    uint2 low = uint2(floor(p));
-    uint2 high = min(low + 1, GridResolution - 1);
-    float2 f = frac(p);
-    uint4 cells = uint4(low.y * GridResolution + low.x, low.y * GridResolution + high.x,
-        high.y * GridResolution + low.x, high.y * GridResolution + high.x);
-    float2 a = previous ? PreviousWind[cells.x].xy : Wind[cells.x].xy;
-    float2 b = previous ? PreviousWind[cells.y].xy : Wind[cells.y].xy;
-    float2 c = previous ? PreviousWind[cells.z].xy : Wind[cells.z].xy;
-    float2 d = previous ? PreviousWind[cells.w].xy : Wind[cells.w].xy;
-    return lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y);
-}
 float3 Bend(float3 root, bool previous)
 {
     if (WindMode == 0) return 0;
     float2 uv = (root.xz - WindArea.xy) / (WindArea.zw * 2) + 0.5f;
     if (any(uv < 0) || any(uv > 1)) return 0;
     float2 velocity;
-    if (WindMode == 2) velocity = Field(uv, previous);
+    if (WindMode == 2) velocity = previous ? SampleWindGrid(PreviousWind, uv, GridResolution) :
+                                             SampleWindGrid(Wind, uv, GridResolution);
     else
     {
         float time = previous ? Patch.w : Patch.z;

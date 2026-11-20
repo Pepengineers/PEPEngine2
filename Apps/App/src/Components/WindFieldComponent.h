@@ -7,6 +7,7 @@ struct WindFieldComponent : ComponentTag, GDX12WindSettings
 {
     bool Enabled = true;
     bool Paused = false;
+    bool UseBistroWindClock = false;
     uint64_t _renderOwner = 0;
 
     void SetSettings(const GDX12WindSettings& settings)

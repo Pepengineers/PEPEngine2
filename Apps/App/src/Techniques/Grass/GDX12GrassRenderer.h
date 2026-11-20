@@ -28,7 +28,7 @@ public:
     // Wait the current frame-slot fence before reusing staging or replacing its roots.
     void BeginFrame(const RenderPipelineCommonData& common,
         std::vector<GDX12GrassInstance> grass, std::vector<GDX12WindInstance> wind, GDX12GrassWindControls controls,
-        const std::vector<BistroInteractionSource>& sources = {}, float deltaSeconds = 0);
+        const std::vector<BistroInteractionSource>& sources = {}, float deltaSeconds = 0, uint64_t independentWind = 0);
     GDX12ParticleInteractionField InteractionField() const;
     void PrepareView(const GDX12GeometryContext& view, UINT patch, GDX12Descriptor* materialOverride = nullptr, bool cullPatch = true);
     UINT PatchCount() const { return static_cast<UINT>(_drawOrder.size()); }
@@ -103,6 +103,7 @@ private:
         UINT Stage, Resolution;
         GDX12UploadBuffer<WindParameters>* Constants;
         FieldBuffer *Input, *Pressure, *Output;
+        bool Async = false;
     };
     struct Output
     {

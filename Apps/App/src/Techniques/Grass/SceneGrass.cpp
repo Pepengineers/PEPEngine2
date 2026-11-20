@@ -1,4 +1,5 @@
 #include "SceneGrass.h"
+#include "BistroGrass.h"
 #include "Techniques/NativeWork.h"
 #include "Engine.Core/BenchmarkEngine.h"
 #include "App.Base/Modules/RenderModule.h"
@@ -39,10 +40,40 @@ SceneGrass::SceneGrass(RenderPipelineContext& c)
 	_buildHiZ = GDX12RenderHelpers::CreateComputePipeline(_resources.Device, _hiZRoot.get(),
 	                                                      APP_SHADERS_FOLDER "GrassHiZ.hlsl", "CS");
 }
-void SceneGrass::Prepare(RenderPipelineContext& c, float dt)
+void SceneGrass::Prepare(RenderPipelineContext& c, float dt, const BoundingBox* crown)
 {
 	_scene.CollectScene(dt);
-	_gpu->BeginFrame(c.Common, _scene._grass, _scene._wind, _scene._controls, _scene._sources, _scene._deltaSeconds);
+	// ECS wind owners count upward from one. Reserve the last ID for the imported scene mesh.
+	constexpr uint64_t lindenOwner = UINT64_MAX;
+	const bool enable = crown && BistroGrass::WindEnabled.GetValue() && _scene._controls.WindEnabled &&
+	                    _scene._controls.WindQuality > 0;
+	if (enable)
+	{
+		GDX12WindInstance wind;
+		static_cast<GDX12WindSettings&>(wind) = BistroGrass::ReadWindSettings(
+		    {(std::max)(1.0f, crown->Extents.x), (std::max)(1.0f, crown->Extents.z)});
+		wind.Id = lindenOwner;
+		wind.CenterCm = {crown->Center.x, crown->Center.z};
+		wind.DeltaSeconds = _scene._deltaSeconds;
+		wind.GustStartSeconds = _scene._gustStart;
+		_scene._wind.push_back(wind);
+	}
+	_gpu->BeginFrame(c.Common, _scene._grass, _scene._wind, _scene._controls, _scene._sources, _scene._deltaSeconds,
+	                 enable ? lindenOwner : 0);
+	LindenWindSample sample;
+	sample.Revision = _lindenWind.Revision;
+	if (enable)
+	{
+		const auto& field = _gpu->_wind.at(lindenOwner);
+		const auto& s = field.Source;
+		sample.Grid = field.Velocity[0].get();
+		sample.Area = {s.CenterCm.x, s.CenterCm.y, s.ExtentsCm.x, s.ExtentsCm.y};
+		sample.Time = field.Time;
+		sample.Resolution = field.Resolution;
+		if (!_lindenWind.Grid || field.ResetHistory || sample.Time != _lindenWind.Time) ++sample.Revision;
+	}
+	else if (_lindenWind.Grid) ++sample.Revision;
+	_lindenWind = sample;
 	_gpu->PublishPrimitives(_resources.Primitives, &_scene);
 }
 std::vector<GDX12RenderPrimitive> SceneGrass::Primitives() const
@@ -59,7 +90,8 @@ std::vector<GDX12RenderPrimitive> SceneGrass::Primitives() const
 }
 void SceneGrass::Append(Graph& g, UINT slot, std::vector<ID3D12Resource*>& all, GDX12Descriptor& materials,
                         const std::vector<GeometryTarget>& targets, bool viewsOnly,
-                        const std::function<void()>& afterInteraction, const std::function<void()>& afterDepth)
+                        const std::function<void()>& afterInteraction, const std::function<void()>& afterDepth,
+                        const std::function<void()>& afterWind)
 {
 	auto& gpu = *_gpu;
 	auto& frame = gpu.CurrentFrame();
@@ -160,7 +192,7 @@ void SceneGrass::Append(Graph& g, UINT slot, std::vector<ID3D12Resource*>& all, 
 			{
 				accesses.push_back(access(job.Pressure, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
 			}
-			add("grass wind stage " + std::to_string(job.Stage), accesses,
+			add(std::string(job.Async ? "linden wind stage " : "grass wind stage ") + std::to_string(job.Stage), accesses,
 			    [=](auto* cmd)
 			    {
 				    cmd->SetDescriptorHeaps(1, &heap);
@@ -172,7 +204,9 @@ void SceneGrass::Append(Graph& g, UINT slot, std::vector<ID3D12Resource*>& all, 
 				    cmd->SetComputeRootDescriptorTable(u, output);
 				    cmd->Dispatch(groups, groups, 1);
 			    });
+			if (job.Async) g.Operations.back().Target = Queue::Compute;
 		}
+		if (afterWind) afterWind();
 	}
 	if (!recorded.HiZ)
 	{

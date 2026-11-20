@@ -62,7 +62,7 @@ void BistroRenderPipeline::PrepareFrame(RenderPipelineContext& c)
 		c.Primary.Lighting.SunShadowFlags &= ~2u;
 	}
 	c.Common.AOAfterDepthPrepass = false;
-	_geometry->PrepareGrass(c, c.Common.GameTimer->DeltaTime());
+	_geometry->PrepareVegetation(c, c.Common.GameTimer->DeltaTime());
 	c.Runtime.PrepareReflectionScene();
 }
 

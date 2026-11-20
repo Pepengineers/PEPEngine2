@@ -3,6 +3,10 @@
 #include "Engine.RendererDX12/GDX12DeviceResources.h"
 #include "Engine.RendererDX12/GDX12Skinning.h"
 #include "Techniques/Grass/SceneGrass.h"
+#include "Linden/LindenDraw.h"
+#include "Linden/LindenSimulation.h"
+#include "Linden/LindenMesh.h"
+#include "NativeWork.h"
 #include <array>
 
 namespace BistroRender
@@ -15,9 +19,9 @@ class SceneGeometry
 {
   public:
 	explicit SceneGeometry(RenderPipelineContext&);
-	void PrepareGrass(RenderPipelineContext& c, float dt) { _grass->Prepare(c, dt); }
-	std::vector<GDX12RenderPrimitive> GrassPrimitives() const { return _grass->Primitives(); }
-	void AppendGrassView(Graph&, std::vector<ID3D12Resource*>&, UINT slot, const GeometryTarget&);
+	void PrepareVegetation(RenderPipelineContext& c, float dt);
+	std::vector<GDX12RenderPrimitive> VegetationPrimitives() const;
+	void AppendVegetationView(Graph&, std::vector<ID3D12Resource*>&, UINT slot, const GeometryTarget&);
 	GDX12ParticleInteractionField InteractionField() const { return _grass->InteractionField(); }
 
 	void Resize(UINT width, UINT height); // caller has drained all slots
@@ -52,6 +56,9 @@ class SceneGeometry
 	};
 	struct Slot
 	{
+		NativeWork LindenWork;
+		LindenDisplayedPose LindenPose{};
+		std::shared_ptr<const LindenMesh> Linden;
 		std::vector<ID3D12Resource*> PlannedBindings;
 		std::array<Buffer, 8> Buffers;      // instances/templates/materials/transforms/opaque/count/transparent/count
 		std::array<Buffer, 2> FrameBuffers; // immutable main/camera constants
@@ -83,6 +90,9 @@ class SceneGeometry
 	std::vector<Slot> _slots;
 	std::unique_ptr<GDX12RootSignature> _cullRoot, _clearRoot, _drawRoot;
 	std::unique_ptr<SceneGrass> _grass;
+	LindenSimulation _lindenSimulation;
+	LindenDraw _lindenDraw;
+	std::shared_ptr<const LindenMesh> _linden;
 	RenderPipelineCommonData& _common;
 	GDX12ResourceHandle _emptyVertices, _emptyIndices;
 	ComPtr<ID3D12PipelineState> _cull, _clear, _depth, _gbuffer, _worldCanvas;
