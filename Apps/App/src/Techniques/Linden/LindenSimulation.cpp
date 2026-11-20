@@ -114,10 +114,11 @@ LindenDisplayedPose LindenSimulation::Append(Graph& graph, std::vector<ID3D12Res
 		reads.push_back(access(wind.Grid, Mode::Read, read, "linden wind grid"));
 		field = wind.Grid->GetSRV()->GPUHandle;
 	}
-	work.Add(graph, "linden evaluate crown and flutter", std::move(reads),
+	const auto label = "linden LOD" + std::to_string(mesh->Lod);
+	work.Add(graph, label + " evaluate crown and flutter", std::move(reads),
 	         dispatch(_response, {tree.Fragments->GetSRV()->GPUHandle, field, {}},
 	                  tree.Response->GetUAV()->GPUHandle, (p.Fragments + 63) / 64), {}, Queue::Compute);
-	work.Add(graph, "linden deform next pose",
+	work.Add(graph, label + " deform next pose",
 	         {fragments, access(tree.Rest.get(), Mode::Read, read, "linden rest vertices"),
 	          access(tree.Response.get(), Mode::Read, read, "linden fragment response"),
 	          access(tree.Poses[output].get(), Mode::Write, UnorderedAccess, "linden deformed vertices")},
