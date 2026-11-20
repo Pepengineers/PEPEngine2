@@ -78,6 +78,18 @@ class BistroBenchmark
             // Hermite timing shares the same velocity at each knot and stops at a held pose.
             const float t = u * (start + u * (3 - 2 * start - finish + u * (start + finish - 2)));
             const auto position = EvaluateSplineSegment(_curve.Points[i], _curve.Points[i+1], t);
+            if (_points[i].AlongPaintingWall && _points[i + 1].AlongPaintingWall)
+            {
+                // Height and path knots do not interrupt the pan between paintings.
+                size_t from = i;
+                size_t to = i + 1;
+                while (_points[from].Target == Vector3::Zero) --from;
+                while (_points[to].Target == Vector3::Zero) ++to;
+                const float panStart = _times[from] + _points[from].HoldSeconds;
+                const float panTime = (time - panStart) / (_times[to] - panStart);
+                return {position, BlendDirection(_points[from].Target - position,
+                    _points[to].Target - position, panTime)};
+            }
             auto tangent = EvaluateSplineSegment(_curve.Points[i], _curve.Points[i+1], std::min(1.f,t + .002f)) -
                 EvaluateSplineSegment(_curve.Points[i], _curve.Points[i+1], std::max(0.f,t - .002f));
             tangent.Normalize();
