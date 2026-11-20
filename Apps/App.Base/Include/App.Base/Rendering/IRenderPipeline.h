@@ -39,6 +39,7 @@ public:
     virtual void DrainExecution() {}
     virtual uint64_t ExecuteFrame(RenderPipelineContext&, GDX12CommandList*,
         const std::function<void(GDX12CommandList*)>&) = 0;
+    virtual void FramePresented() {}
     virtual void WriteExecution(std::ostream&) const {}
     virtual void Resize(RenderPipelineContext&) = 0;
     virtual const RenderPipelineBindings& GetBindings() const = 0;

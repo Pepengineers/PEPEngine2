@@ -168,11 +168,11 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	}
 	catch (...)
 	{
-		_cloudPicture->Submitted(_executor->Completions(), false);
+		_cloudPicture->Submitted(_executor->Completions());
 		_post->Reconstruction().CancelRecording();
 		throw;
 	}
-	_cloudPicture->Submitted(_executor->Completions(), true);
+	_cloudPicture->Submitted(_executor->Completions());
 	_post->Submitted(slot);
 	_environment->Submitted(completion);
 	_lighting->Submitted(completion);

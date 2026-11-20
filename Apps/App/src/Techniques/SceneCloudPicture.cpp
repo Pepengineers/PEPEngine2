@@ -46,7 +46,7 @@ struct SceneCloudPicture::Impl {
     GDX12DeviceResources& Resources;
     std::unique_ptr<CloudPictureTexture> Texture;
     std::optional<Settings> Attempted;
-    int ActiveAdapter = -1;
+    int ExecutorAdapter = -1;
     GDX12Texture* CurrentImage = nullptr;
 
     explicit Impl(RenderPipelineContext& c) : Resources(c.Primary) {}
@@ -65,7 +65,7 @@ void SceneCloudPicture::UpdateSettings(std::unique_ptr<Executor>& executor) {
         Log::Error("RenderGraph", "CloudPicture adapter ", adapter, " settings rejected: ", reason);
     };
     try {
-        if (adapter != p.ActiveAdapter) {
+        if (adapter != p.ExecutorAdapter) {
             auto submit = std::make_shared<QueueSubmission>(*p.Resources.Device,
                 OpenSecondary(*p.Resources.Device, adapter));
             replacementExecutor = std::make_unique<Executor>(submit, 0, UINT(p.Resources.FrameConstants.size()));
@@ -80,21 +80,30 @@ void SceneCloudPicture::UpdateSettings(std::unique_ptr<Executor>& executor) {
         reject(error.what());
     }
 
-    if (!next.Active && adapter != p.ActiveAdapter && !replacementExecutor) return;
     if (next.Active && !replacement) {
         if (p.Texture || adapter < 0) return;
-        // A rejected first remote request leaves the ordinary local picture available.
-        replacement = std::make_unique<CloudPictureTexture>(p.Resources, next.Width, next.Height,
-            executor->Submissions(), false);
-        p.Texture = std::move(replacement);
+        const auto fallbackFailed = [](const auto& reason) {
+            Log::Error("RenderGraph", "CloudPicture local fallback failed. Picture disabled: ", reason);
+        };
+        try {
+            p.Texture = std::make_unique<CloudPictureTexture>(p.Resources, next.Width, next.Height,
+                executor->Submissions(), false);
+        } catch (const DxException& error) {
+            fallbackFailed(error.ToString());
+        } catch (const std::exception& error) {
+            fallbackFailed(error.what());
+        }
         return;
     }
+    // Disabling retires the picture even if the current executor has to stay.
     if (p.Texture) p.Texture->Stop();
     executor->Drain();
     p.CurrentImage = nullptr;
     p.Texture = std::move(replacement);
-    if (replacementExecutor) executor = std::move(replacementExecutor);
-    p.ActiveAdapter = adapter;
+    if (replacementExecutor) {
+        executor = std::move(replacementExecutor);
+        p.ExecutorAdapter = adapter;
+    }
 }
 void SceneCloudPicture::Prepare(UINT slot, double time) {
     auto& p = *_impl;
@@ -102,7 +111,7 @@ void SceneCloudPicture::Prepare(UINT slot, double time) {
     p.CurrentImage = p.Texture ? p.Texture->Texture(slot) : nullptr;
 }
 GDX12Texture* SceneCloudPicture::Image() const { return _impl->CurrentImage; }
-bool SceneCloudPicture::IsRemote() const { return _impl->ActiveAdapter >= 0; }
+bool SceneCloudPicture::IsRemote() const { return _impl->Texture && _impl->Texture->IsRemote(); }
 void SceneCloudPicture::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings) {
     if (_impl->CurrentImage) _impl->Texture->Append(graph, bindings);
 }
@@ -110,7 +119,10 @@ bool SceneCloudPicture::Record(Id id, ID3D12GraphicsCommandList* cmd) { return _
 std::vector<PacketWait> SceneCloudPicture::Waits(const Schedule& schedule) {
     return _impl->CurrentImage ? _impl->Texture->Waits(schedule) : std::vector<PacketWait>{};
 }
-void SceneCloudPicture::Submitted(const std::vector<CompletionToken>& tokens, bool frameSubmitted) {
-    if (_impl->CurrentImage) _impl->Texture->Submitted(tokens, frameSubmitted);
+void SceneCloudPicture::Submitted(const std::vector<CompletionToken>& tokens) {
+    if (_impl->Texture) _impl->Texture->Submitted(tokens);
+}
+void SceneCloudPicture::Presented() {
+    if (_impl->CurrentImage) _impl->Texture->Presented();
 }
 }

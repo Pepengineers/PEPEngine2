@@ -6,7 +6,6 @@
 #include "Engine.RendererDX12/GDX12Descriptor.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
 #include "Engine.Core/Logging/Logger.h"
-#include <cassert>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
@@ -35,6 +34,14 @@ struct CloudGeneratorData
 };
 static_assert(sizeof(CloudGeneratorData) == 96, "Cloud picture root constants must match the shader");
 using Clock = std::chrono::steady_clock;
+using Event = std::unique_ptr<void, decltype(&CloseHandle)>;
+
+Event MakeEvent(BOOL manualReset)
+{
+	Event event(CreateEventW(nullptr, manualReset, FALSE, nullptr), CloseHandle);
+	if (!event) ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
+	return event;
+}
 
 void CheckFormat(GDX12Device& device, bool producer)
 {
@@ -66,7 +73,8 @@ struct CloudPictureTexture::Impl
 		GDX12ResourceHandle Output;
 		D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{};
 		std::mutex Mutex;
-		std::condition_variable Wake;
+		std::condition_variable Changed;
+		Event StopEvent = MakeEvent(TRUE), ExportEvent = MakeEvent(FALSE);
 		std::thread Thread;
 		std::exception_ptr Failure;
 		bool Stop = false, DrainFailed = false;
@@ -185,7 +193,7 @@ struct CloudPictureTexture::Impl
 		{
 			remote.Latest = remote.Pending;
 			remote.Pending = Invalid;
-			remote.Slots[remote.Latest].Version = ++remote.Exports;
+			++remote.Exports;
 		}
 	}
 	Id WritableSlot() const
@@ -205,6 +213,20 @@ struct CloudPictureTexture::Impl
 			}
 		}
 		return Invalid;
+	}
+	void WaitForExport(CompletionToken token)
+	{
+		auto& remote = *Remote;
+		Submit->NotifyOnCompletion(token, remote.ExportEvent.get());
+		const HANDLE events[] = {remote.StopEvent.get(), remote.ExportEvent.get()};
+		for (;;)
+		{
+			const auto result = WaitForMultipleObjects(2, events, FALSE, 100);
+			if (result == WAIT_OBJECT_0 || result == WAIT_OBJECT_0 + 1) return;
+			if (result == WAIT_FAILED) ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
+			// The other adapter can fail without signalling this fence.
+			Submit->CheckHealth();
+		}
 	}
 	void Produce(Executor& executor, double phase, Clock::time_point epoch)
 	{
@@ -227,11 +249,11 @@ struct CloudPictureTexture::Impl
 		while (!remote.Stop)
 		{
 			PublishCompleted();
-			const Id id = remote.Pending == Invalid ? WritableSlot() : Invalid;
+			const Id id = WritableSlot();
 			if (id == Invalid)
 			{
-				// Fence completion does not wake the CPU condition variable.
-				remote.Wake.wait_for(lock, std::chrono::milliseconds(1));
+				// The remaining slots may have GPU0 readers on different queues.
+				remote.Changed.wait_for(lock, std::chrono::milliseconds(1));
 				continue;
 			}
 			auto parameters = Parameters;
@@ -239,36 +261,36 @@ struct CloudPictureTexture::Impl
 			slot.Readers = {};
 			lock.unlock();
 
-			// The export and the terminal transition share a queue. Retry until
-			// the one recording slot is idle before reusing its allocators.
-			if (executor.TryBegin(0))
+			if (!executor.TryBegin(0))
 			{
-				executor.Reserve(schedule);
-				parameters.TotalTime = float(phase + std::chrono::duration<double>(Clock::now() - epoch).count());
-				auto* output = remote.Output.Get();
-				auto* shared = slot.Buffer.Resources[1].Get();
-				executor.Execute(schedule, {output, shared},
-				    [&](Id operation, uint32_t, auto* cmd)
+				throw std::logic_error("CloudPicture export completed before its recording slot retired");
+			}
+			executor.Reserve(schedule);
+			parameters.TotalTime = float(phase + std::chrono::duration<double>(Clock::now() - epoch).count());
+			auto* output = remote.Output.Get();
+			auto* shared = slot.Buffer.Resources[1].Get();
+			executor.Execute(schedule, {output, shared},
+			    [&](Id operation, uint32_t, auto* cmd)
+			    {
+				    if (operation == 0)
 				    {
-					    if (operation == 0)
-					    {
-						    Dispatch(cmd, parameters, remote.Heap->GetGPUHandle(0));
-					    }
-					    else
-					    {
-						    const CD3DX12_TEXTURE_COPY_LOCATION source(output, 0u), target(shared, remote.Footprint);
-						    cmd->CopyTextureRegion(&target, 0, 0, 0, &source, nullptr);
-					    }
-				    });
-				lock.lock();
-				slot.Export = executor.Completions().back();
-				remote.Pending = id;
-			}
-			else
-			{
-				lock.lock();
-				remote.Wake.wait_for(lock, std::chrono::milliseconds(1), [&] { return remote.Stop; });
-			}
+					    Dispatch(cmd, parameters, remote.Heap->GetGPUHandle(0));
+				    }
+				    else
+				    {
+					    const CD3DX12_TEXTURE_COPY_LOCATION source(output, 0u), target(shared, remote.Footprint);
+					    cmd->CopyTextureRegion(&target, 0, 0, 0, &source, nullptr);
+				    }
+			    });
+			const auto token = executor.Completions().back();
+			lock.lock();
+			slot.Export = token;
+			slot.Version = remote.Exports + 1;
+			remote.Pending = id;
+			remote.Changed.notify_all();
+			lock.unlock();
+			WaitForExport(token);
+			lock.lock();
 		}
 	}
 	void RunProducer(double phase, Clock::time_point epoch)
@@ -278,6 +300,7 @@ struct CloudPictureTexture::Impl
 		{
 			std::lock_guard lock(remote.Mutex);
 			if (!remote.Failure) remote.Failure = std::current_exception();
+			remote.Changed.notify_all();
 		};
 		try
 		{
@@ -305,7 +328,8 @@ struct CloudPictureTexture::Impl
 			std::lock_guard lock(Remote->Mutex);
 			Remote->Stop = true;
 		}
-		Remote->Wake.notify_one();
+		SetEvent(Remote->StopEvent.get());
+		Remote->Changed.notify_all();
 		Remote->Thread.join();
 	}
 	void Drain()
@@ -366,16 +390,20 @@ void CloudPictureTexture::Prepare(UINT frameSlot, double totalTime)
 	if (p.Remote)
 	{
 		auto& remote = *p.Remote;
-		std::lock_guard lock(remote.Mutex);
-		if (remote.Failure) std::rethrow_exception(remote.Failure);
+		std::unique_lock lock(remote.Mutex);
 		p.Parameters.CloudSpeed = 0.006f * SpeedScale.GetValue();
 		if (!remote.Thread.joinable())
 		{
 			remote.Thread = std::thread([&p, totalTime, epoch = Clock::now()] { p.RunProducer(totalTime, epoch); });
 		}
+		// Bootstrap waits only for an issued token. The GPU import waits for its bytes.
+		remote.Changed.wait(lock, [&]
+		{
+			return remote.Pending != Invalid || remote.Latest != Invalid || remote.Failure;
+		});
+		if (remote.Failure) std::rethrow_exception(remote.Failure);
 		p.PublishCompleted();
-		// Keep the picture inactive until the first complete image can be imported.
-		remote.Pinned = remote.Latest;
+		remote.Pinned = remote.Latest != Invalid ? remote.Latest : remote.Pending;
 		return;
 	}
 	p.Parameters.TotalTime = float(totalTime);
@@ -433,27 +461,32 @@ std::vector<PacketWait> CloudPictureTexture::Waits(const Schedule& schedule)
 	throw std::logic_error("CloudPicture import missing from the primary schedule");
 }
 
-void CloudPictureTexture::Submitted(const std::vector<CompletionToken>& completions, bool frameSubmitted)
+bool CloudPictureTexture::IsRemote() const { return bool(_impl->Remote); }
+
+void CloudPictureTexture::Presented()
+{
+	if (_impl->Remote) ++_impl->Remote->Frames;
+}
+
+void CloudPictureTexture::Submitted(const std::vector<CompletionToken>& completions)
 {
 	auto& p = *_impl;
-	if (p.ImportPacket == Invalid) return;
+	if (!p.Remote) return;
 	auto& remote = *p.Remote;
 	{
 		std::lock_guard lock(remote.Mutex);
-		auto& slot = remote.Slots.at(remote.Pinned);
 		const auto token = p.ImportPacket < completions.size() ? completions[p.ImportPacket] : CompletionToken{};
-		assert(!frameSubmitted || token);
 		if (token)
 		{
+			auto& slot = remote.Slots.at(remote.Pinned);
 			const size_t queue = token.Target == Queue::Direct ? 0 : token.Target == Queue::Compute ? 1 : 2;
 			slot.Readers[queue] = token;
 			++remote.Imports;
 			if (remote.ImportedVersion == slot.Version) ++remote.Repeats;
 			remote.ImportedVersion = slot.Version;
 		}
-		if (frameSubmitted) ++remote.Frames;
 		remote.Pinned = Invalid;
 	}
-	remote.Wake.notify_one();
+	remote.Changed.notify_all();
 }
 } // namespace BistroRender

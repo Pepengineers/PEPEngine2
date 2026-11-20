@@ -15,7 +15,8 @@ public:
     void Append(Graph&, std::vector<ID3D12Resource*>&);
     bool Record(Id, ID3D12GraphicsCommandList*);
     std::vector<PacketWait> Waits(const Schedule&);
-    void Submitted(const std::vector<CompletionToken>&, bool frameSubmitted);
+    void Submitted(const std::vector<CompletionToken>&);
+    void Presented();
 private:
     struct Impl;
     std::shared_ptr<Impl> _impl;
