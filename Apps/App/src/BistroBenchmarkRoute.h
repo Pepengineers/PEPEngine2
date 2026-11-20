@@ -3,7 +3,12 @@
 // World-space centimetres. An omitted target follows the forward tangent.
 namespace BistroBenchmarkRoute
 {
-struct Point { Vector3 Position; Vector3 Target = Vector3::Zero; };
+struct Point
+{
+    Vector3 Position;
+    Vector3 Target = Vector3::Zero;
+    bool AlongPaintingWall = false;
+};
 
 inline const Point Red[] = {
     {{1071, 202, -4195}},
@@ -77,17 +82,13 @@ inline const Point Yellow[] = {
     {{258, 200, -14}, {470, 110, -242}},
     {{433, 200, 44}, {470, 110, -242}},
     {{606, 200, 120}, {470, 110, -242}},
-    {{763, 200, 169}, {977, 237, 296}},
-    {{854, 200, 201}, {977, 237, 296}},
-    {{878, 200, 135}, {500, 110, -237}},
-    {{904, 200, 59}, {1089, 237, 92}},
-    {{899, 200, -16}, {1089, 237, 92}},
-    {{909, 245, -74}, {500, 110, -237}},
-    {{935, 275, -126}, {500, 110, -237}},
-    {{969, 275, -176}},
-    {{1029, 275, -205}, {500, 110, -237}},
-    {{1087, 200, -179}, {1210, 235, -151}},
-    {{1087, 200, -215}, {1210, 235, -151}},
+    {{770, 200, 204}, {977, 237, 296}, true},
+    {{805, 200, 139}, {500, 110, -237}, true},
+    {{840, 200, 74}, {1089, 237, 92}, true},
+    {{875, 200, 9}, {500, 110, -237}, true},
+    {{910, 245, -56}, {500, 110, -237}, true},
+    {{945, 275, -121}, {1210, 235, -151}, true},
+    {{980, 265, -186}, {1210, 235, -151}, true},
     {{1019, 200, -265}, {1210, 235, -151}},
     {{888, 200, -330}, {258, 275, 117}},
     {{799, 200, -367}, {234, 275, 109}},
@@ -120,5 +121,5 @@ inline const Point Yellow[] = {
 };
 
 inline constexpr size_t EntryDoor = 4;
-inline constexpr size_t ExitDoor = 45;
+inline constexpr size_t ExitDoor = std::size(Yellow) - 5;
 }
