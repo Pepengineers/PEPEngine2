@@ -7,6 +7,7 @@
 #include "Common/ConsoleVariables.h"
 #include "BistroWaves.h"
 #include "BistroStaticCollision.h"
+#include "BistroEntrance.h"
 #include "App.Base/Physics/CollisionGeometry.h"
 #include "Engine.Core/Jobs/JobSystem.h"
 #include "App.Base/App.h"
@@ -476,13 +477,7 @@ inline void CreateBistroPropEntities(World& world, const std::string& sceneName,
             group.push_back(index);
         }
         create(sceneName, exterior, BistroStaticCollision::BuildWalkway(), PhysicsMotionType::Static);
-        if (!entrance.empty())
-        {
-            auto door = ecs.CreateEntity();
-            door.AddComponent<NameComponent>("BistroEntranceDoor");
-            door.AddComponent<TransformComponent>(Vector3::Zero);
-            door.AddComponent<StaticMeshRenderComponent>(source.MeshHandler, source.Materials, entrance).ReflectionDynamic = true;
-        }
+        if (!entrance.empty()) BistroEntrance::Install(world, source, mesh, entrance);
         return;
     }
 
