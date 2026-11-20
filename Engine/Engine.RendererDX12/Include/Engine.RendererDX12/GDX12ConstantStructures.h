@@ -20,16 +20,18 @@ struct GDX12MaterialConstants
     float Roughness = 0.5f;
     float Metallic = 0.5f;
     float Opacity = 1.0f;
-    UINT DiffuseIndex = 0;
-    UINT NormalIndex = 0;
-    UINT DisplacementIndex = 0;
+    UINT DiffuseMapIndex = 0;
+    UINT NormalMapIndex = UINT_MAX;
+    UINT DisplacementMapIndex = 0;
     UINT RenderLayer = 0; // 0 - opaque, 1 - masked, 2 - transparent
-    float _pad0 = 0.0f;
-    float _pad1 = 0.0f;
-    float _pad2 = 0.0f;
-    float _pad3 = 0.0f;
-    float _pad4 = 0.0f;
+    UINT UseBakedLighting = 0;
+    XMFLOAT3 SpecularColor = {};
+    UINT SpecularMapIndex = UINT_MAX;
+    XMFLOAT3 EmissiveColor = {};
+    UINT EmissiveMapIndex = UINT_MAX;
+    UINT RoughnessMapIndex = UINT_MAX;
 };
+static_assert(sizeof(GDX12MaterialConstants) == 68);
 
 struct GDX12CameraConstants
 {

@@ -55,21 +55,17 @@ void CS(uint3 dispatchThreadID : SV_DispatchThreadID)
     {
         Material mat = MaterialCache[InstanceCache[instanceID].MaterialIndex];
         
-        //opaque and masked
-        if (mat.RenderLayer != 2)
+        if (mat.RenderLayer != RENDER_LAYER_TRANSPARENT)
         {
             uint writeIndex;
             InterlockedAdd(OpaqueCounterBuffer[0], 1, writeIndex);
             OpaqueVisibleCommands[writeIndex] = InputCommands[drawIndex];
-            return;
         }
-        //transparent
-        if (mat.RenderLayer == 2)
+        else
         {
             uint writeIndex;
             InterlockedAdd(TransparentCounterBuffer[0], 1, writeIndex);
             TransparentVisibleCommands[writeIndex] = InputCommands[drawIndex];
-            return;
         }
     }
 }

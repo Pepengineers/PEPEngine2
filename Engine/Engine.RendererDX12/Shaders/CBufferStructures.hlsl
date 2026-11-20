@@ -2,6 +2,12 @@
 #define TEXTURE2D_RANGE_LENGTH 99000
 #define TEXTURECUBE_RANGE_LENGTH 5000
 #define SHADOWMAP_RANGE_LENGTH 400
+#define NO_TEXTURE 0xffffffffu
+
+// Matches MaterialType in GDX12Material.h.
+#define RENDER_LAYER_OPAQUE 0u
+#define RENDER_LAYER_MASKED 1u
+#define RENDER_LAYER_TRANSPARENT 2u
 
 struct MainCB
 {
@@ -21,15 +27,16 @@ struct Material
     float Roughness;
     float Metallic;
     float Opacity;
-    uint DiffuseIndex;
-    uint NormalIndex;
-    uint DisplacementIndex;
-    uint RenderLayer; // 0 - opaque, 1 - masked, 2 - transparent
-    float _pad0;
-    float _pad1;
-    float _pad2;
-    float _pad3;
-    float _pad4;
+    uint DiffuseMapIndex;
+    uint NormalMapIndex;
+    uint DisplacementMapIndex;
+    uint RenderLayer;
+    uint UseBakedLighting;
+    float3 SpecularColor;
+    uint SpecularMapIndex;
+    float3 EmissiveColor;
+    uint EmissiveMapIndex;
+    uint RoughnessMapIndex;
 };
 
 struct CameraCB
@@ -90,3 +97,17 @@ struct IndirectConstants
 {
     uint InstanceID;
 };
+
+float3 SafeNormalize(float3 v)
+{
+    return v * rsqrt(max(dot(v, v), 1e-12f));
+}
+
+float3 TransformNormal(float3 normal, float3x3 world)
+{
+    float3 x = cross(world[1], world[2]);
+    float3 y = cross(world[2], world[0]);
+    float3 z = cross(world[0], world[1]);
+    float signDet = dot(world[0], x) < 0 ? -1.0f : 1.0f;
+    return SafeNormalize(mul(normal, float3x3(x, y, z)) * signDet);
+}

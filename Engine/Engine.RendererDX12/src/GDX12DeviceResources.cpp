@@ -87,20 +87,22 @@ void GDX12DeviceResources::UpdateMaterialCB(std::unordered_map<std::string, std:
             materialConstants.Opacity = material->Opacity;
             materialConstants.RenderLayer = UINT(material->Type);
 
-            if (Device->Role == DEVICE_ROLE_PRIMARY)
+            const auto textureIndex = [this](const GPUTexture* texture, UINT fallback = UINT_MAX)
             {
-                if (material->Diffuse && material->Diffuse->PrimaryDeviceTexture) { materialConstants.DiffuseIndex = material->Diffuse->PrimaryDeviceTexture->GetSRV()->HeapIndex - Texture2D_StartIndex; }
-                if (material->Normal && material->Normal->PrimaryDeviceTexture) { materialConstants.NormalIndex = material->Normal->PrimaryDeviceTexture->GetSRV()->HeapIndex - Texture2D_StartIndex; }
-                if (material->Displacement && material->Displacement->PrimaryDeviceTexture) { materialConstants.DisplacementIndex = material->Displacement->PrimaryDeviceTexture->GetSRV()->HeapIndex - Texture2D_StartIndex; }
-                currMaterialCB->CopyData(material->_CBufferIndex, materialConstants);
-            }
-            else
-            {
-                if (material->Diffuse && material->Diffuse->SecondaryDeviceTexture) { materialConstants.DiffuseIndex = material->Diffuse->SecondaryDeviceTexture->GetSRV()->HeapIndex - Texture2D_StartIndex; }
-                if (material->Normal && material->Normal->SecondaryDeviceTexture) { materialConstants.NormalIndex = material->Normal->SecondaryDeviceTexture->GetSRV()->HeapIndex - Texture2D_StartIndex; }
-                if (material->Displacement && material->Displacement->SecondaryDeviceTexture) { materialConstants.DisplacementIndex = material->Displacement->SecondaryDeviceTexture->GetSRV()->HeapIndex - Texture2D_StartIndex; }
-                currMaterialCB->CopyData(material->_CBufferIndex, materialConstants);
-            }
+                if (!texture) { return fallback; }
+                auto* local = Device->Role == DEVICE_ROLE_PRIMARY ? texture->PrimaryDeviceTexture : texture->SecondaryDeviceTexture;
+                return local ? local->GetSRV()->HeapIndex - Texture2D_StartIndex : fallback;
+            };
+            materialConstants.DiffuseMapIndex = textureIndex(material->Diffuse, 0);
+            materialConstants.DisplacementMapIndex = textureIndex(material->Displacement, 0);
+            materialConstants.NormalMapIndex = textureIndex(material->HasNormalMap ? material->Normal : nullptr);
+            materialConstants.RoughnessMapIndex = textureIndex(material->HasRoughnessMap ? material->RoughnessMap : nullptr);
+            materialConstants.SpecularMapIndex = textureIndex(material->HasSpecularMap ? material->Specular : nullptr);
+            materialConstants.EmissiveMapIndex = textureIndex(material->HasEmissiveMap ? material->Emissive : nullptr);
+            materialConstants.SpecularColor = material->SpecularColor;
+            materialConstants.EmissiveColor = material->EmissiveColor;
+            materialConstants.UseBakedLighting = material->UseBakedLighting;
+            currMaterialCB->CopyData(material->_CBufferIndex, materialConstants);
             framesDirty--;
         }
     }

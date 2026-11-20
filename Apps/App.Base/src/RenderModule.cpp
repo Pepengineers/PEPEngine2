@@ -14,7 +14,7 @@ namespace
     void ConfigureDefaultPipeline(FrameGraph& graph, const FrameGraphInputs& inputs)
     {
         auto culling = graph.AddPrimaryGPUPass<GDX12GPUCullingPass>("Frustum Culling");
-        auto opaque = graph.AddPrimaryGPUPass<GDX12OpaquePass>("Opaque");
+        auto opaque = graph.AddPrimaryGPUPass<GDX12DeferredGeometryPass>("Opaque");
         auto transparency = graph.AddPrimaryGPUPass<GDX12WBOITTransparencyPass>("Transparency");
         auto composition = graph.AddPrimaryGPUPass<GDX12WBOITCompositionPass>("Composition");
         auto clear = graph.AddPrimaryGPUPass<GDX12TextureClearPass>("Back Buffer Clear");
@@ -26,7 +26,7 @@ namespace
         graph.ConnectNodes(culling.GetOutput("OutOpaqueDrawStream"), opaque.GetInput("InDrawStream"));
         graph.ConnectNodes(culling.GetOutput("OutTransparentDrawStream"), transparency.GetInput("InDrawStream"));
         graph.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), transparency.GetInput("InDepthBuffer"));
-        graph.ConnectNodes(opaque.GetOutput("OutColorTexture"), composition.GetInput("InOpaqueTexture"));
+        graph.ConnectNodes(opaque.GetOutput("OutAlbedoMetallic"), composition.GetInput("InOpaqueTexture"));
         graph.ConnectNodes(transparency.GetOutput("OutAccumulationTexture"), composition.GetInput("InAccumulationTexture"));
         graph.ConnectNodes(transparency.GetOutput("OutRevealageTexture"), composition.GetInput("InRevealageTexture"));
         graph.ConnectNodes(composition.GetOutput("OutColorTexture"), output.GetInput("InColorTexture"));
@@ -336,7 +336,7 @@ GDX12Texture* RenderModule::CreateDX12Texture(const std::string& name, GDX12Devi
 void RenderModule::SubmitMesh(const Mesh* mesh, MeshHandle handle)
 {
     if (_frameGraph) { _frameGraph->WaitForGPUCompletion(); }
-    _meshes[handle.GetValue()] = mesh;
+    if (_meshes.insert_or_assign(handle.GetValue(), mesh).second) { _meshUploadOrder.push_back(handle); }
     if (GetDevicePassFlags(DEVICE_ROLE_PRIMARY) & RENDER_PASS_FLAG_USE_GEOMETRY)
     { _primaryResources.GeometryBuffer->AddMesh(mesh, handle); }
     if (GetDevicePassFlags(DEVICE_ROLE_SECONDARY) & RENDER_PASS_FLAG_USE_GEOMETRY)
@@ -725,10 +725,10 @@ void RenderModule::UploadSceneResources(GDX12DeviceResources& resources, uint32_
     ResizeSceneBuffers(resources, flags);
     if (flags & RENDER_PASS_FLAG_USE_GEOMETRY)
     {
-        for (const auto& mesh : _meshes)
+        for (const auto handle : _meshUploadOrder)
         {
-            if (!resources.GeometryBuffer->_meshCache.count(mesh.first))
-            { resources.GeometryBuffer->AddMesh(mesh.second, MeshHandle(mesh.first)); }
+            if (!resources.GeometryBuffer->_meshCache.count(handle.GetValue()))
+            { resources.GeometryBuffer->AddMesh(_meshes.at(handle.GetValue()), handle); }
         }
     }
     if (flags & RENDER_PASS_FLAG_USE_MATERIALS)

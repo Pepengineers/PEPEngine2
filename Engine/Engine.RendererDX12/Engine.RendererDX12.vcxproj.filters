@@ -107,7 +107,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12WBOITTransparencyPass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12OpaquePass.h">
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12DeferredGeometryPass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12SharedAllocation.h">
@@ -198,7 +198,7 @@
     <None Include="Shaders\Culling.hlsl" />
     <None Include="Shaders\ComputeCopy.hlsl" />
     <None Include="Shaders\FullScreenVS.hlsl" />
-    <None Include="Shaders\OpaquePass.hlsl" />
+    <None Include="Shaders\DeferredGeometryPass.hlsl" />
     <None Include="Shaders\TransparentPass.hlsl" />
   </ItemGroup>
 </Project>

@@ -19,7 +19,7 @@ namespace
     void ConfigureSingleGPUXeSS(FrameGraph& graph, const FrameGraphInputs& inputs)
     {
         auto culling = graph.AddPrimaryGPUPass<GDX12GPUCullingPass>("Frustum Culling");
-        auto opaque = graph.AddPrimaryGPUPass<GDX12OpaquePass>("Opaque");
+        auto opaque = graph.AddPrimaryGPUPass<GDX12DeferredGeometryPass>("Opaque");
         auto transparency = graph.AddPrimaryGPUPass<GDX12WBOITTransparencyPass>("Transparency");
         auto composition = graph.AddPrimaryGPUPass<GDX12WBOITCompositionPass>("Composition");
         auto clear = graph.AddPrimaryGPUPass<GDX12TextureClearPass>("Back Buffer Clear");
@@ -32,7 +32,7 @@ namespace
         graph.ConnectNodes(culling.GetOutput("OutOpaqueDrawStream"), opaque.GetInput("InDrawStream"));
         graph.ConnectNodes(culling.GetOutput("OutTransparentDrawStream"), transparency.GetInput("InDrawStream"));
         graph.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), transparency.GetInput("InDepthBuffer"));
-        graph.ConnectNodes(opaque.GetOutput("OutColorTexture"), composition.GetInput("InOpaqueTexture"));
+        graph.ConnectNodes(opaque.GetOutput("OutAlbedoMetallic"), composition.GetInput("InOpaqueTexture"));
         graph.ConnectNodes(transparency.GetOutput("OutAccumulationTexture"), composition.GetInput("InAccumulationTexture"));
         graph.ConnectNodes(transparency.GetOutput("OutRevealageTexture"), composition.GetInput("InRevealageTexture"));
         graph.ConnectNodes(composition.GetOutput("OutColorTexture"), upscale.GetInput("InColorTexture"));
@@ -44,7 +44,7 @@ namespace
     void ConfigureDualGPUXeSS(FrameGraph& graph, const FrameGraphInputs& inputs)
     {
         auto culling = graph.AddPrimaryGPUPass<GDX12GPUCullingPass>("Frustum Culling");
-        auto opaque = graph.AddPrimaryGPUPass<GDX12OpaquePass>("Opaque");
+        auto opaque = graph.AddPrimaryGPUPass<GDX12DeferredGeometryPass>("Opaque");
         auto transparency = graph.AddPrimaryGPUPass<GDX12WBOITTransparencyPass>("Transparency");
         auto composition = graph.AddPrimaryGPUPass<GDX12WBOITCompositionPass>("Composition");
         auto clear = graph.AddSecondaryGPUPass<GDX12TextureClearPass>("Back Buffer Clear");
@@ -57,7 +57,7 @@ namespace
         graph.ConnectNodes(culling.GetOutput("OutOpaqueDrawStream"), opaque.GetInput("InDrawStream"));
         graph.ConnectNodes(culling.GetOutput("OutTransparentDrawStream"), transparency.GetInput("InDrawStream"));
         graph.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), transparency.GetInput("InDepthBuffer"));
-        graph.ConnectNodes(opaque.GetOutput("OutColorTexture"), composition.GetInput("InOpaqueTexture"));
+        graph.ConnectNodes(opaque.GetOutput("OutAlbedoMetallic"), composition.GetInput("InOpaqueTexture"));
         graph.ConnectNodes(transparency.GetOutput("OutAccumulationTexture"), composition.GetInput("InAccumulationTexture"));
         graph.ConnectNodes(transparency.GetOutput("OutRevealageTexture"), composition.GetInput("InRevealageTexture"));
         graph.ConnectNodes(composition.GetOutput("OutColorTexture"), upscale.GetInput("InColorTexture"));

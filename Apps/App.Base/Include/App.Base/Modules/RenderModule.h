@@ -164,6 +164,8 @@ private:
     std::unordered_map<std::string, std::unique_ptr<GPUTexture>> _textures;
     std::unordered_map<std::string, std::unique_ptr<GDX12Material>> _materials;
     std::unordered_map<uint32_t, const Mesh*> _meshes;
+    // Indirect draw offsets must address the same geometry on either adapter.
+    std::vector<MeshHandle> _meshUploadOrder;
 
     // The swap chain and display depth belong to the presenting device.
     std::unique_ptr<GDX12SwapChain> _backBuffer;

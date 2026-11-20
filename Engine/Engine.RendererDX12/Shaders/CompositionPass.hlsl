@@ -16,12 +16,11 @@ float4 PS(VSOutput input) : SV_TARGET
 {
     float2 uv = input.TexCoord;
     
-    float4 opaqueColor = OpaqueTexture.Sample(samPointClamp, uv);
+    float3 opaqueColor = OpaqueTexture.Sample(samPointClamp, uv).rgb;
     float4 accumColor = AccumTexture.Sample(samPointClamp, uv);
     float revealage = saturate(RevealageTexture.Sample(samPointClamp, uv));
     
-    float3 finalColor = opaqueColor.rgb * (1.0 - revealage) + accumColor.rgb;
-    float finalAlpha = max(opaqueColor.a, revealage);
+    float3 finalColor = opaqueColor * (1.0 - revealage) + accumColor.rgb;
     
-    return float4(finalColor, finalAlpha);
+    return float4(finalColor, 1.0f);
 }

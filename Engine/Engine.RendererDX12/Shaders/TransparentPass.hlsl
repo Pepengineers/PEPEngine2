@@ -45,9 +45,8 @@ VS_OUTPUT_PS_INPUT VS(VS_INPUT vin)
     float4 posW = mul(float4(vin.Pos, 1.0f), World);
     vout.PosW = posW.xyz;
 
-    // Assumes nonuniform scaling; otherwise, need to use inverse-transpose of world matrix.
-    vout.Normal = normalize(mul(vin.Normal, (float3x3) World));
-    vout.Tangent = normalize(mul(vin.Tangent, (float3x3) World));
+    vout.Normal = TransformNormal(vin.Normal, (float3x3) World);
+    vout.Tangent = SafeNormalize(mul(vin.Tangent, (float3x3) World));
     vout.PosCS = mul(posW, CBCamera.ViewProj);
     vout.TexC = vin.TexC;
     float3 viewPos = mul(posW, CBCamera.View).xyz;
@@ -68,7 +67,7 @@ PSOutput PS(VS_OUTPUT_PS_INPUT pin)
     PSOutput output;
     
     Material material = MaterialCache[pin.MaterialIndex];
-    float4 color = Texture2DCache[material.DiffuseIndex].Sample(samAnisotropicWrap, pin.TexC);
+    float4 color = Texture2DCache[material.DiffuseMapIndex].Sample(samAnisotropicWrap, pin.TexC);
     float alpha = saturate(color.a * material.Opacity);
     
     clip(alpha - 0.001f);

@@ -36,7 +36,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12DLSSUpscalePass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12FSRUpscalePass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12NISUpscalePass.h" />
-    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12OpaquePass.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12DeferredGeometryPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12OutputToScreenPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12TextureClearPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12WBOITTransparencyPass.h" />
@@ -96,7 +96,7 @@
     <None Include="Shaders\CompositionPass.hlsl" />
     <None Include="Shaders\Culling.hlsl" />
     <None Include="Shaders\FullScreenVS.hlsl" />
-    <None Include="Shaders\OpaquePass.hlsl" />
+    <None Include="Shaders\DeferredGeometryPass.hlsl" />
     <None Include="Shaders\TransparentPass.hlsl" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
