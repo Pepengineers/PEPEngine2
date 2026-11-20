@@ -4,6 +4,21 @@
 #include "Common/ConsoleVariables.h"
 #include <optional>
 
+namespace ConsoleVariableDetail {
+template <>
+bool ParseValue(std::string_view text, BistroRender::CloudPictureMode& mode) {
+    using Mode = BistroRender::CloudPictureMode;
+    if (text == "true") mode = Mode::CurrentFrame;
+    else if (text == "false") mode = Mode::Independent;
+    else {
+        int value{};
+        if (!ParseValue(text, value)) return false;
+        mode = static_cast<Mode>(value);
+    }
+    return true;
+}
+}
+
 namespace BistroRender {
 namespace {
 AutoConsoleVariable<bool> Enabled(L"App.CloudPicture.Enabled", true, L"Show the cloud picture in Bistro.");
@@ -14,8 +29,8 @@ AutoConsoleVariable<int> Height(L"App.CloudPicture.Height", 512, L"Cloud picture
 AutoConsoleVariable<int> Adapter(L"App.CloudPicture.Adapter", -1,
     L"Cloud Picture GPU in the Render.PrimaryAdapter hardware list. -1 uses the primary GPU.",
     EConsoleVariableFlags::Default, [](int v) { return v >= -1; });
-AutoConsoleVariable<bool> CrossSync(L"App.CloudPicture.CrossSync", false,
-    L"Remote clouds: 0 imports the latest completed image, 1 queues an import waiting for this frame's export.");
+AutoConsoleVariable<CloudPictureMode> CrossSync(L"App.CloudPicture.CrossSync", CloudPictureMode::PreviousFrame,
+    L"Remote clouds: 0 imports the previous frame, 1 the current frame, 2 the latest completed independent export.");
 struct Settings {
     bool Active;
     int Width, Height, Adapter;
@@ -27,9 +42,7 @@ struct Settings {
 };
 Settings Requested() {
     const int adapter = Adapter.GetValue();
-    auto mode = CloudPictureMode::Local;
-    if (adapter >= 0)
-        mode = CrossSync.GetValue() ? CloudPictureMode::CurrentFrame : CloudPictureMode::Independent;
+    const auto mode = adapter >= 0 ? CrossSync.GetValue() : CloudPictureMode::Local;
     return {Enabled.GetValue(), Width.GetValue(), Height.GetValue(), adapter, mode};
 }
 
