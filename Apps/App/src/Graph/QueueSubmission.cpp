@@ -105,10 +105,18 @@ const QueueSubmission::Timeline& QueueSubmission::Resolve(CompletionToken token)
         throw std::invalid_argument("stale or unissued completion token");
     return t;
 }
+ID3D12Fence* QueueSubmission::CompletionFence(CompletionToken token) const {
+    const auto& timeline=Resolve(token);
+    return (timeline.Shared ? timeline.Shared : timeline.Queue->GetFence()).Get();
+}
+void QueueSubmission::NotifyOnCompletion(CompletionToken token, HANDLE event) const {
+    if(!event) throw std::invalid_argument("missing completion event");
+    std::lock_guard<std::mutex> lock(_mutex); Check();
+    ThrowIfFailed(CompletionFence(token)->SetEventOnCompletion(token.Value, event));
+}
 bool QueueSubmission::Complete(CompletionToken token) const {
     std::lock_guard<std::mutex> lock(_mutex); Check();
-    const auto& timeline=Resolve(token);
-    const auto value=(timeline.Shared ? timeline.Shared : timeline.Queue->GetFence())->GetCompletedValue();
+    const auto value=CompletionFence(token)->GetCompletedValue();
     if(value==UINT64_MAX) { _quarantined.store(true); ThrowIfFailed(DXGI_ERROR_DEVICE_REMOVED); }
     return value>=token.Value;
 }

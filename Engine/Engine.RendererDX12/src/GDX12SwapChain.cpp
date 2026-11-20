@@ -101,14 +101,16 @@ void GDX12SwapChain::Resize(const UINT width, const UINT height)
     CreatePresentation(true);
 }
 
-void GDX12SwapChain::Present()
+bool GDX12SwapChain::Present()
 {
     UINT syncInterval = bVSyncEnabled ? 1 : 0;
     UINT presentFlags = bVSyncEnabled ? 0 : DXGI_PRESENT_ALLOW_TEARING;
     _frameGeneration->BeforePresent();
-    ThrowIfFailed(GetPresentationSwapChain()->Present(syncInterval, presentFlags));
+    const auto result = GetPresentationSwapChain()->Present(syncInterval, presentFlags);
+    ThrowIfFailed(result);
     _currentBufferIndex = GetPresentationSwapChain()->GetCurrentBackBufferIndex();
     _frameGeneration->AfterPresent();
+    return result == S_OK;
 }
 
 bool GDX12SwapChain::NeedsPresentationReset() const { return _frameGeneration->NeedsRecreate(); }

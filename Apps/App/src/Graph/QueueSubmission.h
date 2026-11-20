@@ -31,6 +31,7 @@ public:
     TransferBuffer CreateTransferBuffer(uint64_t bytes) const;
     void CheckHealth() const;
     bool Complete(CompletionToken) const;
+    void NotifyOnCompletion(CompletionToken, HANDLE event) const;
     void Wait(CompletionToken) const; // drain/retirement only; never version selection
     void ValidateResource(Id, ID3D12Resource*) const;
 private:
@@ -44,6 +45,7 @@ private:
     };
     void Check() const;
     const Timeline& Resolve(CompletionToken) const;
+    ID3D12Fence* CompletionFence(CompletionToken) const;
     CompletionToken Submit(Id, BistroRender::Queue, const std::vector<ID3D12CommandList*>&,
         const std::vector<CompletionToken>&, GDX12CommandList* external = nullptr);
     std::unique_ptr<GDX12Device> _secondary;

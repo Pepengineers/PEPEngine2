@@ -18,7 +18,7 @@ public:
     ~GDX12SwapChain();
 
     void Resize(UINT width, UINT height);
-    void Present();
+    bool Present();
     bool NeedsPresentationReset() const;
     void BeginFrame(RenderPipelineCommonData&);
     void SetFrameGenerationSuspended(bool);
