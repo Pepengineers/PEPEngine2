@@ -175,7 +175,7 @@ void GDX12GrassRenderer::RetireWind(WindState& state)
 
 void GDX12GrassRenderer::BeginFrame(const RenderPipelineCommonData& common,
     std::vector<GDX12GrassInstance> grass, std::vector<GDX12WindInstance> wind, GDX12GrassWindControls controls,
-    const std::vector<BistroInteractionSource>& sources, float deltaSeconds)
+    const std::vector<BistroInteractionSource>& sources, float deltaSeconds, uint64_t independentWind)
 {
     auto& frame = CurrentFrame();
     frame.RetiredFields.clear();
@@ -225,14 +225,16 @@ void GDX12GrassRenderer::BeginFrame(const RenderPipelineCommonData& common,
     if (sourceCount) frame.Sources->CopyData(0, nearby.data(), sourceCount);
     if (!frame.InteractionConstants)
         frame.InteractionConstants = std::make_unique<GDX12UploadBuffer<InteractionParameters>>(_resources->Device, 1);
-    const bool controlChange = controls.GrassEnabled != _controls.GrassEnabled || controls.GrassQuality != _controls.GrassQuality ||
-        controls.WindEnabled != _controls.WindEnabled || controls.WindQuality != _controls.WindQuality;
+    const bool windControlChange = controls.WindEnabled != _controls.WindEnabled || controls.WindQuality != _controls.WindQuality;
+    const bool controlChange = controls.GrassEnabled != _controls.GrassEnabled ||
+        controls.GrassQuality != _controls.GrassQuality || windControlChange;
     _controls = controls;
     _previousEye = _eye;
     _eye = common.CameraView.Invert().Translation();
     if (common.ResetHistory) _previousEye = _eye;
     _drawOrder.clear();
     std::unordered_set<uint64_t> activeGrass, activeWind;
+    if (independentWind) activeWind.insert(independentWind);
     UINT vertexCapacity = 0, indexCapacity = 0;
     if (controls.GrassEnabled && controls.GrassQuality > 0)
     {
@@ -316,24 +318,27 @@ void GDX12GrassRenderer::BeginFrame(const RenderPipelineCommonData& common,
     if (!vertexCapacity)
     {
         frame.DrawParameters.clear();
-        frame.WindParametersBuffers.clear();
         if (_vertices) frame.RetiredVertices.push_back(std::move(_vertices));
         if (_indices) frame.RetiredIndices.push_back(std::move(_indices));
         if (_arguments) frame.RetiredIndices.push_back(std::move(_arguments));
-        if (_neutralWind) frame.RetiredFields.push_back(std::move(_neutralWind));
-        return;
+        if (activeWind.empty())
+        {
+            frame.WindParametersBuffers.clear();
+            if (_neutralWind) frame.RetiredFields.push_back(std::move(_neutralWind));
+            return;
+        }
     }
-    if (!_vertices || _vertices->GetElementCount() < vertexCapacity)
+    if (vertexCapacity && (!_vertices || _vertices->GetElementCount() < vertexCapacity))
     {
         if (_vertices) frame.RetiredVertices.push_back(std::move(_vertices));
         _vertices = Buffer<Vertex>(vertexCapacity, true, true);
     }
-    if (!_indices || _indices->GetElementCount() < indexCapacity)
+    if (indexCapacity && (!_indices || _indices->GetElementCount() < indexCapacity))
     {
         if (_indices) frame.RetiredIndices.push_back(std::move(_indices));
         _indices = Buffer<UINT>(indexCapacity, false, true);
     }
-    if (!_arguments) _arguments = Buffer<UINT>(8, false, true);
+    if (vertexCapacity && !_arguments) _arguments = Buffer<UINT>(8, false, true);
     if (!_neutralWind)
     {
         _neutralWind = Buffer<XMFLOAT4>(1, true, true);
@@ -353,11 +358,14 @@ void GDX12GrassRenderer::BeginFrame(const RenderPipelineCommonData& common,
             static_cast<GDX12WindSettings&>(source) = ResolveWindSettings(source, controls.WindQuality);
             const auto signature = SettingsHash(source);
             auto& state = _wind[source.Id];
-            const bool reset = controlChange || signature != state.SettingsHash;
+            const bool reset = (source.Id == independentWind ? windControlChange : controlChange) || signature != state.SettingsHash;
             state.Source = std::move(source);
             state.SettingsHash = signature;
             state.ResetHistory = reset;
+            const size_t begin = frame.WindJobs.size();
             UpdateWind(state, reset);
+            if (state.Source.Id == independentWind)
+                for (size_t i = begin; i < frame.WindJobs.size(); ++i) frame.WindJobs[i].Async = true;
         }
     }
     // Missing/disabled fields are neutral; never sample a retained owner's old field.
@@ -397,7 +405,8 @@ void GDX12GrassRenderer::UpdateWind(WindState& state, const bool reset)
     p.Gust = XMFLOAT4(s.GustFrequencyHz, s.GustWavelengthCm, 0, 0);
     p.Solver = XMFLOAT4(s.ForcePerSecond, s.DampingPerSecond, s.MaxSpeedCmPerSecond, 0);
     p.Resolution = s.GridResolution;
-    if (reset) state.Time = 0;
+    if (s.GustStartSeconds >= 0) state.Time = s.GustStartSeconds;
+    else if (reset) state.Time = 0;
     state.PreviousTime = state.Time;
     float remaining = (std::min)(s.DeltaSeconds * s.TimeScale, s.MaxSubsteps * s.MaxStepSeconds);
     if (s.Implementation == GDX12WindImplementation::Analytic)

@@ -114,12 +114,14 @@ void SceneLighting::Freeze(SceneGeometry& geometry, UINT slot)
 	frame.AO->Freeze(scene.DepthView.get(), normals, _aoTemporalIndex);
 
 	auto& constants = *_resources.FrameConstants.at(slot);
-	const auto grass = geometry.GrassPrimitives();
-	{
-		_probeStaticShadows->Freeze(slot, grass, true);
-		_localShadows->Freeze(slot, grass, true);
-	}
-	_sunShadows->Freeze(slot, _localShadows->CastersRebuilt(), _localShadows->ChangedCasterBounds(), grass);
+	auto vegetation = geometry.VegetationPrimitives();
+	// The static cache reads the change journals before the main cache consumes them.
+	auto staticVegetation = vegetation;
+	staticVegetation.erase(std::remove_if(staticVegetation.begin(), staticVegetation.end(),
+	                                      [](const auto& primitive) { return primitive.Dynamic; }), staticVegetation.end());
+	_probeStaticShadows->Freeze(slot, staticVegetation, true);
+	_localShadows->Freeze(slot, vegetation, true);
+	_sunShadows->Freeze(slot, _localShadows->CastersRebuilt(), _localShadows->ChangedCasterBounds(), vegetation);
 	constants.ShadowCB->CopyData(0, _resources.ShadowSettings);
 	if (!constants.LocalLightCache->GetElementCount())
 	{
@@ -247,7 +249,7 @@ void SceneLighting::AppendShadows(Graph& graph, std::vector<ID3D12Resource*>& bi
 	auto& scene = geometry._slots.at(_slot);
 	auto& constants = *_resources.FrameConstants.at(_slot);
 	const auto appendGrass = [&](const GeometryTarget& view, Graph& g, std::vector<ID3D12Resource*>& resources)
-	{ geometry.AppendGrassView(g, resources, _slot, view); };
+	{ geometry.AppendVegetationView(g, resources, _slot, view); };
 	_sunShadows->Append(graph, bindings, _slot,
 	                    {scene.Buffers[0].Srv.GPUHandle, scene.Buffers[1].Srv.GPUHandle, scene.Buffers[2].Srv.GPUHandle,
 	                     scene.Buffers[3].Srv.GPUHandle},

@@ -31,4 +31,6 @@ private:
     GDX12GrassWindControls _controls = {};
     std::vector<BistroInteractionSource> _sources;
     float _deltaSeconds = 0;
+    float _bistroWindTime = 0;
+    float _gustStart = 0;
 };

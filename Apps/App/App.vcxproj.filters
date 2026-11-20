@@ -43,6 +43,12 @@
     <ClCompile Include="src\Techniques\SceneSunShadows.cpp" />
     <ClCompile Include="src\Techniques\SceneLocalShadows.cpp" />
     <ClCompile Include="src\Techniques\Grass\SceneGrass.cpp" />
+    <ClCompile Include="src\Techniques\Linden\LindenMesh.cpp" />
+    <ClCompile Include="src\Techniques\Linden\LindenSimulation.cpp" />
+    <ClCompile Include="src\Techniques\Linden\LindenDraw.cpp" />
+    <ClInclude Include="src\Techniques\Linden\LindenMesh.h" />
+    <ClInclude Include="src\Techniques\Linden\LindenSimulation.h" />
+    <ClInclude Include="src\Techniques\Linden\LindenDraw.h" />
     <ClCompile Include="src\Rendering\BistroRenderPipeline.cpp" />
     <ClCompile Include="src\Techniques\UI\ScenePostUI.cpp" />
     <ClCompile Include="src\Techniques\UI\SceneTextureInspector.cpp" />

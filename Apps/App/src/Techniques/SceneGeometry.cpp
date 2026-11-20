@@ -1,6 +1,8 @@
 #include "SceneGeometry.h"
 #include "NativeWork.h"
 #include "ShadowGeometry.h"
+#include "Engine.Core/BenchmarkEngine.h"
+#include "App.Base/Modules/SceneManagerModule.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.RendererDX12/GDX12ShaderCompiler.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
@@ -33,7 +35,8 @@ constexpr State ShaderRead =
     D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 } // namespace
 SceneGeometry::SceneGeometry(RenderPipelineContext& c)
-    : _resources(c.Primary), _slots(c.Primary.FrameConstants.size()), _common(c.Common)
+    : _resources(c.Primary), _slots(c.Primary.FrameConstants.size()), _lindenSimulation(c.Primary),
+      _lindenDraw(c.Primary), _common(c.Common)
 {
 	auto& r = c.Primary;
 	_grass = std::make_unique<SceneGrass>(c);
@@ -100,6 +103,30 @@ SceneGeometry::SceneGeometry(RenderPipelineContext& c)
 	p.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
 	ThrowIfFailed(r.Device->GetDevice()->CreateGraphicsPipelineState(&p, IID_PPV_ARGS(&_worldCanvas)));
 }
+void SceneGeometry::PrepareVegetation(RenderPipelineContext& c, float dt)
+{
+	_linden = FindLindenMesh(*BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>());
+	if (!_linden) _lindenDraw.Reset();
+	_grass->Prepare(c, dt, _linden ? &_linden->CrownBounds : nullptr);
+}
+
+std::vector<GDX12RenderPrimitive> SceneGeometry::VegetationPrimitives() const
+{
+	auto result = _grass->Primitives();
+	if (_linden)
+	{
+		GDX12RenderPrimitive tree;
+		tree.Bounds = _linden->WoodBounds;
+		tree.GeometryRevision = reinterpret_cast<uintptr_t>(_linden.get());
+		result.push_back(tree);
+		tree.Dynamic = true;
+		tree.Bounds = _linden->WindBounds(_linden->CrownBounds);
+		tree.DeformationRevision = _lindenSimulation.DisplayRevision();
+		result.push_back(tree);
+	}
+	return result;
+}
+
 void SceneGeometry::BufferFor(Buffer& b, UINT64 bytes, UINT stride, bool upload)
 {
 	bytes = (std::max)(bytes, UINT64(stride));
@@ -569,6 +596,9 @@ Schedule SceneGeometry::Plan(UINT index, const AppendTechnique& append, const Ap
 	}
 	const std::vector<GeometryTarget> targets{depthTarget, gbufferTarget};
 	s.PlannedBindings = Resources(index);
+	s.LindenWork.Commands.clear();
+	s.Linden = _linden;
+	s.LindenPose = {};
 	const Id grassBegin = Id(g.Operations.size());
 	Id interactionEnd = grassBegin;
 	Id firstGrassGBuffer = Invalid;
@@ -588,7 +618,19 @@ Schedule SceneGeometry::Plan(UINT index, const AppendTechnique& append, const Ap
 			    afterDepth(g, s.PlannedBindings);
 			    firstGrassGBuffer = Id(g.Operations.size());
 		    }
+	    },
+	    [&]
+	    {
+		    s.LindenPose = _lindenSimulation.Append(g, s.PlannedBindings, s.LindenWork, s.Linden, _grass->LindenWind());
+		    if (!s.Linden) return;
+		    _lindenDraw.Append(g, s.PlannedBindings, s.LindenWork, index, depthTarget, s.Buffers[2].Srv,
+		                      s.Linden, s.LindenPose);
 	    });
+	if (s.Linden)
+	{
+		_lindenDraw.Append(g, s.PlannedBindings, s.LindenWork, index, gbufferTarget, s.Buffers[2].Srv,
+		                   s.Linden, s.LindenPose);
+	}
 	if (append)
 	{
 		append(g, s.PlannedBindings);
@@ -656,10 +698,15 @@ Schedule SceneGeometry::Plan(UINT index, const AppendTechnique& append, const Ap
 	}
 	return schedule;
 }
-void SceneGeometry::AppendGrassView(Graph& graph, std::vector<ID3D12Resource*>& bindings, UINT slot,
+void SceneGeometry::AppendVegetationView(Graph& graph, std::vector<ID3D12Resource*>& bindings, UINT slot,
                                     const GeometryTarget& target)
 {
-	_grass->Append(graph, slot, bindings, _slots.at(slot).Buffers[2].Srv, {target}, true);
+	auto& s = _slots.at(slot);
+	_grass->Append(graph, slot, bindings, s.Buffers[2].Srv, {target}, true);
+	if (s.Linden)
+	{
+		_lindenDraw.Append(graph, bindings, s.LindenWork, slot, target, s.Buffers[2].Srv, s.Linden, s.LindenPose);
+	}
 }
 std::vector<ID3D12Resource*> SceneGeometry::Resources(UINT index) const
 {
@@ -707,7 +754,7 @@ void SceneGeometry::Record(UINT index, Id op, UINT bucket, ID3D12GraphicsCommand
 		RecordGeometry(s, GeometryPass::WorldCanvas, cmd);
 		return;
 	}
-	if (_grass && _grass->Record(index, op, cmd))
+	if (s.LindenWork.Record(op, cmd) || _grass->Record(index, op, cmd))
 	{
 		return;
 	}

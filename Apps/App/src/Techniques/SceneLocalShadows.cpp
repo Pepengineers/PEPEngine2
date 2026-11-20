@@ -1010,6 +1010,7 @@ void SceneLocalShadows::AppendGrassViews(Graph& graph, std::vector<ID3D12Resourc
 		                    Matrix(frame.Lights[view.Light].ShadowViewProj[view.Face]).Transpose(), cameraPosition,
 		                    camera.GetElementAddress(_common.ActiveCameraCBufferIndex)};
 		grassTarget.View.Key = (2ull << 60) | (uint64_t(view.Light) * 6 + view.Face);
+		grassTarget.View.Filter = _staticOnly ? GDX12GeometryFilter::Static : GDX12GeometryFilter::All;
 		grassTarget.View.FrameSlot = slot;
 		grassTarget.View.DepthFormat = DXGI_FORMAT_D32_FLOAT;
 		grassTarget.Depth = atlas;

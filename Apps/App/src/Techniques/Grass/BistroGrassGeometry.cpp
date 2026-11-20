@@ -1,4 +1,5 @@
 #include "BistroGrassGeometry.h"
+#include "BistroGrass.h"
 #include "App.Base/Modules/RenderModule.h"
 
 BistroGrassGeometry::BistroGrassGeometry(std::shared_ptr<SceneManagerModule> scenes, RenderModule& renderer)
@@ -63,6 +64,12 @@ void BistroGrassGeometry::CollectScene(float deltaSeconds, bool advanceWhilePaus
         { _sources.push_back(source); });
     }
     const auto controls = GetGrassWindControls();
+    _gustStart = _bistroWindTime;
+    if (controls.WindEnabled && controls.WindQuality > 0 && BistroGrass::WindEnabled.GetValue())
+    {
+        _bistroWindTime += (std::min)(_deltaSeconds * BistroGrass::TimeScale.GetValue(),
+            BistroGrass::MaxSubsteps.GetValue() * BistroGrass::MaxStepSeconds.GetValue());
+    }
     auto& scenes = _scenes;
     if (controls.GrassEnabled && controls.GrassQuality > 0)
     {
@@ -106,6 +113,7 @@ void BistroGrassGeometry::CollectScene(float deltaSeconds, bool advanceWhilePaus
                             snapshot.CenterCm = Vector2(location.x, location.z);
                             snapshot.DeltaSeconds = field.Paused || (world->IsPaused() && !advanceWhilePaused) ? 0 :
                                 deltaSeconds * world->GetTimeScale();
+                            if (field.UseBistroWindClock && !field.Paused) snapshot.GustStartSeconds = _gustStart;
                             _wind.push_back(std::move(snapshot));
                         }
                     }

@@ -57,7 +57,7 @@ namespace BistroGrass
         EConsoleVariableFlags::Default, [](float value) { return value >= 1 && value <= 1000000; });
     inline AutoConsoleVariable<bool> CastShadows(L"App.Grass.CastShadows", true, L"Grass casts directional and local shadows");
 
-    inline AutoConsoleVariable<bool> WindEnabled(L"App.Grass.Wind.Enabled", true, L"Enable each grass patch's wind field");
+    inline AutoConsoleVariable<bool> WindEnabled(L"App.Grass.Wind.Enabled", true, L"Enable wind for Bistro grass and the plaza linden");
     inline AutoConsoleVariable<WindAlgorithm> Algorithm(L"App.Grass.Wind.Algorithm", WindAlgorithm::Analytic,
         L"0 Analytic directional gusts, 1 ProjectedGrid pressure-solved wind");
     inline AutoConsoleVariable<float> WindSpeed(L"App.Grass.Wind.SpeedCmPerSecond", 100,
@@ -118,6 +118,27 @@ namespace BistroGrass
         }
     };
 
+    inline GDX12WindSettings ReadWindSettings(Vector2 extents)
+    {
+        GDX12WindSettings wind;
+        wind.Implementation = static_cast<GDX12WindImplementation>(Algorithm.GetValue());
+        wind.ExtentsCm = extents;
+        const float angle = XMConvertToRadians(WindAngleDegrees.GetValue());
+        wind.Direction = Vector2(std::cos(angle), std::sin(angle));
+        wind.SpeedCmPerSecond = WindSpeed.GetValue();
+        wind.GustAmplitude = GustAmplitude.GetValue();
+        wind.GustFrequencyHz = GustFrequencyHz.GetValue();
+        wind.GustWavelengthCm = GustWavelengthCm.GetValue();
+        wind.ForcePerSecond = ForcePerSecond.GetValue();
+        wind.DampingPerSecond = DampingPerSecond.GetValue();
+        wind.TimeScale = TimeScale.GetValue();
+        wind.MaxStepSeconds = MaxStepSeconds.GetValue();
+        wind.MaxSubsteps = MaxSubsteps.GetValue();
+        wind.GridResolution = GridResolution.GetValue();
+        wind.PressureIterations = PressureIterations.GetValue();
+        return wind;
+    }
+
     inline Controls ReadControls()
     {
         Controls controls;
@@ -138,25 +159,10 @@ namespace BistroGrass
         grass.MaxDistanceCm = grass.LodDistanceCm * 4;
         grass.CastShadows = CastShadows.GetValue();
         grass.CaptureReflections = false;
-        auto& wind = controls.Wind;
         controls.WindEnabled = WindEnabled.GetValue();
-        wind.Implementation = static_cast<GDX12WindImplementation>(Algorithm.GetValue());
         BoundingBox worldBounds;
         GrassLocalBounds(grass).Transform(worldBounds, Matrix::CreateRotationY(XMConvertToRadians(BistroArch::YawDegrees)));
-        wind.ExtentsCm = Vector2((std::max)(90.0f, worldBounds.Extents.x), (std::max)(70.0f, worldBounds.Extents.z));
-        const float angle = XMConvertToRadians(WindAngleDegrees.GetValue());
-        wind.Direction = Vector2(std::cos(angle), std::sin(angle));
-        wind.SpeedCmPerSecond = WindSpeed.GetValue();
-        wind.GustAmplitude = GustAmplitude.GetValue();
-        wind.GustFrequencyHz = GustFrequencyHz.GetValue();
-        wind.GustWavelengthCm = GustWavelengthCm.GetValue();
-        wind.ForcePerSecond = ForcePerSecond.GetValue();
-        wind.DampingPerSecond = DampingPerSecond.GetValue();
-        wind.TimeScale = TimeScale.GetValue();
-        wind.MaxStepSeconds = MaxStepSeconds.GetValue();
-        wind.MaxSubsteps = MaxSubsteps.GetValue();
-        wind.GridResolution = GridResolution.GetValue();
-        wind.PressureIterations = PressureIterations.GetValue();
+        controls.Wind = ReadWindSettings({(std::max)(90.0f, worldBounds.Extents.x), (std::max)(70.0f, worldBounds.Extents.z)});
         return controls;
     }
 
@@ -196,6 +202,7 @@ namespace BistroGrass
                 wind.AddComponent<NameComponent>("BistroGrassWind" + std::to_string(index));
                 wind.AddComponent<TransformComponent>(position);
                 wind.AddComponent<WindFieldComponent>();
+                wind.GetComponent<WindFieldComponent>().UseBistroWindClock = true;
 
                 auto grass = ecs.CreateEntity();
                 grass.AddComponent<NameComponent>("BistroGrass" + std::to_string(index));

@@ -378,7 +378,7 @@ void SceneReflections::Append(Graph& graph, std::vector<ID3D12Resource*>& bindin
             target.Colors = {resource(color->GetResource())};
             target.Rtvs = {rtv};
         }
-        geometry.AppendGrassView(graph, bindings, slot, target);
+        geometry.AppendVegetationView(graph, bindings, slot, target);
         if (!shadow)
         {
             if (view.Bake)

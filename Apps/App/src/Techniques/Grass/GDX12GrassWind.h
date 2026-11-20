@@ -76,4 +76,5 @@ struct GDX12WindInstance : GDX12WindSettings
     uint64_t Id = 0;
     Vector2 CenterCm = Vector2::Zero;
     float DeltaSeconds = 0;
+    float GustStartSeconds = -1;
 };
