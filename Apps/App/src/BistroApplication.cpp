@@ -13,6 +13,7 @@
 #include "BistroCharacters.h"
 #include "Techniques/Water/BistroWater.h"
 #include "BistroReflections.h"
+#include "BistroBenchmark.h"
 #include "Components/BistroInteractionSource.h"
 #include "Components/FluidRenderComponent.h"
 #include <stdexcept>
@@ -110,6 +111,8 @@ class BistroApplication final : public App
 		_bistroBounds->UpdateEmitters(world);
 		BistroParticles::Update(world);
 		InitializeCamera(world);
+		_benchmark.Initialize(world);
+		Engine::UI::EnableApplicationUIInput();
 		IndirectCommandBuildSystem commands;
 		commands.Schedule(GetJobs(), world, 0).Complete();
 		Log::Info("Bistro",
@@ -119,6 +122,7 @@ class BistroApplication final : public App
 	void Update(const GameTimer& timer) override
 	{
 		auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
+		_benchmark.Update(world, *Locator.GetModule<ConsoleModule>());
 		_bistroReflections.Update(world, timer.DeltaTime());
 		const float sceneDelta = world.IsPaused() ? 0.f : timer.DeltaTime() * world.GetTimeScale();
 		UpdateSky(world, sceneDelta);
@@ -129,6 +133,20 @@ class BistroApplication final : public App
 		BistroParticles::Update(world);
 		App::Update(timer);
 		_bistroReflections.DrawBounds(world, *Locator.GetModule<RenderModule>());
+		_benchmark.Draw();
+	}
+	void Render(const GameTimer& timer) override
+	{
+		App::Render(timer);
+		if (_benchmark.Active())
+			_benchmark.FrameRendered(*Locator.GetModule<SceneManagerModule>()->GetWorld(), *Locator.GetModule<ConsoleModule>());
+	}
+	int Run()
+	{
+		const auto result = App::Run();
+		if (_benchmark.Active())
+			_benchmark.Stop(*Locator.GetModule<SceneManagerModule>()->GetWorld(), *Locator.GetModule<ConsoleModule>());
+		return result;
 	}
 
   private:
@@ -138,6 +156,7 @@ class BistroApplication final : public App
 	BistroCharacters::Scene _bistroCharacters;
 	BistroWater::Scene _bistroWater;
 	BistroReflections::Scene _bistroReflections{1, true};
+	BistroBenchmark _benchmark;
 	std::unique_ptr<BistroBounds::Scene> _bistroBounds;
 	POINT _lastMousePos{};
 	float _cameraSpeed = 500.f;
@@ -223,7 +242,7 @@ class BistroApplication final : public App
 
 	void OnMouseMove(WPARAM buttons, int x, int y) override
 	{
-		if (!Engine::UI::WantsMouseInput() && (buttons & MK_RBUTTON))
+		if (!_benchmark.Active() && !Engine::UI::WantsMouseInput() && (buttons & MK_RBUTTON))
 		{
 			auto* world = Locator.GetModule<SceneManagerModule>()->GetWorld();
 			auto& camera = world->GetECS().Get<TransformComponent>(world->ActiveCamera);
@@ -249,7 +268,7 @@ class BistroApplication final : public App
 
 	void OnKeyboardInput(const GameTimer& timer) override
 	{
-		if (bInactive || Engine::UI::WantsKeyboardInput())
+		if (_benchmark.Active() || bInactive || Engine::UI::WantsKeyboardInput())
 		{
 			return;
 		}
