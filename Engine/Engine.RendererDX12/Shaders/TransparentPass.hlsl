@@ -1,27 +1,28 @@
 #include "CBufferStructures.hlsli"
+#include "PBRMath.hlsli"
 
 ConstantBuffer<IndirectConstants> CBIndirectConstants : register(b0);
-ConstantBuffer<MainCB> CBMain : register(b1);
+ConstantBuffer<LightGridCB> Grid : register(b1);
 ConstantBuffer<CameraCB> CBCamera : register(b2);
 
-SamplerState samPointWrap : register(s0);
-SamplerState samPointClamp : register(s1);
-SamplerState samLinearWrap : register(s2);
 SamplerState samLinearClamp : register(s3);
 SamplerState samAnisotropicWrap : register(s4);
-SamplerState samAnisotropicClamp : register(s5);
 
 StructuredBuffer<Material> MaterialCache : register(t0);
 StructuredBuffer<Transform> TransformCache : register(t1);
 StructuredBuffer<InstanceData> InstanceCache : register(t2);
-Texture2D Texture2DCache[TEXTURE2D_RANGE_LENGTH] : register(t3);
+TextureCube<float4> IrradianceEnvironment : register(t3);
+TextureCube<float4> PrefilteredEnvironment : register(t4);
+Texture2D<float4> EnvironmentBRDF : register(t5);
+StructuredBuffer<GDX12LightConstants> LightsCache : register(t6);
+StructuredBuffer<uint> ClusterLightMasks : register(t7);
+Texture2D Texture2DCache[TEXTURE2D_RANGE_LENGTH] : register(t8);
 
 struct VS_INPUT
 {
     float3 Pos : POSITION;
     float2 TexC : TEXCOORD;
     float3 Normal : NORMAL;
-    float3 Tangent : TANGENT;
 };
 
 struct VS_OUTPUT_PS_INPUT
@@ -30,8 +31,7 @@ struct VS_OUTPUT_PS_INPUT
     float3 PosW : POSITION;
     float2 TexC : TEXCOORD;
     float3 Normal : NORMAL;
-    float3 Tangent : TANGENT;
-    uint MaterialIndex : TEXCOORD1;
+    nointerpolation uint MaterialIndex : TEXCOORD1;
     float LinearDepth : TEXCOORD2;
 };
 
@@ -46,14 +46,131 @@ VS_OUTPUT_PS_INPUT VS(VS_INPUT vin)
     vout.PosW = posW.xyz;
 
     vout.Normal = TransformNormal(vin.Normal, (float3x3) World);
-    vout.Tangent = SafeNormalize(mul(vin.Tangent, (float3x3) World));
     vout.PosCS = mul(posW, CBCamera.ViewProj);
     vout.TexC = vin.TexC;
     float3 viewPos = mul(posW, CBCamera.View).xyz;
-    vout.LinearDepth = abs(viewPos.z);
+    vout.LinearDepth = -viewPos.z;
     vout.MaterialIndex = instance.MaterialIndex;
     
     return vout;
+}
+
+// Transforms normal by a NormalMap using position and UV derivatives
+// Falls back to the mesh normal if the map is missing
+float3 SurfaceNormal(Material material, float3 normal, float3 position, float2 uv)
+{
+    float3 n = SafeNormalize(normal);
+    if (material.NormalMapIndex != NO_TEXTURE)
+    {
+        float3 dpdx = ddx(position), dpdy = ddy(position);
+        float2 duvdx = ddx(uv), duvdy = ddy(uv);
+        float3 dx = cross(dpdy, n), dy = cross(n, dpdx);
+        float3 tangent = dx * duvdx.x + dy * duvdy.x;
+        float3 bitangent = dx * duvdx.y + dy * duvdy.y;
+        float lengthSq = max(dot(tangent, tangent), dot(bitangent, bitangent));
+        if (lengthSq >= 1e-12f)
+        {
+            float3 mapped = Texture2DCache[material.NormalMapIndex].SampleGrad(samAnisotropicWrap, uv, duvdx, duvdy).xyz * 2 - 1;
+            n = SafeNormalize((mapped.x * tangent + mapped.y * bitangent) * rsqrt(lengthSq) + mapped.z * n);
+        }
+    }
+    return n;
+}
+
+void SampleMaterial(Material material, float3 albedo, float3 normal, float3 position, float2 uv,
+    out PBRSurface surface, out float3 emissive)
+{
+    float roughness = material.Roughness;
+    if (material.RoughnessMapIndex != NO_TEXTURE)
+        roughness *= Texture2DCache[material.RoughnessMapIndex].Sample(samAnisotropicWrap, uv).r;
+    float3 specular = saturate(material.SpecularColor);
+    if (material.SpecularMapIndex != NO_TEXTURE)
+        specular *= Texture2DCache[material.SpecularMapIndex].Sample(samAnisotropicWrap, uv).rgb;
+    emissive = material.EmissiveColor;
+    if (material.EmissiveMapIndex != NO_TEXTURE)
+        emissive *= Texture2DCache[material.EmissiveMapIndex].Sample(samAnisotropicWrap, uv).rgb;
+
+    surface.Albedo = albedo;
+    surface.Metallic = saturate(material.Metallic);
+    surface.F0 = lerp(specular, albedo, surface.Metallic);
+    surface.Roughness = clamp(roughness, 0.045f, 1.0f);
+    surface.Normal = SurfaceNormal(material, normal, position, uv);
+}
+
+float3 EvaluateBRDF(PBRSurface s, float3 v, float3 l)
+{
+    float nDotV = saturate(dot(s.Normal, v)), nDotL = saturate(dot(s.Normal, l));
+    float3 result = 0;
+    if (nDotV > 0 && nDotL > 0)
+    {
+        float3 h = SafeNormalize(v + l);
+        float3 fresnel = s.F0 + (1 - s.F0) * FresnelSchlickFactor(saturate(dot(v, h)));
+        float3 diffuse = (1 - fresnel) * (1 - s.Metallic) * s.Albedo / PBR_PI;
+        float3 specular = DistributionGGX(saturate(dot(s.Normal, h)), s.Roughness) * SmithGGXVisibility(nDotV, nDotL, s.Roughness) * fresnel;
+        result = (diffuse + specular) * nDotL;
+    }
+    return result;
+}
+
+float3 EnvironmentLighting(PBRSurface s, float3 v)
+{
+    float nDotV = saturate(dot(s.Normal, v));
+    float3 irradiance = IrradianceEnvironment.SampleLevel(samLinearClamp, s.Normal, 0).rgb;
+    float3 prefiltered = PrefilteredEnvironment.SampleLevel(samLinearClamp, reflect(-v, s.Normal), s.Roughness * 7).rgb;
+
+    float2 brdf = EnvironmentBRDF.SampleLevel(samLinearClamp, float2(nDotV, s.Roughness), 0).rg;
+    float3 fresnel = s.F0 + (max(1 - s.Roughness, s.F0) - s.F0) * FresnelSchlickFactor(nDotV);
+    float3 diffuseIBL = (1 - fresnel) * (1 - s.Metallic) * irradiance * s.Albedo / PBR_PI;
+    float3 specularIBL = prefiltered * (s.F0 * brdf.x + brdf.y);
+    return diffuseIBL + specularIBL;
+}
+
+float3 ShadeLight(PBRSurface s, float3 position, float3 v, GDX12LightConstants light)
+{
+    float3 radiance = light.Color * light.Intensity;
+    float3 result = 0;
+    if (light.Type == LIGHT_TYPE_DIRECTIONAL)
+    {
+        result = EvaluateBRDF(s, v, -light.Direction) * radiance;
+    }
+    else
+    {
+        float3 delta = light.Position - position;
+        float distanceSquared = dot(delta, delta);
+        if (distanceSquared < light.Range * light.Range)
+        {
+            float3 l = delta * rsqrt(max(distanceSquared, 1e-6f));
+            float cone = light.Type == LIGHT_TYPE_SPOT ? saturate((dot(-l, light.Direction) - light.OuterConeCos) / max(light.InnerConeCos - light.OuterConeCos, 1e-4f)) : 1;
+            float rangeFade = saturate(1 - pow(distanceSquared / (light.Range * light.Range), 2));
+            // Bistro units are centimetres; intensity is expressed per square metre.
+            float attenuation = rangeFade * rangeFade * cone * cone / max(distanceSquared * 0.0001f, 0.01f);
+            result = EvaluateBRDF(s, v, l) * radiance * attenuation;
+        }
+    }
+    return result;
+}
+
+float3 ShadeSurface(PBRSurface s, float3 emissive, float3 position, uint2 pixel, float3 cameraPosition, float viewDepth)
+{
+    float3 v = SafeNormalize(cameraPosition - position);
+    float3 result = EnvironmentLighting(s, v) + emissive;
+    if (Grid.MaskWordsPerCluster > 0)
+    {
+        uint slice = (uint)clamp(log2(viewDepth) * Grid.DepthSliceScale + Grid.DepthSliceBias, 0, (float)(Grid.DepthSlices - 1));
+        uint2 tile = min(pixel / Grid.TileSize, uint2(Grid.TileColumns, Grid.TileRows) - 1);
+        uint base = ((slice * Grid.TileRows + tile.y) * Grid.TileColumns + tile.x) * Grid.MaskWordsPerCluster;
+        for (uint word = 0; word < Grid.MaskWordsPerCluster; ++word)
+        {
+            uint mask = ClusterLightMasks[base + word];
+            while (mask)
+            {
+                uint bit = firstbitlow(mask);
+                mask &= mask - 1;
+                result += ShadeLight(s, position, v, LightsCache[word * 32 + bit]);
+            }
+        }
+    }
+    return result;
 }
 
 struct PSOutput
@@ -72,7 +189,17 @@ PSOutput PS(VS_OUTPUT_PS_INPUT pin)
     
     clip(alpha - 0.001f);
     
-    output.AccumColor = float4(color.rgb * alpha, alpha);
+    float3 litColor = color.rgb;
+    if (!material.UseBakedLighting)
+    {
+        PBRSurface surface;
+        float3 emissive;
+        SampleMaterial(material, color.rgb, pin.Normal, pin.PosW, pin.TexC, surface, emissive);
+        litColor = ShadeSurface(surface, emissive, pin.PosW, (uint2)pin.PosCS.xy, CBCamera.CameraLocation,
+            max(pin.LinearDepth, CBCamera.NearPlane));
+    }
+    float weight = max(0.01f, alpha);
+    output.AccumColor = float4(litColor * alpha, alpha) * weight;
     output.Revealage = alpha;
     
     return output;

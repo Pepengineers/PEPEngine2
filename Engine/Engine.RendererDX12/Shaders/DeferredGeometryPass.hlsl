@@ -1,4 +1,5 @@
 #include "CBufferStructures.hlsli"
+#include "PBRMath.hlsli"
 
 ConstantBuffer<IndirectConstants> CBIndirectConstants : register(b0);
 ConstantBuffer<MainCB> CBMain : register(b1);
@@ -68,24 +69,44 @@ void DepthPS(VS_OUTPUT_PS_INPUT pin)
 
 // Transforms normal by a NormalMap using position and UV derivatives
 // Falls back to the mesh normal if the map is missing
-float3 SurfaceNormal(Material material, VS_OUTPUT_PS_INPUT pin)
+float3 SurfaceNormal(Material material, float3 normal, float3 position, float2 uv)
 {
-    float3 n = SafeNormalize(pin.Normal);
+    float3 n = SafeNormalize(normal);
     if (material.NormalMapIndex != NO_TEXTURE)
     {
-        float3 dpdx = ddx(pin.PosW), dpdy = ddy(pin.PosW);
-        float2 duvdx = ddx(pin.TexC), duvdy = ddy(pin.TexC);
+        float3 dpdx = ddx(position), dpdy = ddy(position);
+        float2 duvdx = ddx(uv), duvdy = ddy(uv);
         float3 dx = cross(dpdy, n), dy = cross(n, dpdx);
         float3 tangent = dx * duvdx.x + dy * duvdy.x;
         float3 bitangent = dx * duvdx.y + dy * duvdy.y;
         float lengthSq = max(dot(tangent, tangent), dot(bitangent, bitangent));
         if (lengthSq >= 1e-12f)
         {
-            float3 mapped = Texture2DCache[material.NormalMapIndex].SampleGrad(samAnisotropicWrap, pin.TexC, duvdx, duvdy).xyz * 2 - 1;
+            float3 mapped = Texture2DCache[material.NormalMapIndex].SampleGrad(samAnisotropicWrap, uv, duvdx, duvdy).xyz * 2 - 1;
             n = SafeNormalize((mapped.x * tangent + mapped.y * bitangent) * rsqrt(lengthSq) + mapped.z * n);
         }
     }
     return n;
+}
+
+void SampleMaterial(Material material, float3 albedo, float3 normal, float3 position, float2 uv,
+    out PBRSurface surface, out float3 emissive)
+{
+    float roughness = material.Roughness;
+    if (material.RoughnessMapIndex != NO_TEXTURE)
+        roughness *= Texture2DCache[material.RoughnessMapIndex].Sample(samAnisotropicWrap, uv).r;
+    float3 specular = saturate(material.SpecularColor);
+    if (material.SpecularMapIndex != NO_TEXTURE)
+        specular *= Texture2DCache[material.SpecularMapIndex].Sample(samAnisotropicWrap, uv).rgb;
+    emissive = material.EmissiveColor;
+    if (material.EmissiveMapIndex != NO_TEXTURE)
+        emissive *= Texture2DCache[material.EmissiveMapIndex].Sample(samAnisotropicWrap, uv).rgb;
+
+    surface.Albedo = albedo;
+    surface.Metallic = saturate(material.Metallic);
+    surface.F0 = lerp(specular, albedo, surface.Metallic);
+    surface.Roughness = clamp(roughness, 0.045f, 1.0f);
+    surface.Normal = SurfaceNormal(material, normal, position, uv);
 }
 
 struct PS_OUTPUT
@@ -103,22 +124,14 @@ PS_OUTPUT PS(VS_OUTPUT_PS_INPUT pin)
     
     Material material = MaterialCache[pin.MaterialIndex];
     float4 color = SampleBaseColor(material, pin.TexC);
-    float roughness = material.Roughness;
-    if (material.RoughnessMapIndex != NO_TEXTURE)
-        roughness *= Texture2DCache[material.RoughnessMapIndex].Sample(samAnisotropicWrap, pin.TexC).r;
-    float3 specular = saturate(material.SpecularColor);
-    if (material.SpecularMapIndex != NO_TEXTURE)
-        specular *= Texture2DCache[material.SpecularMapIndex].Sample(samAnisotropicWrap, pin.TexC).rgb;
-    float3 emissive = material.EmissiveColor;
-    if (material.EmissiveMapIndex != NO_TEXTURE)
-        emissive *= Texture2DCache[material.EmissiveMapIndex].Sample(samAnisotropicWrap, pin.TexC).rgb;
-
-    float metallic = saturate(material.Metallic);
-    output.AlbedoMetallic = float4(color.rgb, metallic);
+    PBRSurface surface;
+    float3 emissive;
+    SampleMaterial(material, color.rgb, pin.Normal, pin.PosW, pin.TexC, surface, emissive);
+    output.AlbedoMetallic = float4(surface.Albedo, surface.Metallic);
     output.Velocity = pin.PrevPosCSNoJitter.w > 1e-5f
         ? pin.PrevPosCSNoJitter.xy / pin.PrevPosCSNoJitter.w - pin.PosCSNoJitter.xy / pin.PosCSNoJitter.w : 0;
-    output.NormalRoughness = float4(SurfaceNormal(material, pin), clamp(roughness, 0.045f, 1.0f));
-    output.F0Baked = float4(lerp(specular, color.rgb, metallic), material.UseBakedLighting);
+    output.NormalRoughness = float4(surface.Normal, surface.Roughness);
+    output.F0Baked = float4(surface.F0, material.UseBakedLighting);
     output.Emissive = float4(emissive, 0);
     
     return output;

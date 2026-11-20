@@ -7,7 +7,7 @@ void GDX12WBOITCompositionPass::Describe(PassDescription& s) const
 	opaque.Usages = ResourceUsage::PixelShaderRead;
 	opaque.AllowShared = true;
 	auto& accum = s.AddInputTexture(InAccumulationTexture);
-	accum.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
+	accum.Formats = {DXGI_FORMAT_R16G16B16A16_FLOAT};
 	accum.Usages = ResourceUsage::PixelShaderRead;
 	accum.AllowShared = true;
 	auto& revealage = s.AddInputTexture(InRevealageTexture);

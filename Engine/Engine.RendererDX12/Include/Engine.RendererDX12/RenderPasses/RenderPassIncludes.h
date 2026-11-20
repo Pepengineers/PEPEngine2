@@ -6,6 +6,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12NISUpscalePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12DeferredGeometryPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12DeferredLightingPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12IBLPrecomputePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12OutputToScreenPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12TextureClearPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12WBOITCompositionPass.h"

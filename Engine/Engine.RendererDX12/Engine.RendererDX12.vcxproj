@@ -38,6 +38,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12NISUpscalePass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12DeferredGeometryPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12DeferredLightingPass.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12IBLPrecomputePass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12OutputToScreenPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12TextureClearPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12WBOITTransparencyPass.h" />
@@ -90,6 +91,7 @@
     <ClCompile Include="src\GDX12DLSSUpscalePass.cpp" />
     <ClCompile Include="src\GDX12DeferredGeometryPass.cpp" />
     <ClCompile Include="src\GDX12DeferredLightingPass.cpp" />
+    <ClCompile Include="src\GDX12IBLPrecomputePass.cpp" />
     <ClCompile Include="src\GDX12FSRUpscalePass.cpp" />
     <ClCompile Include="src\GDX12GPUCullingPass.cpp" />
     <ClCompile Include="src\GDX12NISUpscalePass.cpp" />

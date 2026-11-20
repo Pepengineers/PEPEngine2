@@ -65,7 +65,7 @@ namespace
         desc.CreateRTV = HasUsage(description.Usages, ResourceUsage::RenderTarget);
         desc.CreateDSV = HasUsage(description.Usages, ResourceUsage::DepthWrite) || HasUsage(description.Usages, ResourceUsage::DepthRead);
         desc.CreateUAV = HasUsage(description.Usages, ResourceUsage::UnorderedAccess);
-        desc.ClearValue = description.IsDepth() ? XMFLOAT4{0.f, 0.f, 0.f, 0.f} : XMFLOAT4{0.f, 0.f, 0.f, 1.f};
+        desc.ClearValue = description.IsDepth() ? XMFLOAT4{0.f, 0.f, 0.f, 0.f} : XMFLOAT4(description.ClearColor.data());
         if (desc.CreateSRV || desc.CreateUAV) { desc.SRV_UAV_Heap = owner->SRV_UAV_Heap.get(); }
         if (desc.CreateSRV)
         {
@@ -570,8 +570,8 @@ ResourceDescription DescribeFrameGraphTexture(GDX12Texture* texture)
     { throw std::invalid_argument("ERROR: Given FrameGraph texture is missing or has no native allocation. Provide an initialized GDX12Texture."); }
     const auto& wrapper = texture->GetDescription();
     const auto actual = texture->GetResource()->D3DResource->GetDesc();
-    if (actual.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D || (!wrapper.IsCube && actual.MipLevels != 1) || actual.SampleDesc.Count != 1)
-    { throw std::invalid_argument("ERROR: Expected a single-sample 2D texture allocation. Multiple mips are supported for cubemaps."); }
+    if (actual.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D || actual.SampleDesc.Count != 1)
+    { throw std::invalid_argument("ERROR: Expected a single-sample 2D texture allocation."); }
     ResourceDescription result;
     result.Type = wrapper.IsCube ? ResourceType::TextureCube : actual.DepthOrArraySize > 1 ? ResourceType::Texture2DArray : ResourceType::Texture2D;
     result.Format = wrapper.Format;

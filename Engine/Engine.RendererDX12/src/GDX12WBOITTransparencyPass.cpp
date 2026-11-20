@@ -3,7 +3,7 @@
 GDX12WBOITTransparencyPass::GDX12WBOITTransparencyPass()
 {
 	_flags = RENDER_PASS_FLAG_USE_CAMERAS | RENDER_PASS_FLAG_USE_GEOMETRY |
-		RENDER_PASS_FLAG_USE_MATERIALS | RENDER_PASS_FLAG_USE_INSTANCES;
+		RENDER_PASS_FLAG_USE_LIGHTING | RENDER_PASS_FLAG_USE_MATERIALS | RENDER_PASS_FLAG_USE_INSTANCES;
 }
 
 void GDX12WBOITTransparencyPass::Describe(PassDescription& s) const
@@ -15,13 +15,19 @@ void GDX12WBOITTransparencyPass::Describe(PassDescription& s) const
 	depth.Formats = {DXGI_FORMAT_D32_FLOAT};
 	depth.Size = Extent::Render();
 	depth.Usages = ResourceUsage::DepthRead;
+	// These SRV tables use a graphics root signature with visibility ALL.
+	s.AddInputTexture("InIrradiance", ResourceType::TextureCube).Usages = ResourceUsage::GraphicsShaderRead;
+	s.AddInputTexture("InPrefilteredEnvironment", ResourceType::TextureCube).Usages = ResourceUsage::GraphicsShaderRead;
+	s.AddInputTexture("InBRDFLut", ResourceType::Texture2D).Usages = ResourceUsage::GraphicsShaderRead;
 	auto& accum = s.AddOutputTexture(OutAccumulationTexture);
-	accum.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
+	accum.Formats = {DXGI_FORMAT_R16G16B16A16_FLOAT};
+	accum.ClearColor = {0, 0, 0, 0};
 	accum.Size = Extent::SameAs(InDepthBuffer);
 	accum.Usages = ResourceUsage::RenderTarget;
 	accum.AllowShared = true;
 	auto& revealage = s.AddOutputTexture(OutRevealageTexture);
 	revealage.Formats = {DXGI_FORMAT_R16_FLOAT};
+	revealage.ClearColor = {1, 1, 1, 1};
 	revealage.Size = Extent::SameAs(InDepthBuffer);
 	revealage.Usages = ResourceUsage::RenderTarget;
 	revealage.AllowShared = true;
@@ -37,11 +43,11 @@ void GDX12WBOITTransparencyPass::Initialize(PassInitContext& context)
 
 	// Root Signatures
 	GDX12RootSignatureDesc RSDesc1;
-	RSDesc1.NumSingleCBVSlots = 2;
-	RSDesc1.NumSingleSRVSlots = 3;
+	RSDesc1.NumSingleCBVSlots = 1;
+	RSDesc1.NumSingleSRVSlots = 8;
 	RSDesc1.StaticSamplers = GetStaticSamplers();
 	RSDesc1.SRVRanges.push_back(GDX12RootSignatureRange(Texture2D_RangeLength));
-	RSDesc1.Constants.push_back(1);
+	RSDesc1.Constants = {1, sizeof(GDX12LightGridConstants) / sizeof(UINT)};
 	_transparencyRS = std::make_unique<GDX12RootSignature>(resources->Device, RSDesc1);
 
 	//Command Signatures
@@ -71,6 +77,7 @@ void GDX12WBOITTransparencyPass::Initialize(PassInitContext& context)
 	PSODesc1.pRootSignature = _transparencyRS->GetRootSignature().Get();
 	PSODesc1.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
 	PSODesc1.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+	PSODesc1.BlendState.IndependentBlendEnable = TRUE;
 	PSODesc1.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
 	//reversed-Z
 	PSODesc1.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
@@ -92,8 +99,8 @@ void GDX12WBOITTransparencyPass::Initialize(PassInitContext& context)
 	PSODesc1.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
 	// Revealage
 	PSODesc1.BlendState.RenderTarget[1].BlendEnable = true;
-	PSODesc1.BlendState.RenderTarget[1].SrcBlend = D3D12_BLEND_ONE;
-	PSODesc1.BlendState.RenderTarget[1].DestBlend = D3D12_BLEND_ONE;
+	PSODesc1.BlendState.RenderTarget[1].SrcBlend = D3D12_BLEND_ZERO;
+	PSODesc1.BlendState.RenderTarget[1].DestBlend = D3D12_BLEND_INV_SRC_COLOR;
 	PSODesc1.BlendState.RenderTarget[1].BlendOp = D3D12_BLEND_OP_ADD;
 	PSODesc1.BlendState.RenderTarget[1].SrcBlendAlpha = D3D12_BLEND_ONE;
 	PSODesc1.BlendState.RenderTarget[1].DestBlendAlpha = D3D12_BLEND_ONE;
@@ -128,7 +135,8 @@ void GDX12WBOITTransparencyPass::Execute(PassExecutionContext& context)
 	cmdList->SetScissorRect(OUT_Accumulation->GetScissorRect());
 	cmdList->SetGraphicsRootSignature(_transparencyRS.get());
 	cmdList->SetPipelineState(_transparencyPSO);
-	cmdList->SetGraphicsRootConstantBufferView(1, currentFrameConstants->MainCB->GetElementAddress(0));
+	const auto& grid = currentFrameConstants->ClusteredLightingConstants;
+	cmdList->GetCommandList()->SetGraphicsRoot32BitConstants(1, sizeof(grid) / sizeof(UINT), &grid, 0);
 	cmdList->SetGraphicsRootConstantBufferView(2, currentFrameConstants->CameraCB->
 		GetElementAddress(common->ActiveCameraCBufferIndex));
 	cmdList->SetGeometryBuffer(resources->GeometryBuffer.get());
@@ -137,7 +145,12 @@ void GDX12WBOITTransparencyPass::Execute(PassExecutionContext& context)
 	cmdList->SetGraphicsSRV(0, currentFrameConstants->MaterialCache->GetSRV()->GPUHandle);
 	cmdList->SetGraphicsSRV(1, currentFrameConstants->TransformCache->GetSRV()->GPUHandle);
 	cmdList->SetGraphicsSRV(2, currentFrameConstants->InstanceCache->GetSRV()->GPUHandle);
-	cmdList->SetGraphicsSRV(3, resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
+	cmdList->SetGraphicsSRV(3, context.GetInputTexture("InIrradiance").GetSRV()->GPUHandle);
+	cmdList->SetGraphicsSRV(4, context.GetInputTexture("InPrefilteredEnvironment").GetSRV()->GPUHandle);
+	cmdList->SetGraphicsSRV(5, context.GetInputTexture("InBRDFLut").GetSRV()->GPUHandle);
+	cmdList->SetGraphicsSRV(6, currentFrameConstants->LightsCache->GetSRV()->GPUHandle);
+	cmdList->SetGraphicsSRV(7, currentFrameConstants->ClusterLightMaskBuffer->GetSRV()->GPUHandle);
+	cmdList->SetGraphicsSRV(8, resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
 	const D3D12_CPU_DESCRIPTOR_HANDLE targets[] = {
 		context.GetOutputRTV(OutAccumulationTexture)->CPUHandle, context.GetOutputRTV(OutRevealageTexture)->CPUHandle};
 	const auto depth = context.GetInputTexture(InDepthBuffer).GetDSV()->CPUHandle;

@@ -62,6 +62,8 @@ namespace
             const auto& producerNode = graphDefinition.Nodes.at(graphConnection.Source.Node);
             const auto& consumerNode = graphDefinition.Nodes.at(graphConnection.Target.Node);
             if (IsInputPort(graphDefinition, graphConnection.Source) || !IsInputPort(graphDefinition, graphConnection.Target)) { throw std::invalid_argument("ERROR: Connection source is not an output or target is not an input: " + FormatPinAddress(graphConnection.Target) + ". Pass GetOutput() as the source and GetInput() as the target of ConnectNodes()."); }
+            if ((producerNode.Description.RunOnceDuringSetup || consumerNode.Description.RunOnceDuringSetup) && inputDescription.Access != DataAccess::ReadOnly)
+            { throw std::invalid_argument("Setup passes read their inputs once and publish immutable outputs: " + FormatPinAddress(graphConnection.Target)); }
             if (!inputSources.emplace(graphConnection.Target, graphConnection.Source).second) { throw std::invalid_argument("ERROR: " + FormatPinAddress(graphConnection.Target) + ": input has multiple connected sources. Connect exactly one output to this input and remove duplicate "
                 "connections."); }
             if (outputDescription.Type != inputDescription.Type)
@@ -211,6 +213,11 @@ namespace
             resourceDescription.Height = textureDimensions.y;
             if (portDescription.Layers > 2048) { throw std::invalid_argument("ERROR: " + FormatPinAddress(portAddress) + ": texture array layer count exceeds 2048. Use no more than 2048 layers for a Texture2DArray."); }
             resourceDescription.ArraySize = portDescription.Layers;
+            resourceDescription.MipLevels = portDescription.MipLevels;
+            const auto extent = (std::max)(textureDimensions.x, textureDimensions.y);
+            if (!portDescription.MipLevels || portDescription.MipLevels > D3D12_REQ_MIP_LEVELS || (1u << (portDescription.MipLevels - 1)) > extent)
+            { throw std::invalid_argument("Invalid texture mip count: " + FormatPinAddress(portAddress)); }
+            resourceDescription.ClearColor = portDescription.ClearColor;
         }
         return resourceDescription;
     }
@@ -325,7 +332,7 @@ namespace
         memoryCapabilities.Local &= portDescription.AllowLocal;
         memoryCapabilities.Shared &= portDescription.AllowShared;
         auto resourceDescription = resourceDescriptions.at(portAddress);
-        if (!resourceDescription.IsBuffer() && (resourceDescription.IsDepth() || resourceDescription.Type != ResourceType::Texture2D)) { memoryCapabilities.Shared = false; }
+        if (!resourceDescription.IsBuffer() && (resourceDescription.IsDepth() || resourceDescription.Type != ResourceType::Texture2D || resourceDescription.MipLevels != 1)) { memoryCapabilities.Shared = false; }
         return memoryCapabilities;
     }
 
@@ -390,7 +397,7 @@ namespace
         auto resourceDescription = resourceDescriptions.at(sourceAddress);
         const auto receiver = nodeDefinition.DeviceRole == DEVICE_ROLE_PRIMARY ? DEVICE_ROLE_SECONDARY : DEVICE_ROLE_PRIMARY;
         const auto* imported = FindImportedResource(graphDefinition, compileData, inputSources, sourceAddress);
-        const bool allowCompute = resourceDescription.Type == ResourceType::Texture2D && !resourceDescription.IsDepth()
+        const bool allowCompute = resourceDescription.Type == ResourceType::Texture2D && resourceDescription.MipLevels == 1 && !resourceDescription.IsDepth()
             && compileData.QueuePolicy != TransportQueuePolicy::ForceCopy;
         const bool canComputeExport = allowCompute && compileData.ComputeCopyFormats[nodeDefinition.DeviceRole].count(resourceDescription.Format)
             && !compileData.RejectedComputeExports.count(sourceAddress)
@@ -598,6 +605,18 @@ FrameGraphPlan CompileFrameGraph(const FrameGraphDefinition& graphDefinition, co
     BuildConnectionDependencies(graphDefinition, graphConnections, inputSources, nodeDependencies);
     AddExplicitDependencies(graphDefinition, nodeDependencies);
     AddAliasWriteDependencies(graphDefinition, graphConnections, nodeDependencies);
+    for (const auto& [id, dependencies] : nodeDependencies)
+    {
+        if (!graphDefinition.Nodes.at(id).Description.RunOnceDuringSetup) { continue; }
+        for (const auto& dependency : dependencies)
+        {
+            const auto& producer = graphDefinition.Nodes.at(dependency);
+            const bool imported = std::any_of(producer.Description.Outputs.begin(), producer.Description.Outputs.end(),
+                [&](const auto& output) { return GetPortCompileData(compileData, {dependency, output.first}).Imported.has_value(); });
+            if (!producer.Description.RunOnceDuringSetup && !imported)
+            { throw std::invalid_argument("One-time pass " + id + " depends on per-frame pass " + dependency); }
+        }
+    }
     BuildExecutionOrder(nodeDependencies, executionPlan);
     ValidateRequiredInputs(graphDefinition, executionPlan.Order, inputSources);
 

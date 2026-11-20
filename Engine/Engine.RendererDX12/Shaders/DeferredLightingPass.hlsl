@@ -14,13 +14,7 @@ Texture2D<float4> EnvironmentBRDF : register(t7);
 StructuredBuffer<GDX12LightConstants> LightsCache : register(t8);
 StructuredBuffer<uint> ClusterLightMasks : register(t9);
 RWTexture2D<unorm float4> SceneColor : register(u0);
-SamplerState samLinearClamp : register(s0);
-
-struct PBRSurface
-{
-    float3 Albedo, Normal, F0;
-    float Metallic, Roughness;
-};
+SamplerState samLinearClamp : register(s3);
 
 float3 EvaluateBRDF(PBRSurface s, float3 v, float3 l)
 {
@@ -75,6 +69,29 @@ float3 ShadeLight(PBRSurface s, float3 position, float3 v, GDX12LightConstants l
     return result;
 }
 
+float3 ShadeSurface(PBRSurface s, float3 emissive, float3 position, uint2 pixel, float3 cameraPosition, float viewDepth)
+{
+    float3 v = SafeNormalize(cameraPosition - position);
+    float3 result = EnvironmentLighting(s, v) + emissive;
+    if (Grid.MaskWordsPerCluster > 0)
+    {
+        uint slice = (uint)clamp(log2(viewDepth) * Grid.DepthSliceScale + Grid.DepthSliceBias, 0, (float)(Grid.DepthSlices - 1));
+        uint2 tile = min(pixel / Grid.TileSize, uint2(Grid.TileColumns, Grid.TileRows) - 1);
+        uint base = ((slice * Grid.TileRows + tile.y) * Grid.TileColumns + tile.x) * Grid.MaskWordsPerCluster;
+        for (uint word = 0; word < Grid.MaskWordsPerCluster; ++word)
+        {
+            uint mask = ClusterLightMasks[base + word];
+            while (mask)
+            {
+                uint bit = firstbitlow(mask);
+                mask &= mask - 1;
+                result += ShadeLight(s, position, v, LightsCache[word * 32 + bit]);
+            }
+        }
+    }
+    return result;
+}
+
 [numthreads(8, 8, 1)]
 void CS(uint3 thread : SV_DispatchThreadID)
 {
@@ -89,7 +106,6 @@ void CS(uint3 thread : SV_DispatchThreadID)
     float2 ndc = (float2(pixel) + 0.5f) / size * float2(2, -2) + float2(-1, 1);
     float4 world = mul(float4(ndc, depth, 1), Camera.InvViewProj);
     float3 position = world.xyz / world.w;
-    float3 v = SafeNormalize(Camera.CameraLocation - position);
     float4 normal = NormalRoughness[pixel];
     PBRSurface s;
     s.Albedo = albedo.rgb;
@@ -97,23 +113,7 @@ void CS(uint3 thread : SV_DispatchThreadID)
     s.F0 = f0.rgb;
     s.Normal = SafeNormalize(normal.xyz);
     s.Roughness = normal.w;
-    float3 result = EnvironmentLighting(s, v) + Emissive[pixel].rgb;
-    if (Grid.MaskWordsPerCluster > 0)
-    {
-        float z = max(-mul(float4(position, 1), Camera.View).z, Camera.NearPlane);
-        uint slice = (uint)clamp(log2(z) * Grid.DepthSliceScale + Grid.DepthSliceBias, 0, (float)(Grid.DepthSlices - 1));
-        uint2 tile = min(pixel / Grid.TileSize, uint2(Grid.TileColumns, Grid.TileRows) - 1);
-        uint base = ((slice * Grid.TileRows + tile.y) * Grid.TileColumns + tile.x) * Grid.MaskWordsPerCluster;
-        for (uint word = 0; word < Grid.MaskWordsPerCluster; ++word)
-        {
-            uint mask = ClusterLightMasks[base + word];
-            while (mask)
-            {
-                uint bit = firstbitlow(mask);
-                mask &= mask - 1;
-                result += ShadeLight(s, position, v, LightsCache[word * 32 + bit]);
-            }
-        }
-    }
+    float viewDepth = max(-mul(float4(position, 1), Camera.View).z, Camera.NearPlane);
+    float3 result = ShadeSurface(s, Emissive[pixel].rgb, position, pixel, Camera.CameraLocation, viewDepth);
     SceneColor[pixel] = float4(ToneMapToSRGB(result), 1);
 }

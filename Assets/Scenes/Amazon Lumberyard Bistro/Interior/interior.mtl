@@ -120,8 +120,8 @@ newmtl MASTER_Interior_01_Plaster2
 newmtl MASTER_Interior_01_Frozen_Glass
 	Ns 100.000
 	Ni 1.500
-	d 1.000
-	Tr 0.000
+	d 0.450
+	Tr 0.550
 	Tf 1.000 1.000 1.000 
 	illum 2
 	Ka 0.200 0.200 0.200
@@ -152,6 +152,7 @@ newmtl MASTER_Interior_01_Glass
 	Ni 1.500
 	Tr 0.800
 	Tf 0.200 0.200 0.200 
+	d 0.200
 	illum 2
 	Ka 0.200 0.200 0.200
 	Kd 1.000 1.000 1.000
@@ -373,7 +374,7 @@ newmtl Paris_Beertap
 newmtl Paris_LiquorBottle_02_Glass
 	Ns 5000.000
 	Ni 1.00
-	d 1.000
+	d 0.250
 	Tf 0.200 0.10 0.000 
 	illum 7
 	Ka 0 0 0
@@ -414,8 +415,8 @@ newmtl ToffeeJar_Label
 newmtl Paris_LiquorBottle_01_Glass_Wine
 	Ns 100.000
 	Ni 1.500
-	d 1.000
-	Tr 0.000
+	d 0.650
+	Tr 0.350
 	Tf 1.000 1.000 1.000 
 	illum 2
 	Ka 0.200 0.200 0.200
@@ -429,6 +430,7 @@ newmtl Paris_LiquorBottle_01_Glass
 	Ns 100.000
 	Ni 1.500
 	Tf 0.200 0.200 0.200 
+	d 0.200
 	illum 7
 	Ka 0.200 0.200 0.200
 	Kd 0.000 0.000 0.000
@@ -439,6 +441,7 @@ newmtl Paris_LiquorBottle_03_Glass
 	Ns 100.000
 	Ni 1.500
 	Tf 0.200 0.200 0.200 
+	d 0.200
 	illum 7
 	Ka 0.200 0.200 0.200
 	Kd 0.000 0.000 0.000
@@ -523,8 +526,8 @@ newmtl Paris_Paintings
 newmtl Paris_Paintings_Glass
 	Ns 10.000
 	Ni 1.500
-	d 1.000
-	Tr 0.000
+	d 0.150
+	Tr 0.850
 	Tf 1.000 1.000 1.000 
 	illum 2
 	Ka 0.200 0.200 0.200
@@ -562,6 +565,7 @@ newmtl Paris_LiquorBottle_01_Glass1
 	Ns 5000.000
 	Ni 1.200
 	Tf 0.030 0.05 0.04
+	d 0.250
 	illum 7
 	Ka 0 0 0
 	Kd 0 0 0
@@ -584,6 +588,7 @@ newmtl CookieJar_Glass1
 	Ns 500.000
 	Ni 1.000
 	Tf 0.100 0.100 0.100 
+	d 0.200
 	illum 7
 	Ka 0 0 0
 	Kd 0 0 0
@@ -887,6 +892,7 @@ newmtl Paris_Cashregister_Glass
 	Ni 1.500
 	Tr 0.900
 	Tf 0.100 0.100 0.100 
+	d 0.100
 	illum 2
 	Ka 0.200 0.200 0.200
 	Kd 1.000 1.000 1.000

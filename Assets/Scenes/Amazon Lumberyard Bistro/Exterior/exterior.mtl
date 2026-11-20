@@ -220,7 +220,7 @@ newmtl MASTER_Metal
 newmtl MASTER_Focus_Glass
 	Ns 10.000
 	Ni 1.500
-	d 1.000	
+	d 0.250
 	Tf 1.000 1.000 1.000 
 	illum 2
 	Ka 0.200 0.200 0.200
@@ -279,6 +279,7 @@ newmtl MASTER_Concrete_Grooved
 newmtl MASTER_Glass_Exterior
 	Ns 80.000
 	Ni 1.000	
+	d 0.200
 	illum 2
 	Ka 0.200 0.200 0.200
 	Kd 0.1 0.1 0.1
@@ -412,6 +413,7 @@ newmtl MASTER_Glass_Dirty
 	Ns 100.000
 	Ni 1.000
 	Tf 0.200 0.200 0.200 
+	d 0.250
 	illum 7
 	Ka 0.200 0.200 0.200
 	Kd 1.000 1.000 1.000
@@ -660,6 +662,7 @@ newmtl MASTER_Glass_Clean
 	Ns 100.000
 	Ni 1.000
 	Tf 0.200 0.200 0.200 
+	d 0.150
 	illum 7
 	Ka 0.200 0.200 0.200
 	Kd 0.000 0.000 0.000 
@@ -821,7 +824,7 @@ newmtl MASTER_Boulangerie
 newmtl MASTER_Frosted_Glass
 	Ns 100.000
 	Ni 1.00
-	d 1.000	
+	d 0.450
 	Tf 1.000 1.000 1.000 
 	illum 2
 	Ka 0.200 0.200 0.200
@@ -1108,6 +1111,7 @@ newmtl Foliage_Ivy_branches
 newmtl Streetlight_Glass
 	Ns 200.000
 	Ni 1.000
+	d 0.250
 	illum 7
 	Tf 0.3 0.3 0.3
 	Ka 0.200 0.200 0.200
@@ -1309,7 +1313,7 @@ newmtl Spotlight_Emissive
 newmtl Spotlight_Glass
 	Ns 50.000
 	Ni 1.500
-	d 1.000	
+	d 0.250
 	Tf 1.000 1.000 1.000 
 	illum 2
 	Ka 0.200 0.200 0.200
@@ -1386,6 +1390,7 @@ newmtl MenuSign_02_Glass
 	Ni 1.500
 	Tr 0.610
 	Tf 0.390 0.390 0.390 
+	d 0.390
 	illum 7
 	Ka 0.200 0.200 0.200
 	Kd 0.800 0.800 0.800
@@ -1507,7 +1512,7 @@ newmtl Bollards
 newmtl Vespa_Odometer_Glass
 	Ns 100.000
 	Ni 1.500
-	d 1.000
+	d 0.150
 	
 	Tf 1.000 1.000 1.000 
 	illum 2
@@ -1854,7 +1859,7 @@ newmtl NapkinHolder
 newmtl Paris_LiquorBottle_01_Glass_Wine
 	Ns 100.000
 	Ni 1.500
-	d 1.000
+	d 0.650
 	
 	Tf 1.000 1.000 1.000 
 	illum 2

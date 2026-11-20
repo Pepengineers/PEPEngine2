@@ -1,6 +1,12 @@
 #ifndef PBR_MATH_HLSLI
 #define PBR_MATH_HLSLI
 
+struct PBRSurface
+{
+    float3 Albedo, Normal, F0;
+    float Metallic, Roughness;
+};
+
 #define PBR_PI 3.14159265358979323846f
 
 float DistributionGGX(float nDotH, float roughness)

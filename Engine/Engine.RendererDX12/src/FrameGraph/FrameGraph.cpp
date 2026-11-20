@@ -238,6 +238,7 @@ struct CompiledFrameGraph::Runtime
 
     struct FrameSlotResources
     {
+        bool MeasureFrame = true;
         std::map<PinAddress, Materialization> Resources;
         std::vector<std::variant<PreparedPass, PreparedImport>> Execution;
         std::vector<GDX12CompletionPoint> Completions;
@@ -266,6 +267,11 @@ struct CompiledFrameGraph::Runtime
     std::map<NodeId, std::function<GDX12Texture*()>> Imports;
     std::map<PinAddress, PinAddress> Sources;
     std::vector<FrameSlotResources> FrameSlots;
+    // Immutable outputs and remote replicas outlive rotating frame slots, including window resize.
+    std::map<PinAddress, Materialization> OnceResources;
+    std::vector<PreparedPass> SetupPasses;
+    std::vector<std::pair<EDeviceRole, PreparedInput>> SetupTransfers;
+    bool SetupComplete = false;
     uint64_t Frame = 0;
     bool ResourceRebuildRequested = false;
     bool BatchLocalPasses = false;
@@ -425,7 +431,7 @@ struct CompiledFrameGraph::Runtime
     }
 
     // Resolve names and physical bindings once per slot. Only fences and imported textures change each frame.
-    void PrepareSlotExecution(FrameSlotResources& slot, const FrameGraphPlan& plan)
+    void PrepareSlotExecution(FrameSlotResources& slot, const FrameGraphPlan& plan, bool prepareSetup)
     {
         std::map<NodeId, const GDX12CompletionPoint*> completions;
         std::map<FrameGraphPhysicalResource*, PreparedImport*> imports;
@@ -435,6 +441,9 @@ struct CompiledFrameGraph::Runtime
         {
             if (const auto provider = Imports.find(id); provider != Imports.end())
             {
+                const auto& consumers = plan.Resources.at({id, "Resource"}).Consumers;
+                if (std::none_of(consumers.begin(), consumers.end(), [&](const auto& consumer)
+                    { return !Definition.Nodes.at(consumer.first.Node).Description.RunOnceDuringSetup; })) { continue; }
                 auto* resource = slot.Resources.at({id, "Resource"}).ProducerResource;
                 auto& step = slot.Execution.emplace_back(PreparedImport{&provider->second, resource});
                 imports.emplace(resource, &std::get<PreparedImport>(step));
@@ -443,19 +452,25 @@ struct CompiledFrameGraph::Runtime
 
             const auto& node = Definition.Nodes.at(id);
             auto* device = GetDeviceResources(node.DeviceRole);
-            auto& step = slot.Execution.emplace_back(PreparedPass{&node, device, Passes.at(id).get(), Diagnostics.PassTimers.at(id).get()});
-            auto& pass = std::get<PreparedPass>(step);
+            const bool once = node.Description.RunOnceDuringSetup;
+            if (once && !prepareSetup) { continue; }
+            PreparedPass& pass = once ? SetupPasses.emplace_back() :
+                std::get<PreparedPass>(slot.Execution.emplace_back(PreparedPass{}));
+            pass.Node = &node;
+            pass.DeviceResources = device;
+            pass.Pass = Passes.at(id).get();
+            pass.Timer = once ? nullptr : Diagnostics.PassTimers.at(id).get();
             for (const auto& dependency : plan.Dependencies.at(id))
             {
                 const auto ready = completions.find(dependency);
-                if (ready != completions.end()) { pass.Dependencies.push_back(ready->second); }
+                if (ready != completions.end() && Definition.Nodes.at(dependency).Description.RunOnceDuringSetup == once) { pass.Dependencies.push_back(ready->second); }
             }
             completions.emplace(id, &pass.Completion);
 
             auto bind = [&](const PinId& pin, const PortDescription& port, FrameGraphPhysicalResource& resource, bool sharedOutput)
             {
                 auto& binding = pass.Bindings.emplace(pin, resource.CreatePassBinding(port.Usages)).first->second;
-                if (resource.ImportedTexture) { imports.at(&resource)->Bindings.push_back(&binding.Texture); }
+                if (!once && resource.ImportedTexture) { imports.at(&resource)->Bindings.push_back(&binding.Texture); }
                 pass.Ports.push_back({&resource, UsageState(port.Usages), HasUsage(port.Usages, ResourceUsage::UnorderedAccess),
                     !port.AliasInput.empty(), sharedOutput});
             };
@@ -466,18 +481,22 @@ struct CompiledFrameGraph::Runtime
                 if (connection == Sources.end()) { continue; }
                 const auto& source = connection->second;
                 const auto& resource = plan.Resources.at(source);
-                auto& material = slot.Resources.at(source);
+                const bool immutable = Definition.Nodes.at(source.Node).Description.RunOnceDuringSetup;
+                auto& material = (immutable ? OnceResources : slot.Resources).at(source);
                 const auto access = resource.Consumers.at(target);
                 auto* physical = material.ProducerResource;
                 if (access == MemoryType::Shared) { physical = &GetSharedResources(material).GetDeviceMapping(device->Device); }
                 else if (resource.Imports[node.DeviceRole]) { physical = material.LocalCopies.at(node.DeviceRole).get(); }
-                pass.Inputs.push_back({&material, &source, &resource, access, physical});
+                PreparedInput input{&material, &source, &resource, access, physical};
+                if (!immutable || once) { pass.Inputs.push_back(input); }
+                else if (prepareSetup && (access == MemoryType::Shared || resource.Imports[node.DeviceRole]))
+                { SetupTransfers.emplace_back(node.DeviceRole, input); }
                 bind(pin, port, *physical, false);
             }
             for (const auto& [pin, port] : node.Description.Outputs)
             {
                 const PinAddress output{id, pin};
-                auto& material = slot.Resources.at(output);
+                auto& material = (once ? OnceResources : slot.Resources).at(output);
                 const bool shared = plan.Resources.at(output).Storage == MemoryType::Shared;
                 if (!port.AliasInput.empty())
                 {
@@ -520,6 +539,15 @@ struct CompiledFrameGraph::Runtime
                     }
                 }
             }
+            const bool reuseSetup = SetupComplete && std::all_of(OnceResources.begin(), OnceResources.end(), [&](const auto& entry)
+            {
+                const auto& old = Plan.Resources.at(entry.first);
+                const auto& next = plan.Resources.at(entry.first);
+                return old.Description.GetSize() == next.Description.GetSize() && old.Description.Capacity == next.Description.Capacity
+                    && old.Storage == next.Storage && old.Consumers == next.Consumers && old.Export.Method == next.Export.Method
+                    && old.Imports[0].Method == next.Imports[0].Method && old.Imports[1].Method == next.Imports[1].Method;
+            });
+            std::map<PinAddress, Materialization> newOnceResources;
             std::vector<FrameSlotResources> newFrameSlots(CompileData.FrameSlotCount);
             bool retry = false;
             for (auto& frameResources : newFrameSlots)
@@ -527,7 +555,9 @@ struct CompiledFrameGraph::Runtime
                 for (const auto& entry : plan.Resources)
                 {
                     const auto& resource = entry.second;
-                    auto& material = frameResources.Resources[entry.first];
+                    const bool once = Definition.Nodes.at(entry.first.Node).Description.RunOnceDuringSetup;
+                    if (once && (reuseSetup || &frameResources != &newFrameSlots.front())) { continue; }
+                    auto& material = (once ? newOnceResources : frameResources.Resources)[entry.first];
                     const bool alias = !resource.Alias.Node.empty();
                     auto* owner = GetDeviceResources(Definition.Nodes.at(entry.first.Node).DeviceRole);
                     auto* other = owner == Primary ? Secondary : Primary;
@@ -608,7 +638,13 @@ struct CompiledFrameGraph::Runtime
                 if (retry) { break; }
             }
             if (retry) { continue; }
-            for (auto& slot : newFrameSlots) { PrepareSlotExecution(slot, plan); }
+            if (!reuseSetup) { OnceResources = std::move(newOnceResources); }
+            SetupComplete = reuseSetup;
+            SetupPasses.clear();
+            // Completion pointers in dependent setup passes must stay stable during binding.
+            SetupPasses.reserve(Passes.size());
+            SetupTransfers.clear();
+            for (auto& slot : newFrameSlots) { PrepareSlotExecution(slot, plan, !reuseSetup && &slot == &newFrameSlots.front()); }
             FrameSlots = std::move(newFrameSlots);
             Diagnostics.LastCompletedFrame.reset();
             Plan = std::move(plan);
@@ -633,7 +669,7 @@ struct CompiledFrameGraph::Runtime
     GDX12CommandList* GetFrameCommandList(GDX12CommandQueue* queue, FrameSlotResources& frameResources)
     {
         auto* commands = queue->GetCommandList();
-        if (std::find(frameResources.UsedQueues.begin(), frameResources.UsedQueues.end(), queue) == frameResources.UsedQueues.end())
+        if (frameResources.MeasureFrame && std::find(frameResources.UsedQueues.begin(), frameResources.UsedQueues.end(), queue) == frameResources.UsedQueues.end())
         {
             auto [timer, inserted] = Diagnostics.QueueTimers.try_emplace(queue);
             if (inserted) { timer->second.Initialize(queue->GetCompletionPoint().Device, queue, CompileData.FrameSlotCount); }
@@ -646,7 +682,7 @@ struct CompiledFrameGraph::Runtime
     // Update the end timestamp in each existing submission. The last submission leaves the final timestamp.
     GDX12CompletionPoint SubmitCommandList(GDX12CommandQueue* queue, GDX12CommandList* commands, FrameSlotResources& frameResources)
     {
-        Diagnostics.QueueTimers.at(queue).RecordEndAndResolve(commands, GetCurrentFrameSlotResourcesIndex());
+        if (frameResources.MeasureFrame) { Diagnostics.QueueTimers.at(queue).RecordEndAndResolve(commands, GetCurrentFrameSlotResourcesIndex()); }
         queue->ExecuteCommandList(commands);
         auto point = queue->GetCompletionPoint();
         frameResources.Completions.push_back(point);
@@ -701,7 +737,7 @@ struct CompiledFrameGraph::Runtime
             TransitionFrameGraphResource(commands, target, compute ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS : D3D12_RESOURCE_STATE_COPY_DEST);
         }
         // A busy timestamp slot must not delay transport.
-        auto* timer = scope == CopyScope::Local ? nullptr : &Diagnostics.GetTransferTimer(queue, sourcePin, exporting, CompileData.FrameSlotCount);
+        auto* timer = !frameResources.MeasureFrame || scope == CopyScope::Local ? nullptr : &Diagnostics.GetTransferTimer(queue, sourcePin, exporting, CompileData.FrameSlotCount);
         const bool timed = timer && timer->Start(commands, false);
         auto statistics = compute ? ComputeCopiers[device->Role].Dispatch(commands, source, target)
                                   : CopyFrameGraphResource(commands, source, target);
@@ -768,6 +804,7 @@ struct CompiledFrameGraph::Runtime
             PassInitContext initContext(GetDeviceResources(nodeDefinition.DeviceRole), Common, nodeDefinition, Plan, Sources);
             passEntry.second->OnResourcesRecreated(initContext);
         }
+        RunSetupPasses();
         ResourceRebuildRequested = false;
     }
 
@@ -802,7 +839,7 @@ struct CompiledFrameGraph::Runtime
         for (const auto& externalUse : renderPass.GetExternalResources(executionContext))
         {
             if (!externalUse.Resource || !externalUse.Resource->D3DResource) { continue; }
-            if (BatchLocalPasses)
+            if (BatchLocalPasses && frameResources.MeasureFrame)
             {
                 const bool waitOnAnotherQueue = externalUse.Ready.Value && externalUse.Ready.Queue != commandQueue;
                 const bool isReadOnly = externalUse.State != D3D12_RESOURCE_STATE_COMMON &&
@@ -833,7 +870,8 @@ struct CompiledFrameGraph::Runtime
         auto* deviceResources = pass.DeviceResources;
         deviceResources->CurrFrameConstantsIndex = GetCurrentFrameSlotResourcesIndex();
         auto* commandQueue = deviceResources->Device->GetCommandQueue();
-        if (!BatchLocalPasses)
+        const bool batch = BatchLocalPasses && frameResources.MeasureFrame;
+        if (!batch)
         {
             for (const auto* dependency : pass.Dependencies) { commandQueue->GPUWait(*dependency); }
             for (const auto& input : pass.Inputs)
@@ -846,7 +884,7 @@ struct CompiledFrameGraph::Runtime
         auto* passTimer = pass.Timer;
         const auto timingSlot = GetPassTimingSlot(Frame);
 
-        passTimer->RecordBegin(commandList, timingSlot);
+        if (passTimer) { passTimer->RecordBegin(commandList, timingSlot); }
         PassInitContext initContext(deviceResources, Common, *pass.Node, Plan, Sources);
         PassExecutionContext executionContext(initContext, commandList, Frame, GetCurrentFrameSlotResourcesIndex(), pass.Bindings);
         PreparePassExternalResources(*pass.Pass, executionContext, frameResources);
@@ -857,9 +895,9 @@ struct CompiledFrameGraph::Runtime
         for (const auto& port : pass.Ports) { ApplyPortState(commandList, port); }
         for (const auto& port : pass.Ports)
         { if (port.ReleaseToCommon) { TransitionFrameGraphResource(commandList, *port.Resource, D3D12_RESOURCE_STATE_COMMON); } }
-        passTimer->RecordEndAndResolve(commandList, timingSlot);
+        if (passTimer) { passTimer->RecordEndAndResolve(commandList, timingSlot); }
 
-        if (BatchLocalPasses)
+        if (batch)
         {
             LocalBatch.Lists.push_back(commandList);
             LocalBatch.Timers.push_back(passTimer);
@@ -867,9 +905,31 @@ struct CompiledFrameGraph::Runtime
         }
 
         pass.Completion = SubmitCommandList(commandQueue, commandList, frameResources);
-        passTimer->OnCommandListExecuted(pass.Completion.Value, timingSlot);
+        if (passTimer) { passTimer->OnCommandListExecuted(pass.Completion.Value, timingSlot); }
         for (const auto& port : pass.Ports) { frameResources.LastUse[port.Resource] = pass.Completion; }
         for (auto* output : pass.Outputs) { output->ProducerReady = pass.Completion; }
+    }
+
+    void RunSetupPasses()
+    {
+        if (SetupComplete) { return; }
+        FrameSlotResources setup;
+        setup.MeasureFrame = false;
+        try
+        {
+            for (auto& pass : SetupPasses) { RecordPass(pass, setup); }
+            for (const auto& [role, input] : SetupTransfers) { ResolveInputResource(input, role, setup); }
+            for (const auto& point : setup.Completions) { GDX12CommandQueue::CPUwait(point); }
+        }
+        catch (...)
+        {
+            // Submitted lists still reference setup resources when a later submission fails.
+            WaitForGPUCompletion();
+            throw;
+        }
+        SetupPasses.clear();
+        SetupTransfers.clear();
+        SetupComplete = true;
     }
 
     // Submit one frame; presentation and a final GPU wait remain the caller's responsibility.
@@ -970,6 +1030,7 @@ std::unique_ptr<CompiledFrameGraph> FrameGraph::Compile()
         const auto role = runtime->Definition.Nodes.at(id).DeviceRole;
         runtime->PassesByDevice[role].push_back(pass.get());
         auto* device = runtime->GetDeviceResources(role)->Device;
+        if (runtime->Definition.Nodes.at(id).Description.RunOnceDuringSetup) { continue; }
         auto timer = std::make_unique<GDX12GPUTimer>();
         timer->Initialize(device, device->GetCommandQueue(), runtime->GetPassTimingSlotCount());
         runtime->Diagnostics.PassTimers.emplace(id, std::move(timer));
@@ -982,6 +1043,7 @@ std::unique_ptr<CompiledFrameGraph> FrameGraph::Compile()
         PassInitContext context(runtime->GetDeviceResources(node.DeviceRole), _common, node, runtime->Plan, runtime->Sources);
         entry.second->Initialize(context);
     }
+    runtime->RunSetupPasses();
     auto graph = std::unique_ptr<CompiledFrameGraph>(new CompiledFrameGraph(std::move(runtime)));
     _definition->IsCompiled = true;
     return graph;

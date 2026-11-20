@@ -20,6 +20,7 @@ namespace
     {
         auto culling = graph.AddPrimaryGPUPass<GDX12GPUCullingPass>("Frustum Culling");
         auto opaque = graph.AddPrimaryGPUPass<GDX12DeferredGeometryPass>("Opaque");
+        auto ibl = graph.AddPrimaryGPUPass<GDX12IBLPrecomputePass>("IBL Precompute");
         auto lighting = graph.AddPrimaryGPUPass<GDX12DeferredLightingPass>("Deferred Lighting");
         auto transparency = graph.AddPrimaryGPUPass<GDX12WBOITTransparencyPass>("Transparency");
         auto composition = graph.AddPrimaryGPUPass<GDX12WBOITCompositionPass>("Composition");
@@ -33,7 +34,13 @@ namespace
         graph.ConnectNodes(culling.GetOutput("OutOpaqueDrawStream"), opaque.GetInput("InDrawStream"));
         graph.ConnectNodes(culling.GetOutput("OutTransparentDrawStream"), transparency.GetInput("InDrawStream"));
         graph.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), transparency.GetInput("InDepthBuffer"));
-        graph.ConnectNodes(inputs.EnvironmentMap, lighting.GetInput("InEnvironmentMap"));
+        graph.ConnectNodes(inputs.EnvironmentMap, ibl.GetInput("InEnvironmentMap"));
+        graph.ConnectNodes(ibl.GetOutput("OutIrradiance"), lighting.GetInput("InIrradiance"));
+        graph.ConnectNodes(ibl.GetOutput("OutPrefilteredEnvironment"), lighting.GetInput("InPrefilteredEnvironment"));
+        graph.ConnectNodes(ibl.GetOutput("OutBRDFLut"), lighting.GetInput("InBRDFLut"));
+        graph.ConnectNodes(ibl.GetOutput("OutIrradiance"), transparency.GetInput("InIrradiance"));
+        graph.ConnectNodes(ibl.GetOutput("OutPrefilteredEnvironment"), transparency.GetInput("InPrefilteredEnvironment"));
+        graph.ConnectNodes(ibl.GetOutput("OutBRDFLut"), transparency.GetInput("InBRDFLut"));
         graph.ConnectNodes(opaque.GetOutput("OutAlbedoMetallic"), lighting.GetInput("InAlbedoMetallic"));
         graph.ConnectNodes(opaque.GetOutput("OutNormalRoughness"), lighting.GetInput("InNormalRoughness"));
         graph.ConnectNodes(opaque.GetOutput("OutF0Baked"), lighting.GetInput("InF0Baked"));
@@ -52,6 +59,7 @@ namespace
     {
         auto culling = graph.AddPrimaryGPUPass<GDX12GPUCullingPass>("Frustum Culling");
         auto opaque = graph.AddPrimaryGPUPass<GDX12DeferredGeometryPass>("Opaque");
+        auto ibl = graph.AddPrimaryGPUPass<GDX12IBLPrecomputePass>("IBL Precompute");
         auto lighting = graph.AddPrimaryGPUPass<GDX12DeferredLightingPass>("Deferred Lighting");
         auto transparency = graph.AddPrimaryGPUPass<GDX12WBOITTransparencyPass>("Transparency");
         auto composition = graph.AddPrimaryGPUPass<GDX12WBOITCompositionPass>("Composition");
@@ -65,7 +73,13 @@ namespace
         graph.ConnectNodes(culling.GetOutput("OutOpaqueDrawStream"), opaque.GetInput("InDrawStream"));
         graph.ConnectNodes(culling.GetOutput("OutTransparentDrawStream"), transparency.GetInput("InDrawStream"));
         graph.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), transparency.GetInput("InDepthBuffer"));
-        graph.ConnectNodes(inputs.EnvironmentMap, lighting.GetInput("InEnvironmentMap"));
+        graph.ConnectNodes(inputs.EnvironmentMap, ibl.GetInput("InEnvironmentMap"));
+        graph.ConnectNodes(ibl.GetOutput("OutIrradiance"), lighting.GetInput("InIrradiance"));
+        graph.ConnectNodes(ibl.GetOutput("OutPrefilteredEnvironment"), lighting.GetInput("InPrefilteredEnvironment"));
+        graph.ConnectNodes(ibl.GetOutput("OutBRDFLut"), lighting.GetInput("InBRDFLut"));
+        graph.ConnectNodes(ibl.GetOutput("OutIrradiance"), transparency.GetInput("InIrradiance"));
+        graph.ConnectNodes(ibl.GetOutput("OutPrefilteredEnvironment"), transparency.GetInput("InPrefilteredEnvironment"));
+        graph.ConnectNodes(ibl.GetOutput("OutBRDFLut"), transparency.GetInput("InBRDFLut"));
         graph.ConnectNodes(opaque.GetOutput("OutAlbedoMetallic"), lighting.GetInput("InAlbedoMetallic"));
         graph.ConnectNodes(opaque.GetOutput("OutNormalRoughness"), lighting.GetInput("InNormalRoughness"));
         graph.ConnectNodes(opaque.GetOutput("OutF0Baked"), lighting.GetInput("InF0Baked"));

@@ -2,6 +2,7 @@
 
 #include <dxgiformat.h>
 #include <any>
+#include <array>
 #include <cstdint>
 #include <initializer_list>
 #include <map>
@@ -80,12 +81,16 @@ struct PortDescription
     uint32_t Stride = 0;
     std::string Layout;
     PinId AliasInput;
+    std::array<float, 4> ClearColor = {0, 0, 0, 1};
+    uint16_t MipLevels = 1;
     bool IsDepth() const { return !Formats.empty() && IsDepthFormat(Formats.front()); }
 };
 
 struct PassDescription
 {
     bool PrimaryOnly = false;
+    // Run during graph setup, outside frame timings. All slots read the same immutable outputs.
+    bool RunOnceDuringSetup = false;
     std::map<PinId, PortDescription> Inputs;
     std::map<PinId, PortDescription> Outputs;
     std::vector<std::vector<PinId>> SameTextureSizeGroups;
@@ -135,6 +140,7 @@ struct ResourceDescription
     uint32_t Stride = 0;
     std::string Layout;
     ResourceUsage Usages = ResourceUsage::None;
+    std::array<float, 4> ClearColor = {0, 0, 0, 1};
     bool IsBuffer() const { return !IsTexture(Type); }
     bool IsDepth() const { return IsDepthFormat(Format); }
     UInt2 GetSize() const { return {Width, Height}; }

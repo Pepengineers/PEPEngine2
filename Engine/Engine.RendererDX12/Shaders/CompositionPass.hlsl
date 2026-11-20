@@ -1,12 +1,7 @@
-#include "CBufferStructures.hlsli"
+#include "PBRMath.hlsli"
 #include "FullScreenVS.hlsl"
 
-SamplerState samPointWrap : register(s0);
 SamplerState samPointClamp : register(s1);
-SamplerState samLinearWrap : register(s2);
-SamplerState samLinearClamp : register(s3);
-SamplerState samAnisotropicWrap : register(s4);
-SamplerState samAnisotropicClamp : register(s5);
 
 Texture2D<float4> OpaqueTexture : register(t0);
 Texture2D<float4> AccumTexture : register(t1);
@@ -20,7 +15,9 @@ float4 PS(VSOutput input) : SV_TARGET
     float4 accumColor = AccumTexture.Sample(samPointClamp, uv);
     float revealage = saturate(RevealageTexture.Sample(samPointClamp, uv));
     
-    float3 finalColor = opaqueColor * (1.0 - revealage) + accumColor.rgb;
+    float3 transparentColor = accumColor.rgb / max(accumColor.a, 1e-5f);
+    // Deferred lighting has already tone-mapped the opaque background.
+    float3 finalColor = lerp(ToneMapToSRGB(transparentColor), opaqueColor, revealage);
     
     return float4(finalColor, 1.0f);
 }

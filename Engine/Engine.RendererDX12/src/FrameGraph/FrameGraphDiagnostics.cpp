@@ -98,16 +98,25 @@ namespace
         writeSpan("total-frame", total);
     }
 
-    size_t CountCrossGPUTransferStages(const FrameGraphPlan& plan)
+    size_t CountCrossGPUTransferStages(const FrameGraphPlan& plan, const FrameGraphDefinition& definition)
     {
         size_t count = 0;
         for (const auto& [source, resource] : plan.Resources)
         {
-            if (resource.Export && resource.Export.Scope != CopyScope::Local) { ++count; }
-            for (const auto& replica : resource.Imports)
+            if (definition.Nodes.at(source.Node).Description.RunOnceDuringSetup) { continue; }
+            bool needsExport = false;
+            std::array<bool, 2> needsReplica{};
+            for (const auto& [target, access] : resource.Consumers)
             {
-                if (replica && replica.Scope != CopyScope::Local) { ++count; }
+                const auto& reader = definition.Nodes.at(target.Node);
+                if (reader.Description.RunOnceDuringSetup) { continue; }
+                const bool replica = access == MemoryType::Local && resource.Imports[reader.DeviceRole];
+                needsReplica[reader.DeviceRole] |= replica;
+                needsExport |= replica || access == MemoryType::Shared;
             }
+            if (needsExport && resource.Export && resource.Export.Scope != CopyScope::Local) { ++count; }
+            for (const auto role : {DEVICE_ROLE_PRIMARY, DEVICE_ROLE_SECONDARY})
+            { if (needsReplica[role] && resource.Imports[role].Scope != CopyScope::Local) { ++count; } }
         }
         return count;
     }
@@ -186,7 +195,7 @@ std::string FrameGraphDiagnostics::GetDebugReport(const FrameGraphPlan& plan, co
     if (usesSecondary)
     {
         out << "\n[Cross-GPU copies]\n"
-            << "  Planned per frame: " << CountCrossGPUTransferStages(plan) << " transfer stages"
+            << "  Planned per frame: " << CountCrossGPUTransferStages(plan, definition) << " transfer stages"
             << " | Default copy queue: " << (plan.UseCopyQueue ? "COPY" : "DIRECT") << '\n'
             << "  Submitted so far: " << SubmittedCopyCommands << " commands, " << SubmittedCopyBytes << " command bytes (export + import)\n"
             << "  Transfer timings cover copy commands and compute dispatches, excluding queue waits and state transitions.\n";
@@ -302,6 +311,7 @@ std::string FrameGraphPlan::GetDebugReport(const FrameGraphDefinition& definitio
     {
         if (isImported(id)) { continue; }
         out << "  " << id << " | " << GetDeviceRoleName(definition.Nodes.at(id).DeviceRole);
+        if (definition.Nodes.at(id).Description.RunOnceDuringSetup) { out << " | once"; }
         auto dependencies = Dependencies.find(id);
         if (dependencies != Dependencies.end())
         {
@@ -326,6 +336,7 @@ std::string FrameGraphPlan::GetDebugReport(const FrameGraphDefinition& definitio
         {
             out << ' ' << GetTextureFormatName(p.Description.Format) << ' ' << p.Description.Width << 'x' << p.Description.Height;
             if (p.Description.ArraySize > 1) { out << " layers=" << p.Description.ArraySize; }
+            if (p.Description.MipLevels > 1) { out << " mips=" << p.Description.MipLevels; }
         }
         out << " | usages=" << uint32_t(p.Description.Usages);
         if (p.CopyCount) { out << " | copies=" << p.CopyCount; }
