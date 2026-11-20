@@ -3,8 +3,10 @@
 #include "App.Base/ECS/World.h"
 #include "App.Base/Systems/LookAtTargetSystem.h"
 #include "App.Base/Systems/SplineFollowSystem.h"
+#include "BistroArch.h"
 #include "BistroBenchmarkRoute.h"
 #include "Components/BistroInteractionSource.h"
+#include "Common/ConsoleVariables.h"
 #include "Common/RuntimePaths.h"
 #include "Engine.Core/ConsoleModule.h"
 #include "Engine.Core/Logging/Logger.h"
@@ -27,7 +29,7 @@ class BistroBenchmark
     class Shot
     {
     public:
-        template<size_t N> Shot(const Point (&points)[N], float speed)
+        template<size_t N> explicit Shot(const Point (&points)[N])
             : _points(points), _count(N)
         {
             for (size_t i = 0; i + 1 < N; ++i)
@@ -35,13 +37,26 @@ class BistroBenchmark
                 const auto delta = points[i+1].Position - points[i].Position;
                 const float length = delta.Length();
                 assert(length > 0);
-                const float duration = length / speed;
-                _times.push_back(_times.back() + duration);
+                _distances.push_back(_distances.back() + length);
                 _curve.Points.back().LeaveTangent = Tangent(i) * (length / 3);
                 SplinePoint next{};
                 next.Position = points[i+1].Position;
                 next.ArriveTangent = Tangent(i+1) * (-length / 3);
                 _curve.Points.push_back(next);
+            }
+            _times.resize(N);
+        }
+
+        float Distance() const { return _distances.back(); }
+        float Distance(size_t begin, size_t end) const { return _distances[end] - _distances[begin]; }
+
+        void SetPace(float secondsPerCm, size_t interiorBegin = 0, size_t interiorEnd = 0,
+            float interiorSecondsPerCm = 0)
+        {
+            for (size_t i = 1; i < _times.size(); ++i)
+            {
+                const float pace = i > interiorBegin && i <= interiorEnd ? interiorSecondsPerCm : secondsPerCm;
+                _times[i] = _times[i - 1] + (_distances[i] - _distances[i - 1]) * pace;
             }
         }
 
@@ -72,7 +87,14 @@ class BistroBenchmark
     private:
         Vector3 Tangent(size_t i) const
         {
-            auto result = _points[std::min(i+1, _count-1)].Position - _points[i > 0 ? i-1 : i].Position;
+            size_t before = i > 0 ? i - 1 : i;
+            size_t after = std::min(i + 1, _count - 1);
+            if (_points[i].AlongPaintingWall)
+            {
+                if (!_points[before].AlongPaintingWall) before = i;
+                if (!_points[after].AlongPaintingWall) after = i;
+            }
+            auto result = _points[after].Position - _points[before].Position;
             if (result.LengthSquared() < .01f)
                 result = _points[i+1].Position - _points[i].Position;
             result.Normalize();
@@ -88,7 +110,8 @@ class BistroBenchmark
             curve.Points.push_back(first);
             return curve;
         }();
-        std::vector<float> _times{0};
+        std::vector<float> _distances{0};
+        std::vector<float> _times;
     };
 
     static constexpr std::array Techniques{
@@ -96,6 +119,9 @@ class BistroBenchmark
         L"App.Async.Water", L"App.Async.CloudPicture"};
     static constexpr unsigned Cases = 1u << Techniques.size();
     static constexpr double Warmup = 3.;
+    inline static AutoConsoleVariable<float> FlightSeconds{L"App.Benchmark.FlightSeconds", 60.f,
+        L"Benchmark flight duration, excluding warmup. The green route and Bistro interior each get one third.",
+        EConsoleVariableFlags::Default, [](float seconds) { return std::isfinite(seconds) && seconds > 0; }};
     enum class Action { None, Start, Cancel };
 
 public:
@@ -176,8 +202,10 @@ public:
             auto& influence = ecs.Get<BistroInteractionSource>(world.ActiveCamera);
             const Vector3 previous(influence.PositionRadius.x, influence.PositionRadius.y, influence.PositionRadius.z);
             const auto start = (source - previous).LengthSquared() > 250000 ? source : previous;
-            influence.PositionRadius = {source.x, source.y, source.z, 65};
-            influence.PreviousHeight = {start.x, start.y, start.z, 190};
+            const float ceiling = BistroArch::SwarmBounds.Center.y + BistroArch::SwarmBounds.Extents.y;
+            // The particle shader fades contact over the final 40 cm of its height.
+            influence.PositionRadius = {source.x, source.y, source.z, 180};
+            influence.PreviousHeight = {start.x, start.y, start.z, std::max(190.f, ceiling + 40.f - source.y)};
             _frameStart = Clock::now();
         }
         catch (const std::exception& error)
@@ -228,6 +256,19 @@ private:
     }
 
     float Duration() const { return 2 * _red.Duration() + _blue.Duration() + _green.Duration() + _yellow.Duration(); }
+
+    void SetFlightDuration(float seconds)
+    {
+        const float part = seconds / 3;
+        const float interior = _yellow.Distance(BistroBenchmarkRoute::EntryDoor, BistroBenchmarkRoute::ExitDoor);
+        const float exterior = 2 * _red.Distance() + _blue.Distance() + _yellow.Distance() - interior;
+        const float outsidePace = part / exterior;
+        _red.SetPace(outsidePace);
+        _blue.SetPace(outsidePace);
+        _green.SetPace(part / _green.Distance());
+        _yellow.SetPace(outsidePace, BistroBenchmarkRoute::EntryDoor, BistroBenchmarkRoute::ExitDoor, part / interior);
+        assert(std::abs(Duration() - seconds) < seconds * .0001f);
+    }
 
     Pose Flight(float time) const
     {
@@ -295,6 +336,7 @@ private:
     {
         if (_door == InvalidEntity)
             throw std::runtime_error("Entrance door mesh was not found");
+        SetFlightDuration(FlightSeconds.GetValue());
         auto patch = Placement(0);
         patch.insert(patch.end(), {{L"App.Async.Queues", "true"}, {L"App.CloudPicture.Adapter", "-1"},
             {L"Render.FrameGeneration.Provider", "0"}, {L"App.Sky.SunCycle.Enabled", "false"}});
@@ -410,10 +452,10 @@ private:
         Log::Error("BistroBenchmark", _message);
     }
 
-    Shot _red{BistroBenchmarkRoute::Red, 780};
-    Shot _blue{BistroBenchmarkRoute::Blue, 590};
-    Shot _green{BistroBenchmarkRoute::Green, 760};
-    Shot _yellow{BistroBenchmarkRoute::Yellow, 255};
+    Shot _red{BistroBenchmarkRoute::Red};
+    Shot _blue{BistroBenchmarkRoute::Blue};
+    Shot _green{BistroBenchmarkRoute::Green};
+    Shot _yellow{BistroBenchmarkRoute::Yellow};
     Entity _door = InvalidEntity;
     Entity _fountain = InvalidEntity;
     Pose _previousPose{};
