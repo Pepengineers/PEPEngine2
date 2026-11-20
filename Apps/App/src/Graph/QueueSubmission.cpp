@@ -1,6 +1,7 @@
 #include "QueueSubmission.h"
 #include "Engine.RendererDX12/GDX12CommandQueue.h"
 #include "Engine.RendererDX12/GDX12CommandList.h"
+#include <algorithm>
 #include <atomic>
 #include <stdexcept>
 #include <thread>
@@ -56,6 +57,34 @@ GDX12Device& QueueSubmission::Device(Id id) const {
     if(id>1 || !_devices[id]) throw std::invalid_argument("unconfigured device context");
     return *_devices[id];
 }
+QueueSubmission::TransferBuffer QueueSubmission::CreateTransferBuffer(uint64_t bytes) const {
+    if (!bytes) throw std::invalid_argument("empty cross-adapter buffer");
+    auto* primary = Device(0).GetDevice().Get();
+    auto* secondary = Device(1).GetDevice().Get();
+    const auto desc = CD3DX12_RESOURCE_DESC::Buffer(bytes, D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER);
+    const auto a = primary->GetResourceAllocationInfo(0, 1, &desc);
+    const auto b = secondary->GetResourceAllocationInfo(0, 1, &desc);
+    if (a.SizeInBytes == UINT64_MAX || b.SizeInBytes == UINT64_MAX)
+        throw std::runtime_error("cross-adapter buffer allocation is unsupported");
+    D3D12_HEAP_DESC heap{};
+    heap.SizeInBytes = (std::max)(a.SizeInBytes, b.SizeInBytes);
+    heap.Alignment = (std::max)(a.Alignment, b.Alignment);
+    heap.Properties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+    heap.Flags = D3D12_HEAP_FLAG_SHARED | D3D12_HEAP_FLAG_SHARED_CROSS_ADAPTER;
+    TransferBuffer buffer;
+    ThrowIfFailed(secondary->CreateHeap(&heap, IID_PPV_ARGS(&buffer.Heaps[1])));
+    HANDLE handle = nullptr;
+    ThrowIfFailed(secondary->CreateSharedHandle(buffer.Heaps[1].Get(), nullptr, GENERIC_ALL, nullptr, &handle));
+    const auto opened = primary->OpenSharedHandle(handle, IID_PPV_ARGS(&buffer.Heaps[0]));
+    CloseHandle(handle);
+    ThrowIfFailed(opened);
+    for (Id id = 0; id < 2; ++id) {
+        ThrowIfFailed(Device(id).GetDevice()->CreatePlacedResource(buffer.Heaps[id].Get(), 0, &desc,
+            D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&buffer.Resources[id])));
+        ValidateResource(id, buffer.Resources[id].Get());
+    }
+    return buffer;
+}
 void QueueSubmission::Check() const {
     if(_quarantined.load()) throw std::runtime_error("submission domain quarantined");
     try {
@@ -78,7 +107,8 @@ const QueueSubmission::Timeline& QueueSubmission::Resolve(CompletionToken token)
 }
 bool QueueSubmission::Complete(CompletionToken token) const {
     std::lock_guard<std::mutex> lock(_mutex); Check();
-    const auto value=Resolve(token).Queue->GetFence()->GetCompletedValue();
+    const auto& timeline=Resolve(token);
+    const auto value=(timeline.Shared ? timeline.Shared : timeline.Queue->GetFence())->GetCompletedValue();
     if(value==UINT64_MAX) { _quarantined.store(true); ThrowIfFailed(DXGI_ERROR_DEVICE_REMOVED); }
     return value>=token.Value;
 }

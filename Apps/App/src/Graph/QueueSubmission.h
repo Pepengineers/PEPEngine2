@@ -24,6 +24,11 @@ public:
     ~QueueSubmission();
     GDX12Device& Device(Id) const;
     uint64_t Incarnation() const { return _incarnation; }
+    struct TransferBuffer {
+        std::array<ComPtr<ID3D12Heap>, 2> Heaps;
+        std::array<ComPtr<ID3D12Resource>, 2> Resources;
+    };
+    TransferBuffer CreateTransferBuffer(uint64_t bytes) const;
     void CheckHealth() const;
     bool Complete(CompletionToken) const;
     void Wait(CompletionToken) const; // drain/retirement only; never version selection

@@ -1,11 +1,15 @@
 #include "CloudPictureTexture.h"
 #include "NativeWork.h"
+#include "../Graph/RenderGraphExecutor.h"
 #include "Common/ConsoleVariables.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.RendererDX12/GDX12Descriptor.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
 #include "Engine.Core/Logging/Logger.h"
+#include <cassert>
+#include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <limits>
 #include <stdexcept>
 
@@ -30,13 +34,15 @@ struct CloudGeneratorData
 	XMFLOAT2 RenderTargetSize{}, Padding{};
 };
 static_assert(sizeof(CloudGeneratorData) == 96, "Cloud picture root constants must match the shader");
-void CheckFormat(GDX12Device& device)
+using Clock = std::chrono::steady_clock;
+
+void CheckFormat(GDX12Device& device, bool producer)
 {
 	D3D12_FEATURE_DATA_FORMAT_SUPPORT support{Format};
 	ThrowIfFailed(device.GetDevice()->CheckFeatureSupport(D3D12_FEATURE_FORMAT_SUPPORT, &support, sizeof(support)));
 	if (!(support.Support1 & D3D12_FORMAT_SUPPORT1_TEXTURE2D) ||
 	    !(support.Support1 & D3D12_FORMAT_SUPPORT1_SHADER_SAMPLE) ||
-	    !(support.Support2 & D3D12_FORMAT_SUPPORT2_UAV_TYPED_STORE))
+	    (producer && !(support.Support2 & D3D12_FORMAT_SUPPORT2_UAV_TYPED_STORE)))
 	{
 		throw std::runtime_error("Cloud picture requires RGBA8 UNORM texture sampling and typed UAV stores");
 	}
@@ -45,7 +51,33 @@ void CheckFormat(GDX12Device& device)
 
 struct CloudPictureTexture::Impl
 {
+	struct SharedSlot
+	{
+		QueueSubmission::TransferBuffer Buffer;
+		CompletionToken Export;
+		// With Async.Queues off the import is compiled onto DIRECT instead of COPY.
+		std::array<CompletionToken, 3> Readers{};
+		uint64_t Version = 0;
+	};
+	struct RemoteProducer
+	{
+		std::array<SharedSlot, 3> Slots;
+		std::unique_ptr<GDX12DescriptorHeap> Heap;
+		GDX12ResourceHandle Output;
+		D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{};
+		std::mutex Mutex;
+		std::condition_variable Wake;
+		std::thread Thread;
+		std::exception_ptr Failure;
+		bool Stop = false, DrainFailed = false;
+		// IDs and tokens are scoped to this resource generation (one RemoteProducer).
+		Id Latest = Invalid, Pending = Invalid, Pinned = Invalid;
+		uint64_t Exports = 0, Frames = 0, Imports = 0, Repeats = 0, ImportedVersion = 0;
+	};
+
 	GDX12DeviceResources& Primary;
+	std::shared_ptr<QueueSubmission> Submit;
+	std::unique_ptr<RemoteProducer> Remote;
 	std::unique_ptr<GDX12RootSignature> Root;
 	ComPtr<ID3D12PipelineState> Pipeline;
 	std::vector<std::unique_ptr<GDX12Texture>> Slots;
@@ -53,17 +85,23 @@ struct CloudPictureTexture::Impl
 	CloudGeneratorData Parameters;
 	uint64_t Sequence = 0;
 	UINT Width, Height, CurrentSlot = 0;
+	Id ImportOperation = Invalid, ImportPacket = Invalid;
 
-	Impl(GDX12DeviceResources& primary, UINT width, UINT height)
-	    : Primary(primary), Slots(primary.FrameConstants.size()), Width(width), Height(height)
+	Impl(GDX12DeviceResources& primary, UINT width, UINT height, std::shared_ptr<QueueSubmission> submit, bool remote)
+	    : Primary(primary), Submit(std::move(submit)), Slots(primary.FrameConstants.size()), Width(width), Height(height)
 	{
 		if (!primary.Device || Slots.empty() || !width || !height || width > D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION ||
 		    height > D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION)
 		{
 			throw std::invalid_argument("Cloud picture grid must be nonzero and within D3D12 Texture2D limits");
 		}
-		auto& device = *primary.Device;
-		CheckFormat(device);
+		auto& device = Submit->Device(remote ? 1 : 0);
+		CheckFormat(*primary.Device, !remote);
+		if (remote)
+		{
+			CheckFormat(device, true);
+			InitializeRemote(device);
+		}
 		GDX12RootSignatureDesc root;
 		root.Constants = {sizeof(CloudGeneratorData) / sizeof(UINT)};
 		root.NumSingleUAVSlots = 1;
@@ -85,18 +123,52 @@ struct CloudPictureTexture::Impl
 			target.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
 			target.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
 			target.SRVDesc.Texture2D.MipLevels = 1;
-			target.CreateUAV = true;
-			target.UAVHeapIndex =
-			    target.SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
-			target.UAVDesc.Format = Format;
-			target.UAVDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+			if (!remote)
+			{
+				target.CreateUAV = true;
+				target.UAVHeapIndex =
+				    target.SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
+				target.UAVDesc.Format = Format;
+				target.UAVDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+			}
 			texture->Initialize(target);
 		}
-		Log::Info("RenderGraph", "CloudPicture effective=", width, "x", height, " format=RGBA8_UNORM slots=", Slots.size());
+		Log::Info("RenderGraph", "CloudPicture effective=", width, "x", height,
+		          " format=RGBA8_UNORM frameSlots=", Slots.size(), " remote=", remote);
+	}
+	void InitializeRemote(GDX12Device& device)
+	{
+		Remote = std::make_unique<RemoteProducer>();
+		auto& remote = *Remote;
+		const auto desc = CD3DX12_RESOURCE_DESC::Tex2D(
+		    Format, Width, Height, 1, 1, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+		uint64_t bytes = 0, primaryBytes = 0;
+		D3D12_PLACED_SUBRESOURCE_FOOTPRINT primaryFootprint{};
+		device.GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &remote.Footprint, nullptr, nullptr, &bytes);
+		Primary.Device->GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &primaryFootprint, nullptr, nullptr,
+		                                                  &primaryBytes);
+		if (!bytes || bytes == UINT64_MAX || bytes != primaryBytes ||
+		    primaryFootprint.Footprint.RowPitch != remote.Footprint.Footprint.RowPitch)
+		{
+			throw std::runtime_error("CloudPicture adapters need matching RGBA8 transfer footprints");
+		}
+		remote.Output = device.CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc, D3D12_RESOURCE_STATE_COMMON);
+		remote.Heap = std::make_unique<GDX12DescriptorHeap>(&device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1,
+		                                                  D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
+		D3D12_UNORDERED_ACCESS_VIEW_DESC uav{};
+		uav.Format = Format;
+		uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+		device.GetDevice()->CreateUnorderedAccessView(remote.Output.Get(), nullptr, &uav, remote.Heap->GetCPUHandle(0));
+		for (auto& slot : remote.Slots)
+		{
+			slot.Buffer = Submit->CreateTransferBuffer(bytes);
+		}
+		Log::Info("RenderGraph", "CloudPicture transferBytes=", bytes, " rowPitch=", remote.Footprint.Footprint.RowPitch,
+		          " sharedSlots=", remote.Slots.size());
 	}
 	void Dispatch(ID3D12GraphicsCommandList* cmd, const CloudGeneratorData& parameters, D3D12_GPU_DESCRIPTOR_HANDLE uav)
 	{
-		auto* heap = Primary.SRV_UAV_Heap->GetHeap().Get();
+		auto* heap = (Remote ? Remote->Heap.get() : Primary.SRV_UAV_Heap.get())->GetHeap().Get();
 		cmd->SetDescriptorHeaps(1, &heap);
 		cmd->SetComputeRootSignature(Root->GetRootSignature().Get());
 		cmd->SetPipelineState(Pipeline.Get());
@@ -105,16 +177,181 @@ struct CloudPictureTexture::Impl
 		cmd->SetComputeRootDescriptorTable(Root->GetURootParamIndex(0), uav);
 		cmd->Dispatch((Width + 31) / 32, (Height + 31) / 32, 1);
 	}
+	// Both owners may observe completion first. The mutex makes publication and pinning atomic.
+	void PublishCompleted()
+	{
+		auto& remote = *Remote;
+		if (remote.Pending != Invalid && Submit->Complete(remote.Slots[remote.Pending].Export))
+		{
+			remote.Latest = remote.Pending;
+			remote.Pending = Invalid;
+			remote.Slots[remote.Latest].Version = ++remote.Exports;
+		}
+	}
+	Id WritableSlot() const
+	{
+		const auto& remote = *Remote;
+		for (Id id = 0; id < remote.Slots.size(); ++id)
+		{
+			if (id == remote.Latest || id == remote.Pinned)
+			{
+				continue;
+			}
+			const auto& readers = remote.Slots[id].Readers;
+			if (std::all_of(readers.begin(), readers.end(),
+			                [this](auto token) { return !token || Submit->Complete(token); }))
+			{
+				return id;
+			}
+		}
+		return Invalid;
+	}
+	void Produce(Executor& executor, double phase, Clock::time_point epoch)
+	{
+		auto& remote = *Remote;
+		Graph graph;
+		graph.Device = 1;
+		graph.FrameBoundary = false;
+		graph.TerminalQueue = Queue::Compute;
+		graph.Resources = {{"cloud producer UAV", 0, 0, true}, {"cloud shared export buffer", 0, 0, false, true}};
+		graph.Operations = {
+		    {"cloud picture GPU1 generation", {{0, Mode::Write, UnorderedAccess}}},
+		    {"cloud picture GPU1 export",
+		     {{0, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE}, {1, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}}}};
+		for (auto& operation : graph.Operations)
+		{
+			operation.Target = Queue::Compute;
+		}
+		const auto schedule = Compile(graph);
+		std::unique_lock lock(remote.Mutex);
+		while (!remote.Stop)
+		{
+			PublishCompleted();
+			const Id id = remote.Pending == Invalid ? WritableSlot() : Invalid;
+			if (id == Invalid)
+			{
+				// Fence completion does not wake the CPU condition variable.
+				remote.Wake.wait_for(lock, std::chrono::milliseconds(1));
+				continue;
+			}
+			auto parameters = Parameters;
+			auto& slot = remote.Slots[id];
+			slot.Readers = {};
+			lock.unlock();
+
+			// The export and the terminal transition share a queue. Retry until
+			// the one recording slot is idle before reusing its allocators.
+			if (executor.TryBegin(0))
+			{
+				executor.Reserve(schedule);
+				parameters.TotalTime = float(phase + std::chrono::duration<double>(Clock::now() - epoch).count());
+				auto* output = remote.Output.Get();
+				auto* shared = slot.Buffer.Resources[1].Get();
+				executor.Execute(schedule, {output, shared},
+				    [&](Id operation, uint32_t, auto* cmd)
+				    {
+					    if (operation == 0)
+					    {
+						    Dispatch(cmd, parameters, remote.Heap->GetGPUHandle(0));
+					    }
+					    else
+					    {
+						    const CD3DX12_TEXTURE_COPY_LOCATION source(output, 0u), target(shared, remote.Footprint);
+						    cmd->CopyTextureRegion(&target, 0, 0, 0, &source, nullptr);
+					    }
+				    });
+				lock.lock();
+				slot.Export = executor.Completions().back();
+				remote.Pending = id;
+			}
+			else
+			{
+				lock.lock();
+				remote.Wake.wait_for(lock, std::chrono::milliseconds(1), [&] { return remote.Stop; });
+			}
+		}
+	}
+	void RunProducer(double phase, Clock::time_point epoch)
+	{
+		auto& remote = *Remote;
+		const auto fail = [&]
+		{
+			std::lock_guard lock(remote.Mutex);
+			if (!remote.Failure) remote.Failure = std::current_exception();
+		};
+		try
+		{
+			Executor executor(Submit, 1, 1, 1);
+			try { Produce(executor, phase, epoch); }
+			catch (...) { fail(); }
+			try
+			{
+				executor.Drain();
+				std::lock_guard lock(remote.Mutex);
+				PublishCompleted();
+			}
+			catch (...)
+			{
+				remote.DrainFailed = true;
+				fail();
+			}
+		}
+		catch (...) { fail(); }
+	}
+	void Stop()
+	{
+		if (!Remote || !Remote->Thread.joinable()) return;
+		{
+			std::lock_guard lock(Remote->Mutex);
+			Remote->Stop = true;
+		}
+		Remote->Wake.notify_one();
+		Remote->Thread.join();
+	}
+	void Drain()
+	{
+		if (!Remote) return;
+		Stop();
+		if (Remote->DrainFailed)
+		{
+			throw std::runtime_error("CloudPicture GPU1 could not retire submitted commands");
+		}
+		Submit->CheckHealth();
+		for (const auto& slot : Remote->Slots)
+		{
+			for (auto token : slot.Readers)
+			{
+				if (token) Submit->Wait(token);
+			}
+		}
+		const auto primary = Submit->Device(0).GetDevice()->GetAdapterLuid();
+		const auto secondary = Submit->Device(1).GetDevice()->GetAdapterLuid();
+		Log::Info("RenderGraph", "CloudPicture MGPU summary GPU0 LUID=", primary.HighPart, ":", primary.LowPart,
+		          " GPU1 LUID=", secondary.HighPart, ":", secondary.LowPart, " exports=", Remote->Exports,
+		          " activeFrames=", Remote->Frames, " imports=", Remote->Imports, " repeatedImports=", Remote->Repeats);
+	}
+
 };
 
-CloudPictureTexture::CloudPictureTexture(GDX12DeviceResources& primary, UINT width, UINT height)
-    : _impl(std::make_unique<Impl>(primary, width, height))
+CloudPictureTexture::CloudPictureTexture(GDX12DeviceResources& primary, UINT width, UINT height,
+                                         std::shared_ptr<QueueSubmission> submit, bool remote)
+    : _impl(std::make_unique<Impl>(primary, width, height, std::move(submit), remote))
 {
 }
-CloudPictureTexture::~CloudPictureTexture() = default;
+CloudPictureTexture::~CloudPictureTexture()
+{
+	try { _impl->Drain(); }
+	catch (...)
+	{
+		OutputDebugStringA("CloudPicture drain failed; retaining in-flight resources until process exit.\n");
+		_impl.release();
+	}
+}
+
+void CloudPictureTexture::Stop() { _impl->Stop(); }
 GDX12Texture* CloudPictureTexture::Texture(UINT frameSlot) const
 {
-	return _impl->Slots.at(frameSlot).get();
+	return !_impl->Remote || _impl->Remote->Pinned != Invalid ? _impl->Slots.at(frameSlot).get() : nullptr;
 }
 void CloudPictureTexture::Prepare(UINT frameSlot, double totalTime)
 {
@@ -125,6 +362,22 @@ void CloudPictureTexture::Prepare(UINT frameSlot, double totalTime)
 	}
 	p.CurrentSlot = frameSlot;
 	p.Work.Commands.clear();
+	p.ImportOperation = p.ImportPacket = Invalid;
+	if (p.Remote)
+	{
+		auto& remote = *p.Remote;
+		std::lock_guard lock(remote.Mutex);
+		if (remote.Failure) std::rethrow_exception(remote.Failure);
+		p.Parameters.CloudSpeed = 0.006f * SpeedScale.GetValue();
+		if (!remote.Thread.joinable())
+		{
+			remote.Thread = std::thread([&p, totalTime, epoch = Clock::now()] { p.RunProducer(totalTime, epoch); });
+		}
+		p.PublishCompleted();
+		// Keep the picture inactive until the first complete image can be imported.
+		remote.Pinned = remote.Latest;
+		return;
+	}
 	p.Parameters.TotalTime = float(totalTime);
 	p.Parameters.CloudSpeed = 0.006f * SpeedScale.GetValue();
 	++p.Sequence;
@@ -139,6 +392,22 @@ void CloudPictureTexture::Append(Graph& graph, std::vector<ID3D12Resource*>& bin
 	const auto& texture = p.Slots.at(p.CurrentSlot);
 	const Id output = NativeWork::ResourceFor(graph, bindings, texture->GetResource()->D3DResource.Get(),
 	                                          "cloud picture material texture");
+	if (p.Remote)
+	{
+		auto& remote = *p.Remote;
+		auto* shared = remote.Slots.at(remote.Pinned).Buffer.Resources[0].Get();
+		auto* display = texture->GetResource()->D3DResource.Get();
+		const Id input = NativeWork::ResourceFor(graph, bindings, shared, "cloud shared import buffer");
+		p.ImportOperation = p.Work.Add(graph, "cloud picture GPU0 import",
+		    {{input, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE},
+		     {output, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
+		    [shared, display, footprint = remote.Footprint](auto* cmd)
+		    {
+			    const CD3DX12_TEXTURE_COPY_LOCATION source(shared, footprint), target(display, 0u);
+			    cmd->CopyTextureRegion(&target, 0, 0, 0, &source, nullptr);
+		    }, {}, Queue::Copy);
+		return;
+	}
 	const auto parameters = p.Parameters;
 	const auto uav = texture->GetUAV()->GPUHandle;
 	p.Work.Add(graph, "cloud picture generation", {{output, Mode::Write, UnorderedAccess}},
@@ -148,5 +417,43 @@ void CloudPictureTexture::Append(Graph& graph, std::vector<ID3D12Resource*>& bin
 bool CloudPictureTexture::Record(Id id, ID3D12GraphicsCommandList* cmd)
 {
 	return _impl->Work.Record(id, cmd);
+}
+std::vector<PacketWait> CloudPictureTexture::Waits(const Schedule& schedule)
+{
+	auto& p = *_impl;
+	if (p.ImportOperation == Invalid) return {};
+	for (Id id = 0; id < schedule.Packets.size(); ++id)
+	{
+		if (schedule.Packets[id].Operation == p.ImportOperation)
+		{
+			p.ImportPacket = id;
+			return {{id, p.Remote->Slots.at(p.Remote->Pinned).Export}};
+		}
+	}
+	throw std::logic_error("CloudPicture import missing from the primary schedule");
+}
+
+void CloudPictureTexture::Submitted(const std::vector<CompletionToken>& completions, bool frameSubmitted)
+{
+	auto& p = *_impl;
+	if (p.ImportPacket == Invalid) return;
+	auto& remote = *p.Remote;
+	{
+		std::lock_guard lock(remote.Mutex);
+		auto& slot = remote.Slots.at(remote.Pinned);
+		const auto token = p.ImportPacket < completions.size() ? completions[p.ImportPacket] : CompletionToken{};
+		assert(!frameSubmitted || token);
+		if (token)
+		{
+			const size_t queue = token.Target == Queue::Direct ? 0 : token.Target == Queue::Compute ? 1 : 2;
+			slot.Readers[queue] = token;
+			++remote.Imports;
+			if (remote.ImportedVersion == slot.Version) ++remote.Repeats;
+			remote.ImportedVersion = slot.Version;
+		}
+		if (frameSubmitted) ++remote.Frames;
+		remote.Pinned = Invalid;
+	}
+	remote.Wake.notify_one();
 }
 } // namespace BistroRender
