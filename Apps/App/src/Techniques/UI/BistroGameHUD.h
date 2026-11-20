@@ -15,13 +15,20 @@ inline AutoConsoleVariable<int> Quality(L"Render.UI.Game.Quality", 0,
     L"Game HUD detail level: 0, 1 or 2.", EConsoleVariableFlags::Default,
     [](int value) { return value >= 0 && value <= 2; });
 inline constexpr auto Atlas = Engine::UI::UITextureId(0x42495354524f4855ull);
+inline constexpr auto HealthBar = Engine::UI::UITextureId(0x4249535452485042ull);
 
-inline void Draw(ImDrawList& list, float time)
+struct Bar
+{
+    float Width, Height, Health, Phase;
+    unsigned Sparks;
+};
+
+inline Bar Draw(ImDrawList& list, float time)
 {
     list._ResetForNewFrame();
     const auto display = ImGui::GetIO().DisplaySize;
     if (display.x <= 0 || display.y <= 0)
-        return;
+        return {};
     const auto* viewport = ImGui::GetMainViewport();
     list.Flags |= ImDrawListFlags_AllowVtxOffset;
     list.PushTexture(ImGui::GetIO().Fonts->TexRef);
@@ -49,29 +56,13 @@ inline void Draw(ImDrawList& list, float time)
     }
 
     const float health = .77f + .10f * std::sin(time * .65f);
-    const float fill = left + health * width;
     const ImVec2 barStart{left, barY}, barEnd{left + width, barY + barHeight};
-    list.AddRectFilled(barStart, barEnd, IM_COL32(37, 18, 30, 255), 3);
-    list.AddRectFilledMultiColor(barStart, {fill, barEnd.y}, IM_COL32(112, 12, 40, 255),
-        IM_COL32(218, 57, 64, 255), IM_COL32(143, 18, 46, 255), IM_COL32(63, 12, 39, 255));
+    list.AddImageRounded(static_cast<ImTextureID>(HealthBar), barStart, barEnd, {0, 0}, {1, 1}, IM_COL32_WHITE, 3);
 
     // Original MGPU-IMGUI builds start at 1–6 stars and multiply both limits by 1.2^10 or 1.2^50.
     constexpr float density[] = {1.f, 6.191736f, 9100.438f};
     const float multiplier = density[Quality.GetValue()];
-    const unsigned stars = unsigned(multiplier * (1.f + 4.99f * (.5f + .5f * std::sin(time * .29f))));
-    const auto alpha = std::clamp(3200 / int(std::max(stars, 1u)), 8, 210);
-    const ImU32 glow = IM_COL32(255, 195, 126, alpha);
-    list.PushClipRect(barStart, {fill, barEnd.y}, true);
-    for (unsigned i = 0; i < stars; ++i)
-    {
-        unsigned random = (i + 1) * 2654435761u;
-        random = (random ^ (random >> 16)) * 0x7feb352du;
-        random ^= random >> 15;
-        const float x = left + std::fmod(float(random & 65535) / 65536.f + time * .13f, 1.f) * (fill - left);
-        const float y = barY + float(random >> 16) / 65536.f * barHeight;
-        list.AddTriangleFilled({x - 2, y}, {x + 2, y - 1.4f}, {x + 1, y + 1.4f}, glow);
-    }
-    list.PopClipRect();
+    const unsigned sparks = unsigned(multiplier * (1.f + 4.99f * (.5f + .5f * std::sin(time * .29f))));
     list.AddRect(barStart, barEnd, border, 3);
     char hp[16];
     std::snprintf(hp, sizeof(hp), "HP  %d%%", int(health * 100));
@@ -89,5 +80,6 @@ inline void Draw(ImDrawList& list, float time)
     const ImVec2 marker{mapStart.x + map * .5f, mapStart.y + map * .54f};
     list.AddTriangleFilled({marker.x, marker.y - 7}, {marker.x - 4, marker.y + 4}, {marker.x + 4, marker.y + 4},
         IM_COL32(251, 221, 147, 255));
+    return {width, barHeight, health, std::fmod(time * .13f, 1.f), sparks};
 }
 }

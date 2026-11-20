@@ -5,7 +5,10 @@
 #include "Engine.Core/BenchmarkEngine.h"
 #include "Engine.Core/AssetManager.h"
 #include "Engine.RendererDX12/GDX12CommandList.h"
+#include "Engine.RendererDX12/GDX12Device.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
+#include "Engine.RendererDX12/GDX12RootSignature.h"
+#include "Engine.RendererDX12/GDX12ShaderCompiler.h"
 #include "Engine.RendererDX12/GDX12SwapChain.h"
 #include "Engine.RendererDX12/GDX12FrameGeneration.h"
 #include "Engine.RendererDX12/GDX12MotionBlurSettings.h"
@@ -15,6 +18,38 @@
 
 namespace BistroRender
 {
+namespace
+{
+ComPtr<ID3D12PipelineState> CreateHealthBarPipeline(GDX12Device& device, GDX12RootSignature& root)
+{
+	auto& compiler = GDX12ShaderCompiler::GetInstance();
+	const auto vs = compiler.CompileShader(&device, APP_SHADERS_FOLDER L"BistroHealthBar.hlsl", nullptr, "VSMain", "vs");
+	const auto ps = compiler.CompileShader(&device, APP_SHADERS_FOLDER L"BistroHealthBar.hlsl", nullptr, "PSMain", "ps");
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC desc{};
+	desc.pRootSignature = root.GetRootSignature().Get();
+	desc.VS = {vs->GetBufferPointer(), vs->GetBufferSize()};
+	desc.PS = {ps->GetBufferPointer(), ps->GetBufferSize()};
+	desc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+	desc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+	desc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+	desc.DepthStencilState.DepthEnable = FALSE;
+	desc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+	auto& blend = desc.BlendState.RenderTarget[0];
+	blend.BlendEnable = TRUE;
+	blend.SrcBlend = D3D12_BLEND_SRC_ALPHA;
+	blend.SrcBlendAlpha = D3D12_BLEND_ONE;
+	blend.DestBlend = blend.DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
+	desc.SampleMask = UINT_MAX;
+	desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+	desc.NumRenderTargets = 1;
+	desc.RTVFormats[0] = Engine::UI::OffscreenFormat;
+	desc.SampleDesc.Count = 1;
+	ComPtr<ID3D12PipelineState> pipeline;
+	ThrowIfFailed(device.GetDevice()->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&pipeline)));
+	return pipeline;
+}
+}
+
 ScenePostUI::ScenePostUI(RenderPipelineContext& c)
     : _resources(c.Primary), _common(c.Common), _swapchain(c.BackBuffer), _render(c.Runtime),
       _inspector(UINT(c.Primary.FrameConstants.size())),
@@ -250,6 +285,7 @@ void ScenePostUI::AppendScreen(Graph& graph, std::vector<ID3D12Resource*>& bindi
 	screen.RasterOwner.reset();
 	screen.CompositeOwner.reset();
 	const bool hud = GameHUD::Enabled.GetValue() && ImGui::GetCurrentContext();
+	GameHUD::Bar bar{};
 	if (hud && !_hudAtlas)
 	{
 		auto* texture = _render.GetTextureByName("BistroDemoHUD");
@@ -269,7 +305,7 @@ void ScenePostUI::AppendScreen(Graph& graph, std::vector<ID3D12Resource*>& bindi
 	{
 		if (!_gameOverlay)
 			_gameOverlay = std::make_unique<ImDrawList>(ImGui::GetDrawListSharedData());
-		GameHUD::Draw(*_gameOverlay, _common.GameTimer ? _common.GameTimer->TotalTime() : 0.f);
+		bar = GameHUD::Draw(*_gameOverlay, _common.GameTimer ? _common.GameTimer->TotalTime() : 0.f);
 	}
 	auto* preview = _inspector.Append(graph, bindings, _work, *_resources.Device, _resources.CurrFrameConstantsIndex,
 	    resource(target)->D3DResource.Get(), _common.ActiveCameraNearPlane, _common.ActiveCameraFarPlane);
@@ -290,6 +326,7 @@ void ScenePostUI::AppendScreen(Graph& graph, std::vector<ID3D12Resource*>& bindi
 		}
 		std::vector<std::pair<GDX12Resource*, Mode>> accesses{{resource(screen.Target.get()), Mode::Write}};
 		std::vector<Engine::UI::TextureBinding> hudTextures;
+		std::vector<Id> rasterDependencies{dependency};
 		if (preview)
 		{
 			auto* atlas = resource(preview);
@@ -304,6 +341,45 @@ void ScenePostUI::AppendScreen(Graph& graph, std::vector<ID3D12Resource*>& bindi
 			accesses.emplace_back(atlas, Mode::Read);
 			hudTextures.push_back({GameHUD::Atlas, atlas->D3DResource, _hudAtlas->GetFormat()});
 		}
+		if (bar.Sparks)
+		{
+			if (!_healthBarPipeline)
+			{
+				GDX12RootSignatureDesc root;
+				root.Constants = {5};
+				_healthBarRoot = std::make_unique<GDX12RootSignature>(_resources.Device, root);
+				_healthBarPipeline = CreateHealthBarPipeline(*_resources.Device, *_healthBarRoot);
+			}
+			const UINT width = UINT(std::ceil(bar.Width)), height = UINT(std::ceil(bar.Height));
+			if (!screen.HealthBar || screen.HealthBar->GetWidth() != width || screen.HealthBar->GetHeight() != height)
+			{
+				screen.HealthBar = std::make_unique<GDX12Texture>();
+				GDX12RenderHelpers::InitializeRenderTarget(*screen.HealthBar, _resources, width, height,
+				                                           Engine::UI::OffscreenFormat, {0, 0, 0, 0});
+			}
+			auto* barTarget = screen.HealthBar.get();
+			auto* barResource = resource(barTarget);
+			rasterDependencies.push_back(Packet(
+			    graph, bindings, "Game HUD health bar (GPU sparks)", {{barResource, Mode::Write}},
+			    [this, bar, barTarget](auto* commands)
+			    {
+				    auto* cmd = commands->GetCommandList().Get();
+				    const auto rtv = barTarget->GetRTV()->CPUHandle;
+				    const auto viewport = barTarget->GetViewport();
+				    const auto scissor = barTarget->GetScissorRect();
+				    cmd->SetGraphicsRootSignature(_healthBarRoot->GetRootSignature().Get());
+				    cmd->SetPipelineState(_healthBarPipeline.Get());
+				    cmd->SetGraphicsRoot32BitConstants(_healthBarRoot->GetBRootParamIndex(0), 5, &bar, 0);
+				    cmd->RSSetViewports(1, &viewport);
+				    cmd->RSSetScissorRects(1, &scissor);
+				    cmd->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
+				    cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+				    cmd->DrawInstanced(3, 1 + bar.Sparks, 0, 0);
+			    },
+			    {}, barTarget));
+			accesses.emplace_back(barResource, Mode::Read);
+			hudTextures.push_back({GameHUD::HealthBar, barResource->D3DResource, Engine::UI::OffscreenFormat});
+		}
 		const auto raster = Packet(
 		    graph, bindings, "Engine.UI explicit font upload / offscreen raster boundary",
 		    std::move(accesses),
@@ -316,7 +392,7 @@ void ScenePostUI::AppendScreen(Graph& graph, std::vector<ID3D12Resource*>& bindi
 				    throw std::logic_error("Screen UI backend slot is still in flight");
 			    }
 		    },
-		    {dependency}, screen.Target.get());
+		    std::move(rasterDependencies), screen.Target.get());
 		screenId = Packet(
 		    graph, bindings, "Engine.UI screen composition",
 		    {{resource(screen.Target.get()), Mode::Read}, {resource(target), Mode::ReadWrite}},
