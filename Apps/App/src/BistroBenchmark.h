@@ -51,14 +51,10 @@ class BistroBenchmark
         float Distance() const { return _distances.back(); }
         float Distance(size_t begin, size_t end) const { return _distances[end] - _distances[begin]; }
 
-        void SetPace(float secondsPerCm, size_t interiorBegin = 0, size_t interiorEnd = 0,
-            float interiorSecondsPerCm = 0)
+        template<class Pace> void SetPace(Pace secondsPerCm)
         {
             for (size_t i = 1; i < _times.size(); ++i)
-            {
-                const float pace = i > interiorBegin && i <= interiorEnd ? interiorSecondsPerCm : secondsPerCm;
-                _times[i] = _times[i - 1] + (_distances[i] - _distances[i - 1]) * pace;
-            }
+                _times[i] = _times[i - 1] + _points[i - 1].HoldSeconds + Distance(i - 1, i) * secondsPerCm(i);
         }
 
         float Duration() const { return _times.back(); }
@@ -69,7 +65,18 @@ class BistroBenchmark
             time = std::clamp(time, 0.f, Duration());
             const auto next = std::upper_bound(_times.begin(), _times.end(), time);
             const size_t i = std::min(size_t(next - _times.begin() - 1), _count - 2);
-            const float t = (time - _times[i]) / (_times[i+1] - _times[i]);
+            const float departure = _times[i] + _points[i].HoldSeconds;
+            if (time < departure)
+            {
+                const auto& point = _points[i];
+                return {point.Position, point.Target - point.Position};
+            }
+            const float u = (time - departure) / (_times[i + 1] - departure);
+            const float speed = SegmentSpeed(i);
+            const float start = KnotSpeed(i) / speed;
+            const float finish = KnotSpeed(i + 1) / speed;
+            // Hermite timing shares the same velocity at each knot and stops at a held pose.
+            const float t = u * (start + u * (3 - 2 * start - finish + u * (start + finish - 2)));
             const auto position = EvaluateSplineSegment(_curve.Points[i], _curve.Points[i+1], t);
             auto tangent = EvaluateSplineSegment(_curve.Points[i], _curve.Points[i+1], std::min(1.f,t + .002f)) -
                 EvaluateSplineSegment(_curve.Points[i], _curve.Points[i+1], std::max(0.f,t - .002f));
@@ -86,6 +93,19 @@ class BistroBenchmark
             return {position, BlendDirection(a, b, t)};
         }
     private:
+        float SegmentSpeed(size_t i) const
+        {
+            return Distance(i, i + 1) / (_times[i + 1] - _times[i] - _points[i].HoldSeconds);
+        }
+
+        float KnotSpeed(size_t i) const
+        {
+            if (_points[i].HoldSeconds > 0) return 0;
+            if (i == 0) return SegmentSpeed(0);
+            if (i + 1 == _count) return SegmentSpeed(i - 1);
+            return std::min(SegmentSpeed(i - 1), SegmentSpeed(i));
+        }
+
         Vector3 Tangent(size_t i) const
         {
             size_t before = i > 0 ? i - 1 : i;
@@ -120,9 +140,10 @@ class BistroBenchmark
         L"App.Async.Water", L"App.Async.CloudPicture"};
     static constexpr unsigned Cases = 1u << Techniques.size();
     static constexpr double Warmup = 3.;
-    inline static AutoConsoleVariable<float> FlightSeconds{L"App.Benchmark.FlightSeconds", 60.f,
-        L"Benchmark flight duration, excluding warmup. The green route and Bistro interior each get one third.",
-        EConsoleVariableFlags::Default, [](float seconds) { return std::isfinite(seconds) && seconds > 0; }};
+    inline static AutoConsoleVariable<float> FlightSeconds{L"App.Benchmark.FlightSeconds", 100.f,
+        L"Total benchmark flight duration, excluding warmup. Includes five fixed five-second painting stops.",
+        EConsoleVariableFlags::Default,
+        [](float seconds) { return std::isfinite(seconds) && seconds >= BistroBenchmarkRoute::TotalPaintingHoldSeconds + 1; }};
     enum class Action { None, Start, Cancel };
 
 public:
@@ -261,14 +282,38 @@ private:
 
     void SetFlightDuration(float seconds)
     {
-        const float part = seconds / 3;
+        using namespace BistroBenchmarkRoute;
+        constexpr float movingSeconds = 75.f;
+        constexpr float greenSeconds = 35.f;
+        constexpr float exteriorSeconds = 20.f;
+        constexpr float interiorSeconds = movingSeconds - greenSeconds - exteriorSeconds;
+        const float scale = (seconds - TotalPaintingHoldSeconds) / movingSeconds;
         const float interior = _yellow.Distance(BistroBenchmarkRoute::EntryDoor, BistroBenchmarkRoute::ExitDoor);
         const float exterior = 2 * _red.Distance() + _blue.Distance() + _yellow.Distance() - interior;
-        const float outsidePace = part / exterior;
-        _red.SetPace(outsidePace);
-        _blue.SetPace(outsidePace);
-        _green.SetPace(part / _green.Distance());
-        _yellow.SetPace(outsidePace, BistroBenchmarkRoute::EntryDoor, BistroBenchmarkRoute::ExitDoor, part / interior);
+        const float outsidePace = exteriorSeconds * scale / exterior;
+        _red.SetPace([&](size_t) { return outsidePace; });
+        _blue.SetPace([&](size_t) { return outsidePace; });
+        _yellow.SetPace([&](size_t i)
+        {
+            return i > EntryDoor && i <= ExitDoor ? interiorSeconds * scale / interior : outsidePace;
+        });
+
+        constexpr size_t ArchEntrance = 4, ArchExit = 6, TreeStart = 9, TreeEnd = 21;
+        constexpr size_t ReturnArchEntrance = 25, ReturnArchExit = 27;
+        const float streetPace = 20.f / _green.Distance();
+        constexpr float archPace = 1.f / 300.f, connectorPace = 1.f / 500.f;
+        const float street = _green.Distance(0, ArchEntrance) + _green.Distance(ReturnArchExit, std::size(Green) - 1);
+        const float arch = _green.Distance(ArchEntrance, ArchExit) + _green.Distance(ReturnArchEntrance, ReturnArchExit);
+        const float connectors = _green.Distance(ArchExit, TreeStart) + _green.Distance(TreeEnd, ReturnArchEntrance);
+        const float orbitSeconds = greenSeconds - street * streetPace - arch * archPace - connectors * connectorPace;
+        const float orbitPace = orbitSeconds / _green.Distance(TreeStart, TreeEnd);
+        _green.SetPace([&](size_t i)
+        {
+            if (i <= ArchEntrance || i > ReturnArchExit) return streetPace * scale;
+            if (i <= ArchExit || i > ReturnArchEntrance) return archPace * scale;
+            if (i <= TreeStart || i > TreeEnd) return connectorPace * scale;
+            return orbitPace * scale;
+        });
         assert(std::abs(Duration() - seconds) < seconds * .0001f);
     }
 
