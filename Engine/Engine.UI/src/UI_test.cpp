@@ -31,6 +31,7 @@ namespace Engine::UI
         std::vector<UINT> FreeDescriptors;
         bool FrameBegun = false;
         bool ScreenFrameReady = false;
+        bool ApplicationUIInput = false;
 #ifdef _DEBUG
         bool DebugEnabled = true;
 #else
@@ -808,24 +809,24 @@ namespace Engine::UI
 
     bool HandleMessage(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
     {
-        if (!DebugEnabled || !ImGui::GetCurrentContext()) return false;
+        if ((!DebugEnabled && !ApplicationUIInput) || !ImGui::GetCurrentContext()) return false;
         const bool handled = ImGui_ImplWin32_WndProcHandler(window, message, wParam, lParam) != 0;
-        if (message == WM_KEYUP && wParam == VK_F1) { Visible = !Visible; return true; }
-        const auto& io = ImGui::GetIO();
-        return handled || (Visible && ((message >= WM_MOUSEFIRST && message <= WM_MOUSELAST && io.WantCaptureMouse) ||
-            (message >= WM_KEYFIRST && message <= WM_KEYLAST && io.WantCaptureKeyboard)));
+        if (DebugEnabled && message == WM_KEYUP && wParam == VK_F1) { Visible = !Visible; return true; }
+        return handled || (message >= WM_MOUSEFIRST && message <= WM_MOUSELAST && WantsMouseInput()) ||
+            (message >= WM_KEYFIRST && message <= WM_KEYLAST && WantsKeyboardInput());
     }
 
     bool WantsKeyboardInput()
     {
-        return DebugEnabled && Visible && ImGui::GetCurrentContext() && ImGui::GetIO().WantCaptureKeyboard;
+        return (ApplicationUIInput || (DebugEnabled && Visible)) && ImGui::GetCurrentContext() && ImGui::GetIO().WantCaptureKeyboard;
     }
 
     bool WantsMouseInput()
     {
-        return DebugEnabled && Visible && ImGui::GetCurrentContext() && ImGui::GetIO().WantCaptureMouse;
+        return (ApplicationUIInput || (DebugEnabled && Visible)) && ImGui::GetCurrentContext() && ImGui::GetIO().WantCaptureMouse;
     }
 
+    void EnableApplicationUIInput() { ApplicationUIInput = true; }
     void EnableDebugUI() { DebugEnabled = true; }
     bool DebugUIVisible() { return DebugEnabled && FrameBegun && Visible; }
 }

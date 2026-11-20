@@ -466,7 +466,23 @@ inline void CreateBistroPropEntities(World& world, const std::string& sceneName,
     };
     if (!partition.Interior)
     {
-        create(sceneName, partition.StaticSubMeshes, BistroStaticCollision::BuildWalkway(), PhysicsMotionType::Static);
+        std::vector<uint32_t> exterior, entrance;
+        for (const auto index : partition.StaticSubMeshes)
+        {
+            auto node = mesh.GetSubMesh(index).SourceNodeName;
+            std::transform(node.begin(), node.end(), node.begin(), [](unsigned char ch) { return char(std::tolower(ch)); });
+            auto& group = node == "paris_building_01_paris_building_01_bottom_121" ||
+                node == "paris_building_01_paris_building_01_bottom_123" ? entrance : exterior;
+            group.push_back(index);
+        }
+        create(sceneName, exterior, BistroStaticCollision::BuildWalkway(), PhysicsMotionType::Static);
+        if (!entrance.empty())
+        {
+            auto door = ecs.CreateEntity();
+            door.AddComponent<NameComponent>("BistroEntranceDoor");
+            door.AddComponent<TransformComponent>(Vector3::Zero);
+            door.AddComponent<StaticMeshRenderComponent>(source.MeshHandler, source.Materials, entrance).ReflectionDynamic = true;
+        }
         return;
     }
 
