@@ -87,7 +87,17 @@
     <ClCompile Include="src\GDX12DeviceFactory.cpp" />
     <ClCompile Include="src\GDX12FrameConstants.cpp" />
     <ClCompile Include="src\ClusteredLightingGrid.cpp" />
+    <ClCompile Include="src\GDX12DLSSUpscalePass.cpp" />
+    <ClCompile Include="src\GDX12DeferredGeometryPass.cpp" />
     <ClCompile Include="src\GDX12DeferredLightingPass.cpp" />
+    <ClCompile Include="src\GDX12FSRUpscalePass.cpp" />
+    <ClCompile Include="src\GDX12GPUCullingPass.cpp" />
+    <ClCompile Include="src\GDX12NISUpscalePass.cpp" />
+    <ClCompile Include="src\GDX12OutputToScreenPass.cpp" />
+    <ClCompile Include="src\GDX12TextureClearPass.cpp" />
+    <ClCompile Include="src\GDX12WBOITCompositionPass.cpp" />
+    <ClCompile Include="src\GDX12WBOITTransparencyPass.cpp" />
+    <ClCompile Include="src\GDX12XeSSUpscalePass.cpp" />
     <ClCompile Include="src\GDX12TextureResource.cpp" />
     <ClCompile Include="src\GDX12RootSignature.cpp" />
     <ClCompile Include="src\GDX12ShaderCompiler.cpp" />

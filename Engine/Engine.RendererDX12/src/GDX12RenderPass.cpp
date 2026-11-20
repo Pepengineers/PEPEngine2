@@ -1,5 +1,26 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 
+void GDX12RenderPass::ResolveResourceRequirements(PassResourceRequirementsContext&)
+{}
+
+void GDX12RenderPass::Initialize(PassInitContext&)
+{}
+
+void GDX12RenderPass::OnResourcesRecreated(PassInitContext&)
+{}
+
+uint32_t GDX12RenderPass::GetFlags()
+{ return _flags; }
+
+void GDX12RenderPass::SetFlag(uint32_t flag, bool value)
+{
+    if (value) { _flags |= flag; }
+    else { _flags &= ~flag; }
+}
+
+bool GDX12RenderPass::GetFlagValue(uint32_t flag)
+{ return _flags & flag; }
+
 std::vector<ExternalResourceUse> GDX12RenderPass::GetExternalResources(PassExecutionContext& context)
 {
     std::vector<ExternalResourceUse> uses;

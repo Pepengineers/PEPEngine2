@@ -30,6 +30,9 @@ namespace
     }
 }
 
+GDX12DeferredLightingPass::GDX12DeferredLightingPass()
+{ _flags = RENDER_PASS_FLAG_USE_LIGHTING | RENDER_PASS_FLAG_USE_CAMERAS; }
+
 void GDX12DeferredLightingPass::InitializeEnvironmentMaps(GDX12DeviceResources& resources)
 {
     auto* device = resources.Device;

@@ -33,18 +33,14 @@ class GDX12RenderPass
 public:
     virtual ~GDX12RenderPass() = default;
     virtual void Describe(PassDescription&) const = 0;
-    virtual void ResolveResourceRequirements(PassResourceRequirementsContext&) {}
-    virtual void Initialize(PassInitContext&) {}
+    virtual void ResolveResourceRequirements(PassResourceRequirementsContext&);
+    virtual void Initialize(PassInitContext&);
     virtual void Execute(PassExecutionContext&) = 0;
     virtual std::vector<ExternalResourceUse> GetExternalResources(PassExecutionContext& context);
-    virtual void OnResourcesRecreated(PassInitContext&) {}
-    uint32_t GetFlags() { return _flags; }
-    void SetFlag(uint32_t flag, bool value)
-    {
-        if (value) { _flags |= flag; }
-        else { _flags &= ~flag; }
-    }
-    bool GetFlagValue(uint32_t flag) { return _flags & flag; }
+    virtual void OnResourcesRecreated(PassInitContext&);
+    uint32_t GetFlags();
+    void SetFlag(uint32_t flag, bool value);
+    bool GetFlagValue(uint32_t flag);
 
 protected:
     // These flags control scene uploads and external resource tracking on this GPU.

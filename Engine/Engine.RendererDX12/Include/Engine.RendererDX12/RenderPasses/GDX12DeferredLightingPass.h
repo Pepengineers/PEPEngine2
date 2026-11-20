@@ -4,7 +4,7 @@
 class GDX12DeferredLightingPass final : public GDX12RenderPass
 {
 public:
-    GDX12DeferredLightingPass() { _flags = RENDER_PASS_FLAG_USE_LIGHTING | RENDER_PASS_FLAG_USE_CAMERAS; }
+    GDX12DeferredLightingPass();
     void Describe(PassDescription& s) const override;
     void Initialize(PassInitContext& context) override;
     void Execute(PassExecutionContext& context) override;
