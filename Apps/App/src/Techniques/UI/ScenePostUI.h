@@ -57,7 +57,7 @@ class ScenePostUI
 	          GDX12Texture* renderTarget = nullptr, State textureState = D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
 	struct ScreenSlot
 	{
-		std::unique_ptr<GDX12Texture> Target;
+		std::unique_ptr<GDX12Texture> Target, HealthBar;
 		std::shared_ptr<const Engine::UI::DrawData> Draw;
 		std::shared_ptr<const void> RasterOwner, CompositeOwner;
 	};
@@ -68,6 +68,8 @@ class ScenePostUI
 	SceneTextureInspector _inspector;
 	GDX12Texture* _hudAtlas = nullptr;
 	std::unique_ptr<ImDrawList> _gameOverlay;
+	std::unique_ptr<GDX12RootSignature> _healthBarRoot;
+	ComPtr<ID3D12PipelineState> _healthBarPipeline;
 	GDX12DepthOfFieldPass _dof;
 	GDX12MotionBlurPass _blur;
 	GDX12ReconstructionPass _reconstruction;

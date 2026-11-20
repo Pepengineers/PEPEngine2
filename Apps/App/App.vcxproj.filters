@@ -48,6 +48,7 @@
     <ClCompile Include="src\Techniques\UI\SceneTextureInspector.cpp" />
     <ClInclude Include="src\Techniques\UI\SceneTextureInspector.h" />
     <None Include="Shaders\SceneTextureInspector.hlsl" />
+    <None Include="Shaders\BistroHealthBar.hlsl" />
     <ClInclude Include="src\Techniques\UI\BistroUICanvases.h" />
     <ClInclude Include="src\Techniques\UI\BistroGameHUD.h" />
     <ClInclude Include="src\Techniques\UI\BistroUIPosters.h" />
