@@ -130,6 +130,7 @@ void Executor::Begin(uint32_t index)
 	_slot = index;
 	_begun = true;
 	_tokens.clear();
+	_completions.clear();
 }
 bool Executor::TryBegin(uint32_t index)
 {
@@ -153,6 +154,7 @@ bool Executor::TryBegin(uint32_t index)
 	_slot = index;
 	_begun = true;
 	_tokens.clear();
+	_completions.clear();
 	return true;
 }
 void Executor::Drain()

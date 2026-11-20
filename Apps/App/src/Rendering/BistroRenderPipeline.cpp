@@ -40,7 +40,7 @@ void BistroRenderPipeline::Initialize(RenderPipelineContext& c)
 
 void BistroRenderPipeline::PrepareMaterialBindings(RenderPipelineContext& c)
 {
-	_cloudPicture->UpdateSettings([this] { _executor->Drain(); });
+	_cloudPicture->UpdateSettings(_executor);
 	const UINT slot = c.Primary.CurrFrameConstantsIndex;
 	_executor->Begin(slot);
 	_animationTime += (std::max)(0.0, double(c.Common.GameTimer->DeltaTime()));
@@ -108,6 +108,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 		{
 			_environment->Append(graph, resources);
 		}
+		if (_cloudPicture->IsRemote()) _cloudPicture->Append(graph, resources);
 		const auto posters = _post->AppendPosters(graph, resources);
 		_geometry->AppendWorldCanvases(graph, slot, posters);
 		_lighting->SetHDRContinuation(
@@ -136,7 +137,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	};
 	const auto prelude = [&](BistroRender::Graph& graph, std::vector<ID3D12Resource*>& resources)
 	{
-		_cloudPicture->Append(graph, resources);
+		if (!_cloudPicture->IsRemote()) _cloudPicture->Append(graph, resources);
 		particles.AppendSimulation(graph, resources, ParticleInputs::Frame, depth);
 		water.AppendSimulation(graph, resources);
 		_lighting->AppendGpuLightGrid(graph, resources, *_geometry);
@@ -159,16 +160,19 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 			_geometry->Record(slot, op, list, commands);
 		}
 	};
+	const auto waits = _cloudPicture->Waits(_schedule);
 	uint64_t completion;
 	try
 	{
-		completion = _executor->Execute(_schedule, _geometry->PlannedResources(slot), record, prefix);
+		completion = _executor->Execute(_schedule, _geometry->PlannedResources(slot), record, prefix, nullptr, nullptr, waits);
 	}
 	catch (...)
 	{
+		_cloudPicture->Submitted(_executor->Completions(), false);
 		_post->Reconstruction().CancelRecording();
 		throw;
 	}
+	_cloudPicture->Submitted(_executor->Completions(), true);
 	_post->Submitted(slot);
 	_environment->Submitted(completion);
 	_lighting->Submitted(completion);
