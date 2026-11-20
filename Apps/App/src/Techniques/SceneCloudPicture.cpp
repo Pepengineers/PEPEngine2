@@ -14,14 +14,24 @@ AutoConsoleVariable<int> Height(L"App.CloudPicture.Height", 512, L"Cloud picture
 AutoConsoleVariable<int> Adapter(L"App.CloudPicture.Adapter", -1,
     L"Cloud Picture GPU in the Render.PrimaryAdapter hardware list. -1 uses the primary GPU.",
     EConsoleVariableFlags::Default, [](int v) { return v >= -1; });
+AutoConsoleVariable<bool> CrossSync(L"App.CloudPicture.CrossSync", false,
+    L"Remote clouds: 0 imports the latest completed image, 1 queues an import waiting for this frame's export.");
 struct Settings {
     bool Active;
     int Width, Height, Adapter;
+    CloudPictureMode Mode;
     bool operator==(const Settings& other) const {
-        return Active == other.Active && Width == other.Width && Height == other.Height && Adapter == other.Adapter;
+        return Active == other.Active && Width == other.Width && Height == other.Height &&
+            Adapter == other.Adapter && Mode == other.Mode;
     }
 };
-Settings Requested() { return {Enabled.GetValue(), Width.GetValue(), Height.GetValue(), Adapter.GetValue()}; }
+Settings Requested() {
+    const int adapter = Adapter.GetValue();
+    auto mode = CloudPictureMode::Local;
+    if (adapter >= 0)
+        mode = CrossSync.GetValue() ? CloudPictureMode::CurrentFrame : CloudPictureMode::Independent;
+    return {Enabled.GetValue(), Width.GetValue(), Height.GetValue(), adapter, mode};
+}
 
 bool SameAdapter(LUID a, LUID b) {
     return a.HighPart == b.HighPart && a.LowPart == b.LowPart;
@@ -72,7 +82,7 @@ void SceneCloudPicture::UpdateSettings(std::unique_ptr<Executor>& executor) {
         }
         if (next.Active) {
             replacement = std::make_unique<CloudPictureTexture>(p.Resources, next.Width, next.Height,
-                replacementExecutor ? replacementExecutor->Submissions() : executor->Submissions(), adapter >= 0);
+                replacementExecutor ? replacementExecutor->Submissions() : executor->Submissions(), next.Mode);
         }
     } catch (const DxException& error) {
         reject(error.ToString());
@@ -87,7 +97,7 @@ void SceneCloudPicture::UpdateSettings(std::unique_ptr<Executor>& executor) {
         };
         try {
             p.Texture = std::make_unique<CloudPictureTexture>(p.Resources, next.Width, next.Height,
-                executor->Submissions(), false);
+                executor->Submissions(), CloudPictureMode::Local);
         } catch (const DxException& error) {
             fallbackFailed(error.ToString());
         } catch (const std::exception& error) {

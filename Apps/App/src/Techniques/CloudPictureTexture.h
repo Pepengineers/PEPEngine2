@@ -3,11 +3,12 @@
 #include "Engine.RendererDX12/GDX12DeviceResources.h"
 
 namespace BistroRender {
+enum class CloudPictureMode { Local, Independent, CurrentFrame };
 // The scene owner drains the frame executor before replacing textures.
 class CloudPictureTexture {
 public:
     CloudPictureTexture(GDX12DeviceResources& primary, UINT width, UINT height,
-                        std::shared_ptr<QueueSubmission>, bool remote);
+                        std::shared_ptr<QueueSubmission>, CloudPictureMode mode);
     ~CloudPictureTexture();
     void Prepare(UINT frameSlot, double totalTime);
     GDX12Texture* Texture(UINT frameSlot) const;

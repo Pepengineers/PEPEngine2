@@ -68,7 +68,9 @@ struct CloudPictureTexture::Impl
 	};
 	struct RemoteProducer
 	{
-		std::array<SharedSlot, 3> Slots;
+		std::vector<SharedSlot> Slots;
+		Schedule ExportSchedule;
+		std::unique_ptr<Executor> FrameExecutor;
 		std::unique_ptr<GDX12DescriptorHeap> Heap;
 		GDX12ResourceHandle Output;
 		D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{};
@@ -95,7 +97,7 @@ struct CloudPictureTexture::Impl
 	UINT Width, Height, CurrentSlot = 0;
 	Id ImportOperation = Invalid, ImportPacket = Invalid;
 
-	Impl(GDX12DeviceResources& primary, UINT width, UINT height, std::shared_ptr<QueueSubmission> submit, bool remote)
+	Impl(GDX12DeviceResources& primary, UINT width, UINT height, std::shared_ptr<QueueSubmission> submit, CloudPictureMode mode)
 	    : Primary(primary), Submit(std::move(submit)), Slots(primary.FrameConstants.size()), Width(width), Height(height)
 	{
 		if (!primary.Device || Slots.empty() || !width || !height || width > D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION ||
@@ -103,12 +105,13 @@ struct CloudPictureTexture::Impl
 		{
 			throw std::invalid_argument("Cloud picture grid must be nonzero and within D3D12 Texture2D limits");
 		}
+		const bool remote = mode != CloudPictureMode::Local;
 		auto& device = Submit->Device(remote ? 1 : 0);
 		CheckFormat(*primary.Device, !remote);
 		if (remote)
 		{
 			CheckFormat(device, true);
-			InitializeRemote(device);
+			InitializeRemote(device, mode);
 		}
 		GDX12RootSignatureDesc root;
 		root.Constants = {sizeof(CloudGeneratorData) / sizeof(UINT)};
@@ -142,12 +145,18 @@ struct CloudPictureTexture::Impl
 			texture->Initialize(target);
 		}
 		Log::Info("RenderGraph", "CloudPicture effective=", width, "x", height,
-		          " format=RGBA8_UNORM frameSlots=", Slots.size(), " remote=", remote);
+		          " format=RGBA8_UNORM frameSlots=", Slots.size(), " remote=", remote,
+		          " CrossSync=", int(mode == CloudPictureMode::CurrentFrame));
 	}
-	void InitializeRemote(GDX12Device& device)
+	void InitializeRemote(GDX12Device& device, CloudPictureMode mode)
 	{
 		Remote = std::make_unique<RemoteProducer>();
 		auto& remote = *Remote;
+		const bool frameSync = mode == CloudPictureMode::CurrentFrame;
+		remote.Slots.resize(frameSync ? Slots.size() : 3);
+		remote.ExportSchedule = BuildExportSchedule();
+		if (frameSync)
+			remote.FrameExecutor = std::make_unique<Executor>(Submit, 1, UINT(Slots.size()), 1);
 		const auto desc = CD3DX12_RESOURCE_DESC::Tex2D(
 		    Format, Width, Height, 1, 1, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
 		uint64_t bytes = 0, primaryBytes = 0;
@@ -228,9 +237,8 @@ struct CloudPictureTexture::Impl
 			Submit->CheckHealth();
 		}
 	}
-	void Produce(Executor& executor, double phase, Clock::time_point epoch)
+	static Schedule BuildExportSchedule()
 	{
-		auto& remote = *Remote;
 		Graph graph;
 		graph.Device = 1;
 		graph.FrameBoundary = false;
@@ -244,7 +252,32 @@ struct CloudPictureTexture::Impl
 		{
 			operation.Target = Queue::Compute;
 		}
-		const auto schedule = Compile(graph);
+		return Compile(graph);
+	}
+	CompletionToken SubmitExport(Executor& executor, SharedSlot& slot, const CloudGeneratorData& parameters)
+	{
+		auto& remote = *Remote;
+		auto* output = remote.Output.Get();
+		auto* shared = slot.Buffer.Resources[1].Get();
+		executor.Reserve(remote.ExportSchedule);
+		executor.Execute(remote.ExportSchedule, {output, shared},
+		    [&](Id operation, uint32_t, auto* cmd)
+		    {
+			    if (operation == 0)
+			    {
+				    Dispatch(cmd, parameters, remote.Heap->GetGPUHandle(0));
+			    }
+			    else
+			    {
+				    const CD3DX12_TEXTURE_COPY_LOCATION source(output, 0u), target(shared, remote.Footprint);
+				    cmd->CopyTextureRegion(&target, 0, 0, 0, &source, nullptr);
+			    }
+		    });
+		return executor.Completions().back();
+	}
+	void Produce(Executor& executor, double phase, Clock::time_point epoch)
+	{
+		auto& remote = *Remote;
 		std::unique_lock lock(remote.Mutex);
 		while (!remote.Stop)
 		{
@@ -265,24 +298,8 @@ struct CloudPictureTexture::Impl
 			{
 				throw std::logic_error("CloudPicture export completed before its recording slot retired");
 			}
-			executor.Reserve(schedule);
 			parameters.TotalTime = float(phase + std::chrono::duration<double>(Clock::now() - epoch).count());
-			auto* output = remote.Output.Get();
-			auto* shared = slot.Buffer.Resources[1].Get();
-			executor.Execute(schedule, {output, shared},
-			    [&](Id operation, uint32_t, auto* cmd)
-			    {
-				    if (operation == 0)
-				    {
-					    Dispatch(cmd, parameters, remote.Heap->GetGPUHandle(0));
-				    }
-				    else
-				    {
-					    const CD3DX12_TEXTURE_COPY_LOCATION source(output, 0u), target(shared, remote.Footprint);
-					    cmd->CopyTextureRegion(&target, 0, 0, 0, &source, nullptr);
-				    }
-			    });
-			const auto token = executor.Completions().back();
+			const auto token = SubmitExport(executor, slot, parameters);
 			lock.lock();
 			slot.Export = token;
 			slot.Version = remote.Exports + 1;
@@ -336,6 +353,7 @@ struct CloudPictureTexture::Impl
 	{
 		if (!Remote) return;
 		Stop();
+		if (Remote->FrameExecutor) Remote->FrameExecutor->Drain();
 		if (Remote->DrainFailed)
 		{
 			throw std::runtime_error("CloudPicture GPU1 could not retire submitted commands");
@@ -358,8 +376,8 @@ struct CloudPictureTexture::Impl
 };
 
 CloudPictureTexture::CloudPictureTexture(GDX12DeviceResources& primary, UINT width, UINT height,
-                                         std::shared_ptr<QueueSubmission> submit, bool remote)
-    : _impl(std::make_unique<Impl>(primary, width, height, std::move(submit), remote))
+                                         std::shared_ptr<QueueSubmission> submit, CloudPictureMode mode)
+    : _impl(std::make_unique<Impl>(primary, width, height, std::move(submit), mode))
 {
 }
 CloudPictureTexture::~CloudPictureTexture()
@@ -390,6 +408,18 @@ void CloudPictureTexture::Prepare(UINT frameSlot, double totalTime)
 	if (p.Remote)
 	{
 		auto& remote = *p.Remote;
+		if (remote.FrameExecutor)
+		{
+			// GPU0 Begin(frameSlot) retired this slot's previous import and display readers.
+			auto& slot = remote.Slots.at(frameSlot);
+			remote.FrameExecutor->Begin(frameSlot);
+			p.Parameters.TotalTime = float(totalTime);
+			p.Parameters.CloudSpeed = 0.006f * SpeedScale.GetValue();
+			slot.Export = p.SubmitExport(*remote.FrameExecutor, slot, p.Parameters);
+			slot.Version = ++remote.Exports;
+			remote.Pinned = frameSlot;
+			return;
+		}
 		std::unique_lock lock(remote.Mutex);
 		p.Parameters.CloudSpeed = 0.006f * SpeedScale.GetValue();
 		if (!remote.Thread.joinable())
@@ -465,7 +495,11 @@ bool CloudPictureTexture::IsRemote() const { return bool(_impl->Remote); }
 
 void CloudPictureTexture::Presented()
 {
-	if (_impl->Remote) ++_impl->Remote->Frames;
+	if (!_impl->Remote) return;
+	auto& remote = *_impl->Remote;
+	++remote.Frames;
+	if (remote.FrameExecutor && remote.Frames == 1)
+		Log::Info("RenderGraph", "CloudPicture CrossSync=1 first frame presented, imported version=", remote.ImportedVersion);
 }
 
 void CloudPictureTexture::Submitted(const std::vector<CompletionToken>& completions)
