@@ -3,7 +3,7 @@
 #include "Engine.RendererDX12/GDX12DeviceResources.h"
 
 namespace BistroRender {
-enum class CloudPictureMode { Local, Independent, CurrentFrame };
+enum class CloudPictureMode { Local = -1, PreviousFrame = 0, CurrentFrame = 1, Independent = 2, Count };
 // The scene owner drains the frame executor before replacing textures.
 class CloudPictureTexture {
 public:

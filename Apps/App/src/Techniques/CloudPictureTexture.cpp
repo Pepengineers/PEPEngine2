@@ -82,11 +82,13 @@ struct CloudPictureTexture::Impl
 		bool Stop = false, DrainFailed = false;
 		// IDs and tokens are scoped to this resource generation (one RemoteProducer).
 		Id Latest = Invalid, Pending = Invalid, Pinned = Invalid;
+		Id LastOrder = Invalid; // Previous framed order; its slot holds the version and export token.
 		uint64_t Exports = 0, Frames = 0, Imports = 0, Repeats = 0, ImportedVersion = 0;
 	};
 
 	GDX12DeviceResources& Primary;
 	std::shared_ptr<QueueSubmission> Submit;
+	const CloudPictureMode Mode;
 	std::unique_ptr<RemoteProducer> Remote;
 	std::unique_ptr<GDX12RootSignature> Root;
 	ComPtr<ID3D12PipelineState> Pipeline;
@@ -98,7 +100,8 @@ struct CloudPictureTexture::Impl
 	Id ImportOperation = Invalid, ImportPacket = Invalid;
 
 	Impl(GDX12DeviceResources& primary, UINT width, UINT height, std::shared_ptr<QueueSubmission> submit, CloudPictureMode mode)
-	    : Primary(primary), Submit(std::move(submit)), Slots(primary.FrameConstants.size()), Width(width), Height(height)
+	    : Primary(primary), Submit(std::move(submit)), Mode(mode), Slots(primary.FrameConstants.size()), Width(width),
+	      Height(height)
 	{
 		if (!primary.Device || Slots.empty() || !width || !height || width > D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION ||
 		    height > D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION)
@@ -111,7 +114,7 @@ struct CloudPictureTexture::Impl
 		if (remote)
 		{
 			CheckFormat(device, true);
-			InitializeRemote(device, mode);
+			InitializeRemote(device);
 		}
 		GDX12RootSignatureDesc root;
 		root.Constants = {sizeof(CloudGeneratorData) / sizeof(UINT)};
@@ -146,14 +149,15 @@ struct CloudPictureTexture::Impl
 		}
 		Log::Info("RenderGraph", "CloudPicture effective=", width, "x", height,
 		          " format=RGBA8_UNORM frameSlots=", Slots.size(), " remote=", remote,
-		          " CrossSync=", int(mode == CloudPictureMode::CurrentFrame));
+		          " CrossSync=", int(Mode));
 	}
-	void InitializeRemote(GDX12Device& device, CloudPictureMode mode)
+	void InitializeRemote(GDX12Device& device)
 	{
 		Remote = std::make_unique<RemoteProducer>();
 		auto& remote = *Remote;
-		const bool frameSync = mode == CloudPictureMode::CurrentFrame;
-		remote.Slots.resize(frameSync ? Slots.size() : 3);
+		const bool frameSync = Mode != CloudPictureMode::Independent;
+		const size_t historySlots = Mode == CloudPictureMode::PreviousFrame ? 1 : 0;
+		remote.Slots.resize(frameSync ? Slots.size() + historySlots : 3);
 		remote.ExportSchedule = BuildExportSchedule();
 		if (frameSync)
 			remote.FrameExecutor = std::make_unique<Executor>(Submit, 1, UINT(Slots.size()), 1);
@@ -410,14 +414,25 @@ void CloudPictureTexture::Prepare(UINT frameSlot, double totalTime)
 		auto& remote = *p.Remote;
 		if (remote.FrameExecutor)
 		{
-			// GPU0 Begin(frameSlot) retired this slot's previous import and display readers.
-			auto& slot = remote.Slots.at(frameSlot);
+			const bool previousFrame = p.Mode == CloudPictureMode::PreviousFrame;
+			const Id previous = remote.LastOrder;
+			// The export ring advances with orders. GPU0's display and allocator slots can cycle separately.
+			const Id output = previousFrame
+			                      ? (previous == Invalid ? 0 : Id((previous + 1) % remote.Slots.size()))
+			                      : frameSlot;
+			auto& slot = remote.Slots.at(output);
 			remote.FrameExecutor->Begin(frameSlot);
+			for (auto reader : slot.Readers)
+			{
+				if (reader) p.Submit->Wait(reader);
+			}
+			slot.Readers = {};
 			p.Parameters.TotalTime = float(totalTime);
 			p.Parameters.CloudSpeed = 0.006f * SpeedScale.GetValue();
 			slot.Export = p.SubmitExport(*remote.FrameExecutor, slot, p.Parameters);
 			slot.Version = ++remote.Exports;
-			remote.Pinned = frameSlot;
+			remote.LastOrder = output;
+			remote.Pinned = previousFrame && previous != Invalid ? previous : output;
 			return;
 		}
 		std::unique_lock lock(remote.Mutex);
@@ -498,8 +513,10 @@ void CloudPictureTexture::Presented()
 	if (!_impl->Remote) return;
 	auto& remote = *_impl->Remote;
 	++remote.Frames;
-	if (remote.FrameExecutor && remote.Frames == 1)
-		Log::Info("RenderGraph", "CloudPicture CrossSync=1 first frame presented, imported version=", remote.ImportedVersion);
+	if (remote.FrameExecutor && remote.Frames <= 4)
+		Log::Info("RenderGraph", "CloudPicture CrossSync=", int(_impl->Mode), " presented frame=", remote.Frames,
+		          " ordered version=", remote.Slots.at(remote.LastOrder).Version,
+		          " imported version=", remote.ImportedVersion);
 }
 
 void CloudPictureTexture::Submitted(const std::vector<CompletionToken>& completions)
