@@ -7,6 +7,7 @@
 #include "App.Base/Modules/RenderModule.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -1049,6 +1050,56 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
 
     world.ActiveCamera = camera;
     renderModule->SetActiveCamera(&camera.GetComponent<CameraComponent>());
+
+    auto createLight = [&ecs](const char* name, LightType type, Vector3 position, float range, float intensity,
+        Vector3 direction = Vector3(0, -1, 0)) -> LightComponent&
+        {
+            direction.Normalize();
+            const Vector3 rotation(
+                XMConvertToDegrees(std::asin(-direction.y)),
+                XMConvertToDegrees(std::atan2(direction.x, direction.z)),
+                0);
+            auto entity = ecs.CreateEntity();
+            entity.AddComponent<NameComponent>(name);
+            entity.AddComponent<TransformComponent>(position, rotation);
+            auto& light = entity.AddComponent<LightComponent>();
+            light.Type = type;
+            light.Range = range;
+            light.Intensity = intensity;
+            return light;
+        };
+
+    auto& sun = createLight("Sun", LightType::Directional, Vector3::Zero, 0, 4.0f, Vector3(0.35f, -1.0f, 0.25f));
+    sun.Color = Vector3(1.0f, 0.95f, 0.875f);
+
+    // Interior MASTER_Interior_01_Paris_Lantern, below each shade opening.
+    createLight("paris_building_01_interior_63", LightType::Point, { 722.376f, 248.922f, -278.580f }, 450.000f, 120.000f);
+    createLight("paris_building_01_interior_105", LightType::Point, { 879.741f, 248.922f, -192.013f }, 450.000f, 120.000f);
+    createLight("paris_building_01_interior_106", LightType::Point, { 1037.195f, 248.922f, -105.398f }, 450.000f, 120.000f);
+    createLight("paris_building_01_interior_107", LightType::Point, { 662.391f, 248.922f, -420.726f }, 450.000f, 120.000f);
+
+    // Four Paris_Ceiling_Light map_Ke disks, point and downlight below each lower shade rim.
+    createLight("Paris_Ceiling_Light_01_Bulb", LightType::Point, { 611.446f, 292.996f, -849.156f }, 550.000f, 150.000f);
+    createLight("Paris_Ceiling_Light_01_Downlight", LightType::Spot, { 611.446f, 292.996f, -849.156f }, 1000.000f, 400.000f);
+    createLight("Paris_Ceiling_Light_02_Bulb", LightType::Point, { 424.950f, 307.563f, -493.348f }, 550.000f, 150.000f);
+    createLight("Paris_Ceiling_Light_02_Downlight", LightType::Spot, { 424.950f, 307.563f, -493.348f }, 1000.000f, 400.000f);
+    createLight("Paris_Ceiling_Light_03_Bulb", LightType::Point, { 500.106f, 307.563f, -50.352f }, 550.000f, 150.000f);
+    createLight("Paris_Ceiling_Light_03_Downlight", LightType::Spot, { 500.106f, 307.563f, -50.352f }, 1000.000f, 400.000f);
+    createLight("Paris_Ceiling_Light_04_Bulb", LightType::Point, { 798.379f, 307.563f, 100.141f }, 550.000f, 150.000f);
+    createLight("Paris_Ceiling_Light_04_Downlight", LightType::Spot, { 798.379f, 307.563f, 100.141f }, 1000.000f, 400.000f);
+
+    // Seven Paris_Wall_Bulb_Light components, 2 units below the bulb surface.
+    createLight("Paris_Wall_Light_Interior_01", LightType::Point, { 191.903f, 249.558f, -811.007f }, 450.000f, 100.000f);
+    createLight("Paris_Wall_Light_Interior_02", LightType::Point, { 50.266f, 249.558f, -551.061f }, 450.000f, 100.000f);
+    createLight("Paris_Wall_Light_Interior_03", LightType::Point, { -94.535f, 249.558f, -284.018f }, 450.000f, 100.000f);
+    createLight("Paris_Wall_Light_Interior_04", LightType::Point, { 41.186f, 249.558f, 55.168f }, 450.000f, 100.000f);
+    createLight("Paris_Wall_Light_Interior_05", LightType::Point, { 335.848f, 249.558f, 194.410f }, 450.000f, 100.000f);
+    createLight("Paris_Wall_Light_Interior_06", LightType::Point, { 617.429f, 249.558f, 305.031f }, 450.000f, 100.000f);
+    createLight("Paris_Wall_Light_Interior_02A", LightType::Point, { 773.119f, 241.921f, -463.083f }, 450.000f, 100.000f);
+
+    // Two ceiling fan bottom glass globes
+    createLight("Paris_CeilingFan_01A_Base_mesh_01__2_", LightType::Point, { 639.938f, 351.970f, 88.496f }, 450.000f, 120.000f);
+    createLight("Paris_CeilingFan_01A_Base_mesh_01", LightType::Point, { 340.091f, 351.970f, -97.993f }, 450.000f, 120.000f);
     
     return true;
 }

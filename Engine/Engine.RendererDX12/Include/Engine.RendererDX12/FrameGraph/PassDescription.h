@@ -130,6 +130,7 @@ struct ResourceDescription
     uint32_t Width = 0;
     uint32_t Height = 0;
     uint32_t ArraySize = 1;
+    uint16_t MipLevels = 1;
     uint64_t Capacity = 1;
     uint32_t Stride = 0;
     std::string Layout;

@@ -24,8 +24,10 @@ public:
             std::pair{DEVICE_ROLE_SECONDARY, secondaryFlags}};
         const auto pipelineFlags = primaryFlags | secondaryFlags;
 
+        const CameraComponent* lightingCamera = nullptr;
+        Matrix lightingView, lightingProjection;
         ecs.ForEach<TransformComponent, CameraComponent>(
-            [&ecs, &renderModule, &numFrames, &devices, pipelineFlags](Entity entity, TransformComponent& transform, CameraComponent& camera)
+            [&](Entity entity, TransformComponent& transform, CameraComponent& camera)
             {
                 // Active camera requires constant update due to jittering
                 auto pipelineCommonData = renderModule->GetRenderPipelineCommonData();
@@ -98,6 +100,13 @@ public:
                     }
 
                     camera.ViewProj = view * proj;
+                    if (isActiveCamera && (pipelineFlags & RENDER_PASS_FLAG_USE_LIGHTING))
+                    {
+                        lightingCamera = &camera;
+                        lightingView = view;
+                        lightingProjection = proj;
+                        XMStoreFloat4x4(&objConstants.InvViewProj, XMMatrixTranspose(camera.ViewProj.Invert()));
+                    }
 
                     XMStoreFloat4x4(&objConstants.ViewProj, XMMatrixTranspose(view * proj));
                     XMStoreFloat4x4(&objConstants.View, XMMatrixTranspose(view));
@@ -122,6 +131,8 @@ public:
                 auto& GPUData = renderModule->GetTransformGPUData(entity);
                 if (transform.DirtyFlag)
                 {
+                    if (ecs.Has<LightComponent>(entity))
+                        ecs.Get<LightComponent>(entity).DirtyFlag = true;
                     transform.DirtyFlag = false;
                     GPUData.NumFramesDirty = numFrames;
                 }
@@ -216,6 +227,65 @@ public:
                 }
             });
 
+        if (!lightingCamera) { return; }
+
+        auto& grid = renderModule->GetLightingGrid();
+        const auto& lights = ecs.GetPool<LightComponent>();
+        grid.Lights.resize(lights.Size());
+
+        grid.ActiveLightIndices.clear();
+        for (const auto& [role, flags] : devices)
+        {
+            if (flags & RENDER_PASS_FLAG_USE_LIGHTING)
+                renderModule->GetCurrentFrameConstants(role)->LightsCache->Resize(static_cast<UINT>(lights.Size()));
+        }
+
+        UINT nextLightIndex = 0;
+        ecs.ForEach<LightComponent>([&](Entity entity, LightComponent& light)
+        {
+            const UINT index = nextLightIndex++;
+            const bool hasTransform = ecs.Has<TransformComponent>(entity);
+            if (light.Enabled && hasTransform) { grid.ActiveLightIndices.push_back(index); }
+
+            auto& data = grid.Lights[index];
+            // Removing a light can move the last component into its buffer slot.
+            if (light.DirtyFlag || light._CBufferIndex != index)
+            {
+                data = {};
+                data.Type = light.Type;
+                data.Color = light.Color;
+                data.Intensity = light.Intensity;
+                data.Range = light.Range;
+                const float outer = std::clamp(light.OuterAngle, 1.0f, 89.0f);
+                data.OuterConeCos = std::cos(XMConvertToRadians(outer));
+                data.InnerConeCos = std::cos(XMConvertToRadians(std::clamp(light.InnerAngle, 0.0f, outer)));
+                if (hasTransform)
+                {
+                    const auto& transform = ecs.Get<TransformComponent>(entity);
+                    data.Position = transform.Location;
+                    const auto rotation = Matrix::CreateFromYawPitchRoll(XMConvertToRadians(transform.Rotation.y),
+                        XMConvertToRadians(transform.Rotation.x), XMConvertToRadians(transform.Rotation.z));
+                    data.Direction = -rotation.Forward();
+                }
+                light._CBufferIndex = index;
+                light._numFramesDirty = numFrames;
+                light.DirtyFlag = false;
+            }
+
+            if (light._numFramesDirty > 0)
+            {
+                for (const auto& [role, flags] : devices)
+                {
+                    if (flags & RENDER_PASS_FLAG_USE_LIGHTING)
+                        renderModule->GetCurrentFrameConstants(role)->LightsCache->CopyData(index, data);
+                }
+                --light._numFramesDirty;
+            }
+        });
+
+        const auto* pipelineCommonData = renderModule->GetRenderPipelineCommonData();
+        grid.BuildClusterLightMasks(lightingView, lightingProjection, lightingCamera->NearPlane, lightingCamera->FarPlane,
+                                   pipelineCommonData->DownscaledWidth, pipelineCommonData->DownscaledHeight);
     }
 
 private:

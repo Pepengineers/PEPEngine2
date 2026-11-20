@@ -39,36 +39,47 @@ struct Material
     uint RoughnessMapIndex;
 };
 
+// Matches LightType in GDX12ConstantStructures.h.
+#define LIGHT_TYPE_DIRECTIONAL 0u
+#define LIGHT_TYPE_POINT 1u
+#define LIGHT_TYPE_SPOT 2u
+
+struct GDX12LightConstants
+{
+    float3 Position;
+    float Range;
+    float3 Direction;
+    uint Type;
+    float3 Color;
+    float Intensity;
+    float InnerConeCos;
+    float OuterConeCos;
+};
+
+struct LightGridCB
+{
+    uint TileColumns;
+    uint TileRows;
+    uint MaskWordsPerCluster;
+    uint TileSize;
+    uint DepthSlices;
+    float DepthSliceScale;
+    float DepthSliceBias;
+};
+
 struct CameraCB
 {
     float4x4 ViewProj;
     float4x4 ViewProjNoJitter;
     float4x4 View;
     float4x4 PrevViewProjNoJitter;
+    float4x4 InvViewProj;
     float3 CameraLocation;
     float NearPlane;
     float FarPlane;
     float _pad1;
     float _pad2;
     float _pad3;
-};
-
-struct LightCB
-{
-    int LightType; //0 - directional; 1 - point; 2 - spot
-    float Strength;
-    float FalloffStart; // point/spot light only
-    float FalloffEnd; // point/spot light only
-    float3 Direction; // directional/spot light only
-    float SpotLightWidth; // spot light only
-    float3 Position; // point/spot light only
-    float _pad0;
-    float3 Color;
-    float _pad1;
-    float4x4 World;
-    float4x4 ViewProj[6];
-    float4x4 ShadowTransform[6];
-    float4 CascadeDistances;
 };
 
 struct InstanceData

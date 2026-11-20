@@ -20,6 +20,7 @@ namespace
     {
         auto culling = graph.AddPrimaryGPUPass<GDX12GPUCullingPass>("Frustum Culling");
         auto opaque = graph.AddPrimaryGPUPass<GDX12DeferredGeometryPass>("Opaque");
+        auto lighting = graph.AddPrimaryGPUPass<GDX12DeferredLightingPass>("Deferred Lighting");
         auto transparency = graph.AddPrimaryGPUPass<GDX12WBOITTransparencyPass>("Transparency");
         auto composition = graph.AddPrimaryGPUPass<GDX12WBOITCompositionPass>("Composition");
         auto clear = graph.AddPrimaryGPUPass<GDX12TextureClearPass>("Back Buffer Clear");
@@ -32,7 +33,13 @@ namespace
         graph.ConnectNodes(culling.GetOutput("OutOpaqueDrawStream"), opaque.GetInput("InDrawStream"));
         graph.ConnectNodes(culling.GetOutput("OutTransparentDrawStream"), transparency.GetInput("InDrawStream"));
         graph.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), transparency.GetInput("InDepthBuffer"));
-        graph.ConnectNodes(opaque.GetOutput("OutAlbedoMetallic"), composition.GetInput("InOpaqueTexture"));
+        graph.ConnectNodes(inputs.EnvironmentMap, lighting.GetInput("InEnvironmentMap"));
+        graph.ConnectNodes(opaque.GetOutput("OutAlbedoMetallic"), lighting.GetInput("InAlbedoMetallic"));
+        graph.ConnectNodes(opaque.GetOutput("OutNormalRoughness"), lighting.GetInput("InNormalRoughness"));
+        graph.ConnectNodes(opaque.GetOutput("OutF0Baked"), lighting.GetInput("InF0Baked"));
+        graph.ConnectNodes(opaque.GetOutput("OutEmissive"), lighting.GetInput("InEmissive"));
+        graph.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), lighting.GetInput("InDepthBuffer"));
+        graph.ConnectNodes(lighting.GetOutput("OutColorTexture"), composition.GetInput("InOpaqueTexture"));
         graph.ConnectNodes(transparency.GetOutput("OutAccumulationTexture"), composition.GetInput("InAccumulationTexture"));
         graph.ConnectNodes(transparency.GetOutput("OutRevealageTexture"), composition.GetInput("InRevealageTexture"));
         graph.ConnectNodes(composition.GetOutput("OutColorTexture"), upscale.GetInput("InColorTexture"));
@@ -45,6 +52,7 @@ namespace
     {
         auto culling = graph.AddPrimaryGPUPass<GDX12GPUCullingPass>("Frustum Culling");
         auto opaque = graph.AddPrimaryGPUPass<GDX12DeferredGeometryPass>("Opaque");
+        auto lighting = graph.AddPrimaryGPUPass<GDX12DeferredLightingPass>("Deferred Lighting");
         auto transparency = graph.AddPrimaryGPUPass<GDX12WBOITTransparencyPass>("Transparency");
         auto composition = graph.AddPrimaryGPUPass<GDX12WBOITCompositionPass>("Composition");
         auto clear = graph.AddSecondaryGPUPass<GDX12TextureClearPass>("Back Buffer Clear");
@@ -57,7 +65,13 @@ namespace
         graph.ConnectNodes(culling.GetOutput("OutOpaqueDrawStream"), opaque.GetInput("InDrawStream"));
         graph.ConnectNodes(culling.GetOutput("OutTransparentDrawStream"), transparency.GetInput("InDrawStream"));
         graph.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), transparency.GetInput("InDepthBuffer"));
-        graph.ConnectNodes(opaque.GetOutput("OutAlbedoMetallic"), composition.GetInput("InOpaqueTexture"));
+        graph.ConnectNodes(inputs.EnvironmentMap, lighting.GetInput("InEnvironmentMap"));
+        graph.ConnectNodes(opaque.GetOutput("OutAlbedoMetallic"), lighting.GetInput("InAlbedoMetallic"));
+        graph.ConnectNodes(opaque.GetOutput("OutNormalRoughness"), lighting.GetInput("InNormalRoughness"));
+        graph.ConnectNodes(opaque.GetOutput("OutF0Baked"), lighting.GetInput("InF0Baked"));
+        graph.ConnectNodes(opaque.GetOutput("OutEmissive"), lighting.GetInput("InEmissive"));
+        graph.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), lighting.GetInput("InDepthBuffer"));
+        graph.ConnectNodes(lighting.GetOutput("OutColorTexture"), composition.GetInput("InOpaqueTexture"));
         graph.ConnectNodes(transparency.GetOutput("OutAccumulationTexture"), composition.GetInput("InAccumulationTexture"));
         graph.ConnectNodes(transparency.GetOutput("OutRevealageTexture"), composition.GetInput("InRevealageTexture"));
         graph.ConnectNodes(composition.GetOutput("OutColorTexture"), upscale.GetInput("InColorTexture"));

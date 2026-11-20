@@ -45,7 +45,7 @@ namespace
     {
         return CD3DX12_RESOURCE_DESC::Tex2D(description.IsDepth() ? DXGI_FORMAT_R32_TYPELESS : description.Format,
             description.Width, description.Height, static_cast<UINT16>(description.ArraySize),
-            1, 1, 0, TextureFlags(description));
+            description.MipLevels, 1, 0, TextureFlags(description));
     }
 
     GDX12TextureDesc TextureDescription(GDX12DeviceResources* owner, const ResourceDescription& description,
@@ -56,6 +56,7 @@ namespace
         desc.Width = description.Width;
         desc.Height = description.Height;
         desc.ArraySize = description.ArraySize;
+        desc.MipLevels = description.MipLevels;
         desc.IsCube = description.Type == ResourceType::TextureCube;
         desc.Format = description.Format;
         desc.ResourceFormat = description.IsDepth() ? DXGI_FORMAT_R32_TYPELESS : description.Format;
@@ -74,18 +75,18 @@ namespace
             if (description.Type == ResourceType::TextureCube)
             {
                 desc.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
-                desc.SRVDesc.TextureCube.MipLevels = 1;
+                desc.SRVDesc.TextureCube.MipLevels = description.MipLevels;
             }
             else if (description.Type == ResourceType::Texture2DArray)
             {
                 desc.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
                 desc.SRVDesc.Texture2DArray.ArraySize = description.ArraySize;
-                desc.SRVDesc.Texture2DArray.MipLevels = 1;
+                desc.SRVDesc.Texture2DArray.MipLevels = description.MipLevels;
             }
             else
             {
                 desc.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-                desc.SRVDesc.Texture2D.MipLevels = 1;
+                desc.SRVDesc.Texture2D.MipLevels = description.MipLevels;
             }
         }
         if (desc.CreateRTV)
@@ -176,7 +177,7 @@ namespace
         std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT>& footprints, uint64_t& bytes)
     {
         const auto native = NativeTextureDescription(description);
-        const UINT count = description.ArraySize;
+        const UINT count = description.ArraySize * description.MipLevels;
         if (!count || count > D3D12_REQ_SUBRESOURCES) { throw std::invalid_argument("ERROR: Given texture subresource count is zero or exceeds the D3D12 limit. Use a positive layer/mip count "
             "within D3D12_REQ_SUBRESOURCES."); }
         footprints.resize(count);
@@ -319,7 +320,7 @@ std::unique_ptr<FrameGraphPhysicalResource> WrapFrameGraphImport(GDX12DeviceReso
         "owned by the device registered for this import."); }
     const auto actual = DescribeFrameGraphTexture(texture);
     if (actual.Type != description.Type || actual.IsDepth() != description.IsDepth() || actual.Format != description.Format || actual.GetSize() != description.GetSize() ||
-        actual.ArraySize != description.ArraySize)
+        actual.ArraySize != description.ArraySize || actual.MipLevels != description.MipLevels)
     { throw std::invalid_argument("ERROR: Imported FrameGraph texture allocation or description differs from the compiled contract. Rebuild the "
         "frame resources with matching imported targets, or compile a new graph for a changed type or format."); }
     if (((HasUsage(description.Usages, ResourceUsage::PixelShaderRead) || HasUsage(description.Usages, ResourceUsage::NonPixelShaderRead)) && !texture->HasSRV()) ||
@@ -461,7 +462,7 @@ FrameGraphCopyStatistics CopyFrameGraphResource(GDX12CommandList* commands, Fram
         "mappings owned by the device executing the copy."); }
     const auto& a = source.Description;
     const auto& b = target.Description;
-    if (a.Type != b.Type || a.Format != b.Format || a.GetSize() != b.GetSize() || a.ArraySize != b.ArraySize ||
+    if (a.Type != b.Type || a.Format != b.Format || a.GetSize() != b.GetSize() || a.ArraySize != b.ArraySize || a.MipLevels != b.MipLevels ||
         a.Capacity != b.Capacity || a.Stride != b.Stride || a.Layout != b.Layout)
     { throw std::invalid_argument("ERROR: FrameGraph transport source and destination resource descriptions differ. Match the source and "
         "destination resource types, formats, dimensions, layers, capacities, and strides."); }
@@ -487,7 +488,7 @@ FrameGraphCopyStatistics CopyFrameGraphResource(GDX12CommandList* commands, Fram
     {
         auto& payload = sourceTexture ? target : source;
         auto* native = sourceTexture ? sourceTexture : targetTexture;
-        if (payload.Footprints.empty() || payload.Buffers.size() != 1 || payload.Footprints.size() != a.ArraySize)
+        if (payload.Footprints.empty() || payload.Buffers.size() != 1 || payload.Footprints.size() != a.ArraySize * a.MipLevels)
         { throw std::invalid_argument("ERROR: Texture transport has no complete canonical whole-resource copy footprints. Create whole-resource copy "
             "footprints for every texture subresource before transferring it."); }
         for (UINT i = 0; i < payload.Footprints.size(); ++i)
@@ -569,15 +570,15 @@ ResourceDescription DescribeFrameGraphTexture(GDX12Texture* texture)
     { throw std::invalid_argument("ERROR: Given FrameGraph texture is missing or has no native allocation. Provide an initialized GDX12Texture."); }
     const auto& wrapper = texture->GetDescription();
     const auto actual = texture->GetResource()->D3DResource->GetDesc();
-    if (actual.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D || actual.MipLevels != 1 || actual.SampleDesc.Count != 1)
-    { throw std::invalid_argument("ERROR: Given imported texture allocation is not Texture2D, has multiple mips, or uses MSAA. Import a "
-        "two-dimensional allocation with one mip and one sample."); }
+    if (actual.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D || (!wrapper.IsCube && actual.MipLevels != 1) || actual.SampleDesc.Count != 1)
+    { throw std::invalid_argument("ERROR: Expected a single-sample 2D texture allocation. Multiple mips are supported for cubemaps."); }
     ResourceDescription result;
     result.Type = wrapper.IsCube ? ResourceType::TextureCube : actual.DepthOrArraySize > 1 ? ResourceType::Texture2DArray : ResourceType::Texture2D;
     result.Format = wrapper.Format;
     result.Width = static_cast<uint32_t>(actual.Width);
     result.Height = actual.Height;
     result.ArraySize = actual.DepthOrArraySize;
+    result.MipLevels = actual.MipLevels;
     if (wrapper.CreateSRV) { result.Usages |= ResourceUsage::PixelShaderRead | ResourceUsage::NonPixelShaderRead; }
     if (wrapper.CreateRTV) { result.Usages |= ResourceUsage::RenderTarget; }
     if (wrapper.CreateDSV) { result.Usages |= ResourceUsage::DepthWrite | ResourceUsage::DepthRead; }

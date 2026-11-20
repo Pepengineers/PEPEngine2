@@ -33,36 +33,46 @@ struct GDX12MaterialConstants
 };
 static_assert(sizeof(GDX12MaterialConstants) == 68);
 
+enum class LightType : UINT { Directional = 0, Point = 1, Spot = 2 };
+
+struct GDX12LightConstants
+{
+    Vector3 Position;
+    float Range;
+    Vector3 Direction;
+    LightType Type;
+    Vector3 Color;
+    float Intensity;
+    float InnerConeCos;
+    float OuterConeCos;
+};
+static_assert(sizeof(GDX12LightConstants) == 56);
+
+struct GDX12LightGridConstants
+{
+    UINT TileColumns;
+    UINT TileRows;
+    UINT MaskWordsPerCluster;
+    UINT TileSize;
+    UINT DepthSlices;
+    float DepthSliceScale;
+    float DepthSliceBias;
+};
+static_assert(sizeof(GDX12LightGridConstants) == 7 * sizeof(UINT));
+
 struct GDX12CameraConstants
 {
     XMFLOAT4X4 ViewProj = Identity4x4();
     XMFLOAT4X4 ViewProjNoJitter = Identity4x4();
     XMFLOAT4X4 View = Identity4x4();
     XMFLOAT4X4 PrevViewProjNoJitter = Identity4x4();
+    XMFLOAT4X4 InvViewProj = Identity4x4();
     XMFLOAT3 CameraLocation = { 0.f, 0.f, 0.f };
     float NearPlane;
     float FarPlane;
     float _pad1;
     float _pad2;
     float _pad3;
-};
-
-struct GDX12LightConstants
-{
-    int LightType = 0; //0 - directional; 1 - point; 2 - spot
-    float Strength = 1.f;
-    float FalloffStart = 1.0f; // point/spot light only
-    float FalloffEnd = 10.0f;  // point/spot light only
-    XMFLOAT3 Direction = { 0.0f, -1.0f, 0.0f }; // directional/spot light only
-    float SpotLightWidth = 64.0f;                        // spot light only
-    XMFLOAT3 Position = { 0.0f, 0.0f, 0.0f };  // point/spot light only
-    float _pad0;
-    XMFLOAT3 Color = { 1.f, 1.f, 1.f };
-    float _pad1;
-    XMFLOAT4X4 World = Identity4x4();
-    XMFLOAT4X4 ViewProj[6] = { Identity4x4(), Identity4x4(), Identity4x4(), Identity4x4(), Identity4x4(), Identity4x4() };
-    XMFLOAT4X4 ShadowTransform[6] = { Identity4x4(), Identity4x4(), Identity4x4(), Identity4x4(), Identity4x4(), Identity4x4() };
-    XMFLOAT4 CascadeDistances = { 10.0f, 50.0f, 150.0f, 400.0f };
 };
 
 struct GDX12InstanceData

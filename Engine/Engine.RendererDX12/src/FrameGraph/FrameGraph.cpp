@@ -114,15 +114,29 @@ void FrameGraph::AddExecutionDependency(const NodeHandle& before, const NodeHand
 
 OutputPinRef FrameGraph::ImportTexture(NodeId id, std::function<GDX12Texture*()> provider)
 {
-    if (_definition->IsCompiled) { throw std::logic_error("ERROR: Given FrameGraph has already been compiled."); }
-    if (id.empty() || !provider || _definition->Nodes.count(id)) { throw std::invalid_argument("ERROR: Import ID '" + id + "' is empty, already registered, or has no provider."); }
+    if (!provider) { throw std::invalid_argument("Texture import requires a provider."); }
+    auto output = AddImportNode(id);
+    _imports.emplace(id, std::move(provider));
+    return output;
+}
 
+OutputPinRef FrameGraph::ImportTexturePerDevice(NodeId id, std::function<GDX12Texture*(EDeviceRole)> provider)
+{
+    if (!provider) { throw std::invalid_argument("Device-local texture import requires a provider."); }
+    auto output = AddImportNode(id);
+    _deviceLocalImports.emplace(id, std::move(provider));
+    return output;
+}
+
+OutputPinRef FrameGraph::AddImportNode(const NodeId& id)
+{
+    if (_definition->IsCompiled) { throw std::logic_error("FrameGraph is already compiled."); }
+    if (id.empty() || _definition->Nodes.count(id)) { throw std::invalid_argument("Invalid or duplicate texture import ID: " + id); }
     NodeDefinition node;
     node.Id = id;
     auto& port = node.Description.AddOutputTexture("Resource");
     port.RequestedMemory = MemoryType::Local;
     _definition->Nodes.emplace(id, std::move(node));
-    _imports.emplace(id, std::move(provider));
     return OutputPinRef(_definition, {id, "Resource"});
 }
 
@@ -889,6 +903,43 @@ std::unique_ptr<CompiledFrameGraph> FrameGraph::Compile()
     runtime->Common = _common; runtime->Definition = *_definition;
     runtime->CompileData = _compileData;
     runtime->Imports = _imports;
+    // Resolve each immutable input to an ordinary local import on its readers' devices.
+    for (const auto& [id, provider] : _deviceLocalImports)
+    {
+        auto& definition = runtime->Definition;
+        const auto source = definition.Nodes.at(id);
+        bool used = false;
+        for (auto role : {DEVICE_ROLE_PRIMARY, DEVICE_ROLE_SECONDARY})
+        {
+            NodeId localId = id;
+            if (used)
+            {
+                localId += "-secondary";
+                while (definition.Nodes.count(localId)) { localId += "_"; }
+            }
+            bool needed = false;
+            for (auto& edge : definition.Connections)
+            {
+                if (edge.Source.Node != id || definition.Nodes.at(edge.Target.Node).DeviceRole != role) { continue; }
+                if (definition.GetPortDescription(edge.Target).Access != DataAccess::ReadOnly)
+                { throw std::invalid_argument("Device-local texture must be read-only: " + id); }
+                edge.Source.Node = localId;
+                needed = true;
+            }
+            if (!needed) { continue; }
+            auto* texture = provider(role);
+            if (!texture || texture->GetDevice() != (role == DEVICE_ROLE_PRIMARY ? _primary : _secondary))
+            { throw std::invalid_argument("Device-local texture belongs to the wrong adapter: " + id); }
+            if (used)
+            {
+                auto& replica = definition.Nodes.emplace(localId, source).first->second;
+                replica.Id = localId;
+            }
+            runtime->Imports.emplace(localId, [texture]() { return texture; });
+            used = true;
+        }
+        if (!used) { definition.Nodes.erase(id); }
+    }
     for (const auto& imported : runtime->Imports)
     {
         auto* texture = imported.second();

@@ -1,4 +1,4 @@
-#include "CBufferStructures.hlsl"
+#include "CBufferStructures.hlsli"
 
 ConstantBuffer<CameraCB> CBCamera : register(b0);
 

@@ -1,4 +1,4 @@
-#include "CBufferStructures.hlsl"
+#include "CBufferStructures.hlsli"
 #include "FullScreenVS.hlsl"
 
 SamplerState samPointWrap : register(s0);

@@ -18,7 +18,10 @@ std::vector<ExternalResourceUse> GDX12RenderPass::GetExternalResources(PassExecu
         uses.push_back({&frame.MainCB->GetResource(), D3D12_RESOURCE_STATE_GENERIC_READ, {}});
     }
     if (_flags & RENDER_PASS_FLAG_USE_LIGHTING)
-    { uses.push_back({&frame.LightCB->GetResource(), D3D12_RESOURCE_STATE_GENERIC_READ, {}}); }
+    {
+        uses.push_back({&frame.LightsCache->GetResource(), D3D12_RESOURCE_STATE_GENERIC_READ, {}});
+        uses.push_back({&frame.ClusterLightMaskBuffer->GetResource(), D3D12_RESOURCE_STATE_GENERIC_READ, {}});
+    }
     if (_flags & RENDER_PASS_FLAG_USE_GEOMETRY)
     {
         uses.push_back({&resources->IndirectCommandsCache->GetResource(), D3D12_RESOURCE_STATE_GENERIC_READ, {}});

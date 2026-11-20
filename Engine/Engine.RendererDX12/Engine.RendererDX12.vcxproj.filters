@@ -68,6 +68,9 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12FrameConstants.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\ClusteredLightingGrid.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12GPUTimer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -108,6 +111,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12DeferredGeometryPass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12DeferredLightingPass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12SharedAllocation.h">
@@ -175,6 +181,12 @@
     <ClCompile Include="src\GDX12FrameConstants.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\ClusteredLightingGrid.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\GDX12DeferredLightingPass.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="src\GDX12TextureResource.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -193,12 +205,15 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="Shaders\BufferClear.hlsl" />
-    <None Include="Shaders\CBufferStructures.hlsl" />
+    <None Include="Shaders\CBufferStructures.hlsli" />
     <None Include="Shaders\CompositionPass.hlsl" />
     <None Include="Shaders\Culling.hlsl" />
     <None Include="Shaders\ComputeCopy.hlsl" />
     <None Include="Shaders\FullScreenVS.hlsl" />
     <None Include="Shaders\DeferredGeometryPass.hlsl" />
+    <None Include="Shaders\DeferredLightingPass.hlsl" />
+    <None Include="Shaders\IBLPrecomputePass.hlsl" />
+    <None Include="Shaders\PBRMath.hlsli" />
     <None Include="Shaders\TransparentPass.hlsl" />
   </ItemGroup>
 </Project>

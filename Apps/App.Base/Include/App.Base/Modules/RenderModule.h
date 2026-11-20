@@ -6,6 +6,7 @@
 
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Engine.RendererDX12/FrameGraph/FrameGraph.h"
+#include "Engine.RendererDX12/ClusteredLightingGrid.h"
 #include "Engine.Core/ECS/Entity.h"
 #include "Engine.Core/ECS/Event.h"
 
@@ -36,6 +37,7 @@ struct FrameGraphInputs
 {
     OutputPinRef BackBuffer;
     OutputPinRef DepthStencil;
+    OutputPinRef EnvironmentMap;
 };
 
 class RenderModule final : public Module
@@ -84,6 +86,8 @@ public:
         ListenerHandle CameraCreated = 0;
         ListenerHandle CameraDestroyed = 0;
         ListenerHandle CameraUpdated = 0;
+        ListenerHandle LightCreated = 0;
+        ListenerHandle LightUpdated = 0;
 
         ListenerHandle RenderCompCreated = 0;
         ListenerHandle RenderCompDestroyed = 0;
@@ -91,6 +95,7 @@ public:
     };
 
     TransformCompGPUData& GetTransformGPUData(Entity entity);
+    ClusteredLightingGrid& GetLightingGrid() { return _lightingGrid; }
 
     // this function adds listeners to new world
     void SubscribeToWorld(World& world);
@@ -140,7 +145,8 @@ private:
     void UnsubscribeFromSceneManager();
     void UnsubscribeFromAllWorlds();
 
-    GDX12Texture* CreateDX12Texture(const std::string& name, GDX12DeviceResources* resources, const Texture* texture);
+    GDX12Texture* GetEnvironmentMap(EDeviceRole role);
+    GDX12Texture* CreateDX12Texture(const std::string& name, GDX12DeviceResources* resources, const Texture* texture, bool useSRGB = false);
 
     GameTimer* _timer;
     Window* _window;
@@ -159,6 +165,7 @@ private:
     std::unique_ptr<GDX12Device> _primaryDevice;
     std::unique_ptr<GDX12Device> _secondaryDevice;
 
+    ClusteredLightingGrid _lightingGrid;
     GDX12DeviceResources _primaryResources;
     GDX12DeviceResources _secondaryResources;
     std::unordered_map<std::string, std::unique_ptr<GPUTexture>> _textures;

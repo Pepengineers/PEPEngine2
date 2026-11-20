@@ -5,6 +5,7 @@
 
 #include "App.Base/Modules/SceneManagerModule.h"
 #include "Common/ConsoleVariables.h"
+#include "Engine.Core/AssetManager.h"
 
 #include "Engine.RendererDX12/GDX12SwapChain.h"
 #include "Engine.RendererDX12/GDX12StreamlineSDK.h"
@@ -15,6 +16,7 @@ namespace
     {
         auto culling = graph.AddPrimaryGPUPass<GDX12GPUCullingPass>("Frustum Culling");
         auto opaque = graph.AddPrimaryGPUPass<GDX12DeferredGeometryPass>("Opaque");
+        auto lighting = graph.AddPrimaryGPUPass<GDX12DeferredLightingPass>("Deferred Lighting");
         auto transparency = graph.AddPrimaryGPUPass<GDX12WBOITTransparencyPass>("Transparency");
         auto composition = graph.AddPrimaryGPUPass<GDX12WBOITCompositionPass>("Composition");
         auto clear = graph.AddPrimaryGPUPass<GDX12TextureClearPass>("Back Buffer Clear");
@@ -26,7 +28,13 @@ namespace
         graph.ConnectNodes(culling.GetOutput("OutOpaqueDrawStream"), opaque.GetInput("InDrawStream"));
         graph.ConnectNodes(culling.GetOutput("OutTransparentDrawStream"), transparency.GetInput("InDrawStream"));
         graph.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), transparency.GetInput("InDepthBuffer"));
-        graph.ConnectNodes(opaque.GetOutput("OutAlbedoMetallic"), composition.GetInput("InOpaqueTexture"));
+        graph.ConnectNodes(inputs.EnvironmentMap, lighting.GetInput("InEnvironmentMap"));
+        graph.ConnectNodes(opaque.GetOutput("OutAlbedoMetallic"), lighting.GetInput("InAlbedoMetallic"));
+        graph.ConnectNodes(opaque.GetOutput("OutNormalRoughness"), lighting.GetInput("InNormalRoughness"));
+        graph.ConnectNodes(opaque.GetOutput("OutF0Baked"), lighting.GetInput("InF0Baked"));
+        graph.ConnectNodes(opaque.GetOutput("OutEmissive"), lighting.GetInput("InEmissive"));
+        graph.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), lighting.GetInput("InDepthBuffer"));
+        graph.ConnectNodes(lighting.GetOutput("OutColorTexture"), composition.GetInput("InOpaqueTexture"));
         graph.ConnectNodes(transparency.GetOutput("OutAccumulationTexture"), composition.GetInput("InAccumulationTexture"));
         graph.ConnectNodes(transparency.GetOutput("OutRevealageTexture"), composition.GetInput("InRevealageTexture"));
         graph.ConnectNodes(composition.GetOutput("OutColorTexture"), output.GetInput("InColorTexture"));
@@ -71,7 +79,8 @@ void RenderModule::SetGraphicsPipeline(PipelineConfiguration configure)
     FrameGraph graph(_primaryDevice.get(), _secondaryDevice.get());
     const FrameGraphInputs inputs{
         graph.ImportTexture("back-buffer", [this]() { return _backBuffer->GetCurrentBuffer(); }),
-        graph.ImportTexture("depth-stencil", [this]() { return _depthStencil.get(); })
+        graph.ImportTexture("depth-stencil", [this]() { return _depthStencil.get(); }),
+        graph.ImportTexturePerDevice("environment-map", [this](EDeviceRole role) { return GetEnvironmentMap(role); })
     };
     configure(graph, inputs);
     CompileFrameGraph(graph);
@@ -171,11 +180,24 @@ GPUTexture* RenderModule::CreateTexture(const std::string& name, const Texture* 
     return _textures[name].get();
 }
 
-GDX12Texture* RenderModule::CreateDX12Texture(const std::string& name, GDX12DeviceResources* resources, const Texture* texture)
+GDX12Texture* RenderModule::GetEnvironmentMap(EDeviceRole role)
+{
+    auto& resources = GetDeviceResources(role);
+    const std::string name = "Environment/grasscube1024.dds";
+    auto found = resources.Textures.find(name);
+    if (found != resources.Textures.end()) { return found->second.get(); }
+
+    const auto* asset = AssetManager::GetInstance().LoadTexture(std::filesystem::path(TEXTURES_FOLDER) / name);
+    if (!asset || !asset->IsCubeMap() || asset->GetArraySize() != 6 || asset->GetSubresourceCount() != 6 * asset->GetMipLevels())
+    { throw std::runtime_error("Expected a complete environment cubemap: " + name); }
+    return CreateDX12Texture(name, &resources, asset, true);
+}
+
+GDX12Texture* RenderModule::CreateDX12Texture(const std::string& name, GDX12DeviceResources* resources, const Texture* texture, bool useSRGB)
 {
     GDX12TextureDesc desc;
     desc.SRV_UAV_Heap = resources->SRV_UAV_Heap.get();
-    desc.Format = desc.SRVDesc.Format = texture->GetFormat();
+    desc.Format = desc.SRVDesc.Format = useSRGB ? FormatToSRGB(texture->GetFormat()) : texture->GetFormat();
     desc.Semantic = ConvertTextureSemantic(texture->GetType());
     desc.Width = texture->GetWidth();
     desc.Height = texture->GetHeight();
@@ -192,10 +214,6 @@ GDX12Texture* RenderModule::CreateDX12Texture(const std::string& name, GDX12Devi
     CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
     CD3DX12_HEAP_PROPERTIES uploadHeap(D3D12_HEAP_TYPE_UPLOAD);
 
-    // TODO: add IsDiffuseTexture/useSRGB flag to Texture
-    bool convertToSRGB = false;
-    if (convertToSRGB) { desc.Format = desc.SRVDesc.Format = FormatToSRGB(texture->GetFormat()); }
-
     if (texture->IsCubeMap())
     {
         // CubeMap: 6 faces, array size is multiple of 6
@@ -205,20 +223,6 @@ GDX12Texture* RenderModule::CreateDX12Texture(const std::string& name, GDX12Devi
         desc.SRVDesc.TextureCube.ResourceMinLODClamp = 0.0f;
         desc.SRVHeapIndex = resources->SRV_UAV_Heap->GetAvailableIndex(TextureCube_StartIndex, TextureCube_RangeLength);
 
-        auto texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
-            desc.Format, desc.Width, desc.Height,
-            numArraySlices, numMipLevels, 1, 0,
-            D3D12_RESOURCE_FLAG_NONE,
-            D3D12_TEXTURE_LAYOUT_UNKNOWN,
-            D3D12_RESOURCE_DIMENSION_TEXTURE2D);
-
-        resources->Device->GetDevice()->CreateCommittedResource(
-            &defaultHeap,
-            D3D12_HEAP_FLAG_NONE,
-            &texDesc,
-            D3D12_RESOURCE_STATE_COMMON,
-            nullptr,
-            IID_PPV_ARGS(&textureResource));
     }
     else
     {
@@ -230,20 +234,13 @@ GDX12Texture* RenderModule::CreateDX12Texture(const std::string& name, GDX12Devi
         desc.SRVDesc.Texture2D.ResourceMinLODClamp = 0.0f;
         desc.SRVHeapIndex = resources->SRV_UAV_Heap->GetAvailableIndex(Texture2D_StartIndex, Texture2D_RangeLength);
 
-        auto texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
-            desc.Format, desc.Width, desc.Height,
-            numArraySlices, numMipLevels);
-
-        resources->Device->GetDevice()->CreateCommittedResource(
-            &defaultHeap,
-            D3D12_HEAP_FLAG_NONE,
-            &texDesc,
-            D3D12_RESOURCE_STATE_COMMON,
-            nullptr,
-            IID_PPV_ARGS(&textureResource));
     }
 
-    auto& subresources = texture->GetSubresources();
+    auto texDesc = CD3DX12_RESOURCE_DESC::Tex2D(desc.Format, desc.Width, desc.Height, numArraySlices, numMipLevels);
+    ThrowIfFailed(resources->Device->GetDevice()->CreateCommittedResource(
+        &defaultHeap, D3D12_HEAP_FLAG_NONE, &texDesc, D3D12_RESOURCE_STATE_COPY_DEST,
+        nullptr, IID_PPV_ARGS(&textureResource)));
+
     UINT totalSubresources = numMipLevels * numArraySlices;
 
     UINT64 totalSize = 0;
@@ -251,7 +248,6 @@ GDX12Texture* RenderModule::CreateDX12Texture(const std::string& name, GDX12Devi
     std::vector<UINT> rowCounts(totalSubresources);
     std::vector<UINT64> rowSizes(totalSubresources);
 
-    auto texDesc = textureResource->GetDesc();
     resources->Device->GetDevice()->GetCopyableFootprints(
         &texDesc, 0, totalSubresources,
         0, footprints.data(), rowCounts.data(), rowSizes.data(), &totalSize);
@@ -315,10 +311,11 @@ GDX12Texture* RenderModule::CreateDX12Texture(const std::string& name, GDX12Devi
         }
     }
 
+    constexpr auto shaderReadState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
     auto Barrier = CD3DX12_RESOURCE_BARRIER::Transition(
         textureResource.Get(),
         D3D12_RESOURCE_STATE_COPY_DEST,
-        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        shaderReadState);
 
     cmdList->GetCommandList()->ResourceBarrier(1, &Barrier);
 
@@ -329,6 +326,7 @@ GDX12Texture* RenderModule::CreateDX12Texture(const std::string& name, GDX12Devi
 
     resources->Textures[name] = std::make_unique<GDX12Texture>();
     resources->Textures[name]->Initialize(desc);
+    resources->Textures[name]->GetResource()->SetCurrentState(shaderReadState);
 
     return resources->Textures[name].get();
 }
@@ -370,6 +368,10 @@ void RenderModule::SubscribeToWorld(World& world)
     auto& renderCompPool = ecs.GetPool<StaticMeshRenderComponent>();
 
     WorldRenderSubscriptions subscriptions;
+    auto& lightPool = ecs.GetPool<LightComponent>();
+    auto markLightDirty = [](Entity, LightComponent& light) { light.DirtyFlag = true; };
+    subscriptions.LightCreated = lightPool.OnComponentCreated.AddListener(markLightDirty);
+    subscriptions.LightUpdated = lightPool.OnComponentUpdated.AddListener(markLightDirty);
 
     subscriptions.TransformCreated =
         transformPool.OnComponentCreated.AddListener(
@@ -460,6 +462,10 @@ void RenderModule::UnsubscribeFromWorld(World& world)
     cameraPool.OnComponentDestroyed.RemoveListener(subscriptions.CameraDestroyed);
     cameraPool.OnComponentUpdated.RemoveListener(subscriptions.CameraUpdated);
 
+    auto& lightPool = ecs.GetPool<LightComponent>();
+    lightPool.OnComponentCreated.RemoveListener(subscriptions.LightCreated);
+    lightPool.OnComponentUpdated.RemoveListener(subscriptions.LightUpdated);
+
     _worldSubscriptions.erase(it);
 }
 
@@ -505,6 +511,7 @@ RenderPipelineCommonData* RenderModule::GetRenderPipelineCommonData()
 
 void RenderModule::OnTransformComponentCreated(World& world, Entity entity, TransformComponent& component)
 {
+    component.DirtyFlag = true;
     if (_frameGraph) { _frameGraph->WaitForGPUCompletion(); }
     auto& data = _transformGPUData[entity];
     data.CBufferIndex = _transformCount++;
@@ -520,6 +527,7 @@ void RenderModule::OnTransformComponentDestroyed(World& world, Entity entity, Tr
 
 void RenderModule::OnTransformComponentUpdated(World& world, Entity entity, TransformComponent& component)
 {
+    component.DirtyFlag = true;
 }
 
 void RenderModule::OnCameraComponentCreated(World& world, Entity entity, CameraComponent& component)
@@ -586,6 +594,11 @@ void RenderModule::OnUpdate()
 void RenderModule::OnRender()
 {
     if (!_frameGraph || _renderingSuspended) { return; }
+    for (const auto role : {DEVICE_ROLE_PRIMARY, DEVICE_ROLE_SECONDARY})
+    {
+        if (PipelineHasFlag(role, RENDER_PASS_FLAG_USE_LIGHTING))
+        { GetCurrentFrameConstants(role)->UploadLightingClusters(_lightingGrid); }
+    }
     _frameGraph->ExecuteFrame();
     _backBuffer->Present();
     _metrics.RecordPresentedFrame(*_frameGraph);
@@ -751,6 +764,7 @@ void RenderModule::MarkSceneDataDirty()
     {
         auto& ecs = subscription.first->GetECS();
         ecs.ForEach<CameraComponent>([](Entity, CameraComponent& camera) { camera.DirtyFlag = true; });
+        ecs.ForEach<LightComponent>([](Entity, LightComponent& light) { light.DirtyFlag = true; });
         ecs.ForEach<StaticMeshRenderComponent>([](Entity, StaticMeshRenderComponent& renderer) { renderer.DirtyFlag = true; });
     }
 }

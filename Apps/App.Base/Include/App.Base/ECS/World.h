@@ -5,6 +5,7 @@
 
 #include "Engine.Core/ECS/ECSStorage.h"
 #include "App.Base/ECS/Components/CameraComponent.h"
+#include "App.Base/ECS/Components/LightComponent.h"
 #include "App.Base/ECS/Components/CircleMovementComponent.h"
 #include "App.Base/ECS/Components/LookAtTargetComponent.h"
 #include "App.Base/ECS/Components/NameComponent.h"
@@ -22,6 +23,7 @@ struct WorldDesc {
 
 using WorldECS = ECSStorage<
     TransformComponent,
+    LightComponent,
     VelocityComponent,
     NameComponent,
     StaticMeshRenderComponent,

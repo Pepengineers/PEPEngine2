@@ -1,4 +1,4 @@
-#include "CBufferStructures.hlsl"
+#include "CBufferStructures.hlsli"
 
 ConstantBuffer<IndirectConstants> CBIndirectConstants : register(b0);
 ConstantBuffer<MainCB> CBMain : register(b1);

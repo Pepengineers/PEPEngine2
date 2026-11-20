@@ -86,9 +86,15 @@ public:
     void ConnectNodes(const OutputPinRef& output, const InputPinRef& input);
     // Require `before` to execute ahead of `after` without adding a resource connection.
     void AddExecutionDependency(const NodeHandle& before, const NodeHandle& after);
-    // Allows you to import external textures to FrameGraph via function
-    // Works as an output pin coming from nowhere
+    // Allows you to import an external texture. At compile time the graph reads its description and owning GPU from provider().
+    // Each frame it calls provider() again, so the allocation can change (e.g. the current swap-chain buffer)
+    // as long as it stays on the same GPU and matches the compiled description.
     OutputPinRef ImportTexture(NodeId id, std::function<GDX12Texture*()> provider);
+
+    // Allows you to import a read-only texture that can be present on both devices. During compilation the graph calls provider(role)
+    // once for each GPU with a connected reader. Return a texture on that GPU and keep it alive for the
+    // lifetime of the compiled graph. All readers on that GPU reuse it across frames.
+    OutputPinRef ImportTexturePerDevice(NodeId id, std::function<GDX12Texture*(EDeviceRole)> provider);
     void SetDeviceResources(GDX12DeviceResources* primary, GDX12DeviceResources* secondary, RenderPipelineCommonData* common);
     void SetTransportQueuePolicy(TransportQueuePolicy policy);
     void SetFrameSlotResourcesCount(uint32_t count);
@@ -135,6 +141,8 @@ private:
     std::shared_ptr<FrameGraphDefinition> _definition;
     std::map<NodeId, std::unique_ptr<GDX12RenderPass>> _passes;
     std::map<NodeId, std::function<GDX12Texture*()>> _imports;
+    std::map<NodeId, std::function<GDX12Texture*(EDeviceRole)>> _deviceLocalImports;
+    OutputPinRef AddImportNode(const NodeId& id);
     FrameGraphCompileData _compileData;
 };
 
