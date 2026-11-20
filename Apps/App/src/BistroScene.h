@@ -362,7 +362,7 @@ inline void ConfigureBistroProps(SceneManagerModule& scenes, JobSystem& jobs)
 			    const auto* mesh = render.GetPrimaryGPUMesh(source.MeshHandler);
 			    auto partition = PartitionBistroProps(*mesh->CPUMesh, name == "Interior_interior", true);
 			    if (!partition.Interior)
-			        BistroRender::ExtractLinden(world, *mesh->CPUMesh, source, partition.StaticSubMeshes);
+			        BistroRender::ExtractLinden(world, *mesh->CPUMesh, render, partition.StaticSubMeshes);
 			    const auto count = partition.Props.size();
 			    render.ReserveTransformCapacity(static_cast<UINT>(count) + 9);
 			    size_t instances = partition.StaticSubMeshes.size();

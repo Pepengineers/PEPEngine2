@@ -5,7 +5,7 @@
 
 class SceneManagerModule;
 class World;
-struct StaticMeshRenderComponent;
+class RenderModule;
 namespace Engine::Core { class Mesh; }
 
 namespace BistroRender
@@ -33,6 +33,7 @@ struct LindenBatch
 
 struct LindenMesh
 {
+    UINT Lod = 0;
     std::vector<LindenVertex> Vertices;
     std::vector<UINT> Indices;
     std::vector<LindenFragment> Fragments;
@@ -49,6 +50,6 @@ struct LindenMesh
 static_assert(sizeof(LindenVertex) == 40 && offsetof(LindenVertex, UV) == 32);
 static_assert(sizeof(LindenFragment) == 16);
 
-void ExtractLinden(World&, const Engine::Core::Mesh&, const StaticMeshRenderComponent&, std::vector<UINT>& staticParts);
+void ExtractLinden(World&, const Engine::Core::Mesh&, RenderModule&, std::vector<UINT>& staticParts);
 std::shared_ptr<const LindenMesh> FindLindenMesh(SceneManagerModule&);
 }
