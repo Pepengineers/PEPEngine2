@@ -5,6 +5,7 @@
 #include "App.Base/Systems/SplineFollowSystem.h"
 #include "BistroArch.h"
 #include "BistroBenchmarkRoute.h"
+#include "BistroEntrance.h"
 #include "Components/BistroInteractionSource.h"
 #include "Common/ConsoleVariables.h"
 #include "Common/RuntimePaths.h"
@@ -136,7 +137,8 @@ public:
     {
         world.GetECS().ForEach<NameComponent>([&](Entity entity, const NameComponent& name)
         {
-            if (name.value == "BistroEntranceDoor") _door = entity;
+            for (size_t leaf = 0; leaf < _doors.size(); ++leaf)
+                if (name.value == BistroEntrance::Names[leaf]) _doors[leaf] = entity;
             if (name.value == "BistroEntranceFountain") _fountain = entity;
         });
         wchar_t windows[MAX_PATH]{};
@@ -293,28 +295,34 @@ private:
 
     void AnimateDoor(WorldECS& ecs, float time)
     {
-        if (_door == InvalidEntity) return;
         const float yellowTime = time - (_red.Duration() + _blue.Duration() + _green.Duration());
         const auto opening = [&](size_t threshold)
         {
             const auto offset = yellowTime - _yellow.At(threshold);
             return Ease((offset + 1.55f) / 1.15f) * Ease((1.55f - offset) / 1.15f);
         };
-        const float angle = -95 * std::max(opening(BistroBenchmarkRoute::EntryDoor), opening(BistroBenchmarkRoute::ExitDoor));
-        auto& door = ecs.Get<TransformComponent>(_door);
-        if (door.Rotation.y == angle) return;
-        const Vector3 hinge{-37.4f, 0, -16.3f};
-        door.Location = hinge - Vector3::Transform(hinge, Matrix::CreateRotationY(XMConvertToRadians(angle)));
-        door.Rotation.y = angle;
-        door.DirtyFlag = true;
+        const float swing = 85 * std::max(opening(BistroBenchmarkRoute::EntryDoor), opening(BistroBenchmarkRoute::ExitDoor));
+        for (size_t leaf = 0; leaf < _doors.size(); ++leaf)
+        {
+            auto& door = ecs.Get<TransformComponent>(_doors[leaf]);
+            const float angle = -BistroEntrance::Side(leaf) * swing;
+            if (door.Rotation.y == angle) continue;
+            const auto hinge = BistroEntrance::Hinge(leaf);
+            door.Location = hinge - Vector3::Transform(hinge, BistroEntrance::Rotation(angle));
+            door.Rotation.y = angle;
+            door.DirtyFlag = true;
+        }
         if (_fountain != InvalidEntity)
         {
             auto& fountain = ecs.Get<ParticleEmitterComponent>(_fountain);
             auto settings = fountain.GetSettings();
-            settings.CollisionBoxCenter = door.Location + Vector3::Transform({-80.037f, 166.15f, -94.836f},
-                Matrix::CreateRotationY(XMConvertToRadians(angle)));
-            settings.CollisionBoxYawDegrees = 28.5f + angle;
-            fountain.SetSettings(settings);
+            const bool closed = swing == 0;
+            // One particle box can cover the closed doorway only.
+            if (settings.CollisionBoxEnabled != closed)
+            {
+                settings.CollisionBoxEnabled = closed;
+                fountain.SetSettings(settings);
+            }
         }
     }
 
@@ -334,8 +342,8 @@ private:
 
     void Start(World& world, ConsoleModule& console)
     {
-        if (_door == InvalidEntity)
-            throw std::runtime_error("Entrance door mesh was not found");
+        if (std::find(_doors.begin(), _doors.end(), InvalidEntity) != _doors.end())
+            throw std::runtime_error("Both Bistro entrance door leaves are required");
         SetFlightDuration(FlightSeconds.GetValue());
         auto patch = Placement(0);
         patch.insert(patch.end(), {{L"App.Async.Queues", "true"}, {L"App.CloudPicture.Adapter", "-1"},
@@ -456,7 +464,7 @@ private:
     Shot _blue{BistroBenchmarkRoute::Blue};
     Shot _green{BistroBenchmarkRoute::Green};
     Shot _yellow{BistroBenchmarkRoute::Yellow};
-    Entity _door = InvalidEntity;
+    std::array<Entity, BistroEntrance::Names.size()> _doors{InvalidEntity, InvalidEntity};
     Entity _fountain = InvalidEntity;
     Pose _previousPose{};
     ConsoleVariablePatch _previous;

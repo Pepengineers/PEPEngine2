@@ -157,9 +157,9 @@ inline void Create(World& world, GPUTexture* atlas)
 	settings.CollisionFriction = 0.2f;
 	// Authored bounds of the closed entrance door and its glass (Exterior nodes 121/123).
 	settings.CollisionBoxEnabled = true;
-	settings.CollisionBoxCenter = Vector3(-80.037f, 166.15f, -94.836f);
-	settings.CollisionBoxHalfExtents = Vector3(10.05f, 127.92f, 89.39f);
-	settings.CollisionBoxYawDegrees = 28.5f;
+	settings.CollisionBoxCenter = BistroEntrance::Center;
+	settings.CollisionBoxHalfExtents = Vector3(10.05f, 127.92f, BistroEntrance::HalfWidth);
+	settings.CollisionBoxYawDegrees = BistroEntrance::Yaw;
 	create("BistroEntranceFountain", {-170, 45, -170}, 4, settings);
 
 	settings.SpeedMin = 180;
