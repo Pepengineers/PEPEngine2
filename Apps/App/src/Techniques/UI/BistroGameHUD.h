@@ -59,10 +59,14 @@ inline Bar Draw(ImDrawList& list, float time)
     const ImVec2 barStart{left, barY}, barEnd{left + width, barY + barHeight};
     list.AddImageRounded(static_cast<ImTextureID>(HealthBar), barStart, barEnd, {0, 0}, {1, 1}, IM_COL32_WHITE, 3);
 
-    // Original MGPU-IMGUI builds start at 1–6 stars and multiply both limits by 1.2^10 or 1.2^50.
-    constexpr float density[] = {1.f, 6.191736f, 9100.438f};
-    const float multiplier = density[Quality.GetValue()];
-    const unsigned sparks = unsigned(multiplier * (1.f + 4.99f * (.5f + .5f * std::sin(time * .29f))));
+    const float animatedCount = 1.f + 4.99f * (.5f + .5f * std::sin(time * .29f));
+    const unsigned highSparks = unsigned(9100.438f * animatedCount);
+    const int quality = Quality.GetValue();
+    unsigned sparks = unsigned(animatedCount);
+    if (quality == 1)
+        sparks = std::max(7000u, highSparks / 2);
+    else if (quality == 2)
+        sparks = highSparks;
     list.AddRect(barStart, barEnd, border, 3);
     char hp[16];
     std::snprintf(hp, sizeof(hp), "HP  %d%%", int(health * 100));
