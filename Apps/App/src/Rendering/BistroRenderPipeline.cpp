@@ -179,6 +179,8 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	};
 	const auto prelude = [&](BistroRender::Graph& graph, std::vector<ID3D12Resource*>& resources)
 	{
+		// Previous canvas publications have no dependency on the current Cloud Picture or its canvas upload.
+		_post->AppendPreviousPosterImports(graph, resources);
 		if (!_cloudPicture->IsRemote()) _cloudPicture->Append(graph, resources);
 		particles.AppendSimulation(graph, resources, ParticleInputs::Frame, depth);
 		water.AppendSimulation(graph, resources);
@@ -234,6 +236,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	catch (...)
 	{
 		_cloudPicture->Submitted(_executor->Completions());
+		_post->PostersSubmitted(_frameNumber, _executor->Completions());
 		water.Submitted(_executor->Completions());
 		grass.WindSubmitted(_frameNumber, _executor->Completions());
 		particles.Submitted(_executor->Completions());

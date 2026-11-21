@@ -47,11 +47,17 @@ saved keys are `App.UI.WorldCanvas.Adapter.Atrium` for NEON DISTRICT (CanvasId 1
 `App.UI.WorldCanvas.Adapter.Clouds` for CLOUDS (3). The default `-1` follows
 the primary GPU. Each billboard owns its rendering and material texture.
 
-Remote billboards render the current frame (CrossSync=1). The primary GPU
-waits at the final texture import and uses it for the surface material.
-CLOUDS renders the selected Cloud Picture image. If CLOUDS uses a remote
-GPU, its input is copied from the selected Cloud Picture output before it
-renders, preserving all Cloud Picture adapter and synchronization settings.
+Each billboard also has a saved `App.UI.WorldCanvas.CrossSync.<name>` setting
+in F1, with the same Atrium, Terrace, and Clouds suffixes. Remote mode `1`
+(default) displays the current publication. Mode `0` still orders a current
+render each frame and displays exactly the previous publication. A new
+compatible series starts with ordered/displayed pairs `1/1 → 2/1 → 3/2`.
+Local billboards always render the current frame.
+
+GPU0 waits at import and shares the displayed texture between the surface and
+reflection passes. A remote CLOUDS order receives the image selected by Cloud
+Picture for that order. In mode `0`, importing the previous billboard can run
+before the current cloud input export.
 
 ### Two-adapter synchronization
 

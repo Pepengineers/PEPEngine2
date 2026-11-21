@@ -57,6 +57,10 @@ class ScenePostUI
 	            GDX12Texture* featureMotion, GDX12Texture* target,
 	            const std::function<void(GDX12CommandList*)>& finish);
 	std::vector<CanvasRead> AppendPosters(Graph&, std::vector<ID3D12Resource*>&);
+	void AppendPreviousPosterImports(Graph& graph, std::vector<ID3D12Resource*>& bindings)
+	{
+		_posters->AppendPreviousImports(graph, bindings, _work);
+	}
 	bool Record(Id id, ID3D12GraphicsCommandList* cmd) const { return _work.Record(id, cmd); }
 
   private:

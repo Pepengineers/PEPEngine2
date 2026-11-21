@@ -30,6 +30,7 @@ public:
 
     void PrepareFrame(GDX12DeviceResources&, BistroRender::Executor&, uint64_t frame, double animationSeconds, GDX12Texture* image);
     std::vector<BistroRender::CanvasRead> Append(BistroRender::Graph&, std::vector<ID3D12Resource*>&, BistroRender::NativeWork&);
+    void AppendPreviousImports(BistroRender::Graph&, std::vector<ID3D12Resource*>&, BistroRender::NativeWork&);
     void AddExchanges(const BistroRender::Schedule&, std::vector<BistroRender::PacketWait>&,
                       std::vector<BistroRender::Executor::PacketExchange>&);
     void Submitted(uint64_t frame, const std::vector<BistroRender::CompletionToken>&);

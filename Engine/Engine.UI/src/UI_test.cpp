@@ -137,6 +137,18 @@ namespace Engine::UI
                     Name == L"App.Particles.Adapter" || Name == L"App.Water.Adapter" || Name == L"App.Grass.Wind.Adapter" ||
                     canvasAdapter)
                     DrawAdapter(variable);
+                else if (Name.rfind(L"App.UI.WorldCanvas.CrossSync.", 0) == 0)
+                {
+                    const int mode = variable.GetInt();
+                    const char* labels[] = {"Previous frame (N-1)", "Current frame (N)"};
+                    if (ImGui::BeginCombo("##cross-sync", labels[mode == 0 ? 0 : 1]))
+                    {
+                        for (int i = 0; i < 2; ++i)
+                            if (ImGui::Selectable(labels[i], i == mode) && i != mode)
+                                Apply(variable, std::to_string(i));
+                        ImGui::EndCombo();
+                    }
+                }
                 else if (variable.GetType() == EConsoleVariableType::Boolean)
                 {
                     bool enabled = Current == "true";
