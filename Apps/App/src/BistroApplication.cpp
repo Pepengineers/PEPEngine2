@@ -16,6 +16,7 @@
 #include "BistroReflections.h"
 #include "BistroBenchmark.h"
 #include "Techniques/UI/BistroInfoPanel.h"
+#include "Techniques/UI/BistroUICanvases.h"
 #include "Components/BistroInteractionSource.h"
 #include "Components/FluidRenderComponent.h"
 #include <stdexcept>
@@ -62,13 +63,14 @@ void ValidateStartupAdapters(ConsoleModule& console, const std::filesystem::path
     for (size_t index = 0; index < adapters.size(); ++index)
         Log::Info("Bistro", "Hardware GPU [", index, "] ", adapters[index].Name);
 
-    const ConsoleVariablePatch reset{
+    ConsoleVariablePatch reset{
         {L"Render.PrimaryAdapter", "0"},
         {L"App.CloudPicture.Adapter", "-1"},
         {L"App.AO.Adapter", "-1"},
         {L"App.Particles.Adapter", "-1"},
         {L"App.Water.Adapter", "-1"},
         {L"App.Grass.Wind.Adapter", "-1"}};
+    for (const auto& poster : BistroUICanvases::Posters) reset.emplace_back(poster.Adapter, "-1");
     bool invalid = false;
     for (const auto& [name, fallback] : reset)
     {

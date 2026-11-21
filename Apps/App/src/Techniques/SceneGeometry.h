@@ -13,6 +13,7 @@ namespace BistroRender
 {
 class SceneLighting;
 class SceneReflections;
+struct CanvasRead;
 // Owner-only Freeze/Resize. Record uses immutable slot data and native commands;
 // no shared resource tracker, heap allocator, ECS or queue access on workers.
 class SceneGeometry
@@ -30,7 +31,7 @@ class SceneGeometry
 	void Freeze(UINT slot, UINT camera, std::vector<GDX12SkinningWork> skin);
 	using AppendTechnique = std::function<void(Graph&, std::vector<ID3D12Resource*>&)>;
 	using AppendDepthNormals = std::function<void(Graph&, std::vector<ID3D12Resource*>&, Id ready)>;
-	void AppendWorldCanvases(Graph&, UINT slot, std::vector<Access> textureReads);
+	void AppendWorldCanvases(Graph&, UINT slot, const std::vector<CanvasRead>&);
 	Schedule Plan(UINT slot, const AppendTechnique& append = {}, const AppendTechnique& prelude = {},
 	              bool singleDirect = true, const AppendTechnique& afterInteraction = {},
 	              const AppendTechnique& afterDepth = {}, const AppendDepthNormals& afterDepthNormals = {});

@@ -1,6 +1,8 @@
 #include "BistroUIPosters.h"
 #include "BistroPaintingSurfaces.h"
 #include "BistroUICanvases.h"
+#include "Techniques/NativeWork.h"
+#include "Engine.Core/Logging/Logger.h"
 #include "App.Base/Modules/RenderModule.h"
 #include "App.Base/Modules/SceneManagerModule.h"
 #include "Engine.UI/OffscreenUI.h"
@@ -20,10 +22,17 @@
 namespace
 {
     using namespace Engine::UI;
-    using Engine::Core::MeshHandle;
+    using namespace BistroRender;
 
-
-    constexpr const char* Names[] = {"BistroUINeon", "BistroUIAstra", "BistroUIClouds"};
+    const auto AdapterVariables = [] {
+        std::array<std::unique_ptr<AutoConsoleVariable<int>>, BistroUICanvases::Posters.size()> variables;
+        for (size_t index = 0; index < variables.size(); ++index) {
+            const auto& poster = BistroUICanvases::Posters[index];
+            variables[index] = std::make_unique<AutoConsoleVariable<int>>(poster.Adapter, -1, poster.Description,
+                EConsoleVariableFlags::Default, [](int value) { return value >= -1; });
+        }
+        return variables;
+    }();
 
     bool IsBistro(const World& world)
     {
@@ -69,61 +78,254 @@ namespace
         return target;
     }
 
-    class TextureLink final : public IRenderPassLink
-    {
-    public:
-        GDX12Texture* GetTexture() override { return Texture; }
-        bool IsInitialized() override { return Texture && Texture->IsInitialized(); }
-        GDX12Texture* Texture = nullptr;
-    };
-}
+    constexpr State CopyRead = D3D12_RESOURCE_STATE_COPY_SOURCE;
+    constexpr State CopyWrite = D3D12_RESOURCE_STATE_COPY_DEST;
 
-struct BistroUIPosters::Impl
-{
-    struct Frame
+    ID3D12Resource* Native(GDX12Texture& texture) { return texture.GetResource()->D3DResource.Get(); }
+
+    Access Bind(Graph& graph, std::vector<ID3D12Resource*>& bindings, ID3D12Resource* resource,
+                const char* name, Mode usage, State state)
+    {
+        return {NativeWork::ResourceFor(graph, bindings, resource, name), usage, state};
+    }
+
+    struct SharedImage
+    {
+        QueueSubmission::TransferBuffer Buffer;
+        D3D12_PLACED_SUBRESOURCE_FOOTPRINT Layout{};
+
+        void Prepare(QueueSubmission& submission, Id device, const D3D12_RESOURCE_DESC& desc)
+        {
+            if (Buffer.Resources[0] && Layout.Footprint.Width == desc.Width && Layout.Footprint.Height == desc.Height &&
+                Layout.Footprint.Format == desc.Format) return;
+            D3D12_PLACED_SUBRESOURCE_FOOTPRINT primary{}, remote{};
+            UINT64 bytes = 0, remoteBytes = 0;
+            submission.Device(0).GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &primary, nullptr, nullptr, &bytes);
+            submission.Device(device).GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &remote, nullptr, nullptr, &remoteBytes);
+            if (!bytes || bytes == UINT64_MAX || bytes != remoteBytes || primary.Footprint.RowPitch != remote.Footprint.RowPitch)
+                throw std::runtime_error("World canvas requires matching adapter texture footprints");
+            Buffer = submission.CreateTransferBuffer(device, bytes);
+            Layout = primary;
+        }
+
+        Id Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work,
+                  const std::string& name, size_t endpoint, GDX12Texture& texture, bool exportImage, Queue queue)
+        {
+            auto* image = Native(texture);
+            auto* buffer = Buffer.Resources.at(endpoint).Get();
+            const CD3DX12_TEXTURE_COPY_LOCATION imageLocation(image, 0u), bufferLocation(buffer, Layout);
+            const auto source = exportImage ? imageLocation : bufferLocation;
+            const auto dest = exportImage ? bufferLocation : imageLocation;
+            return work.Add(graph, name,
+                {Bind(graph, bindings, source.pResource, "canvas transfer source", Mode::Read, CopyRead),
+                 Bind(graph, bindings, dest.pResource, "canvas transfer destination", Mode::Write, CopyWrite)},
+                [source, dest](auto* cmd) { cmd->CopyTextureRegion(&dest, 0, 0, 0, &source, nullptr); }, {}, queue);
+        }
+    };
+
+    struct DrawFrame
     {
         std::unique_ptr<GDX12Texture> Effect, Target, Raw;
         std::shared_ptr<const CanvasFrame> Input;
         std::shared_ptr<CanvasEffects::Prepared> PreparedEffects;
         std::shared_ptr<CanvasEffects::PreparedPost> PreparedPost;
         std::shared_ptr<const void> EffectOwner, RasterOwner, PostOwner;
-        bool Published = false;
+
+        void Retire()
+        {
+            EffectOwner.reset();
+            RasterOwner.reset();
+            PostOwner.reset();
+        }
+
+        void PrepareTarget(GDX12DeviceResources& device, CanvasSize size, bool post)
+        {
+            if (!Target || Target->GetWidth() != size.Width || Target->GetHeight() != size.Height) {
+                Target = MakeMaterialTarget(device, size, post);
+                PreparedPost.reset();
+            }
+        }
     };
 
-    struct Surface;
-    class Pass final : public GDX12RenderPass
+    struct CanvasRenderer
     {
-    public:
-        Pass(Impl& owner, Surface& surface) : Owner(owner), Poster(surface)
-        { _numOutputs = 1; }
-        void Execute(GDX12CommandList* commands) override;
-        IRenderPassLink* GetOutput(UINT index) override;
+        CanvasRenderer(GDX12Device& device, UINT slots) : Raster(device, slots, true) {}
+        OffscreenRenderer Raster;
+        std::unique_ptr<CanvasEffects> Effects;
 
-    private:
-        Impl& Owner;
-        Surface& Poster;
+        void Prepare(GDX12DeviceResources& device, DrawFrame& frame, const std::shared_ptr<const CanvasFrame>& input)
+        {
+            frame.Input = input;
+            const auto profile = GetCanvasProfile(input->LogicalSize, input->Quality);
+            const bool post = input->Style != CanvasStyle::Image;
+            frame.PrepareTarget(device, profile.RasterSize, post);
+            if (!post) return;
+            if (!Effects) Effects = std::make_unique<CanvasEffects>(*device.Device);
+            if (!frame.Effect || frame.Effect->GetWidth() != profile.EffectsSize.Width ||
+                frame.Effect->GetHeight() != profile.EffectsSize.Height) {
+                frame.Effect = std::make_unique<GDX12Texture>();
+                GDX12RenderHelpers::InitializeComputeTexture(*frame.Effect, device,
+                    profile.EffectsSize.Width, profile.EffectsSize.Height, OffscreenFormat, false);
+                frame.PreparedEffects = Effects->Prepare(*input, frame.Effect->GetResource()->D3DResource);
+            }
+            if (!frame.PreparedPost) {
+                frame.Raw = MakeMaterialTarget(device, profile.RasterSize);
+                frame.PreparedPost = Effects->PreparePost(*input, frame.Raw->GetResource()->D3DResource,
+                    frame.Target->GetResource()->D3DResource);
+            }
+        }
+
+        void Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work,
+                    DrawFrame& frame, GDX12Texture* image, const std::string& name)
+        {
+            const bool post = frame.Input->Style != CanvasStyle::Image;
+            auto* effect = (post ? frame.Effect.get() : image)->GetResource();
+            auto* output = frame.Target->GetResource();
+            auto* raster = (post ? frame.Raw.get() : frame.Target.get())->GetResource();
+            std::vector<Access> accesses{
+                Bind(graph, bindings, effect->D3DResource.Get(), "canvas effect/image",
+                    post ? Mode::ReadWrite : Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE),
+                Bind(graph, bindings, raster->D3DResource.Get(), "canvas raster",
+                    post ? Mode::ReadWrite : Mode::Write, D3D12_RESOURCE_STATE_RENDER_TARGET)};
+            if (post) accesses.push_back(Bind(graph, bindings, output->D3DResource.Get(), "canvas post",
+                Mode::Write, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE));
+            work.AddOwned(graph, name, std::move(accesses), bindings,
+                [this, &frame, effect, raster, output, post](auto* cmd) {
+                    if (post) {
+                        cmd->ResourceBarrier({effect->GetUnorderedAccessBarrier()});
+                        frame.EffectOwner = Effects->RecordPrepared(*cmd, *frame.Input, frame.PreparedEffects);
+                        cmd->ResourceBarrier({effect->GetPixelShaderResourceBarrier()});
+                    }
+                    frame.RasterOwner = Raster.TryRecord(*cmd, raster->D3DResource, frame.Input->Draw,
+                        {{CanvasEffectTextureId, effect->D3DResource}});
+                    if (!frame.RasterOwner) throw std::logic_error("Retired world canvas has no raster slot");
+                    if (post) {
+                        cmd->ResourceBarrier({raster->GetNonPixelShaderResourceBarrier(), output->GetUnorderedAccessBarrier()});
+                        frame.PostOwner = Effects->RecordPost(*cmd, *frame.Input, frame.PreparedPost);
+                    }
+                }, "World canvas cannot submit private queue signals");
+        }
+    };
+
+    bool DeviceLost(HRESULT code)
+    {
+        return code == DXGI_ERROR_DEVICE_REMOVED || code == DXGI_ERROR_DEVICE_RESET ||
+            code == DXGI_ERROR_DEVICE_HUNG || code == DXGI_ERROR_DRIVER_INTERNAL_ERROR;
+    }
+}
+
+struct BistroUIPosters::Impl
+{
+    struct Remote
+    {
+        struct Slot
+        {
+            DrawFrame Draw;
+            std::unique_ptr<GDX12Texture> Image;
+            SharedImage Output, Input;
+            NativeWork Work;
+            Schedule Plan;
+            std::vector<ID3D12Resource*> Bindings;
+            CompletionToken Ready, CloudInput;
+            Id InputPacket = Invalid;
+        };
+        std::shared_ptr<QueueSubmission> Submit;
+        Id Device;
+        GDX12DeviceResources Resources;
+        CanvasRenderer Draw;
+        std::vector<Slot> Slots;
+        Executor Recorder;
+
+        Remote(Executor& primary, Id device, UINT count)
+            : Submit(primary.Submissions()), Device(device), Draw(Submit->Device(device), count),
+              Slots(count), Recorder(Submit, device, count, 1)
+        {
+            Resources.Device = &Submit->Device(device);
+            Resources.SRV_UAV_Heap = std::make_shared<GDX12DescriptorHeap>(Resources.Device,
+                D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Texture2D_StartIndex + count * 8, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
+            Resources.RTVHeap = std::make_unique<GDX12DescriptorHeap>(Resources.Device,
+                D3D12_DESCRIPTOR_HEAP_TYPE_RTV, count * 3, D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
+        }
+
+        void Prepare(UINT index, const std::shared_ptr<const CanvasFrame>& input, GDX12Texture* image, const std::string& title)
+        {
+            Recorder.Begin(index);
+            auto& slot = Slots.at(index);
+            slot.Ready = slot.CloudInput = {};
+            slot.InputPacket = Invalid;
+            slot.Bindings.clear();
+            slot.Work.Commands.clear();
+            Draw.Prepare(Resources, slot.Draw, input);
+            slot.Output.Prepare(*Submit, Device, Native(*slot.Draw.Target)->GetDesc());
+            Graph graph;
+            graph.Device = Device;
+            graph.FrameBoundary = false;
+            Id inputOp = Invalid;
+            if (image) {
+                const CanvasSize size{image->GetWidth(), image->GetHeight()};
+                if (!slot.Image || slot.Image->GetWidth() != size.Width || slot.Image->GetHeight() != size.Height)
+                    slot.Image = MakeMaterialTarget(Resources, size);
+                slot.Input.Prepare(*Submit, Device, Native(*image)->GetDesc());
+                inputOp = slot.Input.Append(graph, slot.Bindings, slot.Work, "canvas receive selected cloud picture",
+                    1, *slot.Image, false, Queue::Direct);
+            }
+            Draw.Append(graph, slot.Bindings, slot.Work, slot.Draw, slot.Image.get(), title + " remote raster");
+            slot.Output.Append(graph, slot.Bindings, slot.Work, title + " export final texture",
+                1, *slot.Draw.Target, true, Queue::Direct);
+            slot.Plan = Compile(graph);
+            if (image) {
+                for (Id packet = 0; packet < slot.Plan.Packets.size(); ++packet)
+                    if (slot.Plan.Packets[packet].Operation == inputOp) slot.InputPacket = packet;
+                if (slot.InputPacket == Invalid) throw std::logic_error("Missing remote canvas input packet");
+            }
+            Recorder.Reserve(slot.Plan);
+        }
+
+        CompletionToken Execute(UINT index, CompletionToken input = {})
+        {
+            auto& slot = Slots.at(index);
+            std::vector<PacketWait> waits;
+            if (input) waits.push_back({slot.InputPacket, input});
+            slot.CloudInput = input;
+            Recorder.Execute(slot.Plan, slot.Bindings,
+                [&](Id op, uint32_t, auto* cmd) { slot.Work.Record(op, cmd); }, nullptr, nullptr, nullptr, waits);
+            return slot.Ready = Recorder.Completions().back();
+        }
+    };
+
+    struct Frame
+    {
+        DrawFrame Local;
+        std::shared_ptr<Remote> Lane;
+        GDX12Texture* InputImage = nullptr;
+        uint64_t Version = 0;
+        Id Output = Invalid, Import = Invalid, ExportInput = Invalid, ImportPacket = Invalid, Consumer = Invalid;
+        bool Published = false;
     };
 
     struct Surface
     {
-        Surface(Impl& owner, std::size_t index) : Index(index), Raster(owner, *this) {}
-        const std::size_t Index;
+        explicit Surface(size_t index)
+            : Index(index), Definition(BistroUICanvases::Posters[index]), Canvas(Definition.Id, Definition.Title, Definition.Style) {}
+        const size_t Index;
+        const BistroUICanvases::Poster& Definition;
+        WorldCanvas Canvas;
         GDX12Material* Material = nullptr;
         GPUTexture Binding;
-        TextureLink EffectLink, TargetLink, RawLink;
+        std::unique_ptr<CanvasRenderer> Local;
+        std::shared_ptr<Remote> Lane;
         Frame* Current = nullptr;
-        Pass Raster;
+        int FailedAdapter = -1;
+        Id ReportedDevice = Invalid;
+        unsigned Reports = 0;
     };
 
     explicit Impl(RenderModule& render, const std::shared_ptr<SceneManagerModule>& scenes, bool cloudCanvas)
-        : Render(render), Scenes(scenes), Atrium(*this, 0), Terrace(*this, 1), Clouds(*this, 2), CloudCanvas(cloudCanvas)
-    {
-    }
+        : Render(render), Scenes(scenes), Atrium(0), Terrace(1), Clouds(2), CloudCanvas(cloudCanvas) {}
 
     ~Impl()
     {
-        if (const auto scenes = Scenes.lock())
-        {
+        if (const auto scenes = Scenes.lock()) {
             scenes->OnWorldCreated.RemoveListener(WorldCreated);
             scenes->OnWorldDestroyed.RemoveListener(WorldDestroyed);
         }
@@ -133,7 +335,6 @@ struct BistroUIPosters::Impl
     }
 
     std::array<Surface*, Count> Surfaces() { return {&Atrium, &Terrace, &Clouds}; }
-
     void Subscribe(const std::shared_ptr<Impl>& owner, SceneManagerModule& scenes)
     {
         const std::weak_ptr<Impl> weak(owner);
@@ -167,12 +368,13 @@ struct BistroUIPosters::Impl
         std::array<GDX12Material*, Count> materials{};
         for (auto* surface : Surfaces()) {
             const auto i = surface->Index;
-            if (i == 2 && !CloudCanvas) continue;
+            const auto& poster = surface->Definition;
+            if (poster.Style == CanvasStyle::Image && !CloudCanvas) continue;
             if (!surface->Material) {
-                surface->Material = Render.GetMaterialByName(Names[i]);
-                if (!surface->Material) surface->Material = Render.CreateMaterial(Names[i]);
+                surface->Material = Render.GetMaterialByName(poster.Material);
+                if (!surface->Material) surface->Material = Render.CreateMaterial(poster.Material);
                 if (!surface->Material) throw std::runtime_error("Cannot create Bistro canvas material");
-                surface->Binding.Name = Names[i];
+                surface->Binding.Name = poster.Material;
                 surface->Material->Diffuse = &surface->Binding;
                 surface->Material->Type = MaterialType::WorldCanvas;
                 surface->Material->UseBakedLighting = true;
@@ -183,84 +385,71 @@ struct BistroUIPosters::Impl
         BistroPaintingSurfaces::Install(world, Render, source, materials, entities);
     }
 
-    bool Prepare(GDX12DeviceResources& primary, UINT slot, double animationSeconds)
+
+    void Prepare(GDX12DeviceResources& primary, Executor& executor, uint64_t version, double seconds, GDX12Texture* cloudImage)
     {
-        if (slot != primary.CurrFrameConstantsIndex || slot >= primary.FrameConstants.size() || !primary.Device)
-            throw std::invalid_argument("Bistro posters require the current primary frame slot");
+        Slot = primary.CurrFrameConstantsIndex;
         const auto completed = primary.Device->GetCommandQueue()->GetFence()->GetCompletedValue();
         if (completed == UINT64_MAX) ThrowIfFailed(DXGI_ERROR_DEVICE_REMOVED);
-        if (primary.FrameConstants[slot]->FenceValue > completed)
+        if (primary.FrameConstants.at(Slot)->FenceValue > completed)
             throw std::logic_error("Bistro poster slot is still in flight");
-
-        const bool visible = !Worlds.empty();
-        bool rebuild = false;
-        if (visible)
-        {
-            if (!Raster[0])
-            {
-                std::array<std::unique_ptr<OffscreenRenderer>, Count> raster;
-                for (auto& renderer : raster)
-                    renderer = std::make_unique<OffscreenRenderer>(*primary.Device,
-                        static_cast<unsigned>(primary.FrameConstants.size()), true);
-                auto effects = std::make_unique<CanvasEffects>(*primary.Device);
-                Slots.resize(primary.FrameConstants.size());
-                Raster = std::move(raster);
-                Effects = std::move(effects);
-            }
-            const auto inputs = Posters.BuildFrames(animationSeconds);
-            for (auto* surface : Surfaces())
-            {
-                const auto i = surface->Index;
-                const bool image = i == 2;
-                if (!surface->Material || (image && (!CloudCanvas || !ImageInput))) {
-                    Slots.at(slot)[i].Published = false;
-                    surface->Current = nullptr;
-                    surface->TargetLink.Texture = surface->EffectLink.Texture = surface->RawLink.Texture = nullptr;
-                    continue;
-                }
-                const auto& input = inputs[i];
-                const auto profile = GetCanvasProfile(input->LogicalSize, input->Quality);
-                auto& frame = Slots.at(slot)[i];
-                frame.EffectOwner.reset(); frame.RasterOwner.reset(); frame.PostOwner.reset();
-                bool changed = false;
-                if (!frame.Target || frame.Target->GetWidth() != profile.RasterSize.Width ||
-                    frame.Target->GetHeight() != profile.RasterSize.Height) {
-                    frame.Target = MakeMaterialTarget(primary, profile.RasterSize, !image);
-                    if (!image) frame.Raw = MakeMaterialTarget(primary, profile.RasterSize);
-                    changed = true;
-                }
-                if (!image) {
-                    if (!frame.Effect || frame.Effect->GetWidth() != profile.EffectsSize.Width ||
-                        frame.Effect->GetHeight() != profile.EffectsSize.Height) {
-                        frame.Effect = std::make_unique<GDX12Texture>();
-                        GDX12RenderHelpers::InitializeComputeTexture(*frame.Effect, primary,
-                            profile.EffectsSize.Width, profile.EffectsSize.Height, OffscreenFormat, false);
-                        frame.PreparedEffects = Effects->Prepare(*input, frame.Effect->GetResource()->D3DResource);
-                    }
-                    if (changed) frame.PreparedPost = Effects->PreparePost(*input,
-                        frame.Raw->GetResource()->D3DResource, frame.Target->GetResource()->D3DResource);
-                }
-                frame.Input = input;
-                surface->Current = &frame;
-                surface->TargetLink.Texture = frame.Target.get();
-                surface->RawLink.Texture = frame.Raw.get();
-                surface->EffectLink.Texture = image ? ImageInput : frame.Effect.get();
-                surface->Binding.PrimaryDeviceTexture = frame.Target.get();
-                if (changed || !frame.Published) surface->Material->DirtyFlag = true;
-                frame.Published = true;
-            }
-        }
+        if (Slots.empty()) Slots.resize(primary.FrameConstants.size());
+        const auto quality = GetCanvasQuality();
         for (auto* surface : Surfaces())
         {
-            if (!visible) {
-                surface->Current = nullptr;
-                surface->TargetLink.Texture = surface->EffectLink.Texture = surface->RawLink.Texture = nullptr;
+            auto& frame = Slots.at(Slot)[surface->Index];
+            frame.Local.Retire();
+            if (frame.Lane) frame.Lane->Slots.at(Slot).Draw.Retire();
+            frame.Lane.reset();
+            frame.Output = frame.Import = frame.ExportInput = frame.ImportPacket = frame.Consumer = Invalid;
+            surface->Current = nullptr;
+            const auto& poster = surface->Definition;
+            const bool image = poster.Style == CanvasStyle::Image;
+            const bool active = !Worlds.empty() && surface->Material && (!image || (CloudCanvas && cloudImage));
+            const auto* oldTarget = frame.Local.Target.get();
+            if (active) {
+                const auto input = surface->Canvas.BuildFrame(poster.Size, seconds, quality);
+                if (input->Id != poster.Id) throw std::logic_error("World canvas identity mismatch");
+                frame.InputImage = image ? cloudImage : nullptr;
+                frame.Version = version;
+                const auto profile = GetCanvasProfile(input->LogicalSize, input->Quality);
+                frame.Local.PrepareTarget(primary, profile.RasterSize, !image);
+                const int requested = AdapterVariables[surface->Index]->GetValue();
+                if (requested != surface->FailedAdapter) surface->FailedAdapter = -1;
+                const Id device = requested >= 0 && requested != surface->FailedAdapter ?
+                    executor.Submissions()->SelectAdapter(requested) : 0;
+                if (surface->Lane && surface->Lane->Device != device) surface->Lane.reset();
+                if (device) {
+                    const auto fallback = [&](const auto& error) {
+                        executor.Submissions()->CheckHealth();
+                        Log::Warning("RenderGraph", "Using local canvas ", poster.Title, ": ", error);
+                        surface->FailedAdapter = requested;
+                        surface->Lane.reset();
+                    };
+                    try {
+                        if (!surface->Lane) surface->Lane = std::make_shared<Remote>(executor, device, UINT(Slots.size()));
+                        surface->Lane->Prepare(Slot, input, frame.InputImage, poster.Title);
+                        frame.Lane = surface->Lane;
+                    } catch (const DxException& e) {
+                        if (DeviceLost(e.ErrorCode)) throw;
+                        fallback(e.ToString());
+                    } catch (const std::exception& e) {
+                        fallback(e.what());
+                    }
+                }
+                if (frame.Lane) {
+                    if (!frame.InputImage) frame.Lane->Execute(Slot);
+                } else {
+                    if (!surface->Local) surface->Local = std::make_unique<CanvasRenderer>(*primary.Device, UINT(Slots.size()));
+                    surface->Local->Prepare(primary, frame.Local, input);
+                }
+                surface->Current = &frame;
             }
-            const bool active = visible && surface->Current;
-            if (!active && surface->Binding.PrimaryDeviceTexture) {
-                surface->Binding.PrimaryDeviceTexture = nullptr;
+            auto* target = active ? frame.Local.Target.get() : nullptr;
+            if ((active && (!frame.Published || oldTarget != target)) || (!active && surface->Binding.PrimaryDeviceTexture))
                 surface->Material->DirtyFlag = true;
-            }
+            surface->Binding.PrimaryDeviceTexture = target;
+            frame.Published = active;
             for (auto& [world, entities] : Worlds) {
                 const auto entity = entities[surface->Index];
                 if (entity == InvalidEntity) continue;
@@ -276,52 +465,97 @@ struct BistroUIPosters::Impl
                 }
             }
         }
-        return rebuild;
+    }
+
+    std::vector<CanvasRead> Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work)
+    {
+        std::vector<CanvasRead> reads;
+        for (auto* surface : Surfaces()) {
+            if (!surface->Current) continue;
+            auto& frame = *surface->Current;
+            auto& target = *frame.Local.Target;
+            const std::string title(surface->Definition.Title);
+            if (frame.Lane) {
+                auto& slot = frame.Lane->Slots.at(Slot);
+                if (frame.InputImage)
+                    frame.ExportInput = slot.Input.Append(graph, bindings, work, title + " export selected cloud picture",
+                        0, *frame.InputImage, true, Queue::Copy);
+                frame.Import = slot.Output.Append(graph, bindings, work, title + " import final texture",
+                    0, target, false, Queue::Copy);
+            } else {
+                surface->Local->Append(graph, bindings, work, frame.Local, frame.InputImage, title + " local raster");
+            }
+            const auto access = Bind(graph, bindings, Native(target), "canvas material texture",
+                Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
+            frame.Output = access.Resource;
+            reads.push_back({access, surface->Material->_CBufferIndex, target.GetSRV()->HeapIndex - Texture2D_StartIndex});
+        }
+        return reads;
+    }
+
+    void AddExchanges(const Schedule& schedule, std::vector<PacketWait>& waits, std::vector<Executor::PacketExchange>& exchanges)
+    {
+        for (auto* surface : Surfaces()) {
+            if (!surface->Current) continue;
+            auto& frame = *surface->Current;
+            Id input = Invalid;
+            for (Id i = 0; i < schedule.Packets.size(); ++i) {
+                const auto& packet = schedule.Packets[i];
+                if (frame.Import != Invalid && packet.Operation == frame.Import) frame.ImportPacket = i;
+                if (frame.ExportInput != Invalid && packet.Operation == frame.ExportInput) input = i;
+                if (packet.Name == "world-space canvases over G-buffer" &&
+                    std::any_of(packet.Accesses.begin(), packet.Accesses.end(), [&](const auto& access) {
+                        return access.Resource == frame.Output && access.Usage == Mode::Read;
+                    })) frame.Consumer = i;
+            }
+            if (!frame.Lane) continue;
+            if (frame.ImportPacket == Invalid) throw std::logic_error("Missing world canvas import");
+            if (frame.InputImage) {
+                if (input == Invalid) throw std::logic_error("Missing canvas cloud picture export");
+                exchanges.push_back({input, frame.ImportPacket, [lane = frame.Lane, slot = Slot](CompletionToken token) {
+                    return lane->Execute(slot, token);
+                }});
+            } else waits.push_back({frame.ImportPacket, frame.Lane->Slots.at(Slot).Ready});
+        }
+    }
+
+    void Submitted(uint64_t version, const std::vector<CompletionToken>& completions)
+    {
+        for (auto* surface : Surfaces()) {
+            if (!surface->Current) continue;
+            const auto& frame = *surface->Current;
+            if (frame.Consumer >= completions.size() || !completions[frame.Consumer]) continue;
+            const Id device = frame.Lane ? frame.Lane->Device : 0;
+            if (surface->ReportedDevice != device) {
+                surface->ReportedDevice = device;
+                surface->Reports = 0;
+            }
+            if (surface->Reports >= 3) continue;
+            ++surface->Reports;
+            const CompletionToken imported = frame.Lane ? completions.at(frame.ImportPacket) : CompletionToken{};
+            const CompletionToken ready = frame.Lane ? frame.Lane->Slots.at(Slot).Ready : CompletionToken{};
+            const CompletionToken cloud = frame.Lane ? frame.Lane->Slots.at(Slot).CloudInput : CompletionToken{};
+            Log::Info("RenderGraph", "World canvas frame=", version, " id=", uint64_t(surface->Definition.Id),
+                " title=", surface->Definition.Title, " GPU=", Submissions->AdapterLabel(device),
+                " material=", surface->Definition.Material, " materialIndex=", surface->Material->_CBufferIndex,
+                " textureIndex=", frame.Local.Target->GetSRV()->HeapIndex - Texture2D_StartIndex,
+                " produced=", frame.Version, " imported=", imported ? frame.Version : 0,
+                " exportFence=", ready.Value, " importFence=", imported.Value,
+                " cloudInputFence=", cloud.Value,
+                " consumer=world-space canvases over G-buffer consumerFence=", completions[frame.Consumer].Value);
+        }
     }
 
     RenderModule& Render;
     std::weak_ptr<SceneManagerModule> Scenes;
     ListenerHandle WorldCreated = 0, WorldDestroyed = 0;
     std::map<World*, std::array<Entity, Count>> Worlds;
-    BistroUICanvases::Posters Posters;
     Surface Atrium, Terrace, Clouds;
-    bool CloudCanvas = false;
-    GDX12Texture* ImageInput = nullptr;
-    std::array<std::unique_ptr<OffscreenRenderer>, Count> Raster;
-    std::unique_ptr<CanvasEffects> Effects;
+    bool CloudCanvas;
+    UINT Slot = 0;
+    std::shared_ptr<QueueSubmission> Submissions;
     std::vector<std::array<Frame, Count>> Slots;
 };
-
-
-
-void BistroUIPosters::Impl::Pass::Execute(GDX12CommandList* commands)
-{
-    auto* frame = Poster.Current;
-    if (!frame) return;
-    const bool image = Poster.Index == 2;
-    auto* effect = Poster.EffectLink.Texture->GetResource();
-    if (!image) {
-        commands->ResourceBarrier({effect->GetTransitionBarrier(D3D12_RESOURCE_STATE_UNORDERED_ACCESS)});
-        frame->EffectOwner = Owner.Effects->RecordPrepared(*commands, *frame->Input, frame->PreparedEffects);
-        commands->ResourceBarrier({effect->GetPixelShaderResourceBarrier()});
-    }
-    auto* raster = image ? frame->Target.get() : frame->Raw.get();
-    commands->ResourceBarrier({raster->GetResource()->GetRenderTargetBarrier()});
-    frame->RasterOwner = Owner.Raster[Poster.Index]->TryRecord(*commands, raster->GetResource()->D3DResource,
-        frame->Input->Draw, {{CanvasEffectTextureId, effect->D3DResource}});
-    if (!frame->RasterOwner) throw std::logic_error("Retired Bistro canvas frame has no local raster slot");
-    if (!image) {
-        commands->ResourceBarrier({raster->GetResource()->GetNonPixelShaderResourceBarrier(),
-            frame->Target->GetResource()->GetUnorderedAccessBarrier()});
-        frame->PostOwner = Owner.Effects->RecordPost(*commands, *frame->Input, frame->PreparedPost);
-    }
-}
-
-IRenderPassLink* BistroUIPosters::Impl::Pass::GetOutput(UINT index)
-{
-    if (index != 0) return nullptr;
-    return &Poster.TargetLink;
-}
 
 BistroUIPosters::BistroUIPosters(RenderModule& render, const std::shared_ptr<SceneManagerModule>& scenes, bool cloudCanvas)
 {
@@ -332,32 +566,25 @@ BistroUIPosters::BistroUIPosters(RenderModule& render, const std::shared_ptr<Sce
 
 BistroUIPosters::~BistroUIPosters() = default;
 
-bool BistroUIPosters::PrepareFrame(GDX12DeviceResources& primary, UINT frameSlot, double animationSeconds)
+void BistroUIPosters::PrepareFrame(GDX12DeviceResources& primary, Executor& executor, uint64_t frame,
+                                   double animationSeconds, GDX12Texture* image)
 {
-    return _impl->Prepare(primary, frameSlot, animationSeconds);
+    _impl->Submissions = executor.Submissions();
+    _impl->Prepare(primary, executor, frame, animationSeconds, image);
 }
 
-GDX12RenderPass& BistroUIPosters::RasterPass(std::size_t index) const
+std::vector<CanvasRead> BistroUIPosters::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work)
 {
-    return _impl->Surfaces().at(index)->Raster;
+    return _impl->Append(graph, bindings, work);
 }
 
-IRenderPassLink& BistroUIPosters::Output(std::size_t index) const
+void BistroUIPosters::AddExchanges(const Schedule& schedule, std::vector<PacketWait>& waits,
+                                   std::vector<Executor::PacketExchange>& exchanges)
 {
-    return _impl->Surfaces().at(index)->TargetLink;
+    _impl->AddExchanges(schedule, waits, exchanges);
 }
 
-std::vector<GDX12Texture*> BistroUIPosters::NativeTargets(std::size_t index) const
+void BistroUIPosters::Submitted(uint64_t frame, const std::vector<CompletionToken>& completions)
 {
-    auto* frame = _impl->Surfaces().at(index)->Current;
-    if (!frame) return {};
-    if (index == 2) return {_impl->ImageInput, frame->Target.get()};
-    return {frame->Effect.get(), frame->Target.get(), frame->Raw.get()};
+    _impl->Submitted(frame, completions);
 }
-
-
-
-
-
-
-void BistroUIPosters::SetImageInput(GDX12Texture* image) { _impl->ImageInput = image; }

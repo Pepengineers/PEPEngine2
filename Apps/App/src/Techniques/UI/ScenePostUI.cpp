@@ -84,10 +84,9 @@ bool ScenePostUI::NeedsResize() const
 {
 	return _blur.NeedsTileResize();
 }
-void ScenePostUI::PrepareMaterials(double animationSeconds, GDX12Texture* cloudImage)
+void ScenePostUI::PrepareMaterials(Executor& executor, uint64_t frame, double animationSeconds, GDX12Texture* cloudImage)
 {
-	_posters->SetImageInput(cloudImage);
-	_posters->PrepareFrame(_resources, _resources.CurrFrameConstantsIndex, animationSeconds);
+	_posters->PrepareFrame(_resources, executor, frame, animationSeconds, cloudImage);
 }
 void ScenePostUI::Reset()
 {
@@ -470,7 +469,7 @@ void ScenePostUI::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, G
 	const auto fg = AppendFrameGeneration(graph, bindings, depth, output);
 	AppendScreen(graph, bindings, target, finish, fg);
 }
-std::vector<Access> ScenePostUI::AppendPosters(Graph& graph, std::vector<ID3D12Resource*>& bindings)
+std::vector<CanvasRead> ScenePostUI::AppendPosters(Graph& graph, std::vector<ID3D12Resource*>& bindings)
 {
 	for (Id id = 0; id < bindings.size(); ++id)
 	{
@@ -484,33 +483,6 @@ std::vector<Access> ScenePostUI::AppendPosters(Graph& graph, std::vector<ID3D12R
 			}
 		}
 	}
-	std::vector<Access> outputs;
-	for (size_t index = 0; index < BistroUIPosters::Count; ++index)
-	{
-		const auto images = _posters->NativeTargets(index);
-		if (images.empty())
-		{
-			continue;
-		}
-		auto* effect = images[0];
-		auto* target = images[1];
-		auto* pass = &_posters->RasterPass(index);
-		std::vector<std::pair<GDX12Resource*, Mode>> accesses{
-		    {effect->GetResource(), index == 2 ? Mode::Read : Mode::ReadWrite}, {target->GetResource(), Mode::Write}};
-		auto* raster = target;
-		if (images.size() == 3)
-		{
-			raster = images[2];
-			accesses.emplace_back(raster->GetResource(), Mode::ReadWrite);
-		}
-		const char* names[] = {"UI neon raster / Gaussian glow", "UI ASTRA raster / Gaussian slider",
-		                       "UI cloud texture raster"};
-		Packet(
-		    graph, bindings, names[index], std::move(accesses), [pass](auto* cmd) { pass->Execute(cmd); }, {}, raster);
-		const auto targetId =
-		    NativeWork::ResourceFor(graph, bindings, target->GetResource()->D3DResource.Get(), "poster material");
-		outputs.push_back({targetId, Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
-	}
-	return outputs;
+	return _posters->Append(graph, bindings, _work);
 }
 } // namespace BistroRender

@@ -1,4 +1,5 @@
 #include "SceneGeometry.h"
+#include "Techniques/UI/BistroUIPosters.h"
 #include "NativeWork.h"
 #include "ShadowGeometry.h"
 #include "Common/ConsoleVariables.h"
@@ -400,14 +401,26 @@ void SceneGeometry::Freeze(UINT index, UINT camera, std::vector<GDX12SkinningWor
 		s.SkinIds.push_back(ids);
 	}
 }
-void SceneGeometry::AppendWorldCanvases(Graph& graph, UINT index, std::vector<Access> textureReads)
+void SceneGeometry::AppendWorldCanvases(Graph& graph, UINT index, const std::vector<CanvasRead>& textureReads)
 {
 	auto& s = _slots.at(index);
 	if (s.CanvasDraws.empty())
 	{
 		return;
 	}
-	Operation operation{"world-space canvases over G-buffer", std::move(textureReads)};
+	Operation operation{"world-space canvases over G-buffer", {}};
+	const auto& frame = *_resources.FrameConstants[index];
+	const auto* instances = frame.InstanceCache->GetCPUData();
+	const auto* materials = frame.MaterialCache->GetCPUData();
+	for (const auto& read : textureReads)
+	{
+		if (std::none_of(s.CanvasDraws.begin(), s.CanvasDraws.end(), [&](const auto& draw) {
+			    return instances[draw.InstanceID].MaterialIndex == read.MaterialIndex;
+		    })) continue;
+		if (materials[read.MaterialIndex].DiffuseIndex != read.TextureIndex)
+			throw std::logic_error("World canvas draw uses a different material texture");
+		operation.Accesses.push_back(read.Texture);
+	}
 	for (Id id : {SceneInstances, SceneMaterials, SceneTransforms})
 	{
 		operation.Accesses.push_back({id, Mode::Read, ShaderRead});

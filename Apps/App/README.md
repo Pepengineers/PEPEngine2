@@ -39,6 +39,20 @@ remain late overlays with read-only depth.
 Use `--read-texture=Scene.DepthNormals.Normals` or
 `--read-texture=Scene.DepthNormals.Depth` to read at the early graph boundary.
 
+### World-space billboards
+
+The F1 settings show a GPU picker by hardware name for each billboard. The
+saved keys are `App.UI.WorldCanvas.Adapter.Atrium` for NEON DISTRICT (CanvasId 1),
+`App.UI.WorldCanvas.Adapter.Terrace` for ASTRA (2), and
+`App.UI.WorldCanvas.Adapter.Clouds` for CLOUDS (3). The default `-1` follows
+the primary GPU. Each billboard owns its rendering and material texture.
+
+Remote billboards render the current frame (CrossSync=1). The primary GPU
+waits at the final texture import and uses it for the surface material.
+CLOUDS renders the selected Cloud Picture image. If CLOUDS uses a remote
+GPU, its input is copied from the selected Cloud Picture output before it
+renders, preserving all Cloud Picture adapter and synchronization settings.
+
 ### Two-adapter synchronization
 
 In F1, each technique can select its GPU by name. `App.CloudPicture.Adapter`,

@@ -114,13 +114,14 @@ namespace Engine::UI
             {
                 const auto name = std::filesystem::path(Name).u8string();
                 const auto description = std::filesystem::path(variable.GetDescription()).u8string();
+                const bool canvasAdapter = Name.rfind(L"App.UI.WorldCanvas.Adapter.", 0) == 0;
                 const auto active = variable.GetString();
                 if (Draft == Current) Draft = active;
                 Current = active;
 
                 ImGui::PushID(name.c_str());
-                ImGui::TextWrapped("%s", name.c_str());
-                if (!description.empty()) ImGui::TextWrapped("%s", description.c_str());
+                ImGui::TextWrapped("%s", canvasAdapter ? description.c_str() : name.c_str());
+                if (!description.empty() && !canvasAdapter) ImGui::TextWrapped("%s", description.c_str());
                 ImGui::Spacing();
                 if (variable.GetFlags() == EConsoleVariableFlags::ReadOnly)
                 {
@@ -133,7 +134,8 @@ namespace Engine::UI
                     }
                 }
                 else if (Name == L"App.CloudPicture.Adapter" || Name == L"App.AO.Adapter" ||
-                    Name == L"App.Particles.Adapter" || Name == L"App.Water.Adapter" || Name == L"App.Grass.Wind.Adapter")
+                    Name == L"App.Particles.Adapter" || Name == L"App.Water.Adapter" || Name == L"App.Grass.Wind.Adapter" ||
+                    canvasAdapter)
                     DrawAdapter(variable);
                 else if (variable.GetType() == EConsoleVariableType::Boolean)
                 {

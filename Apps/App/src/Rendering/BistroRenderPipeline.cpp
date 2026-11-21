@@ -65,7 +65,7 @@ void BistroRenderPipeline::PrepareMaterialBindings(RenderPipelineContext& c)
 	_post->Textures().RetireReadback(slot);
 	_animationTime += (std::max)(0.0, double(c.Common.GameTimer->DeltaTime()));
 	_cloudPicture->Prepare(slot, _animationTime);
-	_post->PrepareMaterials(_animationTime, _cloudPicture->Image());
+	_post->PrepareMaterials(*_executor, _frameNumber, _animationTime, _cloudPicture->Image());
 }
 
 void BistroRenderPipeline::RebuildExecution(RenderPipelineContext& c)
@@ -173,7 +173,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 		{
 			if (op.Name == BistroRender::ProbeColorOperationName)
 			{
-				op.Accesses.insert(op.Accesses.end(), posters.begin(), posters.end());
+				for (const auto& poster : posters) op.Accesses.push_back(poster.Texture);
 			}
 		}
 	};
@@ -222,6 +222,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	water.AddWaits(_schedule, waits);
 	grass.AddWindWaits(_schedule, waits);
 	std::vector<BistroRender::Executor::PacketExchange> exchanges;
+	_post->AddPosterExchanges(_schedule, waits, exchanges);
 	particles.AddExchanges(_schedule, waits, exchanges);
 	if (auto ao = _lighting->AOExchange(_schedule)) exchanges.push_back(std::move(*ao));
 	uint64_t completion;
@@ -245,6 +246,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	grass.WindSubmitted(_frameNumber, _executor->Completions());
 	particles.Submitted(_executor->Completions());
 	_lighting->AOSubmitted(_executor->Completions());
+	_post->PostersSubmitted(_frameNumber, _executor->Completions());
 	_post->Submitted(slot);
 	_environment->Submitted(completion);
 	_lighting->Submitted(completion);
