@@ -25,6 +25,11 @@ class SceneSunShadows
 	using GrassAppender = std::function<void(const GeometryTarget&, Graph&, std::vector<ID3D12Resource*>&)>;
 	void AppendGrassViews(Graph& graph, std::vector<ID3D12Resource*>& bindings, UINT slot, Id atlas,
 	                      const GrassAppender& appendGrass);
+	struct VegetationCaster
+	{
+		uint64_t Revision;
+		BoundingBox Bounds;
+	};
 	struct Slot
 	{
 		GDX12Texture Atlas;
@@ -34,7 +39,7 @@ class SceneSunShadows
 		BoundingBox Bounds{};
 		bool HasBounds = false, BoundsReady = false, Rendered = false;
 		UINT Resolution = UINT_MAX, Revision = 0, Update = 0, DirtyCascades = 0;
-		uint64_t GrassRevision = 0;
+		std::vector<VegetationCaster> Vegetation;
 		GDX12ShadowConstants Settings{};
 	};
 	void PrepareAtlas(Slot&, UINT resolution);
