@@ -203,6 +203,8 @@ public:
     template<class T> T GetParameter(const std::string& name) const { return _node.Description.GetParameter<T>(name); }
     void RequireTextureSize(const PinId& id, UInt2 size)
     { _node.Description.GetPortDescription(id); _compileData.Ports.at({_node.Id, id}).RequiredTextureSize = size; }
+    void SetOutputTextureArraySize(const PinId& id, UINT arraySize);
+    // Sets ArraySize for a Texture2DArray output before resource allocation or reconstruction.
     void SetOutputBufferCapacity(const PinId& id, uint64_t capacity)
     {
         auto output = _node.Description.Outputs.find(id);

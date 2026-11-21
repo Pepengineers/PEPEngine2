@@ -211,8 +211,8 @@ namespace
             auto textureDimensions = ResolveTextureExtent(nodeDefinition, extentExpression, compileData, resolveResourceDescription);
             resourceDescription.Width = textureDimensions.x;
             resourceDescription.Height = textureDimensions.y;
-            if (portDescription.Layers > 2048) { throw std::invalid_argument("ERROR: " + FormatPinAddress(portAddress) + ": texture array layer count exceeds 2048. Use no more than 2048 layers for a Texture2DArray."); }
-            resourceDescription.ArraySize = portDescription.Layers;
+            if (portDescription.ArraySize > 2048) { throw std::invalid_argument("ERROR: " + FormatPinAddress(portAddress) + ": texture array size exceeds 2048. Use an ArraySize from 1 to 2048 for a Texture2DArray."); }
+            resourceDescription.ArraySize = portDescription.ArraySize;
             resourceDescription.MipLevels = portDescription.MipLevels;
             const auto extent = (std::max)(textureDimensions.x, textureDimensions.y);
             if (!portDescription.MipLevels || portDescription.MipLevels > D3D12_REQ_MIP_LEVELS || (1u << (portDescription.MipLevels - 1)) > extent)

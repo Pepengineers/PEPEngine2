@@ -76,7 +76,7 @@ struct PortDescription
     bool AllowLocal = true;
     bool AllowShared = false;
     Extent Size;
-    uint32_t Layers = 1;
+    uint32_t ArraySize = 1;
     uint64_t Capacity = 1;
     uint32_t Stride = 0;
     std::string Layout;

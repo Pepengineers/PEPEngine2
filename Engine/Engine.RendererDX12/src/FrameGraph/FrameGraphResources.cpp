@@ -65,7 +65,7 @@ namespace
         desc.CreateRTV = HasUsage(description.Usages, ResourceUsage::RenderTarget);
         desc.CreateDSV = HasUsage(description.Usages, ResourceUsage::DepthWrite) || HasUsage(description.Usages, ResourceUsage::DepthRead);
         desc.CreateUAV = HasUsage(description.Usages, ResourceUsage::UnorderedAccess);
-        desc.ClearValue = description.IsDepth() ? XMFLOAT4{0.f, 0.f, 0.f, 0.f} : XMFLOAT4(description.ClearColor.data());
+        desc.ClearValue = description.IsDepth() ? XMFLOAT4{description.ClearColor[0], 0.f, 0.f, 0.f} : XMFLOAT4(description.ClearColor.data());
         if (desc.CreateSRV || desc.CreateUAV) { desc.SRV_UAV_Heap = owner->SRV_UAV_Heap.get(); }
         if (desc.CreateSRV)
         {
@@ -241,6 +241,19 @@ namespace
         { throw std::invalid_argument("ERROR: FrameGraph resource creation requires initialized device resources. Initialize the device and its "
             "descriptor heaps before creating FrameGraph resources."); }
     }
+}
+
+void PassResourceRequirementsContext::SetOutputTextureArraySize(const PinId& id, UINT arraySize)
+{
+    auto output = _node.Description.Outputs.find(id);
+    if (output == _node.Description.Outputs.end() || output->second.Type != ResourceType::Texture2DArray ||
+        !arraySize || arraySize > D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION)
+    {
+        throw std::invalid_argument("ERROR: " + _node.Id + "." + id +
+            ": texture array size requires a Texture2DArray output and a count from 1 to " +
+            std::to_string(D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION) + ".");
+    }
+    output->second.ArraySize = arraySize;
 }
 
 PassBinding FrameGraphPhysicalResource::CreatePassBinding(ResourceUsage usages)

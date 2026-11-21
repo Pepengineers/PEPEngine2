@@ -56,7 +56,7 @@ PortDescription& PassDescription::AddPort(PinId id, bool input, ResourceType typ
     PortDescription port;
     port.Type = type;
     port.Access = input ? DataAccess::ReadOnly : DataAccess::WriteOnly;
-    if (type == ResourceType::TextureCube) { port.Layers = 6; }
+    if (type == ResourceType::TextureCube) { port.ArraySize = 6; }
     if (type == ResourceType::DrawStream)
     {
         port.Stride = DrawStreamStride;
