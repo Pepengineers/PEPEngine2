@@ -87,7 +87,10 @@ Set `App.Particles.Adapter` to a secondary DXGI index from the same list as
 `Render.PrimaryAdapter`. The default `-1` runs simulation on GPU0. Marked
 transparent emitters with frame-only inputs can use GPU1. Bistro enables this
 for Terrace Embers, Interior Dust and Table Steam. These emitters share one
-publication. GPU0 keeps frustum culling, sorting, soft-particle depth and all drawing.
+publication. Planter Fireflies use a separate publication and import the
+agent interaction field on GPU1. GPU0 imports their result before the opaque
+cull and draws both DepthNormals and G-buffer from that choice. GPU0 keeps
+frustum culling, sorting, soft-particle depth and all drawing.
 An unavailable or conflicting adapter falls back to local simulation. Cloud
 Picture takes priority when selecting the shared secondary adapter, then AO.
 Changing the owner resets the pool and preserves the already consumed burst

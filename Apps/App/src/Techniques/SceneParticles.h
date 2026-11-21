@@ -17,7 +17,7 @@ public:
     static int SecondaryAdapter();
     void BeginSimulation(GDX12ParticleInteractionField, Executor&, int activeAdapter, float worldRate);
     void PauseIndependentClock();
-    void AddWaits(const Schedule&, std::vector<PacketWait>&);
+    void AddExchanges(const Schedule&, std::vector<PacketWait>&, std::vector<Executor::PacketExchange>&);
     void Submitted(const std::vector<CompletionToken>&);
     void Presented(uint64_t frame);
     void AppendSimulation(Graph&, std::vector<ID3D12Resource*>&, Inputs, GDX12Texture* depth);
@@ -39,6 +39,14 @@ private:
         bool operator==(const EmitterLayout& rhs) const { return Id == rhs.Id && Capacity == rhs.Capacity; }
     };
     struct Remote;
+    struct Lane
+    {
+        std::unique_ptr<Remote> Solver;
+        std::vector<EmitterLayout> Layout;
+        uint64_t Domain = 0, Generation = 0;
+        Id Export = Invalid, Import = Invalid, ImportPacket = Invalid;
+        bool Attempted = false;
+    };
     bool HasDrawSources(bool opaque) const;
     std::vector<Access> DrawReads(Graph&, std::vector<ID3D12Resource*>&, bool opaque);
     void AppendOpaqueDraw(Graph&, std::vector<ID3D12Resource*>&, const SceneGeometry&, UINT,
@@ -53,21 +61,18 @@ private:
     GDX12ParticleInteractionField _interaction{};
     std::array<std::vector<uint64_t>, 3> _groups;
     GDX12ParticleRenderFrame _renderFrame;
-    std::unique_ptr<Remote> _remote;
+    std::array<Lane, 3> _remote;
     struct VisibilitySample
     {
         GDX12Resource Buffer;
-        uint64_t Frame = 0, Version = 0;
-        std::vector<uint64_t> SourceIds;
+        uint64_t Frame = 0;
+        std::vector<std::pair<uint64_t, uint64_t>> Sources;
+        bool Written = false;
     };
-    std::vector<VisibilitySample> _visibilitySamples;
+    std::vector<std::array<VisibilitySample, 2>> _visibilitySamples;
+    std::vector<uint64_t> _remoteVersions;
     UINT _firstRemote = 0;
-    bool _sampleVisibility = false;
     std::vector<uint64_t> _visibleSources;
-    uint64_t _attemptedDomain = 0, _generationSeed = 0;
-    std::vector<EmitterLayout> _attemptedLayout;
-    Id _import = Invalid, _importPacket = Invalid;
-    bool _attemptedRemote = false;
     std::vector<Access> _drawReads;
     GDX12Texture *_accum = nullptr, *_reveal = nullptr;
     UINT _width = 0, _height = 0;

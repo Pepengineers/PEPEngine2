@@ -204,13 +204,14 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 		}
 	};
 	auto waits = _cloudPicture->Waits(_schedule);
-	particles.AddWaits(_schedule, waits);
-	const auto exchange = _lighting->AOExchange(_schedule);
+	std::vector<BistroRender::Executor::PacketExchange> exchanges;
+	particles.AddExchanges(_schedule, waits, exchanges);
+	if (auto ao = _lighting->AOExchange(_schedule)) exchanges.push_back(std::move(*ao));
 	uint64_t completion;
 	try
 	{
 		completion = _executor->Execute(_schedule, _geometry->PlannedResources(slot), record, prefix, nullptr, nullptr, waits,
-		                                exchange ? &*exchange : nullptr);
+		                                exchanges);
 	}
 	catch (...)
 	{
@@ -243,6 +244,7 @@ void BistroRenderPipeline::FramePresented()
 		if (name.find("DepthNormals") != std::string::npos || name == BistroRender::GBufferOperationName ||
 		    name == "particle simulation from depth prepass" || name == "opaque particles frustum cull" ||
 		    name == "particle simulation from interaction field" || name == "opaque particles G-buffer (read-only depth)" ||
+		    name == "GPU0 export particle interaction field" || name == "GPU0 import particle snapshot" ||
 		    name == "read back scene texture" || name.find(" GPU0 export inputs") != std::string::npos ||
 		    name.find(" GPU0 import ") != std::string::npos || name == "XeGTAO denoise")
 			Log::Info("RenderGraph", "DepthNormals frame=", _frameNumber, " packet=", i, " ", name);

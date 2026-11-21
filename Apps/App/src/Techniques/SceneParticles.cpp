@@ -104,6 +104,14 @@ struct SceneParticles::Remote
 		std::array<GDX12Descriptor, 3> Views;
 		GDX12ParticleRenderSource Bindings;
 	};
+	struct InputSlot
+	{
+		QueueSubmission::TransferBuffer Buffer;
+		GDX12ParticleInteractionField Field;
+		CompletionToken Ready, Reader;
+		uint64_t Version = 0, Generation = 0;
+		bool Pinned = false, Writing = false;
+	};
 
 	std::shared_ptr<QueueSubmission> Submit;
 	GDX12DeviceResources Secondary;
@@ -111,8 +119,14 @@ struct SceneParticles::Remote
 	Executor GPU1;
 	std::vector<ImportedEmitter> Imported;
 	std::vector<Publication> Ring;
+	std::vector<InputSlot> InputsRing;
+	GDX12Resource InputField;
+	GDX12Descriptor FieldSRV;
+	UINT64 InputBytes = 0;
+	uint64_t InputVersion = 0, ConsumedInput = 0;
+	InputSlot* InputWrite = nullptr;
 	std::vector<uint64_t> Revisions;
-	UINT InputSlot = 0, NextOutput = 0;
+	UINT NextUpload = 0, NextOutput = 0;
 	Publication *Selected = nullptr, *LastOrder = nullptr;
 	uint64_t Generation = 0, Ordered = 0, PresentedVersion = 0;
 	uint64_t CachedVersion = 0;
@@ -143,6 +157,8 @@ struct SceneParticles::Remote
 	std::thread Worker;
 	bool Stopping = false, ClockSuspended = false;
 	std::exception_ptr WorkerFailure;
+	ProducerInput Deferred;
+	Publication* DeferredOutput = nullptr;
 
 	Remote(GDX12DeviceResources& primary, const std::shared_ptr<QueueSubmission>& submit,
 	       const std::vector<GDX12ParticleEmitter>& snapshot, GDX12ParticleSettings settings, uint64_t generationSeed)
@@ -220,6 +236,95 @@ struct SceneParticles::Remote
 		GPU1.Drain();
 	}
 
+	bool External() const { return InputBytes != 0; }
+
+	void RebuildInput(UINT64 bytes)
+	{
+		InputsRing.clear();
+		InputField.Reset();
+		InputWrite = nullptr;
+		InputBytes = bytes;
+		ConsumedInput = InputVersion = 0;
+		Revisions.clear();
+		if (!bytes) return;
+		auto* device = Secondary.Device;
+		InputField.D3DResource = device->CreateResource(D3D12_HEAP_TYPE_DEFAULT,
+		    CD3DX12_RESOURCE_DESC::Buffer(bytes), D3D12_RESOURCE_STATE_COMMON);
+		D3D12_SHADER_RESOURCE_VIEW_DESC view{};
+		view.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+		view.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+		view.Buffer.StructureByteStride = sizeof(XMFLOAT4);
+		view.Buffer.NumElements = UINT(bytes / sizeof(XMFLOAT4));
+		auto* heap = Secondary.SRV_UAV_Heap.get();
+		const UINT descriptor = FieldSRV.DescType == DESC_TYPE_NONE ? heap->GetAvailableIndex() : FieldSRV.HeapIndex;
+		FieldSRV.InitAsSRV(InputField.D3DResource.Get(), &view, heap, descriptor);
+		InputsRing.resize(Secondary.FrameConstants.size() + 2);
+		for (auto& slot : InputsRing) slot.Buffer = Submit->CreateTransferBuffer(bytes);
+	}
+
+	InputSlot* NewestInput()
+	{
+		InputSlot* latest = nullptr;
+		for (auto& slot : InputsRing)
+			if (!slot.Writing && slot.Generation == Generation && slot.Ready &&
+			    (!latest || slot.Version > latest->Version) && Submit->Complete(slot.Ready))
+				latest = &slot;
+		return latest;
+	}
+
+	Id AppendInput(NativeWork& work, Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12ParticleInteractionField field)
+	{
+		std::lock_guard lock(Mutex);
+		auto* latest = Mode == 2 ? NewestInput() : nullptr;
+		InputSlot* candidate = nullptr;
+		for (auto& slot : InputsRing)
+		{
+			if (&slot == latest || slot.Writing || slot.Pinned) continue;
+			if (slot.Reader && !Submit->Complete(slot.Reader))
+			{
+				if (!candidate) candidate = &slot;
+				continue;
+			}
+			candidate = &slot;
+			break;
+		}
+		if (!candidate) throw std::logic_error("No particle input transfer slot available");
+		if (candidate->Reader) Submit->Wait(candidate->Reader);
+		InputWrite = candidate;
+		candidate->Writing = true;
+		candidate->Reader = {};
+		candidate->Field = field;
+		auto* shared = candidate->Buffer.Resources[0].Get();
+		auto* source = field.Resource->D3DResource.Get();
+		return work.Add(graph, "GPU0 export particle interaction field",
+		    {ResourceAccess(graph, bindings, field.Resource, Mode::Read, CopySource),
+		     {NativeWork::ResourceFor(graph, bindings, shared, "shared particle input"), Mode::Write, CopyDest}},
+		    [shared, source, bytes = InputBytes](auto* cmd) { cmd->CopyBufferRegion(shared, 0, source, 0, bytes); }, {}, Queue::Copy);
+	}
+
+	CompletionToken SubmitInput(CompletionToken token)
+	{
+		std::unique_lock lock(Mutex);
+		auto* input = InputWrite;
+		InputWrite = nullptr;
+		input->Ready = token;
+		input->Version = ++InputVersion;
+		input->Generation = Generation;
+		input->Writing = false;
+		if (Mode == 2)
+		{
+			SetEvent(Wake.get());
+			return {};
+		}
+		if (!Deferred.Generation) return {};
+		const auto result = Simulate(GPU1, Deferred.Emitters, Deferred.Settings, DeferredOutput, input);
+		input->Reader = result.Complete;
+		ConsumedInput = input->Version;
+		CommitStep(DeferredOutput, result, Generation);
+		Deferred.Generation = 0;
+		return Selected ? Selected->Ready : CompletionToken{};
+	}
+
 	bool LatestReady() const { return Mode == 2 || Mode == 3; }
 
 	void Configure(const std::vector<GDX12ParticleEmitter>& emitters, int mode)
@@ -236,6 +341,11 @@ struct SceneParticles::Remote
 			GameTime = 0;
 			LastOrder = nullptr;
 			Stats = {};
+			if (External())
+			{
+				Controls.clear();
+				ControlSpace.notify_all();
+			}
 		}
 	}
 
@@ -277,8 +387,27 @@ struct SceneParticles::Remote
 		Selected = LatestReady() ? NewestCompleted() : Mode == 0 ? LastOrder : nullptr;
 		auto* output = ReserveOutput();
 		if (!LatestReady() && !output) throw std::logic_error("No slot for exact particle snapshot");
-		CommitStep(output, Simulate(GPU1, emitters, settings, output), Generation);
-		if (!LatestReady() && !Selected) Selected = LastOrder;
+		if (External())
+		{
+			Deferred = {emitters, settings, 0, Generation, false};
+			DeferredOutput = output;
+			if (!LatestReady() && !Selected)
+			{
+				output->Version = Ordered + 1;
+				output->Snapshot = emitters;
+				for (auto& emitter : output->Snapshot)
+				{
+					static_cast<GDX12ParticleEmitterSettings&>(emitter) = ResolveParticleEmitterSettings(emitter, settings.Quality);
+					emitter.Paused |= !settings.SimulationEnabled;
+				}
+				Selected = output;
+			}
+		}
+		else
+		{
+			CommitStep(output, Simulate(GPU1, emitters, settings, output), Generation);
+			if (!LatestReady() && !Selected) Selected = LastOrder;
+		}
 		if (!settings.DrawEnabled) Selected = nullptr;
 	}
 
@@ -290,9 +419,9 @@ struct SceneParticles::Remote
 	};
 
 	StepResult Simulate(Executor& executor, const std::vector<GDX12ParticleEmitter>& emitters,
-	                    const GDX12ParticleSettings& settings, Publication* output)
+	                    const GDX12ParticleSettings& settings, Publication* output, InputSlot* input = nullptr)
 	{
-		const UINT slot = InputSlot++ % UINT(Secondary.FrameConstants.size());
+		const UINT slot = NextUpload++ % UINT(Secondary.FrameConstants.size());
 		const bool inputWaited = !executor.TryBegin(slot);
 		if (inputWaited) executor.Begin(slot);
 		Secondary.CurrFrameConstantsIndex = slot;
@@ -314,12 +443,27 @@ struct SceneParticles::Remote
 		std::vector<ID3D12Resource*> bindings;
 		NativeWork work;
 		std::vector<Access> pools;
+		Solver.SetInteractionField({});
+		if (input)
+		{
+			auto* shared = input->Buffer.Resources[1].Get();
+			auto* target = InputField.D3DResource.Get();
+			work.Add(graph, "GPU1 import particle interaction field",
+			    {{NativeWork::ResourceFor(graph, bindings, shared, "shared particle input"), Mode::Read, CopySource},
+			     ResourceAccess(graph, bindings, &InputField, Mode::Write, CopyDest)},
+			    [shared, target, bytes = InputBytes](auto* cmd) { cmd->CopyBufferRegion(target, 0, shared, 0, bytes); }, {}, Queue::Compute);
+			auto field = input->Field;
+			field.Resource = &InputField;
+			field.SRV = FieldSRV.GPUHandle;
+			Solver.SetInteractionField(field);
+		}
 		for (auto* buffer : Solver.GetPoolResources())
 			pools.push_back(ResourceAccess(graph, bindings, buffer, Mode::ReadWrite, UnorderedAccess));
 		work.AddOwned(graph, "GPU1 initialize particle pools", pools, bindings, [this](auto* cmd) {
 			Solver.InitializePools(cmd, &Secondary);
 		}, "Particle initialization must not submit", {}, Queue::Compute);
 		AddResources(graph, bindings, pools, Solver.GetConstantResources(slot), Mode::Read);
+		if (input) pools.push_back(ResourceAccess(graph, bindings, &InputField, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
 		work.AddOwned(graph, "GPU1 simulate independent particles", std::move(pools), bindings, [this](auto* cmd) {
 			Solver.ExecuteFrameOnly(cmd, &Secondary);
 		}, "Particle simulation must not submit", {}, Queue::Compute);
@@ -344,7 +488,9 @@ struct SceneParticles::Remote
 		}
 		const auto schedule = Compile(graph);
 		executor.Reserve(schedule);
-		executor.Execute(schedule, bindings, [&](Id op, uint32_t, auto* cmd) { work.Record(op, cmd); });
+		std::vector<PacketWait> waits;
+		if (input) waits.push_back({0, input->Ready});
+		executor.Execute(schedule, bindings, [&](Id op, uint32_t, auto* cmd) { work.Record(op, cmd); }, nullptr, nullptr, nullptr, waits);
 		return {executor.Completions().back(), elapsed, inputWaited};
 	}
 
@@ -448,6 +594,16 @@ struct SceneParticles::Remote
 					sleep({});
 					continue;
 				}
+				auto* external = External() ? NewestInput() : nullptr;
+				if (External() && !external)
+				{
+					CompletionToken incoming;
+					for (const auto& slot : InputsRing)
+						if (!slot.Writing && slot.Generation == Generation && slot.Ready)
+							incoming = slot.Ready;
+					sleep(incoming);
+					continue;
+				}
 				auto* output = ReserveOutput();
 				if (!output)
 				{
@@ -472,9 +628,16 @@ struct SceneParticles::Remote
 				}
 				auto settings = input.Settings;
 				settings.Enabled = true; // Apply paused controls and resets without drawing.
+				if (external) external->Pinned = true;
 				lock.unlock();
-				const auto step = Simulate(executor, stepEmitters, settings, output);
+				const auto step = Simulate(executor, stepEmitters, settings, output, external);
 				lock.lock();
+				if (external)
+				{
+					external->Reader = step.Complete;
+					external->Pinned = false;
+					ConsumedInput = external->Version;
+				}
 				CommitStep(output, step, input.Generation);
 				pending = step.Complete;
 				prior = std::move(input);
@@ -624,11 +787,12 @@ SceneParticles::SceneParticles(GDX12DeviceResources& resources, RenderPipelineCo
 }
 SceneParticles::~SceneParticles()
 {
-	if (_remote)
-	{
-		try { _remote->Drain(); }
-		catch (...) { (void)_remote.release(); } // A quarantined queue can still reference the buffers.
-	}
+	for (auto& lane : _remote)
+		if (lane.Solver)
+		{
+			try { lane.Solver->Drain(); }
+			catch (...) { (void)lane.Solver.release(); } // A quarantined queue can still reference the buffers.
+		}
 	_pass.ClearDenendencies();
 	if (_resources.ParticleSimulation)
 	{
@@ -667,29 +831,31 @@ int SceneParticles::SecondaryAdapter() { return Adapter.GetValue(); }
 
 void SceneParticles::PauseIndependentClock()
 {
-	if (_remote) _remote->PauseClock();
+	for (auto& lane : _remote)
+		if (lane.Solver) lane.Solver->PauseClock();
 }
 
 void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, Executor& primary, int activeAdapter,
                                      float worldRate)
 {
 	_work.Commands.clear();
-	_import = _importPacket = Invalid;
-	_sampleVisibility = false;
-	auto& sample = _visibilitySamples.at(_resources.CurrFrameConstantsIndex);
-	if (sample.Frame)
+	for (auto& lane : _remote) lane.Export = lane.Import = lane.ImportPacket = Invalid;
+	for (auto& sample : _visibilitySamples.at(_resources.CurrFrameConstantsIndex))
 	{
-		const D3D12_RANGE bytes{0, (sample.SourceIds.size() + 1) * sizeof(UINT)};
+		sample.Written = false;
+		if (!sample.Frame) continue;
+		const D3D12_RANGE bytes{0, (sample.Sources.size() + 1) * sizeof(UINT)};
 		void* mapped = nullptr;
 		ThrowIfFailed(sample.Buffer.D3DResource->Map(0, &bytes, &mapped));
 		const auto* counts = static_cast<const UINT*>(mapped);
-		for (size_t i = 0; i < sample.SourceIds.size(); ++i)
+		for (size_t i = 0; i < sample.Sources.size(); ++i)
 		{
-			const auto id = sample.SourceIds[i];
+			const auto [id, version] = sample.Sources[i];
+			if (!version) continue;
 			const UINT visible = counts[i + 1] - counts[i];
 			if (std::find(_visibleSources.begin(), _visibleSources.end(), id) != _visibleSources.end()) continue;
 			if (sample.Frame <= 12 || visible)
-				Log::Info("RenderGraph", "Particles MGPU visible GPU0 frame=", sample.Frame, " shown=", sample.Version,
+				Log::Info("RenderGraph", "Particles MGPU visible GPU0 frame=", sample.Frame, " shown=", version,
 				    " id=", id, " remoteDrawElements=", visible);
 			if (visible) _visibleSources.push_back(id);
 		}
@@ -704,70 +870,91 @@ void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, 
 	const auto& submit = primary.Submissions();
 	const bool requested = activeAdapter >= 0 && activeAdapter == SecondaryAdapter();
 	const uint64_t domain = requested ? submit->Incarnation() : 0;
-	std::vector<GDX12ParticleEmitter> remoteEmitters;
-	std::vector<EmitterLayout> layout;
+	std::array<std::vector<GDX12ParticleEmitter>, 3> remoteEmitters;
+	std::array<std::vector<EmitterLayout>, 3> layouts;
 	if (requested)
 		for (const auto& emitter : _resources.ParticleEmitters)
-			if (emitter.SimulateOnSecondary && !emitter.DepthCollision && !emitter.InteractionEnabled &&
-			    emitter.Blend != ParticleBlend::Opaque)
-				remoteEmitters.push_back(emitter);
-	std::sort(remoteEmitters.begin(), remoteEmitters.end(), [](const auto& a, const auto& b) { return a.Id < b.Id; });
-	for (const auto& emitter : remoteEmitters)
-		layout.push_back({emitter.Id, ResolveParticleEmitterSettings(emitter, settings.Quality).MaxParticles});
-	const bool domainChanged = domain != _attemptedDomain;
-	const bool layoutChanged = _attemptedLayout != layout;
-	if (domainChanged || layoutChanged)
+			if (emitter.SimulateOnSecondary && !emitter.DepthCollision &&
+			    emitter.InteractionEnabled == (emitter.Blend == ParticleBlend::Opaque))
+				remoteEmitters[size_t(emitter.InteractionEnabled ? Inputs::Interaction : Inputs::Frame)].push_back(emitter);
+	const UINT64 fieldBytes = interaction.Resource ? interaction.Resource->D3DResource->GetDesc().Width : 0;
+	std::array<UINT64, 3> inputs{0, fieldBytes, 0};
+	std::array<bool, 3> rebuild{}, replaceInput{};
+	for (size_t i = 0; i < _remote.size(); ++i)
 	{
-		if (_remote)
+		auto& emitters = remoteEmitters[i];
+		std::sort(emitters.begin(), emitters.end(), [](const auto& a, const auto& b) { return a.Id < b.Id; });
+		auto& layout = layouts[i];
+		for (const auto& emitter : emitters)
+			layout.push_back({emitter.Id, ResolveParticleEmitterSettings(emitter, settings.Quality).MaxParticles});
+		auto& lane = _remote[i];
+		const bool domainChanged = domain != lane.Domain;
+		rebuild[i] = layout != lane.Layout;
+		replaceInput[i] = lane.Solver && lane.Solver->InputBytes != inputs[i];
+		if (!(domainChanged || rebuild[i] || replaceInput[i])) continue;
+		if (lane.Solver)
 		{
 			primary.Drain();
-			_remote->Drain();
-			_generationSeed = _remote->Generation;
+			lane.Solver->Drain();
+			lane.Generation = lane.Solver->Generation;
 			for (auto& emitter : _resources.ParticleEmitters)
-				emitter.BurstBaseline = _remote->Solver.ConsumedBurst(emitter.Id, emitter.ResetRevision);
-			if (domainChanged || layout.empty()) _remote.reset();
+				emitter.BurstBaseline = (std::max)(emitter.BurstBaseline,
+				    lane.Solver->Solver.ConsumedBurst(emitter.Id, emitter.ResetRevision));
+			if (domainChanged || layout.empty()) lane.Solver.reset();
 		}
-		_attemptedDomain = domain;
-		_attemptedLayout = layout;
-		_attemptedRemote = false;
+		lane.Domain = domain;
+		lane.Layout = layout;
+		lane.Attempted = false;
 	}
-	const bool rebuild = _remote && layoutChanged;
-	if (rebuild || (!_remote && requested && !layout.empty() && settings.Enabled && !_attemptedRemote))
-	{
-		_attemptedRemote = true;
-		for (auto& emitter : remoteEmitters)
-		{
-			const auto& live = *std::find_if(_resources.ParticleEmitters.begin(), _resources.ParticleEmitters.end(),
-			    [&](const auto& source) { return source.Id == emitter.Id; });
-			emitter.BurstBaseline = (std::max)(live.BurstBaseline, simulation->ConsumedBurst(emitter.Id, emitter.ResetRevision));
-		}
-		try
-		{
-			if (rebuild) _remote->RebuildTransport(_resources, remoteEmitters, settings);
-			else _remote = std::make_unique<Remote>(_resources, submit, remoteEmitters, settings, _generationSeed);
-		}
-		catch (const DxException& e)
-		{
-			_remote.reset();
-			Log::Warning("RenderGraph", "Local particles fallback: ", e.ToString());
-		}
-		catch (const std::exception& e)
-		{
-			_remote.reset();
-			Log::Warning("RenderGraph", "Local particles fallback: ", e.what());
-		}
-	}
-	if (layout.empty()) _attemptedRemote = false;
 	std::vector<uint64_t> remoteIds;
-	if (_remote)
+	for (size_t i = 0; i < _remote.size(); ++i)
 	{
-		for (const auto& item : layout) remoteIds.push_back(item.Id);
-		_remote->Prepare(remoteEmitters, settings, CrossSync.GetValue(), worldRate);
+		auto& lane = _remote[i];
+		auto& emitters = remoteEmitters[i];
+		const bool create = !lane.Solver && requested && !emitters.empty() && settings.Enabled && !lane.Attempted;
+		if (create || (lane.Solver && (rebuild[i] || replaceInput[i])))
+		{
+			lane.Attempted = true;
+			for (auto& emitter : emitters)
+			{
+				const auto& live = *std::find_if(_resources.ParticleEmitters.begin(), _resources.ParticleEmitters.end(),
+				    [&](const auto& source) { return source.Id == emitter.Id; });
+				emitter.BurstBaseline = (std::max)(live.BurstBaseline, simulation->ConsumedBurst(emitter.Id, emitter.ResetRevision));
+			}
+			try
+			{
+				if (create)
+					lane.Solver = std::make_unique<Remote>(_resources, submit, emitters, settings, lane.Generation);
+				else if (rebuild[i])
+					lane.Solver->RebuildTransport(_resources, emitters, settings);
+				if (create || replaceInput[i]) lane.Solver->RebuildInput(inputs[i]);
+			}
+			catch (const DxException& e)
+			{
+				lane.Solver.reset();
+				Log::Warning("RenderGraph", "Local particles fallback: ", e.ToString());
+			}
+			catch (const std::exception& e)
+			{
+				lane.Solver.reset();
+				Log::Warning("RenderGraph", "Local particles fallback: ", e.what());
+			}
+		}
+		if (!lane.Solver) continue;
+		for (const auto& item : lane.Layout) remoteIds.push_back(item.Id);
+		lane.Solver->Prepare(emitters, settings, CrossSync.GetValue(), worldRate);
 	}
 	simulation->BeginFrame(&_resources, _common, &remoteIds);
 	_renderFrame = simulation->RenderFrame();
 	_firstRemote = UINT(_renderFrame.Sources.size());
-	if (_remote) _remote->AppendSources(_renderFrame);
+	_remoteVersions.clear();
+	for (const auto& lane : _remote)
+		if (lane.Solver && lane.Solver->Selected)
+		{
+			const auto* selected = lane.Solver->Selected;
+			lane.Solver->AppendSources(_renderFrame);
+			_remoteVersions.insert(_remoteVersions.end(), selected->Snapshot.size(), selected->Version);
+		}
 	for (auto& group : _groups)
 	{
 		group.clear();
@@ -781,67 +968,84 @@ void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, 
 	}
 }
 
-void SceneParticles::AddWaits(const Schedule& schedule, std::vector<PacketWait>& waits)
+void SceneParticles::AddExchanges(const Schedule& schedule, std::vector<PacketWait>& waits,
+                                  std::vector<Executor::PacketExchange>& exchanges)
 {
-	if (_import == Invalid) return;
-	const auto packet = std::find_if(schedule.Packets.begin(), schedule.Packets.end(),
-	    [this](const auto& value) { return value.Operation == _import; });
-	if (packet == schedule.Packets.end()) throw std::logic_error("Particle import packet is missing");
-	_importPacket = Id(packet - schedule.Packets.begin());
-	if (!_remote->LatestReady())
-		waits.push_back({_importPacket, _remote->Selected->Ready});
+	const auto findPacket = [&](Id operation) {
+		if (operation == Invalid) return Invalid;
+		const auto it = std::find_if(schedule.Packets.begin(), schedule.Packets.end(),
+		    [operation](const auto& packet) { return packet.Operation == operation; });
+		if (it == schedule.Packets.end()) throw std::logic_error("Particle transfer packet is missing");
+		return Id(it - schedule.Packets.begin());
+	};
+	for (auto& lane : _remote)
+	{
+		if (!lane.Solver) continue;
+		auto* remote = lane.Solver.get();
+		lane.ImportPacket = findPacket(lane.Import);
+		const auto producerPacket = findPacket(lane.Export);
+		const auto waitPacket = remote->LatestReady() ? Invalid : lane.ImportPacket;
+		if (producerPacket != Invalid)
+			exchanges.push_back({producerPacket, waitPacket, [remote](CompletionToken token) { return remote->SubmitInput(token); }});
+		else if (waitPacket != Invalid)
+			waits.push_back({waitPacket, remote->Selected->Ready});
+	}
 }
 
 void SceneParticles::Submitted(const std::vector<CompletionToken>& completions)
 {
-	if (_importPacket < completions.size() && completions[_importPacket])
-	{
-		auto& remote = *_remote;
-		std::lock_guard lock(remote.Mutex);
-		remote.Selected->Reader = completions[_importPacket];
-		remote.CachedVersion = remote.Selected->Version;
-		++remote.Stats.Imports;
-	}
+	for (auto& lane : _remote)
+		if (lane.ImportPacket < completions.size() && completions[lane.ImportPacket])
+		{
+			auto& remote = *lane.Solver;
+			std::lock_guard lock(remote.Mutex);
+			remote.Selected->Reader = completions[lane.ImportPacket];
+			remote.CachedVersion = remote.Selected->Version;
+			++remote.Stats.Imports;
+		}
 }
 
 void SceneParticles::Presented(uint64_t frame)
 {
-	if (!_remote) return;
-	auto& remote = *_remote;
-	std::lock_guard lock(remote.Mutex);
-	const auto* selected = remote.Selected;
-	const auto previous = remote.PresentedVersion;
-	remote.PresentedVersion = selected ? selected->Version : 0;
-	if (selected) remote.PresentedSnapshot = selected->Snapshot;
-	auto& stats = remote.Stats;
-	++stats.Frames;
-	if (!selected) ++stats.Empty;
-	else if (remote.PresentedVersion == previous) ++stats.Repeats;
-	else if (remote.PresentedVersion > previous + 1) stats.Skipped += remote.PresentedVersion - previous - 1;
-	if (_sampleVisibility && selected)
+	for (auto& sample : _visibilitySamples.at(_resources.CurrFrameConstantsIndex))
+		if (sample.Written) sample.Frame = frame;
+	for (size_t i = 0; i < _remote.size(); ++i)
 	{
-		auto& sample = _visibilitySamples.at(_resources.CurrFrameConstantsIndex);
-		sample.Frame = frame;
-		sample.Version = selected->Version;
+		auto& lane = _remote[i];
+		if (!lane.Solver) continue;
+		auto& remote = *lane.Solver;
+		std::lock_guard lock(remote.Mutex);
+		const auto* selected = remote.Selected;
+		const auto previous = remote.PresentedVersion;
+		remote.PresentedVersion = selected ? selected->Version : 0;
+		if (selected) remote.PresentedSnapshot = selected->Snapshot;
+		auto& stats = remote.Stats;
+		++stats.Frames;
+		if (!selected) ++stats.Empty;
+		else if (remote.PresentedVersion == previous) ++stats.Repeats;
+		else if (remote.PresentedVersion > previous + 1) stats.Skipped += remote.PresentedVersion - previous - 1;
+		if (stats.Frames <= 12 && remote.Ordered)
+			Log::Info("RenderGraph", "Particles MGPU frame=", frame, " CrossSync=", remote.Mode,
+			    " generation=", remote.Generation, " ordered=", remote.Ordered, " exported=", remote.LastOrder ? remote.LastOrder->Version : 0,
+			    " shown=", remote.PresentedVersion, " exportFence=", selected ? selected->Ready.Value : 0,
+			    " importFence=", lane.ImportPacket != Invalid && selected ? selected->Reader.Value : 0,
+			    " group=", i, " inputVersion=", remote.ConsumedInput, " readyAtChoice=", remote.LatestReady() && selected, " gameSeconds=", remote.GameTime);
+		if (LogSnapshots.GetValue() && stats.Frames == 24)
+			Log::Info("RenderGraph", "Particles MGPU summary frame=", frame, " CrossSync=", remote.Mode,
+			    " generation=", remote.Generation, " frames=", stats.Frames, " steps=", remote.Ordered,
+			    " publications=", stats.Exports, " imports=", stats.Imports, " repeats=", stats.Repeats,
+			    " skippedShows=", stats.Skipped, " noSnapshotFrames=", stats.Empty,
+			    " inputRetirementWaits=", stats.InputWaits, " outputRetirementWaits=", stats.OutputWaits,
+			    " controlBackPressure=", stats.ControlWaits, " gameSeconds=", remote.GameTime,
+			    " shownGameSeconds=", selected ? selected->SimulatedSeconds : 0.0);
 	}
-	if (stats.Frames <= 12 && remote.Ordered)
-		Log::Info("RenderGraph", "Particles MGPU frame=", frame, " CrossSync=", remote.Mode,
-		    " generation=", remote.Generation, " ordered=", remote.Ordered, " exported=", remote.LastOrder ? remote.LastOrder->Version : 0,
-		    " shown=", remote.PresentedVersion, " exportFence=", selected ? selected->Ready.Value : 0,
-		    " importFence=", _importPacket != Invalid && selected ? selected->Reader.Value : 0,
-		    " readyAtChoice=", remote.LatestReady() && selected, " gameSeconds=", remote.GameTime);
-	if (LogSnapshots.GetValue() && stats.Frames == 24)
-		Log::Info("RenderGraph", "Particles MGPU summary frame=", frame, " CrossSync=", remote.Mode,
-		    " generation=", remote.Generation, " frames=", stats.Frames, " steps=", remote.Ordered,
-		    " publications=", stats.Exports, " imports=", stats.Imports, " repeats=", stats.Repeats,
-		    " skippedShows=", stats.Skipped, " noSnapshotFrames=", stats.Empty,
-		    " inputRetirementWaits=", stats.InputWaits, " outputRetirementWaits=", stats.OutputWaits,
-		    " controlBackPressure=", stats.ControlWaits, " gameSeconds=", remote.GameTime,
-		    " shownGameSeconds=", selected ? selected->SimulatedSeconds : 0.0);
 }
 void SceneParticles::AppendSimulation(Graph& graph, std::vector<ID3D12Resource*>& bindings, Inputs inputs,
                                       GDX12Texture* depth)
 {
+	auto& lane = _remote[size_t(inputs)];
+	if (lane.Solver && lane.Solver->External() && GetParticleSettings().Enabled)
+		lane.Export = lane.Solver->AppendInput(_work, graph, bindings, _interaction);
 	const auto& ids = _groups[size_t(inputs)];
 	auto* simulation = _resources.ParticleSimulation.get();
 	std::vector<Access> pools;
@@ -969,24 +1173,36 @@ void SceneParticles::AppendPreparation(Graph& graph, std::vector<ID3D12Resource*
 	    ResourceAccess(graph, bindings, &_resources.FrameConstants.at(slot)->CameraCB->GetResource(), Mode::Read);
 	std::vector<Access> preparation{camera};
 	AddAccesses(graph, bindings, preparation, _pass.NativePreparationAccesses(_renderFrame, opaque));
+	for (size_t i = 0; i < _remote.size(); ++i)
+	{
+		auto& lane = _remote[i];
+		const bool interaction = i == size_t(Inputs::Interaction);
+		if (lane.Solver && interaction == opaque)
+			lane.Import = lane.Solver->AppendImport(_work, graph, bindings);
+	}
 	GDX12Resource* readback = nullptr;
-	if (!opaque && _remote && _remote->Selected && LogSnapshots.GetValue() &&
-	    std::any_of(_renderFrame.Sources.begin() + _firstRemote, _renderFrame.Sources.end(), [&](const auto& source) {
-		    return std::find(_visibleSources.begin(), _visibleSources.end(), source.Emitter.Id) == _visibleSources.end();
+	auto& sample = _visibilitySamples.at(slot)[opaque];
+	if (LogSnapshots.GetValue() && std::any_of(_renderFrame.Sources.begin() + _firstRemote, _renderFrame.Sources.end(),
+	    [&](const auto& source) {
+		    return (source.Emitter.Blend == ParticleBlend::Opaque) == opaque &&
+		        std::find(_visibleSources.begin(), _visibleSources.end(), source.Emitter.Id) == _visibleSources.end();
 	    }))
 	{
-		auto& sample = _visibilitySamples.at(slot);
 		auto& buffer = sample.Buffer;
-		sample.SourceIds.clear();
+		sample.Sources.clear();
 		for (size_t i = _firstRemote; i < _renderFrame.Sources.size(); ++i)
-			sample.SourceIds.push_back(_renderFrame.Sources[i].Emitter.Id);
-		const UINT64 bytes = (sample.SourceIds.size() + 1) * sizeof(UINT);
+		{
+			const auto& emitter = _renderFrame.Sources[i].Emitter;
+			sample.Sources.emplace_back(emitter.Id, (emitter.Blend == ParticleBlend::Opaque) == opaque
+			    ? _remoteVersions[i - _firstRemote] : 0);
+		}
+		const UINT64 bytes = (sample.Sources.size() + 1) * sizeof(UINT);
 		if (!buffer.D3DResource || buffer.D3DResource->GetDesc().Width < bytes)
 			buffer.D3DResource = _resources.Device->CreateResource(D3D12_HEAP_TYPE_READBACK,
 			    CD3DX12_RESOURCE_DESC::Buffer(bytes), D3D12_RESOURCE_STATE_COPY_DEST);
 		preparation.push_back(ResourceAccess(graph, bindings, &buffer, Mode::Write, CopyDest));
 		readback = &buffer;
-		_sampleVisibility = true;
+		sample.Written = true;
 	}
 	Packet(graph, bindings, opaque ? "opaque particles frustum cull" : "transparent particles cull and global sort",
 	       std::move(preparation), [this, opaque, readback](auto* cmd) {
@@ -1028,7 +1244,6 @@ void SceneParticles::Prepare(Graph& graph, std::vector<ID3D12Resource*>& binding
 	_reveal = reveal;
 	_pass.SetInputs({rasterDepth, accum, reveal});
 	_pass.Initialize();
-	if (_remote) _import = _remote->AppendImport(_work, graph, bindings);
 	AppendPreparation(graph, bindings, false);
 	_drawReads = DrawReads(graph, bindings, false);
 	_drawReads.push_back(ResourceAccess(graph, bindings, rasterDepth->GetResource(), Mode::Read));

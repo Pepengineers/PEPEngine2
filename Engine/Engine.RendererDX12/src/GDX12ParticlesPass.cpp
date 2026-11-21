@@ -460,7 +460,11 @@ void GDX12ParticlesPass::PrepareRenderData(GDX12CommandList* commands,
         if (visibilityReadback && i == firstRemote) sampleCount(0);
         const auto& source = particles.Sources[i];
         const auto& emitter = source.Emitter;
-        if ((emitter.Blend == ParticleBlend::Opaque) != opaque) continue;
+        if ((emitter.Blend == ParticleBlend::Opaque) != opaque)
+        {
+            if (visibilityReadback && i >= firstRemote) sampleCount(i - firstRemote + 1);
+            continue;
+        }
         commands->SetComputeRootConstantBufferView(2, state.Constants[_resources->CurrFrameConstantsIndex]->GetElementAddress(i));
         const UINT parameters[] = {emitter.MaxParticles, 0, state.Capacity, state.ResetMotion || source.ResetMotion};
         commands->GetCommandList()->SetComputeRoot32BitConstants(0, 4, parameters, 0);

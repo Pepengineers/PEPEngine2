@@ -212,7 +212,7 @@ void Executor::Reserve(const Schedule& schedule)
 uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Resource*>& resources,
                            const Record& record, GDX12CommandList* prefix, GDX12CommandList* suffix,
                            const std::atomic<bool>* cancellation, const std::vector<PacketWait>& waits,
-                           const PacketExchange* exchange)
+                           const std::vector<PacketExchange>& exchanges)
 {
 	Owner();
 	if (!_begun)
@@ -227,10 +227,11 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 	{
 		throw std::invalid_argument("schedule belongs to another device context");
 	}
-	if (exchange && (exchange->Export >= exchange->Import || exchange->Import >= schedule.Packets.size() ||
-	                 !exchange->SubmitRemote))
-		throw std::invalid_argument("invalid cross-device packet exchange");
-	CompletionToken remoteCompletion;
+	for (const auto& exchange : exchanges)
+		if (exchange.Export >= schedule.Packets.size() || !exchange.SubmitRemote ||
+		    (exchange.Import != Invalid && (exchange.Export >= exchange.Import || exchange.Import >= schedule.Packets.size())))
+			throw std::invalid_argument("invalid cross-device packet exchange");
+	std::vector<CompletionToken> remoteCompletions(exchanges.size());
 	for (const auto& wait : waits)
 	{
 		if (wait.Packet >= schedule.Packets.size())
@@ -503,11 +504,12 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 					dependencies.push_back(wait.Token);
 				}
 			}
-			if (exchange && i == exchange->Import)
-			{
-				if (!remoteCompletion) throw std::logic_error("cross-device packet did not return a completion");
-				dependencies.push_back(remoteCompletion);
-			}
+			for (size_t j = 0; j < exchanges.size(); ++j)
+				if (i == exchanges[j].Import)
+				{
+					if (!remoteCompletions[j]) throw std::logic_error("cross-device packet did not return a completion");
+					dependencies.push_back(remoteCompletions[j]);
+				}
 			slot.Poisoned = true;
 			submitted = true;
 			const auto token = _submissions->Submit(_deviceId, target, packets[i], dependencies);
@@ -515,8 +517,9 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 			_tokens[i] = token.Value;
 			_completions[i] = token;
 			slot.Poisoned = false;
-			if (exchange && i == exchange->Export)
-				remoteCompletion = exchange->SubmitRemote(token);
+			for (size_t j = 0; j < exchanges.size(); ++j)
+				if (i == exchanges[j].Export)
+					remoteCompletions[j] = exchanges[j].SubmitRemote(token);
 		}
 		if (suffix)
 		{

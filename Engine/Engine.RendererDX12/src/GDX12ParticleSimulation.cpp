@@ -247,9 +247,9 @@ void GDX12ParticleSimulation::Execute(GDX12CommandList* commands, GDX12DeviceRes
     else
     {
         if (std::any_of(state.Emitters.begin(), state.Emitters.end(), [](const auto& emitter) {
-                return emitter.DepthCollision || emitter.InteractionEnabled;
+                return emitter.DepthCollision;
             }))
-            throw std::logic_error("Frame-only particle simulation requires independent emitters");
+            throw std::logic_error("Particle simulation requires depth bindings");
         if (!state.NullCamera) throw std::logic_error("Independent particle bindings were not prepared");
         commands->SetComputeSRV(3, state.NullDepth.GPUHandle);
         commands->SetComputeRootConstantBufferView(1, state.NullCamera->GetElementAddress(0));
