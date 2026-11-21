@@ -32,6 +32,8 @@ public:
 
     GDX12Device* Device;
     void Initialize(GDX12Device* device);
+    // A null mesh disables the given instance slots. Waits for this adapter's last DIRECT queue read.
+    void SetMeshDrawCommands(const std::vector<UINT>& instances, const GPUMesh* mesh);
     void UpdateMainCB(UINT width, UINT height, GameTimer* timer);
     void UpdateMaterialCB(const GDX12Material& material);
 };

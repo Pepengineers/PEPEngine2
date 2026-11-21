@@ -447,6 +447,15 @@ void RenderModule::SubscribeToWorld(World& world)
             });
 
     _worldSubscriptions[&world] = subscriptions;
+    ecs.ForEach<StaticMeshRenderComponent>([&](Entity entity, StaticMeshRenderComponent& mesh)
+    {
+        if (mesh._CBufferIndices.empty()) OnRenderComponentCreated(world, entity, mesh);
+        else
+        {
+            mesh.DirtyFlag = true;
+            WriteMeshDrawCommands(mesh);
+        }
+    });
 }
 
 void RenderModule::UnsubscribeFromWorld(World& world)
@@ -463,6 +472,19 @@ void RenderModule::UnsubscribeFromWorld(World& world)
     auto& ecs = world.GetECS();
     auto& transformPool = ecs.GetPool<TransformComponent>();
     auto& cameraPool = ecs.GetPool<CameraComponent>();
+
+    auto& meshes = ecs.GetPool<StaticMeshRenderComponent>();
+    meshes.OnComponentCreated.RemoveListener(subscriptions.RenderCompCreated);
+    meshes.OnComponentDestroyed.RemoveListener(subscriptions.RenderCompDestroyed);
+    meshes.OnComponentUpdated.RemoveListener(subscriptions.RenderCompUpdated);
+    // This world's components are still alive. Disable all of its commands in one queue wait per adapter.
+    std::vector<UINT> instances;
+    ecs.ForEach<StaticMeshRenderComponent>([&](Entity, const StaticMeshRenderComponent& mesh)
+    {
+        instances.insert(instances.end(), mesh._CBufferIndices.begin(), mesh._CBufferIndices.end());
+    });
+    DisableMeshInstanceDrawCommands(instances);
+
 
     transformPool.OnComponentCreated.RemoveListener(subscriptions.TransformCreated);
     transformPool.OnComponentDestroyed.RemoveListener(subscriptions.TransformDestroyed);
@@ -497,13 +519,6 @@ const GPUMesh* RenderModule::GetGPUMesh(EDeviceRole role, MeshHandle handle)
     return GetDeviceResources(role).GeometryBuffer->GetGPUMeshByHandle(handle);
 }
 
-GDX12UploadBuffer<GDX12IndirectDrawArgs>* RenderModule::GetIndirectCommandsCache(EDeviceRole role)
-{
-    // This upload buffer is shared by all frame slots; callers update it on the CPU.
-    if (_frameGraph) { _frameGraph->WaitForGPUCompletion(); }
-    return GetDeviceResources(role).IndirectCommandsCache.get();
-}
-
 uint32_t RenderModule::GetDevicePassFlags(EDeviceRole role) const
 {
     return _frameGraph ? _frameGraph->GetDevicePassFlags(role) : RENDER_PASS_FLAG_NONE;
@@ -528,11 +543,19 @@ void RenderModule::OnTransformComponentCreated(World& world, Entity entity, Tran
     data.NumFramesDirty = GetFrameSlotCount();
     ResizeSceneBuffers(_primaryResources, GetDevicePassFlags(DEVICE_ROLE_PRIMARY));
     ResizeSceneBuffers(_secondaryResources, GetDevicePassFlags(DEVICE_ROLE_SECONDARY));
+    if (world.GetECS().Has<StaticMeshRenderComponent>(entity))
+        world.GetECS().Get<StaticMeshRenderComponent>(entity).DirtyFlag = true;
+    if (world.GetECS().Has<CameraComponent>(entity))
+        world.GetECS().Get<CameraComponent>(entity).DirtyFlag = true;
 }
 
 void RenderModule::OnTransformComponentDestroyed(World& world, Entity entity, TransformComponent& component)
 {
     _transformGPUData.erase(entity);
+    if (world.GetECS().Has<StaticMeshRenderComponent>(entity))
+        world.GetECS().Get<StaticMeshRenderComponent>(entity).DirtyFlag = true;
+    if (world.GetECS().Has<CameraComponent>(entity))
+        world.GetECS().Get<CameraComponent>(entity).DirtyFlag = true;
 }
 
 void RenderModule::OnTransformComponentUpdated(World& world, Entity entity, TransformComponent& component)
@@ -542,6 +565,7 @@ void RenderModule::OnTransformComponentUpdated(World& world, Entity entity, Tran
 
 void RenderModule::OnCameraComponentCreated(World& world, Entity entity, CameraComponent& component)
 {
+    component.DirtyFlag = true;
     if (_frameGraph) { _frameGraph->WaitForGPUCompletion(); }
     component._CBufferIndex = _cameraCount++;
     ResizeSceneBuffers(_primaryResources, GetDevicePassFlags(DEVICE_ROLE_PRIMARY));
@@ -554,10 +578,12 @@ void RenderModule::OnCameraComponentDestroyed(World& world, Entity entity, Camer
 
 void RenderModule::OnCameraComponentUpdated(World& world, Entity entity, CameraComponent& component)
 {
+    component.DirtyFlag = true;
 }
 
 void RenderModule::OnRenderComponentCreated(World& world, Entity entity, StaticMeshRenderComponent& component)
 {
+    component.DirtyFlag = true;
     if (_frameGraph) { _frameGraph->WaitForGPUCompletion(); }
     const auto* mesh = _meshes.at(component.MeshHandler.GetValue());
     component._CBufferIndices.clear();
@@ -567,14 +593,33 @@ void RenderModule::OnRenderComponentCreated(World& world, Entity entity, StaticM
     }
     ResizeSceneBuffers(_primaryResources, GetDevicePassFlags(DEVICE_ROLE_PRIMARY));
     ResizeSceneBuffers(_secondaryResources, GetDevicePassFlags(DEVICE_ROLE_SECONDARY));
+    WriteMeshDrawCommands(component);
 }
 
 void RenderModule::OnRenderComponentDestroyed(World& world, Entity entity, StaticMeshRenderComponent& component)
 {
+    DisableMeshInstanceDrawCommands(component._CBufferIndices);
 }
 
 void RenderModule::OnRenderComponentUpdated(World& world, Entity entity, StaticMeshRenderComponent& component)
 {
+    component.DirtyFlag = true;
+}
+
+void RenderModule::WriteMeshDrawCommands(const StaticMeshRenderComponent& component)
+{
+    for (const auto role : {DEVICE_ROLE_PRIMARY, DEVICE_ROLE_SECONDARY})
+    {
+        if (!PipelineHasFlag(role, RENDER_PASS_FLAG_USE_INSTANCES)) continue;
+        auto& resources = GetDeviceResources(role);
+        resources.SetMeshDrawCommands(component._CBufferIndices, resources.GeometryBuffer->GetGPUMeshByHandle(component.MeshHandler));
+    }
+}
+
+void RenderModule::DisableMeshInstanceDrawCommands(const std::vector<UINT>& instances)
+{
+    for (auto* resources : {&_primaryResources, &_secondaryResources})
+        resources->SetMeshDrawCommands(instances, nullptr);
 }
 
 const float RenderModule::GetAspectRatio()
@@ -755,7 +800,10 @@ void RenderModule::ResizeSceneBuffers(GDX12DeviceResources& resources, uint32_t 
     }
     if (flags & RENDER_PASS_FLAG_USE_INSTANCES)
     {
+        const UINT oldCount = resources.IndirectCommandsCache->GetElementCount();
         const bool commandsResized = grow(resources.IndirectCommandsCache, _instanceCount);
+        for (UINT i = oldCount; i < _instanceCount; ++i)
+            resources.IndirectCommandsCache->CopyData(i, GDX12IndirectDrawArgs{});
         if (commandsResized && _frameGraph) { _frameGraph->RequestFrameSlotResourcesRebuild(); }
     }
 }
@@ -769,6 +817,17 @@ void RenderModule::UploadSceneResources(GDX12DeviceResources& resources, uint32_
         {
             if (!resources.GeometryBuffer->_meshCache.count(handle.GetValue()))
             { resources.GeometryBuffer->AddMesh(_meshes.at(handle.GetValue()), handle); }
+        }
+    }
+    // Populate existing meshes when this adapter becomes an instance consumer.
+    if ((flags & RENDER_PASS_FLAG_USE_INSTANCES) && !PipelineHasFlag(resources.Device->Role, RENDER_PASS_FLAG_USE_INSTANCES))
+    {
+        for (const auto& [world, subscriptions] : _worldSubscriptions)
+        {
+            world->GetECS().ForEach<StaticMeshRenderComponent>([&](Entity, const StaticMeshRenderComponent& mesh)
+            {
+                resources.SetMeshDrawCommands(mesh._CBufferIndices, resources.GeometryBuffer->GetGPUMeshByHandle(mesh.MeshHandler));
+            });
         }
     }
     if (flags & RENDER_PASS_FLAG_USE_MATERIALS)

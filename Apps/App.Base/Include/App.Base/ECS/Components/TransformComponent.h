@@ -18,3 +18,10 @@ struct TransformComponent : ComponentTag
     {
     }
 };
+// Shared immutable fallback for components without their own transform.
+inline const TransformComponent DefaultTransform = []
+{
+    TransformComponent transform;
+    transform.DirtyFlag = false;
+    return transform;
+}();

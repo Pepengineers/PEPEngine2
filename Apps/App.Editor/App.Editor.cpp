@@ -99,14 +99,15 @@ void EditorApp::OnMouseUp(WPARAM btnState, int x, int y)
 
 void EditorApp::OnMouseMove(WPARAM btnState, int x, int y)
 {
-    if ((btnState & MK_RBUTTON) != 0)
+    auto world = GetLocator().GetModule<SceneManagerModule>()->GetWorld();
+    if ((btnState & MK_RBUTTON) != 0 && world &&
+        world->GetECS().Has<TransformComponent>(world->ActiveCamera))
     {
         constexpr float mouseSensitivity = 0.15f;
 
         const float dx = static_cast<float>(x - _lastMousePos.x) * mouseSensitivity;
         const float dy = static_cast<float>(y - _lastMousePos.y) * mouseSensitivity;
 
-        auto world = GetLocator().GetModule<SceneManagerModule>()->GetWorld();
         auto& camera = world->GetECS().Get<TransformComponent>(world->ActiveCamera);
 
         camera.Rotation.x += dy;
@@ -154,6 +155,7 @@ void EditorApp::OnKeyboardInput(const GameTimer& gameTimer)
     const float speed = _cameraSpeed;
 
     auto world = GetLocator().GetModule<SceneManagerModule>()->GetWorld();
+    if (!world || !world->GetECS().Has<TransformComponent>(world->ActiveCamera)) return;
     auto& camera = world->GetECS().Get<TransformComponent>(world->ActiveCamera);
 
     Matrix rotMatrix = Matrix::CreateFromYawPitchRoll(XMConvertToRadians(camera.Rotation.y), 

@@ -4,6 +4,7 @@
 #include "Engine.RendererDX12/GDX12Device.h"
 
 #include "Common/GameTimer.h"
+#include "Engine.RendererDX12/GDX12CommandQueue.h"
 
 static UINT _numFrameConstants = 3;
 
@@ -50,6 +51,27 @@ void GDX12DeviceResources::Initialize(GDX12Device* device)
 
     IndirectCommandsCache = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(device, 0, EBufferType::Upload, false);
     IndirectCommandsCache->CreateSRV(SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
+}
+
+void GDX12DeviceResources::SetMeshDrawCommands(const std::vector<UINT>& instances, const GPUMesh* mesh)
+{
+    if (instances.empty() || !IndirectCommandsCache || !IndirectCommandsCache->GetElementCount()) return;
+    GDX12CommandQueue::CPUwait(Device->GetCommandQueue()->GetCompletionPoint());
+    for (size_t i = 0; i < instances.size(); ++i)
+    {
+        GDX12IndirectDrawArgs command{};
+        if (mesh)
+        {
+            const auto& subMesh = mesh->SubMeshes[i];
+            command.InstanceID = instances[i];
+            command.IndexCountPerInstance = subMesh.IndexCount;
+            command.InstanceCount = 1;
+            command.StartIndexLocation = subMesh.StartIndexLocation;
+            command.BaseVertexLocation = subMesh.StartVertexLocation;
+            command.StartInstanceLocation = instances[i];
+        }
+        IndirectCommandsCache->CopyData(instances[i], command);
+    }
 }
 
 void GDX12DeviceResources::UpdateMainCB(UINT width, UINT height, GameTimer* timer)

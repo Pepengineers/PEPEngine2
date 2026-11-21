@@ -120,7 +120,6 @@ public:
     const float GetAspectRatio();
     GDX12FrameConstants* GetCurrentFrameConstants(EDeviceRole role);
     const GPUMesh* GetGPUMesh(EDeviceRole role, MeshHandle handle);
-    GDX12UploadBuffer<GDX12IndirectDrawArgs>* GetIndirectCommandsCache(EDeviceRole role);
     uint32_t GetDevicePassFlags(EDeviceRole role) const;
     bool PipelineHasFlag(EDeviceRole role, uint32_t flag) const;
     RenderPipelineCommonData* GetRenderPipelineCommonData();
@@ -134,6 +133,9 @@ protected:
     bool ShouldRender() override;
 
 private:
+    void WriteMeshDrawCommands(const StaticMeshRenderComponent& component);
+    // Disable this mesh's submesh slots on every adapter after the last queue read.
+    void DisableMeshInstanceDrawCommands(const std::vector<UINT>& instances);
     GDX12DeviceResources& GetDeviceResources(EDeviceRole role);
     void BuildBackBuffer(GDX12DeviceResources& presentResources);
     void CompileFrameGraph(FrameGraph& graph);
@@ -158,7 +160,7 @@ private:
     
     std::unordered_map<Entity, TransformCompGPUData> _transformGPUData;
     std::unordered_map<World*, WorldRenderSubscriptions> _worldSubscriptions;
-    uint32_t _transformCount = 0;
+    uint32_t _transformCount = 1; // Index zero belongs to the shared identity transform.
     uint32_t _cameraCount = 0;
     uint32_t _instanceCount = 0;
     RenderPipelineCommonData _RPcommonData;
