@@ -25,7 +25,7 @@ constexpr UINT PackThreads = 128;
 static_assert(sizeof(XMFLOAT4) == 16, "Must match the water display payload");
 static_assert(sizeof(GDX12FluidParameters) == 336, "Must match FluidParameters.hlsli");
 } // namespace
-GDX12FluidParticlePass::GDX12FluidParticlePass(GDX12DeviceResources& resources, RenderPipelineCommonData& common)
+GDX12FluidParticlePass::GDX12FluidParticlePass(GDX12DeviceResources& resources, RenderPipelineCommonData* common)
     : _resources(resources), _commonData(common)
 {
 }
@@ -90,22 +90,25 @@ void GDX12FluidParticlePass::PrepareStates()
 		{
 			throw std::invalid_argument("Duplicate fluid instance id");
 		}
+		const auto& author = instance.Component.GetSettings();
+		const bool visible = _controls.Enabled && author.RenderEnabled;
 		auto found = _states.find(instance.Id);
 		if (found == _states.end())
 		{
+			if (_commonData) _commonData->ResetHistory |= visible;
 			continue;
 		}
-		const auto& author = instance.Component.GetSettings();
 		auto& state = *found->second;
 		const bool active = _controls.Enabled && (author.SimulationEnabled || author.RenderEnabled);
 		if (active && (state.Source != source || state.Revision != instance.Component.GetResetRevision()))
 		{
 			retire = true;
 		}
-		if (state.WasRendered && (!_controls.Enabled || !author.RenderEnabled ||
-		                          state.SettingsRevision != instance.Component.GetSettingsRevision()))
+		if (_commonData)
 		{
-			_commonData.ResetHistory = true;
+			_commonData->ResetHistory |= state.WasRendered != visible ||
+			    (state.WasRendered && state.SettingsRevision != instance.Component.GetSettingsRevision());
+			state.WasRendered = false;
 		}
 	}
 	for (const auto& [id, state] : _states)
@@ -113,7 +116,7 @@ void GDX12FluidParticlePass::PrepareStates()
 		if (!alive.count(id))
 		{
 			retire = true;
-			_commonData.ResetHistory |= state->WasRendered;
+			if (_commonData) _commonData->ResetHistory |= state->WasRendered;
 		}
 	}
 	// Old buffers, seed uploads and descriptor slots may still be referenced by queued frames.
@@ -192,7 +195,7 @@ void GDX12FluidParticlePass::PrepareFrame(std::vector<GDX12FluidInstance> instan
 		if (!_states.empty()) _retire();
 		_states.clear();
 		_role = role;
-		_commonData.ResetHistory = true;
+		if (_commonData) _commonData->ResetHistory = true;
 	}
 	_instances = std::move(instances);
 	const auto previousControls = _controls;
@@ -221,15 +224,8 @@ void GDX12FluidParticlePass::PrepareFrame(std::vector<GDX12FluidInstance> instan
 	}
 	const bool changed = rendering != _rendering || previousControls.Enabled != _controls.Enabled ||
 	                     previousControls.Quality != _controls.Quality;
-	_commonData.ResetHistory |= changed;
+	if (_commonData) _commonData->ResetHistory |= changed;
 	_rendering = rendering;
-	if (!rendering)
-	{
-		for (auto& [id, state] : _states)
-		{
-			state->WasRendered = false;
-		}
-	}
 
 	if (!_rendering && !_simulating)
 	{
@@ -278,8 +274,11 @@ void GDX12FluidParticlePass::PrepareDrawSources()
 		if (_role != Role::Solver) state.Constants->CopyData(element, parameters);
 		_drawSources.push_back({instance.Id, display.get(), &state.Constants->GetResource(),
 		                       state.Constants->GetElementAddress(element)});
-		state.WasRendered = true;
-		state.SettingsRevision = instance.Component.GetSettingsRevision();
+		if (_commonData)
+		{
+			state.WasRendered = true;
+			state.SettingsRevision = instance.Component.GetSettingsRevision();
+		}
 	}
 }
 void GDX12FluidParticlePass::ExecuteSimulation(GDX12CommandList* commands)
@@ -374,7 +373,7 @@ void GDX12FluidParticlePass::DrawParticles(GDX12CommandList* commands, GDX12Text
 	commands->GetCommandList()->OMSetRenderTargets(1, &color, false, &depth);
 	auto& frame = _resources.FrameConstants[_resources.CurrFrameConstantsIndex];
 	commands->SetGraphicsRootConstantBufferView(
-	    2, frame->CameraCB->GetElementAddress(_commonData.ActiveCameraCBufferIndex));
+	    2, frame->CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex));
 	for (const auto& source : sources)
 	{
 		commands->SetGraphicsRootConstantBufferView(1, source.Parameters);

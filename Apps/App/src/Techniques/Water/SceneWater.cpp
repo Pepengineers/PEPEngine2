@@ -52,9 +52,8 @@ struct SceneWater::Remote
 	using Seed = std::pair<std::shared_ptr<const std::vector<GDX12FluidParticle>>, uint64_t>;
 	std::map<uint64_t, Seed> Seeds;
 
-	Remote(GDX12DeviceResources& primary, RenderPipelineCommonData& common,
-	       const std::shared_ptr<QueueSubmission>& submit)
-	    : Submit(submit), Pass(Secondary, common), GPU1(submit, 1, UINT(primary.FrameConstants.size()), 1),
+	Remote(GDX12DeviceResources& primary, const std::shared_ptr<QueueSubmission>& submit)
+	    : Submit(submit), Pass(Secondary), GPU1(submit, 1, UINT(primary.FrameConstants.size()), 1),
 	      Ring(primary.FrameConstants.size() + 1)
 	{
 		Secondary.Device = &Submit->Device(1);
@@ -177,8 +176,8 @@ struct SceneWater::Remote
 };
 
 SceneWater::SceneWater(GDX12DeviceResources& resources, RenderPipelineCommonData& common)
-    : _resources(resources), _common(common),
-      _collector(BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>()), _surface(resources, common)
+    : _resources(resources),
+      _collector(BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>()), _surface(resources, &common)
 {
 }
 SceneWater::~SceneWater()
@@ -217,11 +216,13 @@ void SceneWater::Prepare(float delta, Executor& primary, int activeAdapter)
 		_attemptedDomain = domain;
 		_failedDomain = 0;
 	}
+	// Visibility and simulation flags can leave a live instance temporarily idle.
+	if (instances.empty()) RetireRemote(primary);
 	Remote::Snapshot* slot = nullptr;
 	try
 	{
 		if (domain && !_remote && _failedDomain != domain && controls.Enabled && !instances.empty())
-			_remote = std::make_unique<Remote>(_resources, _common, submit);
+			_remote = std::make_unique<Remote>(_resources, submit);
 		if (_remote) slot = _remote->Prepare(instances, controls, _resources.CurrFrameConstantsIndex, CrossSync.GetValue());
 	}
 	catch (const DxException& e)

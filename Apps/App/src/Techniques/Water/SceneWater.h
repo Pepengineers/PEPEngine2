@@ -30,7 +30,6 @@ class SceneWater
 	struct Remote;
 	void RetireRemote(Executor&);
 	GDX12DeviceResources& _resources;
-	RenderPipelineCommonData& _common;
 	BistroWaterRendering _collector;
 	GDX12FluidParticlePass _surface;
 	NativeWork _work;

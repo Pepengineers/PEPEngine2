@@ -16,7 +16,7 @@ class GDX12FluidParticlePass final
 		D3D12_GPU_VIRTUAL_ADDRESS Parameters;
 	};
 
-	GDX12FluidParticlePass(GDX12DeviceResources&, RenderPipelineCommonData&);
+	explicit GDX12FluidParticlePass(GDX12DeviceResources&, RenderPipelineCommonData* = nullptr);
 	~GDX12FluidParticlePass();
 	void PrepareFrame(std::vector<GDX12FluidInstance>, GDX12FluidControls, Role = Role::Local);
 	void SetResourceRetirement(std::function<void()> retire) { _retire = std::move(retire); }
@@ -37,7 +37,7 @@ class GDX12FluidParticlePass final
 	void PrepareDrawSources();
 	void CreatePipelines();
 	GDX12DeviceResources& _resources;
-	RenderPipelineCommonData& _commonData;
+	RenderPipelineCommonData* _commonData;
 	std::vector<GDX12FluidInstance> _instances;
 	std::vector<DrawSource> _drawSources;
 	std::map<uint64_t, std::unique_ptr<State>> _states;
