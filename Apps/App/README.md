@@ -89,7 +89,10 @@ on GPU1. Water shares the secondary adapter with Cloud Picture, AO and
 particles. A conflicting or unavailable adapter falls back to local SPH.
 
 `App.Water.CrossSync = 1` (default) imports the solved snapshot ordered by
-the current frame. GPU1 owns the simulation and sends position and speed.
+the current frame. With `0`, the frame orders N and imports exactly N−1.
+The first frame imports its own snapshot. Switching between `0` and `1`
+starts new publication history and keeps the GPU1 pool and wave phase.
+GPU1 owns the simulation and sends position and speed.
 GPU0 draws with its current camera, HDR and depth. Pausing or hiding water
 keeps its pool, and changing GPU owners resets it from the authored seed.
 

@@ -16,8 +16,8 @@ AutoConsoleVariable<int> WaterAdapter(L"App.Water.Adapter", -1,
     L"Secondary DXGI index for Bistro SPH. -1 keeps the solver on GPU0.",
     EConsoleVariableFlags::Default, [](int value) { return value >= -1; });
 AutoConsoleVariable<int> CrossSync(L"App.Water.CrossSync", 1,
-    L"Remote water: 1 imports the current frame's solved snapshot.",
-    EConsoleVariableFlags::Default, [](int value) { return value == 1; });
+    L"Remote water: 1 imports the current snapshot, 0 imports the exact previous snapshot after bootstrap.",
+    EConsoleVariableFlags::Default, [](int value) { return value == 0 || value == 1; });
 constexpr State CopyRead = D3D12_RESOURCE_STATE_COPY_SOURCE;
 constexpr State CopyWrite = D3D12_RESOURCE_STATE_COPY_DEST;
 }
@@ -33,6 +33,8 @@ struct SceneWater::Remote
 	{
 		QueueSubmission::TransferBuffer Shared;
 		std::vector<Range> Ranges;
+		std::vector<GDX12FluidInstance> Instances;
+		GDX12FluidControls Controls{};
 		uint64_t Bytes = 0, Version = 0;
 		CompletionToken Ready, Reader;
 	};
@@ -43,9 +45,12 @@ struct SceneWater::Remote
 	Executor GPU1;
 	std::vector<Snapshot> Ring;
 	NativeWork Work;
-	Snapshot* Selected = nullptr;
+	Snapshot *Selected = nullptr, *LastOrder = nullptr;
 	size_t Next = 0;
-	uint64_t Ordered = 0;
+	uint64_t Ordered = 0, Generation = 0;
+	int Mode = 1;
+	using Seed = std::pair<std::shared_ptr<const std::vector<GDX12FluidParticle>>, uint64_t>;
+	std::map<uint64_t, Seed> Seeds;
 
 	Remote(GDX12DeviceResources& primary, RenderPipelineCommonData& common,
 	       const std::shared_ptr<QueueSubmission>& submit)
@@ -62,18 +67,41 @@ struct SceneWater::Remote
 		Log::Info("RenderGraph", "Water MGPU solver GPU1 LUID=", gpu.HighPart, ":", gpu.LowPart);
 	}
 
-	Snapshot* Prepare(const std::vector<GDX12FluidInstance>& instances, GDX12FluidControls controls, UINT frameSlot)
+	Snapshot* Prepare(const std::vector<GDX12FluidInstance>& instances, GDX12FluidControls controls, UINT frameSlot, int mode)
 	{
+		std::map<uint64_t, Seed> seeds;
+		if (controls.Enabled)
+			for (const auto& instance : instances)
+			{
+				const auto& settings = instance.Component.GetSettings();
+				const auto& seed = instance.Component.GetParticles();
+				if (seed && !seed->empty() && (settings.RenderEnabled || settings.SimulationEnabled))
+					seeds.emplace(instance.Id, Seed{seed, instance.Component.GetResetRevision()});
+			}
+		if (Mode != mode || Seeds != seeds)
+		{
+			Seeds = std::move(seeds);
+			Mode = mode;
+			LastOrder = nullptr;
+			Ordered = 0;
+			++Generation;
+		}
 		Selected = nullptr;
 		GPU1.Begin(frameSlot);
 		Secondary.CurrFrameConstantsIndex = frameSlot;
 		Pass.PrepareFrame(instances, controls, GDX12FluidParticlePass::Role::Solver);
 		if (!Pass.NeedsSimulation()) return nullptr;
-		auto& slot = Ring[Next++ % Ring.size()];
+		if (Mode == 0) Selected = LastOrder;
+		auto* output = &Ring[Next++ % Ring.size()];
+		// The previous order stays pinned through selection, even before a new read is submitted.
+		if (output == Selected) output = &Ring[Next++ % Ring.size()];
+		auto& slot = *output;
 		if (slot.Ready) Submit->Wait(slot.Ready);
 		if (slot.Reader) Submit->Wait(slot.Reader);
 		slot.Reader = {};
 		slot.Ranges.clear();
+		slot.Instances = instances;
+		slot.Controls = controls;
 		uint64_t bytes = 0;
 		for (const auto& source : Pass.DrawSources())
 		{
@@ -123,7 +151,28 @@ struct SceneWater::Remote
 		GPU1.Execute(schedule, bindings, [this](Id op, uint32_t, auto* cmd) { Work.Record(op, cmd); });
 		slot.Ready = GPU1.Completions().back();
 		slot.Version = ++Ordered;
-		Selected = &slot;
+		LastOrder = &slot;
+		if (!Selected) Selected = LastOrder;
+	}
+
+	std::vector<GDX12FluidInstance> DisplayInstances(const std::vector<GDX12FluidInstance>& current) const
+	{
+		auto instances = Selected->Instances;
+		for (auto& instance : instances)
+		{
+			const auto found = std::find_if(current.begin(), current.end(), [&](const auto& value) {
+				return value.Id == instance.Id;
+			});
+			const bool render = found != current.end() && found->Component.GetSettings().RenderEnabled &&
+			    std::any_of(Selected->Ranges.begin(), Selected->Ranges.end(), [&](const auto& range) {
+				    return range.Id == instance.Id;
+			    });
+			auto settings = instance.Component.GetSettings();
+			if (settings.RenderEnabled == render) continue;
+			settings.RenderEnabled = render;
+			instance.Component.SetSettings(settings);
+		}
+		return instances;
 	}
 };
 
@@ -173,7 +222,7 @@ void SceneWater::Prepare(float delta, Executor& primary, int activeAdapter)
 	{
 		if (domain && !_remote && _failedDomain != domain && controls.Enabled && !instances.empty())
 			_remote = std::make_unique<Remote>(_resources, _common, submit);
-		if (_remote) slot = _remote->Prepare(instances, controls, _resources.CurrFrameConstantsIndex);
+		if (_remote) slot = _remote->Prepare(instances, controls, _resources.CurrFrameConstantsIndex, CrossSync.GetValue());
 	}
 	catch (const DxException& e)
 	{
@@ -187,9 +236,15 @@ void SceneWater::Prepare(float delta, Executor& primary, int activeAdapter)
 		_failedDomain = domain;
 		Log::Warning("RenderGraph", "Local water fallback: ", e.what());
 	}
-	if (slot) _remote->Publish(*slot);
-	_surface.PrepareFrame(std::move(instances), controls,
-	    _remote ? GDX12FluidParticlePass::Role::Display : GDX12FluidParticlePass::Role::Local);
+	if (slot)
+	{
+		_remote->Publish(*slot);
+		_surface.PrepareFrame(_remote->DisplayInstances(instances), _remote->Selected->Controls,
+		    GDX12FluidParticlePass::Role::Display);
+	}
+	else
+		_surface.PrepareFrame(std::move(instances), controls,
+		    _remote ? GDX12FluidParticlePass::Role::Display : GDX12FluidParticlePass::Role::Local);
 }
 Id SceneWater::Packet(NativeWork& work, Graph& graph, std::vector<ID3D12Resource*>& bindings, const char* name,
                         const std::vector<GDX12ResourceAccess>& resources,
@@ -319,10 +374,11 @@ void SceneWater::Presented(uint64_t frame, const std::vector<CompletionToken>& c
 	const auto draw = _drawPacket < completions.size() ? completions[_drawPacket] : CompletionToken{};
 	uint64_t particles = 0;
 	for (const auto& source : _surface.DrawSources()) particles += source.Particles->GetElementCount();
-	Log::Info("RenderGraph", "Water MGPU frame=", frame, " CrossSync=", CrossSync.GetValue(),
+	Log::Info("RenderGraph", "Water MGPU frame=", frame, " CrossSync=", _remote->Mode, " generation=", _remote->Generation,
 	    " ordered=", _remote->Ordered, " shown=", draw ? snapshot.Version : 0, " substeps=", _remote->Pass.Substeps(),
 	    " waitVersion=", draw ? snapshot.Version : 0, " exportFence=", snapshot.Ready.Value,
 	    " importFence=", snapshot.Reader.Value, " drawFence=", draw.Value,
-	    " instances=", _surface.DrawSources().size(), " drawParticles=", particles);
+	    " instances=", _surface.DrawSources().size(), " drawParticles=", particles,
+	    " orderedExportFence=", _remote->LastOrder->Ready.Value);
 }
 } // namespace BistroRender

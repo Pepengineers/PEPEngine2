@@ -216,7 +216,7 @@ void GDX12FluidParticlePass::PrepareFrame(std::vector<GDX12FluidInstance> instan
 			continue;
 		}
 		const auto& settings = instance.Component.GetSettings();
-		rendering |= _controls.Enabled && settings.RenderEnabled;
+		rendering |= _controls.Enabled && (settings.RenderEnabled || (_role == Role::Solver && settings.SimulationEnabled));
 		_simulating |= _controls.Enabled && settings.SimulationEnabled;
 	}
 	const bool changed = rendering != _rendering || previousControls.Enabled != _controls.Enabled ||
@@ -251,7 +251,7 @@ void GDX12FluidParticlePass::PrepareDrawSources()
 	{
 		const auto found = _states.find(instance.Id);
 		const auto settings = ResolveFluidSettings(instance.Component.GetSettings(), _controls.Quality);
-		if (found == _states.end() || !settings.RenderEnabled)
+		if (found == _states.end() || (!settings.RenderEnabled && (_role != Role::Solver || !settings.SimulationEnabled)))
 		{
 			continue;
 		}
