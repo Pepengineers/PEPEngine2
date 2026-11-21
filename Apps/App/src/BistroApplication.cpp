@@ -67,7 +67,8 @@ void ValidateStartupAdapters(ConsoleModule& console, const std::filesystem::path
         {L"App.CloudPicture.Adapter", "-1"},
         {L"App.AO.Adapter", "-1"},
         {L"App.Particles.Adapter", "-1"},
-        {L"App.Water.Adapter", "-1"}};
+        {L"App.Water.Adapter", "-1"},
+        {L"App.Grass.Wind.Adapter", "-1"}};
     bool invalid = false;
     for (const auto& [name, fallback] : reset)
     {

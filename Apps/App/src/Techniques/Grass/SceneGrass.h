@@ -37,6 +37,7 @@ class SceneGrass
 
   private:
 	struct RemoteWind;
+	void RetireRemoteWind(Executor&);
 	static void AppendWindJobs(GDX12GrassRenderer&, Graph&, std::vector<ID3D12Resource*>&, NativeWork&, bool remote);
 	void AppendWindImport(Graph&, std::vector<ID3D12Resource*>&, NativeWork&);
 	struct RecordedFrame

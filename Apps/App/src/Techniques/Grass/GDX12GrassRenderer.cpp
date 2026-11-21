@@ -387,11 +387,7 @@ void GDX12GrassRenderer::BeginFrame(const RenderPipelineCommonData& common,
                         buffer = Buffer<XMFLOAT4>(count, true, false);
                 continue;
             }
-            state.Remote = false;
-            const size_t begin = frame.WindJobs.size();
-            UpdateWind(state, reset);
-            if (state.Source.Id == independentWind)
-                for (size_t i = begin; i < frame.WindJobs.size(); ++i) frame.WindJobs[i].Async = true;
+            PlanLocalWind(state, independentWind);
         }
     }
     for (auto it = frame.ImportedWind.begin(); it != frame.ImportedWind.end();)
@@ -410,6 +406,34 @@ void GDX12GrassRenderer::BeginFrame(const RenderPipelineCommonData& common,
         const auto field = _wind.find(state.Source.WindId);
         if (field != _wind.end()) state.ResetHistory |= field->second.ResetHistory;
     }
+}
+
+void GDX12GrassRenderer::PlanLocalWind(WindState& state, uint64_t independentWind)
+{
+    if (state.Remote)
+    {
+        RetireWind(state); // The previous resolution described the remote buffers.
+        state.Remote = false;
+        state.ResetHistory = true;
+    }
+    auto& jobs = CurrentFrame().WindJobs;
+    const size_t begin = jobs.size();
+    UpdateWind(state, state.ResetHistory);
+    if (state.Source.Id == independentWind)
+        for (size_t i = begin; i < jobs.size(); ++i) jobs[i].Async = true;
+}
+
+void GDX12GrassRenderer::FallBackToLocalWind(uint64_t independentWind)
+{
+    auto& imports = CurrentFrame().ImportedWind;
+    for (const auto& entry : imports)
+        PlanLocalWind(_wind.at(entry.first), independentWind);
+    for (auto id : _drawOrder)
+    {
+        auto& grass = _grass.at(id);
+        if (imports.count(grass.Source.WindId)) grass.ResetHistory = true;
+    }
+    imports.clear();
 }
 
 void GDX12GrassRenderer::EnsureNeutralWind()

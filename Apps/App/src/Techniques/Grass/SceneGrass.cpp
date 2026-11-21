@@ -22,6 +22,12 @@ AutoConsoleVariable<int> WindCrossSync(L"App.Grass.Wind.CrossSync", 1,
 // ECS wind owners count upward from one. Reserve the last ID for the scene mesh.
 constexpr uint64_t LindenWindOwner = UINT64_MAX;
 
+bool IsDeviceLoss(HRESULT code)
+{
+	return code == DXGI_ERROR_DEVICE_REMOVED || code == DXGI_ERROR_DEVICE_RESET ||
+	    code == DXGI_ERROR_DEVICE_HUNG || code == DXGI_ERROR_DRIVER_INTERNAL_ERROR;
+}
+
 struct WindCopy
 {
 	ID3D12Resource* Buffer;
@@ -89,7 +95,7 @@ struct SceneGrass::RemoteWind
 		frame.WindJobs.clear();
 	}
 
-	void Publish(GDX12GrassRenderer& primary)
+	bool Publish(GDX12GrassRenderer& primary)
 	{
 		auto& frame = Frames[Resources.CurrFrameConstantsIndex];
 		const auto& imports = primary.CurrentFrame().ImportedWind;
@@ -100,7 +106,7 @@ struct SceneGrass::RemoteWind
 				it = Solver->_wind.erase(it);
 			}
 			else ++it;
-		if (imports.empty()) return;
+		if (imports.empty()) return true;
 
 		Graph graph;
 		graph.Device = Device;
@@ -128,7 +134,20 @@ struct SceneGrass::RemoteWind
 		}
 		if (bytes > frame.Capacity)
 		{
-			frame.Shared = Submissions->CreateTransferBuffer(Device, bytes);
+			try { frame.Shared = Submissions->CreateTransferBuffer(Device, bytes); }
+			catch (const DxException& e)
+			{
+				if (IsDeviceLoss(e.ErrorCode)) throw;
+				Submissions->CheckHealth();
+				Log::Warning("RenderGraph", "Using local ProjectedGrid wind: shared wind buffer: ", e.ToString());
+				return false;
+			}
+			catch (const std::exception& e)
+			{
+				Submissions->CheckHealth();
+				Log::Warning("RenderGraph", "Using local ProjectedGrid wind: shared wind buffer: ", e.what());
+				return false;
+			}
 			frame.Capacity = bytes;
 		}
 		auto* shared = frame.Shared.Resources[1].Get();
@@ -144,6 +163,7 @@ struct SceneGrass::RemoteWind
 		Recorder.Execute(schedule, bindings, [&](Id operation, uint32_t, auto* cmd) { work.Record(operation, cmd); });
 		frame.Ready = Recorder.Completions().back();
 		frame.Version = ++Ordered;
+		return true;
 	}
 };
 
@@ -185,6 +205,13 @@ SceneGrass::~SceneGrass()
 	catch (...) { (void)_remoteWind.release(); }
 }
 
+void SceneGrass::RetireRemoteWind(Executor& primary)
+{
+	primary.Drain();
+	_remoteWind->Recorder.Drain();
+	_remoteWind.reset();
+}
+
 void SceneGrass::Prepare(RenderPipelineContext& c, float dt, Executor& primary, const BoundingBox* crown)
 {
 	_scene.CollectScene(dt);
@@ -210,21 +237,20 @@ void SceneGrass::Prepare(RenderPipelineContext& c, float dt, Executor& primary, 
 	const Id device = requested >= 0 && requested != _failedWindAdapter ?
 	    primary.Submissions()->SelectAdapter(requested) : 0;
 	if (_remoteWind && _remoteWind->Device != device)
-	{
-		primary.Drain();
-		_remoteWind->Recorder.Drain();
-		_remoteWind.reset();
-	}
+		RetireRemoteWind(primary);
 	if (device && !_remoteWind)
 	{
 		try { _remoteWind = std::make_unique<RemoteWind>(_resources, primary, device); }
 		catch (const DxException& e)
 		{
+			if (IsDeviceLoss(e.ErrorCode)) throw;
+			primary.Submissions()->CheckHealth();
 			_failedWindAdapter = requested;
 			Log::Warning("RenderGraph", "Using local ProjectedGrid wind: ", e.ToString());
 		}
 		catch (const std::exception& e)
 		{
+			primary.Submissions()->CheckHealth();
 			_failedWindAdapter = requested;
 			Log::Warning("RenderGraph", "Using local ProjectedGrid wind: ", e.what());
 		}
@@ -232,7 +258,13 @@ void SceneGrass::Prepare(RenderPipelineContext& c, float dt, Executor& primary, 
 	if (_remoteWind) _remoteWind->Begin(_resources.CurrFrameConstantsIndex);
 	_gpu->BeginFrame(c.Common, _scene._grass, _scene._wind, _scene._controls, _scene._sources, _scene._deltaSeconds,
 	                 enable ? LindenWindOwner : 0, _remoteWind ? _remoteWind->Solver.get() : nullptr);
-	if (_remoteWind) _remoteWind->Publish(*_gpu);
+	if (_remoteWind && !_remoteWind->Publish(*_gpu))
+	{
+		// Only transfer allocation can fall back. Earlier frames can still hold both sides of the shared ring.
+		RetireRemoteWind(primary);
+		_failedWindAdapter = requested;
+		_gpu->FallBackToLocalWind(enable ? LindenWindOwner : 0);
+	}
 	LindenWindSample sample;
 	sample.Revision = _lindenWind.Revision;
 	if (enable)

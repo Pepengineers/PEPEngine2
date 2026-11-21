@@ -143,6 +143,8 @@ private:
     void Initialize();
     void InitializeWind();
     void EnsureNeutralWind();
+    void PlanLocalWind(WindState&, uint64_t independentWind);
+    void FallBackToLocalWind(uint64_t independentWind);
     const VelocityBuffers& Velocity(const WindState&);
     void UpdateWind(WindState& state, bool reset);
     void WindDispatch(UINT stage, const WindParameters& parameters,
