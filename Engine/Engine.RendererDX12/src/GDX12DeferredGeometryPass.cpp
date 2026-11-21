@@ -11,14 +11,37 @@ void GDX12DeferredGeometryPass::Describe(PassDescription& s) const
 	auto& draws = s.AddInputDrawStream(InDrawStream);
 	draws.Usages = ResourceUsage::IndirectArguments;
 	draws.AllowShared = true;
-	for (const auto& target : ColorTargets)
-	{
-		auto& output = s.AddOutputTexture(target.Name);
-		output.Formats = {target.Format};
-		output.Size = Extent::Render();
-		output.Usages = ResourceUsage::RenderTarget;
-		output.AllowShared = true;
-	}
+
+	auto& albedoMetallic = s.AddOutputTexture(OutAlbedoMetallic);
+	albedoMetallic.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
+	albedoMetallic.Size = Extent::Render();
+	albedoMetallic.Usages = ResourceUsage::RenderTarget;
+	albedoMetallic.AllowShared = true;
+
+	auto& velocity = s.AddOutputTexture(OutVelocityBuffer);
+	velocity.Formats = {DXGI_FORMAT_R16G16_FLOAT};
+	velocity.Size = Extent::Render();
+	velocity.Usages = ResourceUsage::RenderTarget;
+	velocity.AllowShared = true;
+
+	auto& normalRoughness = s.AddOutputTexture(OutNormalRoughness);
+	normalRoughness.Formats = {DXGI_FORMAT_R16G16B16A16_FLOAT};
+	normalRoughness.Size = Extent::Render();
+	normalRoughness.Usages = ResourceUsage::RenderTarget;
+	normalRoughness.AllowShared = true;
+
+	auto& f0Baked = s.AddOutputTexture(OutF0Baked);
+	f0Baked.Formats = {DXGI_FORMAT_R16G16B16A16_FLOAT};
+	f0Baked.Size = Extent::Render();
+	f0Baked.Usages = ResourceUsage::RenderTarget;
+	f0Baked.AllowShared = true;
+
+	auto& emissive = s.AddOutputTexture(OutEmissive);
+	emissive.Formats = {DXGI_FORMAT_R16G16B16A16_FLOAT};
+	emissive.Size = Extent::Render();
+	emissive.Usages = ResourceUsage::RenderTarget;
+	emissive.AllowShared = true;
+
 	auto& depth = s.AddOutputTexture(OutDepthBuffer);
 	depth.Formats = {DXGI_FORMAT_D32_FLOAT};
 	depth.Size = Extent::Render();
@@ -86,11 +109,13 @@ void GDX12DeferredGeometryPass::Initialize(PassInitContext& context)
 
 	pso.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_EQUAL;
 	pso.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
-	pso.NumRenderTargets = static_cast<UINT>(std::size(ColorTargets));
-	for (UINT i = 0; i < pso.NumRenderTargets; ++i)
-	{
-		pso.RTVFormats[i] = ColorTargets[i].Format;
-	}
+	// MRT order matches PS_OUTPUT in DeferredGeometryPass.hlsl.
+	pso.NumRenderTargets = 5;
+	pso.RTVFormats[0] = context.GetOutputResourceDescription(OutAlbedoMetallic).Format;
+	pso.RTVFormats[1] = context.GetOutputResourceDescription(OutVelocityBuffer).Format;
+	pso.RTVFormats[2] = context.GetOutputResourceDescription(OutNormalRoughness).Format;
+	pso.RTVFormats[3] = context.GetOutputResourceDescription(OutF0Baked).Format;
+	pso.RTVFormats[4] = context.GetOutputResourceDescription(OutEmissive).Format;
 	pso.PS = {ps->GetBufferPointer(), ps->GetBufferSize()};
 	ThrowIfFailed(resources->Device->GetDevice()->CreateGraphicsPipelineState(&pso, IID_PPV_ARGS(&_opaquePSO)));
 }
@@ -133,10 +158,15 @@ void GDX12DeferredGeometryPass::Execute(PassExecutionContext& context)
 
 	cmdList->BeginPixEvent("G-buffer", Colors::ForestGreen);
 	cmdList->SetPipelineState(_opaquePSO.Get());
-	const auto targets = {albedoMetallic, velocity, context.GetOutputTexture(OutNormalRoughness).GetTexture(),
-		context.GetOutputTexture(OutF0Baked).GetTexture(), context.GetOutputTexture(OutEmissive).GetTexture()};
-	cmdList->SetRenderTargets(targets, depthStencil);
-	for (auto* target : targets) { cmdList->ClearRenderTargetView(target); }
+	auto* normalRoughness = context.GetOutputTexture(OutNormalRoughness).GetTexture();
+	auto* f0Baked = context.GetOutputTexture(OutF0Baked).GetTexture();
+	auto* emissive = context.GetOutputTexture(OutEmissive).GetTexture();
+	cmdList->SetRenderTargets({albedoMetallic, velocity, normalRoughness, f0Baked, emissive}, depthStencil);
+	cmdList->ClearRenderTargetView(albedoMetallic);
+	cmdList->ClearRenderTargetView(velocity);
+	cmdList->ClearRenderTargetView(normalRoughness);
+	cmdList->ClearRenderTargetView(f0Baked);
+	cmdList->ClearRenderTargetView(emissive);
 	drawVisibleMeshes();
 	cmdList->EndPixEvent();
 }

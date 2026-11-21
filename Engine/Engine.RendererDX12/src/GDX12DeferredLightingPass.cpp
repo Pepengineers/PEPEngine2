@@ -1,30 +1,35 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12DeferredLightingPass.h"
 
-namespace
-{
-    struct Input { const char* Name; DXGI_FORMAT Format; };
-    constexpr Input Inputs[] = {
-        {"InAlbedoMetallic", DXGI_FORMAT_R8G8B8A8_UNORM},
-        {"InNormalRoughness", DXGI_FORMAT_R16G16B16A16_FLOAT},
-        {"InF0Baked", DXGI_FORMAT_R16G16B16A16_FLOAT},
-        {"InEmissive", DXGI_FORMAT_R16G16B16A16_FLOAT},
-        {"InDepthBuffer", DXGI_FORMAT_D32_FLOAT}
-    };
-
-}
-
 GDX12DeferredLightingPass::GDX12DeferredLightingPass()
 { _flags = RENDER_PASS_FLAG_USE_LIGHTING | RENDER_PASS_FLAG_USE_CAMERAS; }
 
 void GDX12DeferredLightingPass::Describe(PassDescription& s) const
 {
-    for (const auto& input : Inputs)
-    {
-        auto& pin = s.AddInputTexture(input.Name);
-        pin.Formats = {input.Format};
-        pin.Usages = ResourceUsage::NonPixelShaderRead;
-        pin.AllowShared = !IsDepthFormat(input.Format);
-    }
+    auto& albedoMetallic = s.AddInputTexture("InAlbedoMetallic");
+    albedoMetallic.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
+    albedoMetallic.Usages = ResourceUsage::NonPixelShaderRead;
+    albedoMetallic.AllowShared = true;
+
+    auto& normalRoughness = s.AddInputTexture("InNormalRoughness");
+    normalRoughness.Formats = {DXGI_FORMAT_R16G16B16A16_FLOAT};
+    normalRoughness.Usages = ResourceUsage::NonPixelShaderRead;
+    normalRoughness.AllowShared = true;
+
+    auto& f0Baked = s.AddInputTexture("InF0Baked");
+    f0Baked.Formats = {DXGI_FORMAT_R16G16B16A16_FLOAT};
+    f0Baked.Usages = ResourceUsage::NonPixelShaderRead;
+    f0Baked.AllowShared = true;
+
+    auto& emissive = s.AddInputTexture("InEmissive");
+    emissive.Formats = {DXGI_FORMAT_R16G16B16A16_FLOAT};
+    emissive.Usages = ResourceUsage::NonPixelShaderRead;
+    emissive.AllowShared = true;
+
+    auto& depth = s.AddInputTexture("InDepthBuffer");
+    depth.Formats = {DXGI_FORMAT_D32_FLOAT};
+    depth.Usages = ResourceUsage::NonPixelShaderRead;
+    depth.AllowShared = false;
+
     s.AddInputTexture("InIrradiance", ResourceType::TextureCube).Usages = ResourceUsage::NonPixelShaderRead;
     s.AddInputTexture("InPrefilteredEnvironment", ResourceType::TextureCube).Usages = ResourceUsage::NonPixelShaderRead;
     s.AddInputTexture("InBRDFLut", ResourceType::Texture2D).Usages = ResourceUsage::NonPixelShaderRead;
@@ -66,8 +71,11 @@ void GDX12DeferredLightingPass::Execute(PassExecutionContext& context)
     cmd->SetDescriptorHeaps({resources->SRV_UAV_Heap.get()});
     cmd->SetComputeRootConstantBufferView(1, frame.CameraCB->GetElementAddress(context.GetFrameData()->ActiveCameraCBufferIndex));
     cmd->GetCommandList()->SetComputeRoot32BitConstants(0, sizeof(frame.ClusteredLightingConstants) / sizeof(UINT), &frame.ClusteredLightingConstants, 0);
-    for (UINT i = 0; i < std::size(Inputs); ++i)
-    { cmd->SetComputeSRV(i, context.GetInputTexture(Inputs[i].Name).GetSRV()->GPUHandle); }
+    cmd->SetComputeSRV(0, context.GetInputTexture("InAlbedoMetallic").GetSRV()->GPUHandle);
+    cmd->SetComputeSRV(1, context.GetInputTexture("InNormalRoughness").GetSRV()->GPUHandle);
+    cmd->SetComputeSRV(2, context.GetInputTexture("InF0Baked").GetSRV()->GPUHandle);
+    cmd->SetComputeSRV(3, context.GetInputTexture("InEmissive").GetSRV()->GPUHandle);
+    cmd->SetComputeSRV(4, context.GetInputTexture("InDepthBuffer").GetSRV()->GPUHandle);
     cmd->SetComputeSRV(5, context.GetInputTexture("InIrradiance").GetSRV()->GPUHandle);
     cmd->SetComputeSRV(6, context.GetInputTexture("InPrefilteredEnvironment").GetSRV()->GPUHandle);
     cmd->SetComputeSRV(7, context.GetInputTexture("InBRDFLut").GetSRV()->GPUHandle);

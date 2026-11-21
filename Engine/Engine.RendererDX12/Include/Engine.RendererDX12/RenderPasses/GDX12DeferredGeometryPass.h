@@ -18,15 +18,6 @@ public:
 	void Execute(PassExecutionContext& context) override;
 
 private:
-	// MRT order matches PS_OUTPUT in DeferredGeometryPass.hlsl.
-	struct ColorTarget { const char* Name; DXGI_FORMAT Format; };
-	static constexpr ColorTarget ColorTargets[] = {
-		{OutAlbedoMetallic, DXGI_FORMAT_R8G8B8A8_UNORM},
-		{OutVelocityBuffer, DXGI_FORMAT_R16G16_FLOAT},
-		{OutNormalRoughness, DXGI_FORMAT_R16G16B16A16_FLOAT},
-		{OutF0Baked, DXGI_FORMAT_R16G16B16A16_FLOAT},
-		{OutEmissive, DXGI_FORMAT_R16G16B16A16_FLOAT}
-	};
 	ComPtr<ID3D12PipelineState> _depthPSO;
 	std::unique_ptr<GDX12RootSignature> _opaqueRS;
 	ComPtr<ID3D12CommandSignature> _opaqueCS;

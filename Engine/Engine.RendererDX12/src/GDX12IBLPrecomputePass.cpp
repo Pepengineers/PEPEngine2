@@ -25,17 +25,24 @@ void GDX12IBLPrecomputePass::Describe(PassDescription& description) const
 {
     description.RunOnceDuringSetup = true;
     description.AddInputTexture("InEnvironmentMap", ResourceType::TextureCube).Usages = ResourceUsage::NonPixelShaderRead;
-    auto output = [&](const char* name, ResourceType type, UINT size, UINT mips = 1)
-    {
-        auto& pin = description.AddOutputTexture(name, type);
-        pin.Formats = {DXGI_FORMAT_R16G16B16A16_FLOAT};
-        pin.Size = Extent::Fixed({size, size});
-        pin.MipLevels = mips;
-        pin.Usages = ResourceUsage::UnorderedAccess;
-    };
-    output("OutIrradiance", ResourceType::TextureCube, 32);
-    output("OutPrefilteredEnvironment", ResourceType::TextureCube, 128, SpecularMipCount);
-    output("OutBRDFLut", ResourceType::Texture2D, 128);
+
+    auto& irradiance = description.AddOutputTexture("OutIrradiance", ResourceType::TextureCube);
+    irradiance.Formats = {DXGI_FORMAT_R16G16B16A16_FLOAT};
+    irradiance.Size = Extent::Fixed({32, 32});
+    irradiance.MipLevels = 1;
+    irradiance.Usages = ResourceUsage::UnorderedAccess;
+
+    auto& prefilteredEnvironment = description.AddOutputTexture("OutPrefilteredEnvironment", ResourceType::TextureCube);
+    prefilteredEnvironment.Formats = {DXGI_FORMAT_R16G16B16A16_FLOAT};
+    prefilteredEnvironment.Size = Extent::Fixed({128, 128});
+    prefilteredEnvironment.MipLevels = SpecularMipCount;
+    prefilteredEnvironment.Usages = ResourceUsage::UnorderedAccess;
+
+    auto& brdfLut = description.AddOutputTexture("OutBRDFLut", ResourceType::Texture2D);
+    brdfLut.Formats = {DXGI_FORMAT_R16G16B16A16_FLOAT};
+    brdfLut.Size = Extent::Fixed({128, 128});
+    brdfLut.MipLevels = 1;
+    brdfLut.Usages = ResourceUsage::UnorderedAccess;
 }
 
 void GDX12IBLPrecomputePass::Initialize(PassInitContext& context)
