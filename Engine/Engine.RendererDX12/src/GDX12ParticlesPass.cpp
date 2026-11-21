@@ -21,7 +21,7 @@ struct GDX12ParticlesPass::State
     std::unordered_map<std::string, ComPtr<ID3D12PipelineState>> Compute;
     ComPtr<ID3D12PipelineState> Weighted, Additive, Alpha, Motion;
     ComPtr<ID3D12PipelineState> MeshWeighted, MeshAdditive, MeshMotion;
-    ComPtr<ID3D12PipelineState> Opaque, MeshOpaque;
+    std::array<ComPtr<ID3D12PipelineState>, 3> Opaque, MeshOpaque;
     std::unique_ptr<Buffer<GDX12ParticleMeshVertex>> FireflyVertices;
     std::unique_ptr<Buffer<GDX12ParticleMeshVertex>> FireflyUpload;
     bool MeshUploadPending = false;
@@ -60,7 +60,7 @@ struct GDX12ParticlesPass::State
     }
 
     void InitializeRaster(GDX12DeviceResources* resources, bool mesh,
-        const std::array<GDX12Texture*, 5>* gbuffer = nullptr)
+        const std::array<GDX12Texture*, 5>* gbuffer = nullptr, OpaqueStage stage = OpaqueStage::Combined)
     {
         const D3D12_INPUT_ELEMENT_DESC layout[] = {
             {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
@@ -69,11 +69,13 @@ struct GDX12ParticlesPass::State
             {"TEXCOORD", 0, DXGI_FORMAT_R32_FLOAT, 0, 40, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}};
         auto& compiler = GDX12ShaderCompiler::GetInstance();
         auto vs = compiler.CompileShader(resources->Device, SHADERS_FOLDER "ParticleRaster.hlsl", nullptr, mesh ? "MeshVS" : "VS", "vs");
+        const bool normals = gbuffer && stage == OpaqueStage::DepthNormals;
+        const bool readOnly = gbuffer && stage == OpaqueStage::GBuffer;
         for (UINT mode = gbuffer ? 4u : 0u; mode < (gbuffer ? 5u : 4u); ++mode)
         {
             if (mesh && mode == 2) continue;
             auto ps = compiler.CompileShader(resources->Device, SHADERS_FOLDER "ParticleRaster.hlsl", nullptr,
-                gbuffer ? "OpaquePS" : mode == 0 ? "WeightedPS" : mode == 3 ? "MotionPS" : "ColorPS", "ps");
+                gbuffer ? (normals ? "OpaquePrepassPS" : "OpaquePS") : mode == 0 ? "WeightedPS" : mode == 3 ? "MotionPS" : "ColorPS", "ps");
             D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = {};
             desc.pRootSignature = Root->GetRootSignature().Get();
             desc.VS = { vs->GetBufferPointer(), vs->GetBufferSize() };
@@ -103,13 +105,14 @@ struct GDX12ParticlesPass::State
             if (gbuffer)
             {
                 desc.DepthStencilState.DepthEnable = true;
-                desc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+                desc.DepthStencilState.DepthWriteMask = readOnly ? D3D12_DEPTH_WRITE_MASK_ZERO : D3D12_DEPTH_WRITE_MASK_ALL;
+                if (readOnly) desc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_EQUAL;
                 desc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
                 desc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
                 std::fill(std::begin(desc.RTVFormats), std::end(desc.RTVFormats), DXGI_FORMAT_UNKNOWN);
-                desc.NumRenderTargets = static_cast<UINT>(gbuffer->size());
+                desc.NumRenderTargets = normals ? 1 : static_cast<UINT>(gbuffer->size());
                 for (UINT i = 0; i < desc.NumRenderTargets; ++i)
-                    desc.RTVFormats[i] = (*gbuffer)[i]->GetFormat();
+                    desc.RTVFormats[i] = (*gbuffer)[normals ? 2 : i]->GetFormat();
             }
             else if (mode == 0)
             {
@@ -121,7 +124,7 @@ struct GDX12ParticlesPass::State
                 reveal.SrcBlendAlpha = D3D12_BLEND_ZERO;
                 reveal.DestBlendAlpha = D3D12_BLEND_ONE;
             }
-            auto& target = gbuffer ? (mesh ? MeshOpaque : Opaque) :
+            auto& target = gbuffer ? (mesh ? MeshOpaque : Opaque).at(static_cast<UINT>(stage)) :
                 mesh ? (mode == 0 ? MeshWeighted : mode == 1 ? MeshAdditive : MeshMotion) :
                        (mode == 0 ? Weighted : mode == 1 ? Additive : mode == 2 ? Alpha : Motion);
             ThrowIfFailed(resources->Device->GetDevice()->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(target.ReleaseAndGetAddressOf())));
@@ -393,12 +396,23 @@ void GDX12ParticlesPass::BeginFrame(GDX12Texture* depth, const GDX12ParticleRend
     }
 }
 
-bool GDX12ParticlesPass::InitializeOpaque(const std::array<GDX12Texture*, 5>& gbuffer)
+bool GDX12ParticlesPass::InitializeOpaque(const std::array<GDX12Texture*, 5>& gbuffer, bool depthNormals)
 {
     if (!_state || !_state->Active) return false;
     auto& state = *_state;
-    if (!state.Opaque) state.InitializeRaster(_resources, false, &gbuffer);
-    if (state.Mesh && !state.MeshOpaque) state.InitializeRaster(_resources, true, &gbuffer);
+    const auto prepare = [&](OpaqueStage stage)
+    {
+        const auto index = static_cast<UINT>(stage);
+        if (!state.Opaque[index]) state.InitializeRaster(_resources, false, &gbuffer, stage);
+        if (state.Mesh && !state.MeshOpaque[index]) state.InitializeRaster(_resources, true, &gbuffer, stage);
+    };
+    if (depthNormals)
+    {
+        prepare(OpaqueStage::DepthNormals);
+        prepare(OpaqueStage::GBuffer);
+    }
+    else
+        prepare(OpaqueStage::Combined);
     return true;
 }
 
@@ -460,21 +474,19 @@ void GDX12ParticlesPass::PrepareRenderData(GDX12CommandList* commands,
 }
 
 void GDX12ParticlesPass::DrawOpaque(GDX12CommandList* commands, GDX12Texture* depth, D3D12_CPU_DESCRIPTOR_HANDLE dsv,
-    const std::array<GDX12Texture*, 5>& gbuffer)
+    const D3D12_CPU_DESCRIPTOR_HANDLE* targets, UINT targetCount, OpaqueStage stage)
 {
     auto& state = *_state;
-    GDX12_SCOPED_EVENT(commands, "Opaque particles G-buffer", Colors::Orange);
+    GDX12_SCOPED_EVENT(commands, "Draw opaque particles", Colors::Orange);
+    const auto index = static_cast<UINT>(stage);
     commands->SetViewport(depth->GetViewport());
     commands->SetScissorRect(depth->GetScissorRect());
-    std::array<D3D12_CPU_DESCRIPTOR_HANDLE, 5> targets;
-    for (size_t i = 0; i < targets.size(); ++i)
-        targets[i] = gbuffer[i]->GetRTV()->CPUHandle;
-    commands->GetCommandList()->OMSetRenderTargets(static_cast<UINT>(targets.size()), targets.data(), FALSE, &dsv);
-    commands->SetPipelineState(state.Opaque);
+    commands->GetCommandList()->OMSetRenderTargets(targetCount, targets, FALSE, &dsv);
+    commands->SetPipelineState(state.Opaque[index]);
     state.Draw(commands, _resources, _commonData, 0);
     if (state.Mesh)
     {
-        commands->SetPipelineState(state.MeshOpaque);
+        commands->SetPipelineState(state.MeshOpaque[index]);
         state.Draw(commands, _resources, _commonData, 3);
     }
 }

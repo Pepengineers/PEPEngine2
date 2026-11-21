@@ -63,11 +63,7 @@ class BistroRenderPipeline final : public IRenderPipeline
 	const RenderPipelineBindings& GetBindings() const override { return _bindings; }
 	uint64_t ExecuteFrame(RenderPipelineContext&, GDX12CommandList*,
 	                      const std::function<void(GDX12CommandList*)>&) override;
-	void FramePresented() override
-	{
-		_cloudPicture->Presented();
-		_lighting->AOPresented(_frameNumber, _executor->Completions());
-	}
+	void FramePresented() override;
 	void WriteExecution(std::ostream& output) const override { _schedule.Write(output); }
 	const BistroRender::Schedule& LastSchedule() const { return _schedule; }
 	bool HasRemoteCloudPicture() const { return _cloudPicture->IsRemote(); }
@@ -85,4 +81,6 @@ class BistroRenderPipeline final : public IRenderPipeline
 	double _animationTime = 0;
 	uint64_t _frameNumber = 0;
 	int _aoAdapter = -1;
+	UINT _executorSlot = 0;
+	bool _reportedDepthNormals = false;
 };

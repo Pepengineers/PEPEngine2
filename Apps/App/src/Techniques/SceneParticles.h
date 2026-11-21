@@ -15,6 +15,9 @@ public:
     enum class Inputs { Frame, Interaction, Depth };
     void BeginSimulation(GDX12ParticleInteractionField);
     void AppendSimulation(Graph&, std::vector<ID3D12Resource*>&, Inputs, GDX12Texture* depth);
+    void PrepareOpaque(const SceneGeometry&, UINT slot);
+    void AppendEarlyOpaquePreparation(Graph&, std::vector<ID3D12Resource*>&);
+    void AppendOpaquePrepass(Graph&, std::vector<ID3D12Resource*>&, const SceneGeometry&, UINT slot);
     void AppendOpaque(Graph&, std::vector<ID3D12Resource*>&, const SceneGeometry&, UINT slot);
     void Prepare(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* rasterDepth, GDX12Texture* accum,
         GDX12Texture* reveal);
@@ -25,6 +28,8 @@ public:
 private:
     bool HasDrawSources(bool opaque) const;
     std::vector<Access> DrawReads(Graph&, std::vector<ID3D12Resource*>&, bool opaque);
+    void AppendOpaqueDraw(Graph&, std::vector<ID3D12Resource*>&, const SceneGeometry&, UINT,
+        GDX12ParticlesPass::OpaqueStage);
     void AppendPreparation(Graph&, std::vector<ID3D12Resource*>&, bool opaque);
     void Packet(Graph&, const std::vector<ID3D12Resource*>&, const char*, std::vector<Access>,
         std::function<void(GDX12CommandList*)>, Queue target = Queue::Direct);
@@ -38,5 +43,6 @@ private:
     std::vector<Access> _drawReads;
     GDX12Texture *_accum = nullptr, *_reveal = nullptr;
     UINT _width = 0, _height = 0;
+    bool _opaqueReady = false, _splitOpaque = false, _opaquePrepared = false;
 };
 }

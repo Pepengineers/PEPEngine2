@@ -1,6 +1,7 @@
 #include "SceneGeometry.h"
 #include "NativeWork.h"
 #include "ShadowGeometry.h"
+#include "Common/ConsoleVariables.h"
 #include "Engine.Core/BenchmarkEngine.h"
 #include "App.Base/Modules/SceneManagerModule.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
@@ -15,6 +16,8 @@ namespace
 {
 constexpr DXGI_FORMAT Formats[] = {DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R16G16_FLOAT, DXGI_FORMAT_R16G16B16A16_FLOAT,
                                    DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_R16G16B16A16_FLOAT};
+AutoConsoleVariable<bool> DepthNormalsPrepass(L"App.DepthNormalsPrepass", false,
+    L"Write camera depth and material normals (including opaque particles) before the G-buffer.");
 constexpr UINT UploadBucketCount = 4;
 constexpr UINT CounterBytes = sizeof(UINT);
 constexpr UINT EmptyGeometryBytes = 64;
@@ -92,8 +95,13 @@ SceneGeometry::SceneGeometry(RenderPipelineContext& c)
 	p.PS = {ps->GetBufferPointer(), ps->GetBufferSize()};
 	ThrowIfFailed(r.Device->GetDevice()->CreateGraphicsPipelineState(&p, IID_PPV_ARGS(&_depth)));
 	vs = compiler.CompileShader(r.Device, SHADERS_FOLDER "OpaquePass.hlsl", nullptr, "VS", "vs");
-	ps = compiler.CompileShader(r.Device, SHADERS_FOLDER "OpaquePass.hlsl", nullptr, "PS", "ps");
+	ps = compiler.CompileShader(r.Device, SHADERS_FOLDER "OpaquePass.hlsl", nullptr, "PrepassPS", "ps");
 	p.VS = {vs->GetBufferPointer(), vs->GetBufferSize()};
+	p.PS = {ps->GetBufferPointer(), ps->GetBufferSize()};
+	p.NumRenderTargets = 1;
+	p.RTVFormats[0] = Formats[2];
+	ThrowIfFailed(r.Device->GetDevice()->CreateGraphicsPipelineState(&p, IID_PPV_ARGS(&_depthNormals)));
+	ps = compiler.CompileShader(r.Device, SHADERS_FOLDER "OpaquePass.hlsl", nullptr, "PS", "ps");
 	p.PS = {ps->GetBufferPointer(), ps->GetBufferSize()};
 	p.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_EQUAL;
 	p.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
@@ -166,6 +174,7 @@ void SceneGeometry::Resize(UINT width, UINT height)
 	for (auto& s : _slots)
 	{
 		s.PlannedBindings.clear();
+		if (s.EarlyNormals) s.EarlyNormals->Resize(width, height);
 		for (UINT i = 0; i < 5; ++i)
 		{
 			if (!s.Color[i])
@@ -217,6 +226,13 @@ void SceneGeometry::Freeze(UINT index, UINT camera, std::vector<GDX12SkinningWor
 {
 	auto& s = _slots.at(index);
 	auto& f = *_resources.FrameConstants.at(index);
+	s.DepthNormals = DepthNormalsPrepass.GetValue();
+	if (s.DepthNormals && !s.EarlyNormals)
+	{
+		s.EarlyNormals = std::make_unique<GDX12Texture>();
+		GDX12RenderHelpers::InitializeRenderTarget(*s.EarlyNormals, _resources, _width, _height, Formats[2],
+		                                           {0, 0, 0, 0});
+	}
 	// CPU preparation is complete. These per-frame uploads cannot change until
 	// the returned frame fence; workers only record copies of assigned ranges.
 	auto input = [&](Buffer& destination, auto& buffer, bool frameLocal = false)
@@ -412,7 +428,7 @@ void SceneGeometry::AppendWorldCanvases(Graph& graph, UINT index, std::vector<Ac
 }
 Schedule SceneGeometry::Plan(UINT index, const AppendTechnique& append, const AppendTechnique& prelude,
                              bool singleDirect, const AppendTechnique& afterInteraction,
-                             const AppendTechnique& afterDepth)
+                             const AppendTechnique& afterDepth, const AppendDepthNormals& afterDepthNormals)
 {
 	auto& s = _slots.at(index);
 	s.PlannedBindings.clear();
@@ -493,7 +509,7 @@ Schedule SceneGeometry::Plan(UINT index, const AppendTechnique& append, const Ap
 	}
 	g.Operations[ClearCountsOperation].Target = Queue::Compute;
 	g.Operations.push_back(cull);
-	Operation depth{"scene depth ExecuteIndirect"};
+	Operation depth{s.DepthNormals ? "scene DepthNormals ExecuteIndirect" : "scene depth ExecuteIndirect"};
 	for (UINT i : {0u, 2u, 3u})
 	{
 		depth.Accesses.push_back({i, Mode::Read, ShaderRead});
@@ -571,7 +587,7 @@ Schedule SceneGeometry::Plan(UINT index, const AppendTechnique& append, const Ap
 		}
 	}
 	GeometryTarget depthTarget;
-	depthTarget.View = {GDX12GeometryStage::Depth, _common.CameraView * _common.CameraProjection,
+	depthTarget.View = {s.DepthNormals ? GDX12GeometryStage::DepthNormals : GDX12GeometryStage::Depth, _common.CameraView * _common.CameraProjection,
 	                    _common.CameraView.Invert().Translation(), s.Camera};
 	depthTarget.View.Key = 1;
 	depthTarget.View.FrameSlot = index;
@@ -594,8 +610,22 @@ Schedule SceneGeometry::Plan(UINT index, const AppendTechnique& append, const Ap
 		gbufferTarget.Rtvs.push_back(s.Color[i]->GetRTV()->CPUHandle);
 		gbufferTarget.View.ColorFormats[i] = Formats[i];
 	}
-	const std::vector<GeometryTarget> targets{depthTarget, gbufferTarget};
 	s.PlannedBindings = Resources(index);
+	const Id sceneDepth = DepthOperation + (s.Batches ? BatchingOperationCount : 0);
+	const Id sceneGBuffer = GBufferOperation + (s.Batches ? BatchingOperationCount : 0);
+	Id normals = Invalid;
+	s.DepthNormalsReady = Invalid;
+	if (s.DepthNormals)
+	{
+		normals = NativeWork::ResourceFor(g, s.PlannedBindings, s.EarlyNormals->GetResource()->D3DResource.Get(),
+		                                  "Scene.DepthNormals.Normals");
+		depthTarget.Colors.push_back(normals);
+		depthTarget.Rtvs.push_back(s.EarlyNormals->GetRTV()->CPUHandle);
+		depthTarget.View.ColorTargetCount = 1;
+		depthTarget.View.ColorFormats[0] = Formats[2];
+		g.Operations[sceneDepth].Accesses.push_back({normals, Mode::Write, D3D12_RESOURCE_STATE_RENDER_TARGET});
+	}
+	const std::vector<GeometryTarget> targets{depthTarget, gbufferTarget};
 	s.LindenWork.Commands.clear();
 	s.Linden = _linden;
 	s.LindenPose = {};
@@ -613,11 +643,20 @@ Schedule SceneGeometry::Plan(UINT index, const AppendTechnique& append, const Ap
 	    },
 	    [&]
 	    {
-		    if (afterDepth)
+		    if (afterDepth) afterDepth(g, s.PlannedBindings);
+		    if (s.DepthNormals)
 		    {
-			    afterDepth(g, s.PlannedBindings);
-			    firstGrassGBuffer = Id(g.Operations.size());
+			    s.DepthNormalsReady = Id(g.Operations.size());
+			    g.Operations.push_back({"scene DepthNormals ready",
+			        {{DepthResource, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE},
+			         {normals, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE}}});
+			    g.Operations[sceneGBuffer].Dependencies.push_back(s.DepthNormalsReady);
+			    if (afterDepthNormals) afterDepthNormals(g, s.PlannedBindings, s.DepthNormalsReady);
 		    }
+		    firstGrassGBuffer = Id(g.Operations.size());
+		    if (s.DepthNormals && s.Linden)
+			    _lindenDraw.Append(g, s.PlannedBindings, s.LindenWork, index, gbufferTarget, s.Buffers[2].Srv,
+			                       s.Linden, s.LindenPose);
 	    },
 	    [&]
 	    {
@@ -626,7 +665,7 @@ Schedule SceneGeometry::Plan(UINT index, const AppendTechnique& append, const Ap
 		    _lindenDraw.Append(g, s.PlannedBindings, s.LindenWork, index, depthTarget, s.Buffers[2].Srv,
 		                      s.Linden, s.LindenPose);
 	    });
-	if (s.Linden)
+	if (s.Linden && !s.DepthNormals)
 	{
 		_lindenDraw.Append(g, s.PlannedBindings, s.LindenWork, index, gbufferTarget, s.Buffers[2].Srv,
 		                   s.Linden, s.LindenPose);
@@ -650,7 +689,6 @@ Schedule SceneGeometry::Plan(UINT index, const AppendTechnique& append, const Ap
 	{
 		order.push_back(id);
 	}
-	const Id sceneGBuffer = GBufferOperation + (s.Batches ? BatchingOperationCount : 0);
 	for (Id id = 0; id <= preludeBegin; ++id)
 	{
 		if (id == firstGrassGBuffer)
@@ -695,6 +733,17 @@ Schedule SceneGeometry::Plan(UINT index, const AppendTechnique& append, const Ap
 		{
 			packet.Operation = order.at(packet.Operation);
 		}
+	}
+	if (s.DepthNormals)
+	{
+		const auto find = [&](Id id) {
+			return std::find_if(schedule.Packets.begin(), schedule.Packets.end(),
+			    [id](const auto& packet) { return packet.Operation == id; });
+		};
+		const auto ready = find(s.DepthNormalsReady);
+		const auto gbuffer = find(sceneGBuffer);
+		if (s.DepthNormalsReady == Invalid || ready >= gbuffer || gbuffer == schedule.Packets.end())
+			throw std::logic_error("DepthNormals publication must precede the scene G-buffer");
 	}
 	return schedule;
 }
@@ -747,6 +796,7 @@ void SceneGeometry::Record(UINT index, Id op, UINT bucket, ID3D12GraphicsCommand
 {
 	const auto& s = _slots.at(index);
 	const auto& b = s.Buffers;
+	if (op == s.DepthNormalsReady) return;
 	if (op == s.CanvasOperation)
 	{
 		auto* heap = _resources.SRV_UAV_Heap->GetHeap().Get();
@@ -864,7 +914,8 @@ void SceneGeometry::RecordGeometry(const Slot& s, GeometryPass pass, ID3D12Graph
 	const auto& b = s.Buffers;
 	const bool depth = pass == GeometryPass::Depth;
 	cmd->SetGraphicsRootSignature(_drawRoot->GetRootSignature().Get());
-	cmd->SetPipelineState(depth ? _depth.Get() : pass == GeometryPass::GBuffer ? _gbuffer.Get() : _worldCanvas.Get());
+	cmd->SetPipelineState(depth ? (s.DepthNormals ? _depthNormals.Get() : _depth.Get())
+	                            : pass == GeometryPass::GBuffer ? _gbuffer.Get() : _worldCanvas.Get());
 	cmd->SetGraphicsRootConstantBufferView(_drawRoot->GetBRootParamIndex(1), s.Main);
 	cmd->SetGraphicsRootConstantBufferView(_drawRoot->GetBRootParamIndex(2), s.Camera);
 	const UINT buffers[] = {2, 3, 0};
@@ -890,9 +941,15 @@ void SceneGeometry::RecordGeometry(const Slot& s, GeometryPass pass, ID3D12Graph
 		rt[i] = s.Color[i]->GetRTV()->CPUHandle;
 	}
 	const auto dsv = depth ? s.Dsv.CPUHandle : s.ReadDepth.CPUHandle;
-	cmd->OMSetRenderTargets(depth ? 0 : 5, rt, FALSE, &dsv);
+	const auto normals = depth && s.DepthNormals ? s.EarlyNormals->GetRTV()->CPUHandle : D3D12_CPU_DESCRIPTOR_HANDLE{};
+	cmd->OMSetRenderTargets(depth ? UINT(s.DepthNormals) : 5, depth ? &normals : rt, FALSE, &dsv);
 	if (depth)
 	{
+		if (s.DepthNormals)
+		{
+			const float clear[4] = {};
+			cmd->ClearRenderTargetView(normals, clear, 0, nullptr);
+		}
 		cmd->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 0, 0, 0, nullptr);
 	}
 	else if (pass == GeometryPass::GBuffer)

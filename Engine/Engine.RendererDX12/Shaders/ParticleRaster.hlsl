@@ -206,6 +206,12 @@ struct OpaqueOutput
     float4 Emissive : SV_Target4;
 };
 
+float4 OpaquePrepassPS(VertexOutput input) : SV_Target0
+{
+    // Opaque particles cover the same triangles in both passes.
+    return float4(normalize(input.Normal), 0.65f);
+}
+
 OpaqueOutput OpaquePS(VertexOutput input)
 {
     ParticleDraw draw = Draws[input.DrawIndex];
@@ -214,7 +220,7 @@ OpaqueOutput OpaquePS(VertexOutput input)
     OpaqueOutput output;
     output.AlbedoMetallic = float4(saturate(color), 0);
     output.Velocity = ParticleMotion(input);
-    output.NormalRoughness = float4(normalize(input.Normal), 0.65f);
+    output.NormalRoughness = OpaquePrepassPS(input);
     output.F0Baked = float4(0.04f, 0.04f, 0.04f, 1);
     output.Emissive = float4(mesh ? color * input.Material.a : max(color - 1, 0), 0);
     return output;

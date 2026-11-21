@@ -13,7 +13,8 @@ public:
     ~GDX12ParticlesPass() override;
     void Initialize() override;
     void BeginFrame(GDX12Texture* depth, const GDX12ParticleRenderFrame& frame);
-    bool InitializeOpaque(const std::array<GDX12Texture*, 5>& gbuffer);
+    enum class OpaqueStage : UINT { Combined, DepthNormals, GBuffer };
+    bool InitializeOpaque(const std::array<GDX12Texture*, 5>& gbuffer, bool depthNormals);
     // Configure before BeginFrame; merged fluid depth is an SRV/UAV, not a DSV.
     void SetReadOnlyDepthEnabled(bool enabled) { _readOnlyDepth = enabled; }
     void SetMotionOutputEnabled(bool enabled) { _motionOutputEnabled = enabled; }
@@ -23,7 +24,7 @@ public:
     GDX12Texture* MotionOutput() const;
     void PrepareRenderData(GDX12CommandList* commands, const GDX12ParticleRenderFrame& frame, bool opaque);
     void DrawOpaque(GDX12CommandList* commands, GDX12Texture* depth, D3D12_CPU_DESCRIPTOR_HANDLE dsv,
-        const std::array<GDX12Texture*, 5>& gbuffer);
+        const D3D12_CPU_DESCRIPTOR_HANDLE* targets, UINT targetCount, OpaqueStage);
     void DrawWeightedAndMotion(GDX12CommandList* commands);
     void Composite(GDX12CommandList* commands, GDX12Texture* hdr);
     void Resize() override;

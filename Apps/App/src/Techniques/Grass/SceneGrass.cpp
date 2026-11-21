@@ -472,7 +472,9 @@ void SceneGrass::Append(Graph& g, UINT slot, std::vector<ID3D12Resource*>& all, 
 				                    ? State(D3D12_RESOURCE_STATE_GENERIC_READ)
 				                    : State(D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER)});
 			}
-			add(name + " ExecuteIndirect", draw,
+			const char* pass = target.View.Stage == GDX12GeometryStage::DepthNormals ? " DepthNormals ExecuteIndirect" :
+			                   " ExecuteIndirect";
+			add(name + pass, draw,
 			    [=](auto* cmd)
 			    {
 				    cmd->SetDescriptorHeaps(1, &heap);

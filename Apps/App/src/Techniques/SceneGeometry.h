@@ -27,14 +27,21 @@ class SceneGeometry
 	void Resize(UINT width, UINT height); // caller has drained all slots
 	void Freeze(UINT slot, UINT camera, std::vector<GDX12SkinningWork> skin);
 	using AppendTechnique = std::function<void(Graph&, std::vector<ID3D12Resource*>&)>;
+	using AppendDepthNormals = std::function<void(Graph&, std::vector<ID3D12Resource*>&, Id ready)>;
 	void AppendWorldCanvases(Graph&, UINT slot, std::vector<Access> textureReads);
 	Schedule Plan(UINT slot, const AppendTechnique& append = {}, const AppendTechnique& prelude = {},
 	              bool singleDirect = true, const AppendTechnique& afterInteraction = {},
-	              const AppendTechnique& afterDepth = {});
+	              const AppendTechnique& afterDepth = {}, const AppendDepthNormals& afterDepthNormals = {});
 	const std::vector<ID3D12Resource*>& PlannedResources(UINT slot) const { return _slots.at(slot).PlannedBindings; }
 	// Frame-slot inputs for future graph consumers; access declarations and the
 	// frame completion fence still govern their lifetime and readiness.
 	GDX12Texture* Depth(UINT slot) const { return _slots.at(slot).DepthView.get(); }
+	GDX12Texture* PrepassNormals(UINT slot) const
+	{
+		const auto& frame = _slots.at(slot);
+		return frame.DepthNormals ? frame.EarlyNormals.get() : nullptr;
+	}
+	D3D12_CPU_DESCRIPTOR_HANDLE ReadOnlyDepthDSV(UINT slot) const { return _slots.at(slot).ReadDepth.CPUHandle; }
 	D3D12_CPU_DESCRIPTOR_HANDLE DepthDSV(UINT slot) const { return _slots.at(slot).Dsv.CPUHandle; }
 	GDX12Texture* GBuffer(UINT slot, UINT attachment) const { return _slots.at(slot).Color.at(attachment).get(); }
 	std::vector<ID3D12Resource*> Resources(UINT slot) const;
@@ -65,7 +72,9 @@ class SceneGeometry
 		std::array<Id, 2> FrameIds{};
 		std::array<UINT, 2> FrameStrides{};
 		std::array<std::unique_ptr<GDX12Texture>, 5> Color;
-		std::unique_ptr<GDX12Texture> DepthView;
+		std::unique_ptr<GDX12Texture> DepthView, EarlyNormals;
+		Id DepthNormalsReady = Invalid;
+		bool DepthNormals = false;
 		GDX12ResourceHandle Depth;
 		GDX12Descriptor Dsv, ReadDepth;
 		GDX12GeometryBuffer::RecordingBinding Geometry{};
@@ -95,7 +104,7 @@ class SceneGeometry
 	std::shared_ptr<const LindenMesh> _linden;
 	RenderPipelineCommonData& _common;
 	GDX12ResourceHandle _emptyVertices, _emptyIndices;
-	ComPtr<ID3D12PipelineState> _cull, _clear, _depth, _gbuffer, _worldCanvas;
+	ComPtr<ID3D12PipelineState> _cull, _clear, _depth, _depthNormals, _gbuffer, _worldCanvas;
 	ComPtr<ID3D12CommandSignature> _signature;
 
 	UINT _width = 0, _height = 0;

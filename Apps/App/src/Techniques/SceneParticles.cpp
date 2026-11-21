@@ -163,8 +163,7 @@ void SceneParticles::AppendSimulation(Graph& graph, std::vector<ID3D12Resource*>
 	Packet(graph, bindings, simulate[size_t(inputs)], std::move(pools), [this, simulation, depth, ids](auto* cmd)
 	       { simulation->Execute(cmd, &_resources, _common, depth, &ids); }, target);
 }
-void SceneParticles::AppendOpaque(Graph& graph, std::vector<ID3D12Resource*>& bindings, const SceneGeometry& geometry,
-                                  UINT slot)
+void SceneParticles::PrepareOpaque(const SceneGeometry& geometry, UINT slot)
 {
 	auto* depth = geometry.Depth(slot);
 	if (_width && (_width != depth->GetWidth() || _height != depth->GetHeight()))
@@ -177,32 +176,69 @@ void SceneParticles::AppendOpaque(Graph& graph, std::vector<ID3D12Resource*>& bi
 	    (GetMotionBlurSettings().Enabled || GetFrameGenerationProvider() != GDX12FrameGenerationProvider::Off ||
 	     (_common.Upscaler && (_common.Upscaler->GetFlags() & RENDER_PASS_FLAG_USE_JITTER))));
 	_pass.BeginFrame(depth, _renderFrame);
-	if (!HasDrawSources(true))
-	{
-		return;
-	}
+	_opaqueReady = _opaquePrepared = false;
+	_splitOpaque = geometry.PrepassNormals(slot) != nullptr;
+	if (!HasDrawSources(true)) return;
 	std::array<GDX12Texture*, 5> gbuffer;
-	for (UINT i = 0; i < gbuffer.size(); ++i)
+	for (UINT i = 0; i < gbuffer.size(); ++i) gbuffer[i] = geometry.GBuffer(slot, i);
+	_opaqueReady = _pass.InitializeOpaque(gbuffer, _splitOpaque);
+}
+
+void SceneParticles::AppendEarlyOpaquePreparation(Graph& graph, std::vector<ID3D12Resource*>& bindings)
+{
+	if (!_opaqueReady || !_splitOpaque) return;
+	const bool needsDepth = std::any_of(_renderFrame.Sources.begin(), _renderFrame.Sources.end(), [](const auto& source) {
+		return source.Emitter.Blend == ParticleBlend::Opaque && source.Emitter.DepthCollision;
+	});
+	if (!needsDepth)
 	{
-		gbuffer[i] = geometry.GBuffer(slot, i);
+		AppendPreparation(graph, bindings, true);
+		_opaquePrepared = true;
 	}
-	if (!_pass.InitializeOpaque(gbuffer))
-	{
-		return;
-	}
-	AppendPreparation(graph, bindings, true);
+}
+
+void SceneParticles::AppendOpaquePrepass(Graph& graph, std::vector<ID3D12Resource*>& bindings,
+                                        const SceneGeometry& geometry, UINT slot)
+{
+	if (!_opaqueReady || !_splitOpaque) return;
+	if (!_opaquePrepared) AppendPreparation(graph, bindings, true);
+	AppendOpaqueDraw(graph, bindings, geometry, slot, GDX12ParticlesPass::OpaqueStage::DepthNormals);
+}
+
+void SceneParticles::AppendOpaque(Graph& graph, std::vector<ID3D12Resource*>& bindings, const SceneGeometry& geometry,
+                                  UINT slot)
+{
+	if (!_opaqueReady) return;
+	if (!_splitOpaque) AppendPreparation(graph, bindings, true);
+	using Stage = GDX12ParticlesPass::OpaqueStage;
+	AppendOpaqueDraw(graph, bindings, geometry, slot, _splitOpaque ? Stage::GBuffer : Stage::Combined);
+}
+
+void SceneParticles::AppendOpaqueDraw(Graph& graph, std::vector<ID3D12Resource*>& bindings,
+                                      const SceneGeometry& geometry, UINT slot, GDX12ParticlesPass::OpaqueStage stage)
+{
+	using Stage = GDX12ParticlesPass::OpaqueStage;
+	auto* depth = geometry.Depth(slot);
+	const bool normals = stage == Stage::DepthNormals;
+	const bool readOnly = stage == Stage::GBuffer;
+	const UINT count = normals ? 1 : 5;
+	std::array<D3D12_CPU_DESCRIPTOR_HANDLE, 5> targets{};
 	auto accesses = DrawReads(graph, bindings, true);
 	AddAccesses(graph, bindings, accesses, _pass.NativeRasterAccesses(false));
-	for (auto* target : gbuffer)
+	for (UINT i = 0; i < count; ++i)
 	{
+		auto* target = normals ? geometry.PrepassNormals(slot) : geometry.GBuffer(slot, i);
+		targets[i] = target->GetRTV()->CPUHandle;
 		accesses.push_back(ResourceAccess(graph, bindings, target->GetResource(), Mode::ReadWrite,
 		                                  D3D12_RESOURCE_STATE_RENDER_TARGET));
 	}
-	accesses.push_back(ResourceAccess(graph, bindings, depth->GetResource(), Mode::ReadWrite,
-	                                  D3D12_RESOURCE_STATE_DEPTH_WRITE));
-	const auto dsv = geometry.DepthDSV(slot);
-	Packet(graph, bindings, "opaque particles G-buffer and depth", std::move(accesses),
-	       [this, depth, dsv, gbuffer](auto* cmd) { _pass.DrawOpaque(cmd, depth, dsv, gbuffer); });
+	accesses.push_back(ResourceAccess(graph, bindings, depth->GetResource(), readOnly ? Mode::Read : Mode::ReadWrite,
+	                                  readOnly ? D3D12_RESOURCE_STATE_DEPTH_READ : D3D12_RESOURCE_STATE_DEPTH_WRITE));
+	const auto dsv = readOnly ? geometry.ReadOnlyDepthDSV(slot) : geometry.DepthDSV(slot);
+	const char* name = normals ? "opaque particles DepthNormals" :
+	                   readOnly ? "opaque particles G-buffer (read-only depth)" : "opaque particles G-buffer and depth";
+	Packet(graph, bindings, name, std::move(accesses),
+	       [this, depth, dsv, targets, count, stage](auto* cmd) { _pass.DrawOpaque(cmd, depth, dsv, targets.data(), count, stage); });
 }
 bool SceneParticles::HasDrawSources(bool opaque) const
 {

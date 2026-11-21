@@ -78,6 +78,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
                                             const std::function<void(GDX12CommandList*)>& finish)
 {
 	const auto slot = c.Primary.CurrFrameConstantsIndex;
+	_executorSlot = slot;
 	_geometry->Freeze(slot, c.Common.ActiveCameraCBufferIndex, c.Runtime.FreezeSkeletalMeshes());
 	const auto scenes = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
 	const auto* world = scenes->GetWorld();
@@ -90,6 +91,8 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	using ParticleInputs = BistroRender::SceneParticles::Inputs;
 	auto* depth = _geometry->Depth(slot);
 	particles.BeginSimulation(_geometry->InteractionField());
+	particles.PrepareOpaque(*_geometry, slot);
+	_post->BeginPlan();
 	water.Prepare(float(delta));
 	water.SetSceneInputs(depth, _geometry->GBuffer(slot, 1));
 	auto* target = c.BackBuffer->GetCurrentBuffer();
@@ -97,13 +100,17 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	const bool earlyEnvironment = !singleDirect && _environment->AsyncComputeEnabled();
 	const auto append = [&](BistroRender::Graph& graph, std::vector<ID3D12Resource*>& resources)
 	{
-		_post->BeginPlan();
 		using View = BistroRender::SceneTextureInspector::View;
 		const bool inspect = Engine::UI::DebugUIVisible();
 		auto& textures = _post->Textures();
 		if (inspect || textures.NeedsReadback())
 		{
 			textures.Name("Scene.Depth", depth, View::Depth);
+			if (_geometry->PrepassNormals(slot))
+			{
+				textures.Name("Scene.DepthNormals.Depth", depth, View::Depth);
+				textures.Name("Scene.DepthNormals.Normals", _geometry->PrepassNormals(slot), View::Normals);
+			}
 			textures.Name("Scene.AO", _lighting->AOTexture(slot), View::Scalar);
 			textures.Name("Scene.AO.Reprojected", _lighting->ReprojectedAOTexture(slot), View::Scalar);
 			textures.Name("GBuffer.AlbedoMetallic", _geometry->GBuffer(slot, 0));
@@ -158,10 +165,29 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 		}
 	};
 	const auto afterInteraction = [&](auto& graph, auto& resources)
-	{ particles.AppendSimulation(graph, resources, ParticleInputs::Interaction, depth); };
+	{
+		particles.AppendSimulation(graph, resources, ParticleInputs::Interaction, depth);
+		particles.AppendEarlyOpaquePreparation(graph, resources);
+	};
 	const auto afterDepth = [&](auto& graph, auto& resources)
-	{ particles.AppendSimulation(graph, resources, ParticleInputs::Depth, depth); };
-	_schedule = _geometry->Plan(slot, append, prelude, singleDirect, afterInteraction, afterDepth);
+	{
+		particles.AppendSimulation(graph, resources, ParticleInputs::Depth, depth);
+		particles.AppendOpaquePrepass(graph, resources, *_geometry, slot);
+	};
+	const auto afterDepthNormals = [&](auto& graph, auto& resources, BistroRender::Id ready)
+	{
+		auto& textures = _post->Textures();
+		if (!textures.NeedsReadback("Scene.DepthNormals.Normals") &&
+		    !textures.NeedsReadback("Scene.DepthNormals.Depth")) return;
+		using View = BistroRender::SceneTextureInspector::View;
+		textures.Name("Scene.DepthNormals.Depth", depth, View::Depth);
+		textures.Name("Scene.DepthNormals.Normals", _geometry->PrepassNormals(slot), View::Normals);
+		const auto first = graph.Operations.size();
+		_post->AppendTextureReadback(graph, resources, *target);
+		if (graph.Operations.size() != first)
+			graph.Operations.back().Dependencies.push_back(ready);
+	};
+	_schedule = _geometry->Plan(slot, append, prelude, singleDirect, afterInteraction, afterDepth, afterDepthNormals);
 	_executor->Reserve(_schedule);
 	const auto record = [&](BistroRender::Id op, uint32_t list, ID3D12GraphicsCommandList* commands)
 	{
@@ -192,4 +218,22 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	_environment->Submitted(completion);
 	_lighting->Submitted(completion);
 	return completion;
+}
+
+
+void BistroRenderPipeline::FramePresented()
+{
+	_cloudPicture->Presented();
+	_lighting->AOPresented(_frameNumber, _executor->Completions());
+	if (_reportedDepthNormals || !_geometry->PrepassNormals(_executorSlot)) return;
+	_reportedDepthNormals = true;
+	for (size_t i = 0; i < _schedule.Packets.size(); ++i)
+	{
+		const auto& name = _schedule.Packets[i].Name;
+		if (name.find("DepthNormals") != std::string::npos || name == BistroRender::GBufferOperationName ||
+		    name == "particle simulation from depth prepass" || name == "opaque particles frustum cull" ||
+		    name == "particle simulation from interaction field" || name == "opaque particles G-buffer (read-only depth)" ||
+		    name == "read back scene texture")
+			Log::Info("RenderGraph", "DepthNormals frame=", _frameNumber, " packet=", i, " ", name);
+	}
 }

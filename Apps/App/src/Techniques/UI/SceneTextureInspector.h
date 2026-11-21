@@ -14,6 +14,7 @@ public:
 
 	explicit SceneTextureInspector(UINT slots);
 	bool NeedsReadback() const { return !_readbackName.empty(); }
+	bool NeedsReadback(std::string_view name) const { return _readbackName == name; }
 	void AppendReadback(Graph&, std::vector<ID3D12Resource*>&, NativeWork&, GDX12Device&, UINT slot,
 	                    ID3D12Resource* backBuffer);
 	void RetireReadback(UINT slot);

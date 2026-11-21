@@ -40,7 +40,7 @@ VertexOutput VS(uint corner : SV_VertexID)
     output.WorldPosition = vertex.Position;
     output.Normal = vertex.Normal;
     output.UV = UVs[i];
-#ifndef VEGETATION_CAPTURE
+#if !defined(VEGETATION_CAPTURE) && !defined(LINDEN_DEPTH_NORMALS)
     output.CurrentClip = mul(float4(vertex.Position, 1), CBCamera.ViewProjNoJitter);
     output.PreviousClip = mul(float4(PreviousPose[i].Position, 1), CBCamera.PrevViewProjNoJitter);
 #endif

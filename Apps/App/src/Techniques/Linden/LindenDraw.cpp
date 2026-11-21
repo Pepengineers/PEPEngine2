@@ -25,15 +25,17 @@ LindenDraw::LindenDraw(GDX12DeviceResources& resources) : _resources(resources)
 	_root = std::make_unique<GDX12RootSignature>(resources.Device, root);
 
 	auto& compiler = GDX12ShaderCompiler::GetInstance();
-	for (auto stage : {Stage::Depth, Stage::GBuffer, Stage::Shadow, Stage::Capture})
+	for (auto stage : {Stage::Depth, Stage::DepthNormals, Stage::GBuffer, Stage::Shadow, Stage::Capture})
 	{
 		const bool depth = stage == Stage::Depth || stage == Stage::Shadow;
+		const bool normals = stage == Stage::DepthNormals;
+		const D3D_SHADER_MACRO prepass[] = {{"LINDEN_DEPTH_NORMALS", "1"}, {nullptr, nullptr}};
 		const D3D_SHADER_MACRO capture[] = {{"VEGETATION_CAPTURE", "1"}, {nullptr, nullptr}};
-		const auto* defines = stage == Stage::Capture ? capture : nullptr;
+		const auto* defines = stage == Stage::Capture ? capture : normals ? prepass : nullptr;
 		auto vs = compiler.CompileShader(resources.Device, APP_SHADERS_FOLDER "LindenRender.hlsl", defines,
 		                                 depth ? "DepthVS" : "VS", "vs");
 		auto ps = compiler.CompileShader(resources.Device, APP_SHADERS_FOLDER "LindenRender.hlsl", defines,
-		                                 depth ? "DepthPS" : (stage == Stage::Capture ? "CapturePS" : "PS"), "ps");
+		                                 depth ? "DepthPS" : normals ? "PrepassPS" : stage == Stage::Capture ? "CapturePS" : "PS", "ps");
 		D3D12_GRAPHICS_PIPELINE_STATE_DESC desc{};
 		desc.pRootSignature = _root->GetRootSignature().Get();
 		desc.VS = {vs->GetBufferPointer(), vs->GetBufferSize()};
@@ -59,7 +61,7 @@ LindenDraw::LindenDraw(GDX12DeviceResources& resources) : _resources(resources)
 			desc.RTVFormats[1] = DXGI_FORMAT_R16G16_FLOAT;
 			desc.RTVFormats[2] = desc.RTVFormats[3] = desc.RTVFormats[4] = DXGI_FORMAT_R16G16B16A16_FLOAT;
 		}
-		if (stage == Stage::Capture)
+		if (stage == Stage::Capture || normals)
 		{
 			desc.NumRenderTargets = 1;
 			desc.RTVFormats[0] = DXGI_FORMAT_R16G16B16A16_FLOAT;
@@ -88,6 +90,7 @@ void LindenDraw::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, Na
 	switch (target.View.Stage)
 	{
 	case GDX12GeometryStage::Depth: stage = Stage::Depth; break;
+	case GDX12GeometryStage::DepthNormals: stage = Stage::DepthNormals; break;
 	case GDX12GeometryStage::GBuffer: stage = Stage::GBuffer; break;
 	case GDX12GeometryStage::Shadow: stage = Stage::Shadow; break;
 	case GDX12GeometryStage::ReflectionCapture: stage = Stage::Capture; break;
@@ -171,7 +174,8 @@ void LindenDraw::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, Na
 	auto* root = _root.get();
 	const auto pipeline = _pipelines.at(static_cast<size_t>(stage));
 	const UINT b = root->GetBRootParamIndex(0), t = root->GetTRootParamIndex(0);
-	work.Add(graph, "linden vertex fetch view " + std::to_string(target.View.Key), std::move(accesses),
+	work.Add(graph, (stage == Stage::DepthNormals ? "linden DepthNormals view " : "linden vertex fetch view ") +
+	                   std::to_string(target.View.Key), std::move(accesses),
 	         [=, keepBuffers = buffers](auto* cmd)
 	         {
 		         cmd->SetDescriptorHeaps(1, &heap);

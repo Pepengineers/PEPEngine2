@@ -18,10 +18,10 @@ class LindenDraw
 	            const GDX12Descriptor& materials, const std::shared_ptr<const LindenMesh>&, const LindenDisplayedPose&);
 
   private:
-	enum class Stage { Depth, GBuffer, Shadow, Capture };
+	enum class Stage { Depth, DepthNormals, GBuffer, Shadow, Capture };
 	GDX12DeviceResources& _resources;
 	std::unique_ptr<GDX12RootSignature> _root;
-	std::array<ComPtr<ID3D12PipelineState>, 4> _pipelines;
+	std::array<ComPtr<ID3D12PipelineState>, 5> _pipelines;
 	std::shared_ptr<const LindenMesh> _mesh;
 	struct Buffers
 	{

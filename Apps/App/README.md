@@ -26,6 +26,19 @@ Editor/Benchmark application targets are not part of this renderer.
 `false` uses DIRECT. Scheduling is controlled by the graph, with no separate
 legacy per-technique async switches.
 
+### Early camera DepthNormals
+
+Set `App.DepthNormalsPrepass = true` in Startup.ini or change it in the CVar
+editor. The default keeps the existing depth-only path. The packet
+`scene DepthNormals ready` publishes depth and a separate world-space
+normal/roughness target before the G-buffer. Opaque particles share one set of
+culled draws across both passes. Their depth/normal draw follows actual readers
+of the original scene depth, including particle depth collision. World canvases
+remain late overlays with read-only depth.
+
+Use `--read-texture=Scene.DepthNormals.Normals` or
+`--read-texture=Scene.DepthNormals.Depth` to read at the early graph boundary.
+
 ### Two-adapter HBAO
 
 Set `Render.AO.Implementation = 1`, `Render.AO.Resolution = 1`, and `App.AO.Adapter`
