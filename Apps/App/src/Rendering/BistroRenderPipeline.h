@@ -65,6 +65,8 @@ class BistroRenderPipeline final : public IRenderPipeline
 	                      const std::function<void(GDX12CommandList*)>&) override;
 	void FramePresented() override { _cloudPicture->Presented(); }
 	void WriteExecution(std::ostream& output) const override { _schedule.Write(output); }
+	const BistroRender::Schedule& LastSchedule() const { return _schedule; }
+	bool HasRemoteCloudPicture() const { return _cloudPicture->IsRemote(); }
 
   private:
 	RenderPipelineBindings _bindings;

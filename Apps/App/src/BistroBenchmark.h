@@ -15,6 +15,7 @@
 #include <array>
 #include <cassert>
 #include <chrono>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -183,29 +184,38 @@ public:
         }
     }
 
-    void Draw()
+    void DrawControls()
     {
-        ImGui::SetNextWindowPos({14, 14}, ImGuiCond_FirstUseEver);
-        if (ImGui::Begin("Bistro benchmark", nullptr,
-            ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDocking))
+        if (!_active)
         {
             if (_font) ImGui::PushFont(_font);
-            if (!_active)
-            {
-                if (ImGui::Button(_font ? u8"\u0411\u0435\u043d\u0447\u043c\u0430\u0440\u043a" : "Benchmark"))
-                    _action = Action::Start;
-            }
-            else
-            {
-                if (ImGui::Button("Cancel")) _action = Action::Cancel;
-                ImGui::Text("Configuration %u / %u", _case + 1, Cases);
-                ImGui::TextUnformatted(_elapsed < Warmup ? "Warming up" : "Measuring flight");
-                ImGui::ProgressBar(float(std::clamp((_elapsed - Warmup) / Duration(), 0., 1.)));
-            }
+            if (ImGui::Button(_font ? u8"\u0411\u0435\u043d\u0447\u043c\u0430\u0440\u043a" : "Benchmark"))
+                _action = Action::Start;
             if (_font) ImGui::PopFont();
-            if (!_message.empty()) ImGui::TextUnformatted(_message.c_str());
+            if (_message.empty())
+                ImGui::TextDisabled("%u configurations, %.0f s per flight", Cases, FlightSeconds.GetValue());
+            else
+                DrawRunName(_message.c_str());
+            return;
         }
-        ImGui::End();
+
+        if (ImGui::SmallButton("Cancel")) _action = Action::Cancel;
+        ImGui::SameLine();
+        ImGui::Text("Run %u/%u  |  %s", _case + 1, Cases, _elapsed < Warmup ? "Warmup" : "Measuring");
+        constexpr std::array names{"AO", "Environment", "Light grid", "Particles", "Water", "Cloud picture"};
+        static_assert(names.size() == Techniques.size());
+        std::string name;
+        for (size_t i = 0; i < names.size(); ++i)
+            if (_case & (1u << i)) name += (name.empty() ? "Compute: " : " + ") + std::string(names[i]);
+        DrawRunName(name.empty() ? "All techniques on DIRECT" : name.c_str());
+
+        const double pass = Warmup + Duration();
+        const double remaining = std::max(0., pass - _elapsed);
+        const auto total = static_cast<std::uint64_t>(std::ceil((Cases - _case - 1) * pass + remaining));
+        char label[72]{};
+        std::snprintf(label, sizeof(label), "%.0fs left in run  |  ETA %lluh %02llum", std::ceil(remaining),
+            static_cast<unsigned long long>(total / 3600), static_cast<unsigned long long>(total / 60 % 60));
+        ImGui::ProgressBar(float(std::clamp(_elapsed / pass, 0., 1.)), {-1, 0}, label);
     }
 
     void Update(World& world, ConsoleModule& console)
@@ -272,6 +282,22 @@ public:
     }
 
 private:
+    static void DrawRunName(const char* name)
+    {
+        const auto min = ImGui::GetCursorScreenPos();
+        const auto width = ImGui::GetContentRegionAvail().x;
+        const auto height = ImGui::GetTextLineHeight();
+        if (width <= 0) return;
+        const ImVec2 max{min.x + width, min.y + height};
+        auto* draw = ImGui::GetWindowDrawList();
+        draw->PushClipRect(min, max, true);
+        draw->AddText(min, ImGui::GetColorU32(ImGuiCol_TextDisabled), name);
+        draw->PopClipRect();
+        ImGui::Dummy({width, height});
+        if (ImGui::IsItemHovered() && ImGui::CalcTextSize(name).x > width)
+            ImGui::SetTooltip("%s", name);
+    }
+
     static float Ease(float t)
     {
         t = std::clamp(t, 0.f, 1.f);

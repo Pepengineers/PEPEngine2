@@ -58,8 +58,8 @@ class ScenePostUI
 	struct ScreenSlot
 	{
 		std::unique_ptr<GDX12Texture> Target, HealthBar;
-		std::shared_ptr<const Engine::UI::DrawData> Draw;
-		std::shared_ptr<const void> RasterOwner, CompositeOwner;
+		std::shared_ptr<const Engine::UI::DrawData> Draw, GameDraw;
+		std::shared_ptr<const void> RasterOwner, GameRasterOwner, CompositeOwner;
 	};
 	GDX12DeviceResources& _resources;
 	RenderPipelineCommonData& _common;

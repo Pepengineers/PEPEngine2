@@ -23,7 +23,7 @@ struct Bar
     unsigned Sparks;
 };
 
-inline Bar Draw(ImDrawList& list, float time)
+inline Bar Draw(ImDrawList& list, float time, float bottomInset)
 {
     list._ResetForNewFrame();
     const auto display = ImGui::GetIO().DisplaySize;
@@ -39,7 +39,7 @@ inline Bar Draw(ImDrawList& list, float time)
     const float width = icon * 14 + gap * 13;
     const float left = (display.x - width) * .5f;
     const float barHeight = icon * .52f;
-    const float bottom = display.y - icon * .45f;
+    const float bottom = display.y - bottomInset - icon * .45f;
     const float barY = bottom - icon - gap - barHeight;
     const float top = barY - gap - icon;
     const ImU32 panel = IM_COL32(18, 15, 26, 218), border = IM_COL32(148, 114, 66, 240);

@@ -29,6 +29,7 @@ namespace Engine::UI
     bool WantsKeyboardInput();
     bool WantsMouseInput();
     void EnableApplicationUIInput();
+    void SetDebugReconstructionStatusVisible(bool visible);
     void EnableDebugUI(); // Startup opt-in for non-Debug builds.
     bool DebugUIVisible();
 }
