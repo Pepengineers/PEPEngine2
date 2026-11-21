@@ -50,7 +50,12 @@ struct SceneWater::Remote
 		CompletionToken Ready, Reader;
 		bool Writing = false;
 	};
-	struct ClockState { double Time = 0; float Rate = 0; };
+	using Seed = std::pair<std::shared_ptr<const std::vector<GDX12FluidParticle>>, uint64_t>;
+	struct ClockState
+	{
+		Seed Source;
+		double ActiveSeconds = 0, IntegratedSeconds = 0, Rate = 0;
+	};
 
 	std::shared_ptr<QueueSubmission> Submit;
 	Id DeviceId;
@@ -63,10 +68,8 @@ struct SceneWater::Remote
 	size_t Next = 0;
 	uint64_t Ordered = 0, Generation = 0, TotalSubsteps = 0;
 	uint64_t DisplayFrames = 0, Imports = 0, Repeats = 0, Skipped = 0, LastShown = 0;
-	double SimulatedSeconds = 0;
 	bool WaitForSelected = true;
 	int Mode = 1;
-	using Seed = std::pair<std::shared_ptr<const std::vector<GDX12FluidParticle>>, uint64_t>;
 	std::map<uint64_t, Seed> Seeds;
 	std::mutex Mutex;
 	std::condition_variable Published;
@@ -111,7 +114,6 @@ struct SceneWater::Remote
 			Mode = mode;
 			LastOrder = nullptr;
 			Ordered = TotalSubsteps = DisplayFrames = Imports = Repeats = Skipped = LastShown = 0;
-			SimulatedSeconds = 0;
 			++Generation;
 		}
 		Selected = nullptr;
@@ -163,7 +165,8 @@ struct SceneWater::Remote
 		}
 	}
 
-	CompletionToken SubmitSnapshot(Executor& executor, Snapshot& slot)
+	CompletionToken SubmitSnapshot(Executor& executor, Snapshot& slot,
+	                               GDX12FluidParticlePass::SimulationSlices* independent = nullptr)
 	{
 		Work.Commands.clear();
 		Graph graph;
@@ -172,7 +175,7 @@ struct SceneWater::Remote
 		graph.TerminalQueue = Queue::Compute;
 		std::vector<ID3D12Resource*> bindings;
 		Packet(Work, graph, bindings, "GPU1 water seed / SPH hash-sort-density-integrate", Pass.GetSimulationBufferAccesses(),
-		    [this](auto* cmd) { Pass.ExecuteSimulation(cmd); }, Queue::Compute);
+		    [this, independent](auto* cmd) { Pass.ExecuteSimulation(cmd, independent); }, Queue::Compute);
 		if (!slot.Ranges.empty())
 		{
 			Packet(Work, graph, bindings, "GPU1 pack water position and speed", Pass.GetPackAccesses(),
@@ -206,7 +209,6 @@ struct SceneWater::Remote
 		if (generation != Generation) return;
 		slot.Version = ++Ordered;
 		TotalSubsteps += Pass.Substeps();
-		SimulatedSeconds += Pass.SimulatedSeconds();
 		LastOrder = &slot;
 	}
 
@@ -229,7 +231,7 @@ struct SceneWater::Remote
 	void AdvanceClocks(WaterClock::time_point now)
 	{
 		const double elapsed = std::chrono::duration<double>(now - ClockAnchor).count();
-		for (auto& [id, clock] : Clocks) clock.Time += elapsed * clock.Rate;
+		for (auto& [id, clock] : Clocks) clock.ActiveSeconds += elapsed * clock.Rate;
 		ClockAnchor = now;
 	}
 
@@ -247,7 +249,6 @@ struct SceneWater::Remote
 	{
 		CompletionToken pending, armed;
 		uint64_t generation = 0, revision = 0;
-		std::map<uint64_t, double> sampled;
 		for (;;)
 		{
 			std::unique_lock lock(Mutex);
@@ -285,26 +286,36 @@ struct SceneWater::Remote
 				continue;
 			}
 			AdvanceClocks(WaterClock::now());
-			if (generation != Generation) sampled.clear();
 			generation = Generation;
 			revision = Revision;
 			auto instances = Inputs;
 			const auto controls = InputControls;
-			for (auto& instance : instances)
+			GDX12FluidParticlePass::SimulationSlices slices;
+			if (output)
 			{
-				const auto& clock = Clocks.at(instance.Id);
-				const auto previous = sampled.try_emplace(instance.Id, clock.Time).first;
-				instance.DeltaSeconds = clock.Rate > 0 ? float(clock.Time - previous->second) : 0;
-				previous->second = clock.Time;
+				for (const auto& instance : instances)
+				{
+					const auto& clock = Clocks.at(instance.Id);
+					const double pendingSeconds = clock.Rate > 0 ?
+					    (std::max)(0.0, clock.ActiveSeconds - clock.IntegratedSeconds) : 0;
+					slices.emplace(instance.Id, GDX12FluidParticlePass::SimulationSlice{pendingSeconds});
+				}
+				output->Writing = true;
 			}
-			if (output) output->Writing = true;
 			lock.unlock();
 			if (!PrepareSolve(executor, instances, controls, 0) && output)
 				throw std::logic_error("Active remote water has no solver work");
 			if (!output) continue;
 			PrepareSnapshot(*output, instances, controls);
-			pending = SubmitSnapshot(executor, *output);
+			pending = SubmitSnapshot(executor, *output, &slices);
 			lock.lock();
+			for (const auto& instance : instances)
+			{
+				const auto clock = Clocks.find(instance.Id);
+				const Seed source{instance.Component.GetParticles(), instance.Component.GetResetRevision()};
+				if (clock != Clocks.end() && clock->second.Source == source)
+					clock->second.IntegratedSeconds += slices.at(instance.Id).IntegratedSeconds;
+			}
 			Commit(*output, pending, generation);
 			Published.notify_all();
 		}
@@ -374,10 +385,14 @@ struct SceneWater::Remote
 		std::map<uint64_t, ClockState> clocks;
 		for (const auto& instance : instances)
 		{
-			auto clock = Clocks[instance.Id];
+			const Seed source{instance.Component.GetParticles(), instance.Component.GetResetRevision()};
+			const auto previous = Clocks.find(instance.Id);
+			auto clock = previous != Clocks.end() && previous->second.Source == source ?
+			    previous->second : ClockState{source};
 			const auto& settings = instance.Component.GetSettings();
-			clock.Rate = controls.Enabled && settings.SimulationEnabled && settings.TimeScale > 0 &&
-			    Seeds.count(instance.Id) ? instance.ClockScale : 0;
+			// Apply both scales as time accrues so existing debt retains its original scale.
+			clock.Rate = controls.Enabled && settings.SimulationEnabled && Seeds.count(instance.Id) ?
+			    double(instance.ClockScale) * settings.TimeScale : 0;
 			clocks.emplace(instance.Id, clock);
 		}
 		Clocks = std::move(clocks);
@@ -649,13 +664,24 @@ void SceneWater::Presented(uint64_t frame, const std::vector<CompletionToken>& c
 		_remote->LastShown = snapshot.Version;
 		++_remote->DisplayFrames;
 		if (_remote->DisplayFrames <= 8 || _remote->DisplayFrames == 24)
+		{
+			double active = 0, integrated = 0, debt = 0;
+			for (const auto& entry : _remote->Clocks)
+			{
+				const auto& clock = entry.second;
+				active += clock.ActiveSeconds;
+				integrated += clock.IntegratedSeconds;
+				debt += (std::max)(0.0, clock.ActiveSeconds - clock.IntegratedSeconds);
+			}
 			Log::Info("RenderGraph", "Water MGPU frame=", frame, " CrossSync=2 generation=", _remote->Generation,
-			    " steps=", _remote->Ordered, " substeps=", _remote->TotalSubsteps, " simSeconds=", _remote->SimulatedSeconds,
+			    " steps=", _remote->Ordered, " substeps=", _remote->TotalSubsteps, " simSeconds=", integrated,
 			    " exports=", _remote->Ordered, " shown=", snapshot.Version,
 			    " waitVersion=", _remote->WaitForSelected ? snapshot.Version : 0, " exportFence=", snapshot.Ready.Value,
 			    " importFence=", snapshot.Reader.Value, " drawFence=", draw.Value, " drawParticles=", particles,
 			    " imports=", _remote->Imports,
-			    " repeats=", _remote->Repeats, " skipped=", _remote->Skipped);
+			    " repeats=", _remote->Repeats, " skipped=", _remote->Skipped, " activeSeconds=", active,
+			    " debtSeconds=", debt);
+		}
 		return;
 	}
 	if (_remote->Ordered > 3) return;

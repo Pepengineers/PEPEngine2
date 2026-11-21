@@ -190,7 +190,6 @@ void GDX12FluidParticlePass::PrepareFrame(std::vector<GDX12FluidInstance> instan
 {
 	_drawSources.clear();
 	_substeps = 0;
-	_simulatedSeconds = 0;
 	if (role != _role)
 	{
 		if (!_states.empty()) _retire();
@@ -282,7 +281,7 @@ void GDX12FluidParticlePass::PrepareDrawSources()
 		}
 	}
 }
-void GDX12FluidParticlePass::ExecuteSimulation(GDX12CommandList* commands)
+void GDX12FluidParticlePass::ExecuteSimulation(GDX12CommandList* commands, SimulationSlices* independent)
 {
 	if (!_rendering && !_simulating)
 	{
@@ -312,11 +311,13 @@ void GDX12FluidParticlePass::ExecuteSimulation(GDX12CommandList* commands)
 		const UINT constants = ParameterSlotsPerFrame * _resources.CurrFrameConstantsIndex;
 
 		state.Constants->CopyData(constants, parameters);
-		const auto steps = GDX12FluidSolver::PlanSteps(settings, instance.DeltaSeconds * settings.TimeScale);
+		auto* slice = independent ? &independent->at(instance.Id) : nullptr;
+		const float elapsed = slice ? float(slice->PendingSeconds) : instance.DeltaSeconds * settings.TimeScale;
+		const auto steps = GDX12FluidSolver::PlanSteps(settings, elapsed);
 		_substeps += steps.Count;
-		_simulatedSeconds += double(steps.Dt) * steps.Count;
 		state.SolverHead = _solver.Record(*commands, state.Solver, state.SolverHead, settings, steps,
 		                                  state.Constants->GetElementAddress(constants));
+		if (slice) slice->IntegratedSeconds = double(steps.Dt) * steps.Count;
 		if (seedPending)
 		{
 			state.SeedFrameSlot = _resources.CurrFrameConstantsIndex;
