@@ -4,7 +4,9 @@
 #include "Engine.RendererDX12/GDX12ShaderCompiler.h"
 #include "Engine.RendererDX12/GDX12ShadowCascades.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
+#include <algorithm>
 #include <cstring>
+#include <iterator>
 #include <type_traits>
 
 namespace BistroRender
@@ -161,8 +163,8 @@ void SceneSunShadows::Freeze(UINT slot, bool castersRebuilt, const std::vector<B
 	}
 	BoundingBox bounds = s.Bounds;
 	bool hasBounds = s.HasBounds;
-	constexpr uint64_t FnvOffsetBasis = 14695981039346656037ull, FnvPrime = 1099511628211ull;
-	uint64_t grassRevision = FnvOffsetBasis;
+	std::vector<VegetationCaster> vegetation;
+	vegetation.reserve(grass.size());
 	for (const auto& primitive : grass)
 	{
 		if (!primitive.Visible || !primitive.CastsShadows || !primitive.InstanceCount)
@@ -178,22 +180,48 @@ void SceneSunShadows::Freeze(UINT slot, bool castersRebuilt, const std::vector<B
 			bounds = primitive.Bounds;
 		}
 		hasBounds = true;
-		grassRevision = (grassRevision ^ primitive.Revision()) * FnvPrime;
+		vegetation.push_back({primitive.Revision(), primitive.Bounds});
 	}
-	const bool grassChanged = grassRevision != s.GrassRevision;
-	s.GrassRevision = grassRevision;
 	_resources.ShadowSettings = BuildShadowCascades(
 	    _common.CameraView.Invert(), XMConvertToRadians(_common.ActiveCameraFOV),
 	    float(_common.DownscaledWidth) / _common.DownscaledHeight, _common.ActiveCameraNearPlane,
 	    _common.ActiveCameraFarPlane, Vector3(_resources.Lighting.LightDirection), hasBounds ? &bounds : nullptr,
 	    _resources.ShadowQuality.SunResolution, _resources.ShadowQuality.SunCascades);
 	const UINT flags = _resources.Lighting.SunShadowFlags;
-	const bool fullUpdate = (flags & ShadowEveryFrame) || !s.Rendered || grassChanged ||
+	const bool fullUpdate = (flags & ShadowEveryFrame) || !s.Rendered ||
 	                        s.Resolution != _resources.ShadowQuality.SunResolution ||
 	                        s.Revision != _resources.Lighting.SunShadowRevision ||
 	                        std::memcmp(&s.Settings, &_resources.ShadowSettings, sizeof(s.Settings)) != 0;
 	const UINT cascades = (1u << _resources.ShadowSettings.CascadeCount) - 1;
-	s.Update = (flags & ShadowEnabled) ? (fullUpdate ? cascades : s.DirtyCascades & cascades) : 0;
+	const auto byRevision = [](const auto& a, const auto& b) { return a.Revision < b.Revision; };
+	std::sort(vegetation.begin(), vegetation.end(), byRevision);
+	if (fullUpdate)
+	{
+		s.DirtyCascades |= cascades;
+	}
+	else if ((s.DirtyCascades & cascades) != cascades)
+	{
+		// Compare both sets so moved or removed casters also invalidate their previous tiles.
+		std::vector<VegetationCaster> changed;
+		std::set_symmetric_difference(s.Vegetation.begin(), s.Vegetation.end(), vegetation.begin(), vegetation.end(),
+		                              std::back_inserter(changed), byRevision);
+		for (UINT cascade = 0; !changed.empty() && cascade < s.Settings.CascadeCount; ++cascade)
+		{
+			const UINT bit = 1u << cascade;
+			if (s.DirtyCascades & bit)
+			{
+				continue;
+			}
+			const GDX12LocalShadowFrustum frustum(s.Settings.ViewProj[cascade]);
+			if (std::any_of(changed.begin(), changed.end(),
+			                [&](const VegetationCaster& caster) { return frustum.Intersects(caster.Bounds); }))
+			{
+				s.DirtyCascades |= bit;
+			}
+		}
+	}
+	s.Vegetation = std::move(vegetation);
+	s.Update = (flags & ShadowEnabled) ? s.DirtyCascades & cascades : 0;
 }
 
 void SceneSunShadows::PrepareAtlas(Slot& s, UINT resolution)
