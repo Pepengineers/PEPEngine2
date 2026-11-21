@@ -109,7 +109,6 @@ struct SceneParticles::Remote
 	GDX12DeviceResources Secondary;
 	GDX12ParticleSimulation Solver;
 	Executor GPU1;
-	std::vector<EmitterLayout> Layout;
 	std::vector<ImportedEmitter> Imported;
 	std::vector<Publication> Ring;
 	std::vector<uint64_t> Revisions;
@@ -146,19 +145,33 @@ struct SceneParticles::Remote
 	std::exception_ptr WorkerFailure;
 
 	Remote(GDX12DeviceResources& primary, const std::shared_ptr<QueueSubmission>& submit,
-	       const std::vector<EmitterLayout>& layout, std::vector<GDX12ParticleEmitter> snapshot,
-	       const GDX12ParticleSettings& settings, uint64_t generationSeed)
-	    : Submit(submit), GPU1(Submit, 1, UINT(primary.FrameConstants.size()), 1), Layout(layout),
-	      Imported(layout.size()), Ring(primary.FrameConstants.size() + 1), Generation(generationSeed)
+	       const std::vector<GDX12ParticleEmitter>& snapshot, GDX12ParticleSettings settings, uint64_t generationSeed)
+	    : Submit(submit), GPU1(Submit, 1, UINT(primary.FrameConstants.size()), 1), Generation(generationSeed)
 	{
 		Secondary.Device = &Submit->Device(1);
 		Secondary.FrameConstants.resize(primary.FrameConstants.size()); // Solver needs only the upload ring size.
+		// Pools keep their descriptor handles when the group changes. Use the scene
+		// heap budget so adding a pool never requires moving the existing views.
 		Secondary.SRV_UAV_Heap = std::make_shared<GDX12DescriptorHeap>(Secondary.Device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-		    SceneDescriptorStart + UINT(12 * layout.size() + 1), D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
-		Secondary.ParticleEmitters = std::move(snapshot);
+		    primary.SRV_UAV_Heap->GetNumDescriptors(), D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
+		RebuildTransport(primary, snapshot, settings);
+	}
+
+	// On reconfiguration the caller has retired GPU0 readers and stopped/drained GPU1.
+	void RebuildTransport(GDX12DeviceResources& primary, const std::vector<GDX12ParticleEmitter>& snapshot,
+	                      GDX12ParticleSettings settings)
+	{
+		Selected = LastOrder = nullptr;
+		Revisions.clear(); // Force fresh publication history at the next step.
+		Imported.clear();
+		Ring.clear();
+		Secondary.ParticleEmitters = snapshot;
+		settings.Enabled = true; // Reconcile the pools even while simulation is disabled.
 		Solver.BeginFrame(&Secondary, settings, false);
 		auto* heap = primary.SRV_UAV_Heap.get();
 		const auto frame = Solver.RenderFrame();
+		Imported.resize(frame.Sources.size());
+		Ring.resize(primary.FrameConstants.size() + 1);
 		UINT64 bytes = 0;
 		for (size_t i = 0; i < Imported.size(); ++i)
 		{
@@ -191,7 +204,7 @@ struct SceneParticles::Remote
 		for (auto& slot : Ring) slot.Transfer = Submit->CreateTransferBuffer(bytes);
 		const auto gpu = Submit->Device(1).GetAdapterLuid();
 		Log::Info("RenderGraph", "Particles MGPU solver GPU1 LUID=", gpu.HighPart, ":", gpu.LowPart,
-		    " emitters=", Layout.size(), " snapshotBytes=", bytes);
+		    " emitters=", Imported.size(), " snapshotBytes=", bytes);
 	}
 
 	void Drain()
@@ -689,8 +702,9 @@ void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, 
 	std::sort(remoteEmitters.begin(), remoteEmitters.end(), [](const auto& a, const auto& b) { return a.Id < b.Id; });
 	for (const auto& emitter : remoteEmitters)
 		layout.push_back({emitter.Id, ResolveParticleEmitterSettings(emitter, settings.Quality).MaxParticles});
-	const bool replace = domain != _attemptedDomain || _attemptedLayout != layout;
-	if (replace)
+	const bool domainChanged = domain != _attemptedDomain;
+	const bool layoutChanged = _attemptedLayout != layout;
+	if (domainChanged || layoutChanged)
 	{
 		if (_remote)
 		{
@@ -699,13 +713,14 @@ void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, 
 			_generationSeed = _remote->Generation;
 			for (auto& emitter : _resources.ParticleEmitters)
 				emitter.BurstBaseline = _remote->Solver.ConsumedBurst(emitter.Id, emitter.ResetRevision);
-			_remote.reset();
+			if (domainChanged || layout.empty()) _remote.reset();
 		}
 		_attemptedDomain = domain;
 		_attemptedLayout = layout;
 		_attemptedRemote = false;
 	}
-	if (!_remote && requested && !layout.empty() && settings.Enabled && (replace || !_attemptedRemote))
+	const bool rebuild = _remote && layoutChanged;
+	if (rebuild || (!_remote && requested && !layout.empty() && settings.Enabled && !_attemptedRemote))
 	{
 		_attemptedRemote = true;
 		for (auto& emitter : remoteEmitters)
@@ -714,9 +729,21 @@ void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, 
 			    [&](const auto& source) { return source.Id == emitter.Id; });
 			emitter.BurstBaseline = (std::max)(live.BurstBaseline, simulation->ConsumedBurst(emitter.Id, emitter.ResetRevision));
 		}
-		try { _remote = std::make_unique<Remote>(_resources, submit, layout, remoteEmitters, settings, _generationSeed); }
-		catch (const DxException& e) { Log::Warning("RenderGraph", "Local particles fallback: ", e.ToString()); }
-		catch (const std::exception& e) { Log::Warning("RenderGraph", "Local particles fallback: ", e.what()); }
+		try
+		{
+			if (rebuild) _remote->RebuildTransport(_resources, remoteEmitters, settings);
+			else _remote = std::make_unique<Remote>(_resources, submit, remoteEmitters, settings, _generationSeed);
+		}
+		catch (const DxException& e)
+		{
+			_remote.reset();
+			Log::Warning("RenderGraph", "Local particles fallback: ", e.ToString());
+		}
+		catch (const std::exception& e)
+		{
+			_remote.reset();
+			Log::Warning("RenderGraph", "Local particles fallback: ", e.what());
+		}
 	}
 	if (layout.empty()) _attemptedRemote = false;
 	std::vector<uint64_t> remoteIds;
