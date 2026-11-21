@@ -93,6 +93,14 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	particles.BeginSimulation(_geometry->InteractionField());
 	particles.PrepareOpaque(*_geometry, slot);
 	_post->BeginPlan();
+	auto& textures = _post->Textures();
+	using View = BistroRender::SceneTextureInspector::View;
+	const bool inspect = Engine::UI::DebugUIVisible();
+	if ((inspect || textures.NeedsReadback()) && _geometry->PrepassNormals(slot))
+	{
+		textures.Name("Scene.DepthNormals.Depth", depth, View::Depth);
+		textures.Name("Scene.DepthNormals.Normals", _geometry->PrepassNormals(slot), View::Normals);
+	}
 	water.Prepare(float(delta));
 	water.SetSceneInputs(depth, _geometry->GBuffer(slot, 1));
 	auto* target = c.BackBuffer->GetCurrentBuffer();
@@ -100,17 +108,9 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	const bool earlyEnvironment = !singleDirect && _environment->AsyncComputeEnabled();
 	const auto append = [&](BistroRender::Graph& graph, std::vector<ID3D12Resource*>& resources)
 	{
-		using View = BistroRender::SceneTextureInspector::View;
-		const bool inspect = Engine::UI::DebugUIVisible();
-		auto& textures = _post->Textures();
 		if (inspect || textures.NeedsReadback())
 		{
 			textures.Name("Scene.Depth", depth, View::Depth);
-			if (_geometry->PrepassNormals(slot))
-			{
-				textures.Name("Scene.DepthNormals.Depth", depth, View::Depth);
-				textures.Name("Scene.DepthNormals.Normals", _geometry->PrepassNormals(slot), View::Normals);
-			}
 			textures.Name("Scene.AO", _lighting->AOTexture(slot), View::Scalar);
 			textures.Name("Scene.AO.Reprojected", _lighting->ReprojectedAOTexture(slot), View::Scalar);
 			textures.Name("GBuffer.AlbedoMetallic", _geometry->GBuffer(slot, 0));
@@ -176,12 +176,8 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	};
 	const auto afterDepthNormals = [&](auto& graph, auto& resources, BistroRender::Id ready)
 	{
-		auto& textures = _post->Textures();
 		if (!textures.NeedsReadback("Scene.DepthNormals.Normals") &&
 		    !textures.NeedsReadback("Scene.DepthNormals.Depth")) return;
-		using View = BistroRender::SceneTextureInspector::View;
-		textures.Name("Scene.DepthNormals.Depth", depth, View::Depth);
-		textures.Name("Scene.DepthNormals.Normals", _geometry->PrepassNormals(slot), View::Normals);
 		const auto first = graph.Operations.size();
 		_post->AppendTextureReadback(graph, resources, *target);
 		if (graph.Operations.size() != first)
