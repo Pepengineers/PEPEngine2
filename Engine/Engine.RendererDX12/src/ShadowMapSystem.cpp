@@ -105,6 +105,7 @@ void ShadowMapSystem::UpdateDirectionalViews(const GDX12LightConstants& light, c
         ShadowView view{};
         XMStoreFloat4x4(&view.ViewProj, (lightView * projection).Transpose());
         view.Layer = DirectionalArraySize++;
+        view.Type = light.Type;
         view.SplitDepth = split;
         view.NormalBias = texelSize;
         Views[light.FirstShadowViewIndex + cascade] = view;
@@ -129,6 +130,7 @@ void ShadowMapSystem::UpdatePointSpotViews(const GDX12LightConstants& light)
         const Matrix viewMatrix = Matrix::CreateLookAt(light.Position, light.Position + direction, up);
         ShadowView view{};
         XMStoreFloat4x4(&view.ViewProj, (viewMatrix * projection).Transpose());
+        view.Type = light.Type;
         view.NormalBias = light.Range / PointSpotResolution;
         Views[light.FirstShadowViewIndex + face] = view;
     }

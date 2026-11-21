@@ -242,7 +242,6 @@ struct CompiledFrameGraph::Runtime
         std::map<PinAddress, Materialization> Resources;
         std::vector<std::variant<PreparedPass, PreparedImport>> Execution;
         std::vector<GDX12CompletionPoint> Completions;
-        std::map<FrameGraphPhysicalResource*, GDX12CompletionPoint> LastUse;
         std::vector<ComPtr<ID3D12Resource>> ExternalResources;
         std::optional<uint64_t> SubmittedFrame;
         std::vector<FrameGraphDiagnostics::CopySample> CopySamples;
@@ -267,6 +266,8 @@ struct CompiledFrameGraph::Runtime
     std::map<NodeId, std::function<GDX12Texture*()>> Imports;
     std::map<PinAddress, PinAddress> Sources;
     std::vector<FrameSlotResources> FrameSlots;
+    // Imported allocations can be shared by several frame slots and physical wrappers.
+    std::map<ID3D12Resource*, GDX12CompletionPoint> LastUse;
     // Immutable outputs and remote replicas outlive rotating frame slots, including window resize.
     std::map<PinAddress, Materialization> OnceResources;
     std::vector<PreparedPass> SetupPasses;
@@ -279,6 +280,13 @@ struct CompiledFrameGraph::Runtime
     std::vector<std::string> Fallbacks;
 
     GDX12DeviceResources* GetDeviceResources(EDeviceRole role) const { return role == DEVICE_ROLE_PRIMARY ? Primary : Secondary; }
+    // DrawStream components are always submitted together, so their first buffer identifies the whole stream.
+    GDX12CompletionPoint& GetLastUse(FrameGraphPhysicalResource& resource)
+    {
+        auto* texture = resource.ImportedTexture ? resource.ImportedTexture : resource.Texture.get();
+        auto* native = texture ? texture->GetResource()->D3DResource.Get() : resource.Buffers.front().Resource.D3DResource.Get();
+        return LastUse[native];
+    }
     FrameGraphSharedResources& GetSharedResources(Materialization& material) { return material.SharedAllocationAlias ? *material.SharedAllocationAlias : material.Shared; }
     uint32_t GetCurrentFrameSlotResourcesIndex() const { return uint32_t(Frame % CompileData.FrameSlotCount); }
     // Keep the latest retired frame's pass timestamps intact through submission and Present.
@@ -714,8 +722,8 @@ struct CompiledFrameGraph::Runtime
         auto* direct = device->GetCommandQueue();
         auto* queue = useCopy ? device->GetCopyCommandQueue() : direct;
         auto dependency = ready;
-        direct->GPUWait(frameResources.LastUse[&source]);
-        direct->GPUWait(frameResources.LastUse[&target]);
+        direct->GPUWait(GetLastUse(source));
+        direct->GPUWait(GetLastUse(target));
         // DIRECT releases the resources to COMMON before COPY takes ownership of the transfer.
         if (useCopy)
         {
@@ -758,8 +766,8 @@ struct CompiledFrameGraph::Runtime
             const uint64_t bytes = scope == CopyScope::CrossGPU ? statistics.Bytes : 0;
             frameResources.CopySamples.push_back({timer, device->Role, timed ? completion.Value : 0, exporting, bytes});
         }
-        frameResources.LastUse[&source] = completion;
-        frameResources.LastUse[&target] = completion;
+        GetLastUse(source) = completion;
+        GetLastUse(target) = completion;
         return completion;
     }
 
@@ -796,6 +804,7 @@ struct CompiledFrameGraph::Runtime
     {
         // Resize may have drained the queues and released the slots before replacing the swap chain buffers.
         if (!FrameSlots.empty()) { WaitForGPUCompletion(); }
+        LastUse.clear();
         ResolveResourceRequirements();
         BuildFrameSlotResources();
         for (auto& passEntry : Passes)
@@ -811,7 +820,6 @@ struct CompiledFrameGraph::Runtime
     // Keep idle slot allocations while discarding readiness from their previous frame.
     void ResetFrameSlotReadiness(FrameSlotResources& frameResources)
     {
-        frameResources.LastUse.clear();
         for (auto& resourceEntry : frameResources.Resources)
         {
             resourceEntry.second.SharedReady = {};
@@ -877,7 +885,7 @@ struct CompiledFrameGraph::Runtime
             for (const auto& input : pass.Inputs)
             {
                 commandQueue->GPUWait(ResolveInputResource(input, pass.Node->DeviceRole, frameResources));
-                commandQueue->GPUWait(frameResources.LastUse[input.Resource]);
+                commandQueue->GPUWait(GetLastUse(*input.Resource));
             }
         }
         auto* commandList = GetFrameCommandList(commandQueue, frameResources);
@@ -906,7 +914,7 @@ struct CompiledFrameGraph::Runtime
 
         pass.Completion = SubmitCommandList(commandQueue, commandList, frameResources);
         if (passTimer) { passTimer->OnCommandListExecuted(pass.Completion.Value, timingSlot); }
-        for (const auto& port : pass.Ports) { frameResources.LastUse[port.Resource] = pass.Completion; }
+        for (const auto& port : pass.Ports) { GetLastUse(*port.Resource) = pass.Completion; }
         for (auto* output : pass.Outputs) { output->ProducerReady = pass.Completion; }
     }
 
@@ -1067,6 +1075,7 @@ void CompiledFrameGraph::ReleaseFrameSlotResourcesForResize()
 {
     _runtime->WaitForGPUCompletion();
     _runtime->FrameSlots.clear();
+    _runtime->LastUse.clear();
     _runtime->Diagnostics.LastCompletedFrame.reset();
 }
 uint32_t CompiledFrameGraph::GetCurrentFrameSlotResourcesIndex() const { return _runtime->GetCurrentFrameSlotResourcesIndex(); }

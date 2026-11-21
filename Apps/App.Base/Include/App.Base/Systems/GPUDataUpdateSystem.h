@@ -132,6 +132,7 @@ public:
             [&ecs, &renderModule, &numFrames, &devices](Entity entity, TransformComponent& transform)
             {
                 auto& GPUData = renderModule->GetTransformGPUData(entity);
+                const bool transformUpdated = transform.DirtyFlag;
                 if (transform.DirtyFlag)
                 {
                     if (ecs.Has<LightComponent>(entity))
@@ -151,6 +152,11 @@ public:
                             XMConvertToRadians(transform.Rotation.z)) *
                         Matrix::CreateTranslation(transform.Location);
 
+                    if (transformUpdated && world != GPUData.World && ecs.Has<StaticMeshRenderComponent>(entity))
+                    {
+                        auto& mesh = ecs.Get<StaticMeshRenderComponent>(entity);
+                        if (mesh._shadowCasterInitialized) mesh._shadowCasterDynamic = true;
+                    }
                     GPUData.World = world;
 
 					GDX12TransformConstants objConstants;
@@ -205,6 +211,7 @@ public:
                     }
                 }
                 renderer.DirtyFlag = false;
+                renderer._shadowCasterInitialized = true;
                 for (const auto& [role, flags] : devices)
                 {
                     if (!(flags & RENDER_PASS_FLAG_USE_INSTANCES)) { continue; }
@@ -219,9 +226,11 @@ public:
                         BoundingBox bounds;
                         subMeshBounds.Transform(bounds, worldMatrix);
 
-                        GDX12InstanceData instanceData;
+                        GDX12InstanceData instanceData{};
                         instanceData.TransformIndex = transformIndex;
                         instanceData.MaterialIndex = renderer.Materials[subMesh.MaterialIndex]->_CBufferIndex;
+                        instanceData.CastShadows = renderer.CastShadows;
+                        instanceData.DynamicShadowCaster = renderer._shadowCasterDynamic;
                         instanceData.BoundingBoxCenter = bounds.Center;
                         instanceData.BoundingBoxExtents = bounds.Extents;
 

@@ -17,6 +17,8 @@ public:
 	const ComPtr<ID3D12GraphicsCommandList10>& GetCommandList();
 	const ComPtr<ID3D12CommandAllocator>& GetCommandAllocator();
 	D3D12_COMMAND_LIST_TYPE GetType() const;
+	// Called after the queue's completion fence. COPY reuses the allocator with a fresh native list:
+	// resetting the native COPY list caused NVIDIA import failures in mixed buffer/texture transfers.
 	void Reset();
 
 	UINT64 FenceValue;

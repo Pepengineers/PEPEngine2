@@ -554,9 +554,14 @@ void RenderModule::OnTransformComponentCreated(World& world, Entity entity, Tran
 
 void RenderModule::OnTransformComponentDestroyed(World& world, Entity entity, TransformComponent& component)
 {
-    _transformGPUData.erase(entity);
     if (world.GetECS().Has<StaticMeshRenderComponent>(entity))
-        world.GetECS().Get<StaticMeshRenderComponent>(entity).DirtyFlag = true;
+    {
+        auto& mesh = world.GetECS().Get<StaticMeshRenderComponent>(entity);
+        if (mesh._shadowCasterInitialized && _transformGPUData.at(entity).World != Matrix::Identity)
+            mesh._shadowCasterDynamic = true;
+        mesh.DirtyFlag = true;
+    }
+    _transformGPUData.erase(entity);
     if (world.GetECS().Has<CameraComponent>(entity))
         world.GetECS().Get<CameraComponent>(entity).DirtyFlag = true;
     if (world.GetECS().Has<LightComponent>(entity))
@@ -591,6 +596,8 @@ void RenderModule::OnRenderComponentCreated(World& world, Entity entity, StaticM
     // A copied component belongs to a new entity and receives its own draw slots.
     component._CBufferIndices.clear();
     component._boundMeshHandler = {};
+    component._shadowCasterInitialized = false;
+    component._shadowCasterDynamic = false;
     BindMesh(component);
 }
 
@@ -699,7 +706,11 @@ void RenderModule::UpdateMaterials()
 void RenderModule::PreRender()
 {
     auto& shadows = _RPcommonData.ShadowSystem;
+    const auto directionalArraySize = shadows.DirectionalArraySize;
+    const auto pointSpotArraySize = shadows.PointSpotArraySize;
     shadows.BuildViews(_lightingGrid.Lights);
+    if (shadows.DirectionalArraySize != directionalArraySize || shadows.PointSpotArraySize != pointSpotArraySize)
+        _frameGraph->RequestFrameSlotResourcesRebuild();
     for (const auto role : {DEVICE_ROLE_PRIMARY, DEVICE_ROLE_SECONDARY})
     {
         if (!PipelineHasFlag(role, RENDER_PASS_FLAG_USE_LIGHTING)) continue;

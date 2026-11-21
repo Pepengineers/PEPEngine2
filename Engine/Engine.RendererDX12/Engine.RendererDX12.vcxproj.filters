@@ -107,6 +107,9 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12GPUCullingPass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12ShadowMapCullingPass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12WBOITCompositionPass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -211,6 +214,9 @@
     <ClCompile Include="src\GDX12GPUCullingPass.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\GDX12ShadowMapCullingPass.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="src\GDX12NISUpscalePass.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -249,7 +255,8 @@
     <None Include="Shaders\BufferClear.hlsl" />
     <None Include="Shaders\CBufferStructures.hlsli" />
     <None Include="Shaders\CompositionPass.hlsl" />
-    <None Include="Shaders\Culling.hlsl" />
+    <None Include="Shaders\FrustumCullingPass.hlsl" />
+    <None Include="Shaders\ShadowMapCullingPass.hlsl" />
     <None Include="Shaders\ComputeCopy.hlsl" />
     <None Include="Shaders\FullScreenVS.hlsl" />
     <None Include="Shaders\DeferredGeometryPass.hlsl" />

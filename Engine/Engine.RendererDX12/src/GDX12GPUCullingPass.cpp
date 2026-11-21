@@ -29,7 +29,7 @@ void GDX12GPUCullingPass::Initialize(PassInitContext& context)
 	auto* resources = context.GetDeviceResources();
 	// Shaders
 	auto& shaderCompiler = GDX12ShaderCompiler::GetInstance();
-	_cullingCS = shaderCompiler.CompileShader(resources->Device, SHADERS_FOLDER "Culling.hlsl", nullptr, "CS", "cs");
+	_cullingCS = shaderCompiler.CompileShader(resources->Device, SHADERS_FOLDER "FrustumCullingPass.hlsl", nullptr, "CS", "cs");
 	_bufferClearCS = shaderCompiler.CompileShader(resources->Device, SHADERS_FOLDER "BufferClear.hlsl", nullptr, "CS", "cs");
 
 	// Root Signatures

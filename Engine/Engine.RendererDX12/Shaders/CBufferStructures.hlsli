@@ -61,6 +61,7 @@ struct ShadowView
 {
     float4x4 ViewProj;
     uint Layer;
+    uint Type;
     float SplitDepth;
     float NormalBias;
 };
@@ -95,8 +96,8 @@ struct InstanceData
 {
     uint TransformIndex;
     uint MaterialIndex;
-    uint _pad1;
-    uint _pad2;
+    uint CastShadows;
+    uint DynamicShadowCaster;
     float3 BoundingBoxCenter;
     uint _pad3;
     float3 BoundingBoxExtents;
@@ -112,6 +113,36 @@ struct IndirectDrawArgs
     int BaseVertexLocation;
     uint StartInstanceLocation;
 };
+
+struct ShadowDrawArgs
+{
+    uint InstanceID;
+    uint ShadowViewIndex;
+    uint IndexCountPerInstance;
+    uint InstanceCount;
+    uint StartIndexLocation;
+    int BaseVertexLocation;
+    uint StartInstanceLocation;
+};
+
+// Tests a world-space AABB against the D3D clip volume, including the 0..w depth range.
+bool IsBoxVisible(float3 center, float3 extents, float4x4 m)
+{
+    float4 planes[6];
+    planes[0] = float4(m._14 + m._11, m._24 + m._21, m._34 + m._31, m._44 + m._41);
+    planes[1] = float4(m._14 - m._11, m._24 - m._21, m._34 - m._31, m._44 - m._41);
+    planes[2] = float4(m._14 + m._12, m._24 + m._22, m._34 + m._32, m._44 + m._42);
+    planes[3] = float4(m._14 - m._12, m._24 - m._22, m._34 - m._32, m._44 - m._42);
+    planes[4] = float4(m._13, m._23, m._33, m._43);
+    planes[5] = float4(m._14 - m._13, m._24 - m._23, m._34 - m._33, m._44 - m._43);
+    for (int i = 0; i < 6; ++i)
+    {
+        float r = extents.x * abs(planes[i].x) + extents.y * abs(planes[i].y) + extents.z * abs(planes[i].z);
+        float d = dot(float4(center, 1.0f), planes[i]);
+        if (d + r < 0.0f) return false;
+    }
+    return true;
+}
 
 struct IndirectConstants
 {

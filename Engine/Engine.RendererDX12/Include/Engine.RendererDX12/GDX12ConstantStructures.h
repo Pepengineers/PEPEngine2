@@ -53,10 +53,11 @@ struct ShadowView
 {
     XMFLOAT4X4 ViewProj;
     UINT Layer;
+    LightType Type;
     float SplitDepth;
     float NormalBias;
 };
-static_assert(sizeof(ShadowView) == 76);
+static_assert(sizeof(ShadowView) == 80);
 
 struct GDX12LightGridConstants
 {
@@ -89,13 +90,14 @@ struct GDX12InstanceData
 {
     UINT TransformIndex;
     UINT MaterialIndex;
-    UINT _pad1;
-    UINT _pad2;
+    UINT CastShadows;
+    UINT DynamicShadowCaster;
     XMFLOAT3 BoundingBoxCenter;
     UINT _pad3;
     XMFLOAT3 BoundingBoxExtents;
     UINT _pad4;
 };
+static_assert(sizeof(GDX12InstanceData) == 48);
 
 struct GDX12IndirectDrawArgs
 {
@@ -106,6 +108,20 @@ struct GDX12IndirectDrawArgs
     INT  BaseVertexLocation;
     UINT StartInstanceLocation;
 };
+
+// Two root constants (instance and projection), followed by DrawIndexed arguments.
+struct GDX12ShadowDrawArgs
+{
+    UINT InstanceID;
+    UINT ShadowViewIndex;
+    UINT IndexCountPerInstance;
+    UINT InstanceCount;
+    UINT StartIndexLocation;
+    INT BaseVertexLocation;
+    UINT StartInstanceLocation;
+};
+static_assert(sizeof(GDX12ShadowDrawArgs) == 7 * sizeof(UINT));
+inline constexpr const char* ShadowDrawStreamLayout = "pepe.indirect.shadow-draw-indexed.v1";
 
 struct GDX12IndirectArgs
 {

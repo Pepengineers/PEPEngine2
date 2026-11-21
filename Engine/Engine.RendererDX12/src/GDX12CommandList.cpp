@@ -50,7 +50,18 @@ D3D12_COMMAND_LIST_TYPE GDX12CommandList::GetType() const
 void GDX12CommandList::Reset()
 {
 	ThrowIfFailed(_commandAllocator->Reset());
-	ThrowIfFailed(_commandList->Reset(_commandAllocator.Get(), nullptr));
+	// Work around NVIDIA import crashes / incorrect resource-state validation observed when resetting COPY lists.
+	// Recreate the native list while reusing its completed allocator; queue selection and GPU waits stay unchanged.
+	// Cost: an extra ~2.5-3.2 us of CPU time per COPY list in our Release microbenchmark (hardware-dependent).
+	if (_type == D3D12_COMMAND_LIST_TYPE_COPY)
+	{
+		ComPtr<ID3D12Device> device;
+		ThrowIfFailed(_commandList->GetDevice(IID_PPV_ARGS(&device)));
+		_commandList.Reset();
+		ThrowIfFailed(device->CreateCommandList(0, _type, _commandAllocator.Get(),
+			nullptr, IID_PPV_ARGS(&_commandList)));
+	}
+	else { ThrowIfFailed(_commandList->Reset(_commandAllocator.Get(), nullptr)); }
 	FenceValue = (std::numeric_limits<UINT64>::max)();
 
 	_currentRootSignature = nullptr;

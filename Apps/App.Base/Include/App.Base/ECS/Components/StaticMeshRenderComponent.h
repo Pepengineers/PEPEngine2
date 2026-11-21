@@ -30,5 +30,8 @@ private:
     std::vector<std::uint32_t> _CBufferIndices;
     // Last mesh installed in the draw cache. Compared only when the component update event arrives.
     Engine::Core::MeshHandle _boundMeshHandler;
+    // Initial placement is static; the first later world-matrix change makes it dynamic permanently.
+    bool _shadowCasterInitialized = false;
+    bool _shadowCasterDynamic = false;
     std::uint32_t _numFramesDirty = 0;
 };
