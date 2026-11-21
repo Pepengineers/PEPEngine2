@@ -93,7 +93,10 @@ Changing the owner resets the pool and preserves the already consumed burst
 total for the same emitter revision.
 
 `App.Particles.CrossSync = 1` (default) imports the exact step ordered by
-the current frame. `App.Particles.LogSnapshots = true` enables a short readback
+the current frame. With `0`, the same frame orders step N and imports N−1.
+The first frame of each history shows its own step. Changing between these
+policies starts fresh publication history and keeps the live GPU1 pool.
+`App.Particles.LogSnapshots = true` enables a short readback
 of remote draw elements that passed the GPU0 particle cull.
 
 ### Read back a scene texture by name

@@ -19,8 +19,8 @@ AutoConsoleVariable<int> Adapter(L"App.Particles.Adapter", -1,
     L"Secondary DXGI index for marked independent particle emitters. -1 uses GPU0.",
     EConsoleVariableFlags::Default, [](int value) { return value >= -1; });
 AutoConsoleVariable<int> CrossSync(L"App.Particles.CrossSync", 1,
-    L"Remote particles: 1 shows the current step.",
-    EConsoleVariableFlags::Default, [](int value) { return value == 1; });
+    L"Remote particles: 1 shows the current step, 0 shows the exact previous step.",
+    EConsoleVariableFlags::Default, [](int value) { return value == 0 || value == 1; });
 AutoConsoleVariable<bool> LogSnapshots(L"App.Particles.LogSnapshots", false,
     L"Read back visible remote particle counts for short MGPU diagnostics.");
 
@@ -88,6 +88,7 @@ struct SceneParticles::Remote
 		QueueSubmission::TransferBuffer Transfer;
 		CompletionToken Ready, Reader;
 		uint64_t Version = 0;
+		std::vector<GDX12ParticleEmitter> Snapshot;
 	};
 	struct ImportedEmitter
 	{
@@ -104,12 +105,11 @@ struct SceneParticles::Remote
 	std::vector<ImportedEmitter> Imported;
 	std::vector<Publication> Ring;
 	std::vector<uint64_t> Revisions;
-	std::vector<GDX12ParticleEmitter> Snapshot;
 	UINT InputSlot = 0, NextOutput = 0;
-	Publication* Selected = nullptr;
+	Publication *Selected = nullptr, *LastOrder = nullptr;
 	uint64_t Generation = 0, Ordered = 0, PresentedVersion = 0;
 	double GameTime = 0;
-	bool Drawable = false;
+	int Mode = 1;
 
 	Remote(GDX12DeviceResources& primary, const std::shared_ptr<QueueSubmission>& submit,
 	       const std::vector<EmitterLayout>& layout, std::vector<GDX12ParticleEmitter> snapshot,
@@ -162,34 +162,38 @@ struct SceneParticles::Remote
 
 	void Drain() { GPU1.Drain(); }
 
-	void Step(const std::vector<GDX12ParticleEmitter>& emitters, const GDX12ParticleSettings& settings)
+	void Step(const std::vector<GDX12ParticleEmitter>& emitters, const GDX12ParticleSettings& settings, int mode)
 	{
 		std::vector<uint64_t> revisions;
 		for (const auto& emitter : emitters) revisions.push_back(emitter.ResetRevision);
-		if (revisions != Revisions)
+		if (revisions != Revisions || mode != Mode)
 		{
 			Revisions = std::move(revisions);
+			Mode = mode;
 			++Generation;
 			Ordered = PresentedVersion = 0;
 			GameTime = 0;
+			LastOrder = nullptr;
 		}
-		Drawable = settings.DrawEnabled;
-		Selected = nullptr;
+		Selected = Mode == 0 ? LastOrder : nullptr;
 		const UINT slot = InputSlot++ % UINT(Secondary.FrameConstants.size());
 		GPU1.Begin(slot);
 		Secondary.CurrFrameConstantsIndex = slot;
 		Secondary.ParticleEmitters = emitters;
 		Solver.BeginFrame(&Secondary, settings, false);
 		const auto frame = Solver.RenderFrame();
-		Snapshot.clear();
+		// Protect the chosen previous slot even before its new import token exists.
+		auto* outputSlot = &Ring[NextOutput++ % Ring.size()];
+		if (outputSlot == Selected) outputSlot = &Ring[NextOutput++ % Ring.size()];
+		auto& output = *outputSlot;
+		output.Snapshot.clear();
 		double elapsed = 0;
 		for (const auto& source : frame.Sources)
 		{
-			Snapshot.push_back(source.Emitter);
+			output.Snapshot.push_back(source.Emitter);
 			const auto& e = source.Emitter;
 			if (!e.Paused) elapsed = (std::max)(elapsed, double((std::min)(e.DeltaTime * e.TimeScale, e.MaxDeltaTime)));
 		}
-		auto& output = Ring[NextOutput++ % Ring.size()];
 		if (output.Reader) Submit->Wait(output.Reader);
 		output.Reader = {};
 		Graph graph;
@@ -232,7 +236,9 @@ struct SceneParticles::Remote
 		output.Ready = GPU1.Completions().at(packet - schedule.Packets.begin());
 		output.Version = ++Ordered;
 		GameTime += elapsed;
-		Selected = Drawable ? &output : nullptr;
+		LastOrder = &output;
+		if (!Selected) Selected = LastOrder;
+		if (!settings.DrawEnabled) Selected = nullptr;
 	}
 
 	void AppendSources(GDX12ParticleRenderFrame& frame) const
@@ -241,7 +247,7 @@ struct SceneParticles::Remote
 		for (size_t i = 0; i < Imported.size(); ++i)
 		{
 			auto source = Imported[i].Bindings;
-			source.Emitter = Snapshot[i];
+			source.Emitter = Selected->Snapshot[i];
 			source.ResetMotion = !PresentedVersion || Selected->Version != PresentedVersion + 1 || source.Emitter.Paused;
 			frame.Sources.push_back(source);
 		}
@@ -390,7 +396,7 @@ void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, 
 	{
 		for (const auto& item : layout) remoteIds.push_back(item.Id);
 		_remote->Selected = nullptr;
-		if (settings.Enabled) _remote->Step(remoteEmitters, settings);
+		if (settings.Enabled) _remote->Step(remoteEmitters, settings, CrossSync.GetValue());
 	}
 	simulation->BeginFrame(&_resources, _common, &remoteIds);
 	_renderFrame = simulation->RenderFrame();
@@ -437,7 +443,7 @@ void SceneParticles::Presented(uint64_t frame)
 		sample.Version = selected->Version;
 	}
 	if (_remote->Ordered <= 12 && _remote->Ordered)
-		Log::Info("RenderGraph", "Particles MGPU frame=", frame, " CrossSync=", CrossSync.GetValue(),
+		Log::Info("RenderGraph", "Particles MGPU frame=", frame, " CrossSync=", _remote->Mode,
 		    " generation=", _remote->Generation, " ordered=", _remote->Ordered, " exported=", _remote->Ordered,
 		    " shown=", _remote->PresentedVersion, " exportFence=", selected ? selected->Ready.Value : 0,
 		    " importFence=", selected ? selected->Reader.Value : 0, " gameSeconds=", _remote->GameTime);
