@@ -11,7 +11,7 @@
 namespace
 {
 AutoConsoleVariable<int> AOAdapter(L"App.AO.Adapter", -1,
-    L"Secondary GPU for Bistro half-res HBAO or full-res current-frame XeGTAO. -1 uses local AO.",
+    L"Secondary DXGI index for Bistro AO. -1 uses local AO. Remote grids: SSAO/CACAO full or half, HBAO half, XeGTAO full.",
     EConsoleVariableFlags::Default, [](int value) { return value >= -1; });
 AutoConsoleVariable<bool> AsyncQueues(L"App.Async.Queues", true,
                                       L"Place explicit local work on COMPUTE/COPY; false uses DIRECT.",
@@ -44,8 +44,16 @@ void BistroRenderPipeline::Initialize(RenderPipelineContext& c)
 void BistroRenderPipeline::PrepareMaterialBindings(RenderPipelineContext& c)
 {
 	const auto ao = GetAmbientOcclusionSettings();
-	_aoAdapter = BistroRender::SceneAO::SupportsRemote(ao, _geometry->DepthNormalsEnabled())
-	    ? AOAdapter.GetValue() : -1;
+	const int requestedAdapter = AOAdapter.GetValue();
+	_aoAdapter = BistroRender::SceneAO::SupportsRemote(ao, _geometry->DepthNormalsEnabled()) ? requestedAdapter : -1;
+	if (requestedAdapter >= 0 && _aoAdapter < 0 && ao.IsActive())
+	{
+		if (!_reportedLocalAO)
+			Log::Warning("RenderGraph", "Using local AO: the selected algorithm, grid or prepass does not support MGPU");
+		_reportedLocalAO = true;
+	}
+	else
+		_reportedLocalAO = false;
 	_cloudPicture->UpdateSettings(_executor, _aoAdapter);
 	++_frameNumber;
 	const UINT slot = c.Primary.CurrFrameConstantsIndex;
@@ -230,8 +238,8 @@ void BistroRenderPipeline::FramePresented()
 		if (name.find("DepthNormals") != std::string::npos || name == BistroRender::GBufferOperationName ||
 		    name == "particle simulation from depth prepass" || name == "opaque particles frustum cull" ||
 		    name == "particle simulation from interaction field" || name == "opaque particles G-buffer (read-only depth)" ||
-		    name == "read back scene texture" || name == "XeGTAO GPU0 export inputs" ||
-		    name == "XeGTAO GPU0 import terms" || name == "XeGTAO denoise")
+		    name == "read back scene texture" || name.find(" GPU0 export inputs") != std::string::npos ||
+		    name.find(" GPU0 import ") != std::string::npos || name == "XeGTAO denoise")
 			Log::Info("RenderGraph", "DepthNormals frame=", _frameNumber, " packet=", i, " ", name);
 	}
 }

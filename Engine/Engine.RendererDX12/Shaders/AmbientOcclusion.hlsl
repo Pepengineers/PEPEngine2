@@ -10,7 +10,7 @@ cbuffer DispatchParameters : register(b0)
     uint BlurAxis;
     uint FinalDenoise;
     float XeScale;
-    uint Unused;
+    uint DecodedVisibility;
     float2 HistoryJitterDelta;
     float2 HistoryDepthUnpack;
 };
@@ -282,38 +282,49 @@ void BlurCS(uint3 id : SV_DispatchThreadID) { BilateralBlur(id.xy, false); }
 [numthreads(8, 8, 1)]
 void BlurHalfDepthCS(uint3 id : SV_DispatchThreadID) { BilateralBlur(id.xy, true); }
 
-[numthreads(8, 8, 1)]
-void ReprojectHBAOCS(uint3 id : SV_DispatchThreadID)
+bool HistoryPixel(uint2 p, out uint2 previous)
 {
-    const uint2 p = id.xy;
-    if (!InBounds(p)) return;
-    OutputAO[p] = 1;
+    previous = 0;
     const float depth = Depth[p];
-    if (!isfinite(depth) || depth <= 0) return;
+    if (!isfinite(depth) || depth <= 0) return false;
 
     uint width, height;
     Motion.GetDimensions(width, height);
     const float2 fullSize = float2(width, height);
-    const uint2 representative = RepresentativePixel(p);
+    const uint2 representative = Half ? RepresentativePixel(p) : p;
     const float2 currentUV = (representative + 0.5f) / fullSize;
     // GBuffer.Motion stores previous minus current unjittered NDC.
     const float2 previousUV = currentUV + Motion[representative] * float2(0.5f, -0.5f)
                             + HistoryJitterDelta / fullSize;
-    if (!all(isfinite(previousUV)) || any(previousUV < 0) || any(previousUV >= 1)) return;
-    const uint2 previous = uint2(previousUV * fullSize * 0.5f);
-    if (!InBounds(previous)) return;
+    if (!all(isfinite(previousUV)) || any(previousUV < 0) || any(previousUV >= 1)) return false;
+    previous = uint2(previousUV * fullSize * (Half ? 0.5f : 1.0f));
+    if (!InBounds(previous)) return false;
 
     const float previousRaw = HistoryDepth[previous];
-    if (!isfinite(previousRaw) || previousRaw <= 0) return;
+    if (!isfinite(previousRaw) || previousRaw <= 0) return false;
     const float previousZ = HistoryDepthUnpack.x / (HistoryDepthUnpack.y - previousRaw);
     const float4 world = mul(float4(currentUV * float2(2, -2) + float2(-1, 1), depth, 1), Camera.InvViewProj);
-    if (!all(isfinite(world)) || abs(world.w) <= 1e-8f) return;
+    if (!all(isfinite(world)) || abs(world.w) <= 1e-8f) return false;
     const float expectedZ = mul(world / world.w, Camera.PrevViewProjNoJitter).w;
-    if (!isfinite(expectedZ) || expectedZ <= 0 || !isfinite(previousZ) || previousZ <= 0 ||
-        abs(previousZ - expectedZ) > max(1.0f, 0.02f * expectedZ)) return;
+    return isfinite(expectedZ) && expectedZ > 0 && isfinite(previousZ) && previousZ > 0 &&
+           abs(previousZ - expectedZ) <= max(1.0f, 0.02f * expectedZ);
+}
 
-    const float visibility = InputAO[previous];
-    if (isfinite(visibility)) OutputAO[p] = saturate(visibility);
+[numthreads(8, 8, 1)]
+void ReprojectCS(uint3 id : SV_DispatchThreadID)
+{
+    if (!InBounds(id.xy)) return;
+    uint2 previous;
+    const float visibility = HistoryPixel(id.xy, previous) ? InputAO[previous] : 1;
+    OutputAO[id.xy] = isfinite(visibility) ? saturate(visibility) : 1;
+}
+
+[numthreads(8, 8, 1)]
+void ReprojectXeCS(uint3 id : SV_DispatchThreadID)
+{
+    if (!InBounds(id.xy)) return;
+    uint2 previous;
+    OutputAO[id.xy] = HistoryPixel(id.xy, previous) ? saturate(XeInput[previous] * (XeScale / 255.0f)) : 1;
 }
 
 [numthreads(8, 8, 1)]
@@ -326,7 +337,7 @@ void ResolveCS(uint3 id : SV_DispatchThreadID)
         OutputAO[p] = 1;
         return;
     }
-    float visibility = Implementation == 2 ? XeInput[p] * (XeScale / 255.0f) : InputAO[p];
+    float visibility = Implementation == 2 && !DecodedVisibility ? XeInput[p] * (XeScale / 255.0f) : InputAO[p];
     if (Implementation != 3)
     {
         float fade = saturate((FadeEndCm - LinearDepth(Depth[p])) / (FadeEndCm - FadeStartCm));

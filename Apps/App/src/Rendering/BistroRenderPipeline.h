@@ -83,4 +83,5 @@ class BistroRenderPipeline final : public IRenderPipeline
 	int _aoAdapter = -1;
 	UINT _executorSlot = 0;
 	bool _reportedDepthNormals = false;
+	bool _reportedLocalAO = false;
 };

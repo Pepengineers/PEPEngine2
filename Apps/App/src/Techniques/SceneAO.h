@@ -14,13 +14,14 @@ class SceneAO
     {
         std::shared_ptr<Remote> Last;
         uint64_t CameraRevision = 0;
+        GDX12AOSettings Settings{};
     };
     SceneAO(GDX12DeviceResources&, RenderPipelineCommonData&, GDX12Texture* depth, GDX12Texture* normals);
     ~SceneAO();
     static bool SupportsRemote(const GDX12AOSettings&, bool depthNormals);
     void Freeze(GDX12Texture* depth, GDX12Texture* normals, GDX12Texture* motion, GDX12Texture* earlyNormals, UINT& temporalIndex,
                 const std::shared_ptr<QueueSubmission>& remote, History&);
-    void AppendXeInputs(Graph&, std::vector<ID3D12Resource*>&, Id ready);
+    void AppendEarlyInputs(Graph&, std::vector<ID3D12Resource*>&, Id ready);
     void AppendRemoteDepth(Graph&, std::vector<ID3D12Resource*>&);
     void Append(Graph&, std::vector<ID3D12Resource*>&);
     std::optional<Executor::PacketExchange> Exchange(const Schedule&, History&);
@@ -44,8 +45,12 @@ class SceneAO
         GDX12Texture* Normals;
     };
     PreparedInputs AppendPreparation(Plan&, GDX12Texture* depth, GDX12Texture* normals);
+    PreparedInputs AppendCacaoPadding(Plan&, const PreparedInputs&);
     void AppendXeImport(Plan&, GDX12Texture& terms, GDX12Texture& edges);
+    void AppendVisibilityImport(Plan&, GDX12Texture&);
     void AppendRawVisibility(Plan&, const PreparedInputs&, GDX12Texture&);
+    void AppendReprojection(Plan&, const PreparedInputs&, GDX12Texture& source, GDX12Texture& target,
+                            float scale = 1.f, bool terms = false);
     GDX12Texture* AppendVisibility(Plan&, const PreparedInputs&);
 
     GDX12DeviceResources& _resources;
@@ -58,8 +63,8 @@ class SceneAO
     GDX12Texture* _motion = nullptr;
     GDX12Texture* _earlyNormals = nullptr;
     uint64_t _version = 0, _attemptedDomain = 0;
-    bool _attemptedXe = false, _attemptedDelayed = false, _attemptedSecondary = false;
-    int _attemptedBlur = 0;
+    bool _attemptedHalf = false, _attemptedDelayed = false, _attemptedSecondary = false;
+    int _attemptedImplementation = -1, _attemptedBlur = 0;
     UINT _attemptedWidth = 0, _attemptedHeight = 0;
     Id _depthExport = Invalid, _visibilityImport = Invalid, _reproject = Invalid;
     Id _importPacket = Invalid, _reprojectPacket = Invalid;

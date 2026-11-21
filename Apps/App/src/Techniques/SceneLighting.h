@@ -29,7 +29,7 @@ class SceneLighting
 	}
 	void AppendEarlyAO(Graph& graph, std::vector<ID3D12Resource*>& bindings, Id ready)
 	{
-		_frames.at(_slot).AO->AppendXeInputs(graph, bindings, ready);
+		_frames.at(_slot).AO->AppendEarlyInputs(graph, bindings, ready);
 	}
 	void AppendGpuLightGrid(Graph&, std::vector<ID3D12Resource*>&, const SceneGeometry&);
 	void AppendAO(Graph&, std::vector<ID3D12Resource*>&);

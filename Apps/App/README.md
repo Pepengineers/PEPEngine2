@@ -39,44 +39,47 @@ remain late overlays with read-only depth.
 Use `--read-texture=Scene.DepthNormals.Normals` or
 `--read-texture=Scene.DepthNormals.Depth` to read at the early graph boundary.
 
-### Two-adapter HBAO
+### Two-adapter ambient occlusion
 
-Set `Render.AO.Implementation = 1`, `Render.AO.Resolution = 1`, and `App.AO.Adapter`
-to the secondary GPU index from the same hardware list as `Render.PrimaryAdapter`.
-`App.AO.Adapter = -1` selects local AO, which is the default. When Cloud Picture
-also uses a secondary GPU, both techniques share that adapter. An unavailable or
-conflicting AO adapter falls back to local HBAO.
+Set `App.AO.Adapter` to a secondary DXGI index from the same list as
+`Render.PrimaryAdapter`. The default `-1` runs AO locally. When Cloud Picture
+also uses a secondary GPU, both techniques must use that adapter. An unavailable
+or conflicting adapter, an unsupported grid, or a missing required prepass falls
+back to local AO.
 
-`App.AO.CrossSync = 1` (default) imports the current frame's visibility.
-With `0`, GPU0 imports exactly the preceding frame and reprojects it using
-G-buffer motion, jitter and a history depth check. Invalid history pixels use
-visibility 1. The first frame and the first frame after invalidation import
-their own output as a new history baseline.
+| `Render.AO.Implementation` | Remote grids (`Render.AO.Resolution`) | GPU0 → GPU1 | Filter |
+| --- | --- | --- | --- |
+| `0` SSAO | Full (`0`), Half (`1`) | Early depth and material normals | Bilateral on GPU0 or GPU1 |
+| `1` HBAO | Half (`1`) | Half-depth | Bilateral on GPU0 or GPU1 |
+| `2` XeGTAO | Full (`0`) | Early depth and material normals | XeGTAO denoise on GPU0 or GPU1 |
+| `3` CACAO | Full (`0`), Half (`1`) | Early depth and material normals | CACAO SDK on GPU1 |
 
-`App.AO.BlurOnSecondary = 0` (default) runs the configured bilateral passes on
-GPU0 after import and any reprojection, using current half-depth and G-buffer
-normals. With `1`, GPU1 filters in the source grid before export using normals
-reconstructed from half-depth. Both modes transfer only half-depth and one
-visibility texture. Zero denoise passes skips blur on either GPU. Resolve and
-upsampling always run on GPU0. To capture the final AO only after reprojection,
-use `--read-texture=Scene.AO.Reprojected`. Launch with `--debug-ui` and select `Scene.AO` in the
-scene texture inspector to view the result.
+SSAO, XeGTAO and CACAO require `App.DepthNormalsPrepass = true`. GPU0 prepares
+and exports their inputs at the DepthNormals boundary, before the G-buffer.
+Half-resolution preparation preserves the representative pixel used by SSAO
+and by the GPU0 depth/normal-aware upsample. CACAO retains its SDK settings
+and the existing padding for small grids.
 
-### Two-adapter XeGTAO
+All four paths support `App.AO.CrossSync = 1` (current frame, default) and
+`0` (exactly the previous frame). The first frame and the first after a history
+reset import their own output. GPU0 reprojects delayed AO using G-buffer motion,
+both frames' jitter, and the source depth. Invalid pixels use visibility 1.
+Resolve and any upsample run on GPU0.
 
-Use `Render.AO.Implementation = 2`, `Render.AO.Resolution = 0`,
-`App.DepthNormalsPrepass = true`, `App.AO.CrossSync = 1` and set
-`App.AO.Adapter` to a secondary DXGI index. GPU0 exports depth and prepared
-view-space normals from the early DepthNormals boundary. GPU1 keeps the depth
-pyramid and computes the current frame's XeGTAO terms. GPU0 imports the result
-before lighting and resolves it locally.
+- SSAO and HBAO export one visibility texture. With `App.AO.BlurOnSecondary = 0`
+  (default), GPU0 reprojects before bilateral blur and uses current depth and
+  material normals. With `1`, GPU1 filters the source grid before export. SSAO
+  uses the exported normals and HBAO reconstructs normals from half-depth.
+- XeGTAO keeps the depth pyramid on GPU1. With `BlurOnSecondary = 0`, GPU1
+  returns raw R8_UINT terms and R8_UNORM edges when denoise is enabled. GPU0
+  denoises on the source grid with that frame's parameters before reprojection.
+  With `1`, GPU1 denoises and returns only terms. Zero passes export only raw
+  terms and use the raw-terms scale once.
+- CACAO returns the SDK's final visibility. Its configured blur passes run in
+  the SDK context on GPU1. `App.AO.BlurOnSecondary` has no effect on CACAO.
 
-`App.AO.BlurOnSecondary = 0` (default) returns raw terms (R8_UINT) and, when
-denoise is needed, edges (R8_UNORM) for the existing GPU0 denoise passes.
-With `1`, GPU1 denoises and exports terms only. Zero denoise passes return raw
-terms without edges and resolve with the existing raw-terms scale.
-XeGTAO stays local with `CrossSync = 0`, without DepthNormals, or when the
-secondary adapter or configuration is unavailable.
+Use `--read-texture=Scene.AO.Reprojected` to capture the final `Scene.AO` once
+a delayed frame has consumed history.
 
 ### Read back a scene texture by name
 

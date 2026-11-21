@@ -32,7 +32,8 @@ private:
     };
     enum Pipeline : std::uint8_t
     {
-        PrepareNormals, SSAO, HBAO, Blur, Resolve, XePrefilter, XeMain, XeDenoise, Neutral, PrepareHalf, Upsample, PadCACAO, ReprojectHBAO, PackFull, PipelineCount
+        PrepareNormals, SSAO, HBAO, Blur, Resolve, XePrefilter, XeMain, XeDenoise, Neutral, PrepareHalf, Upsample,
+        PadCACAO, Reproject, PackFull, ReprojectXe, PipelineCount
     };
     struct WorkGrid
     {
