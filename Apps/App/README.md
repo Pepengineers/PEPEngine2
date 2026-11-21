@@ -66,6 +66,9 @@ SkyView LUT. The default `-1` keeps it local. Remote `App.Sky.SkyView.CrossSync=
 (default) imports the current requested view and reuses it while its key stays
 unchanged. Mode `0` displays the exact request of the previous frame, including
 frames with unchanged keys. A new history begins with the current request.
+Mode `3` displays the newest completed compatible view and repeats the current
+image while a newer request is pending. It starts with a local view. If the
+secondary ring is busy, subsequent frames retry the latest desired view.
 The displayed LUT carries its observer position and planet radius, while the
 screen ray and remaining atmosphere parameters use the current frame.
 The secondary GPU caches matching transmittance and multiple scattering

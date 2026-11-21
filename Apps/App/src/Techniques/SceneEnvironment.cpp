@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <optional>
 #include <stdexcept>
 
 namespace BistroRender
@@ -20,8 +21,8 @@ AutoConsoleVariable<int> SkyViewAdapter(L"App.Sky.SkyView.Adapter", -1,
     L"Hardware GPU for the camera SkyView LUT. -1 keeps SkyView on the primary GPU.",
     EConsoleVariableFlags::Default, [](int value) { return value >= -1; });
 AutoConsoleVariable<int> SkyViewCrossSync(L"App.Sky.SkyView.CrossSync", 1,
-    L"Remote camera SkyView: 0 exact previous frame (first uses current), 1 exact current frame.",
-    EConsoleVariableFlags::Default, [](int value) { return value == 0 || value == 1; });
+    L"Remote camera SkyView: 0 exact previous, 1 exact current, 3 latest completed with local bootstrap.",
+    EConsoleVariableFlags::Default, [](int value) { return value == 0 || value == 1 || value == 3; });
 
 bool Different(const GDX12SkyConstants& a, const GDX12SkyConstants& b)
 {
@@ -37,13 +38,18 @@ bool DeviceLost(HRESULT code)
 
 struct SceneEnvironment::RemoteSkyView
 {
-	struct Publication
+	struct View
+	{
+		GDX12SkyConstants Key;
+		uint64_t Version = 0, SourceFrame = 0, Inputs = 0;
+		CompletionToken Ready;
+	};
+	struct Publication : View
 	{
 		QueueSubmission::TransferBuffer Shared;
 		std::unique_ptr<GDX12UploadBuffer<GDX12SkyConstants>> Constants;
-		GDX12SkyConstants Key;
-		uint64_t Version = 0, SourceFrame = 0, Inputs = 0, Generation = 0;
-		CompletionToken Ready, Reader;
+		uint64_t Generation = 0;
+		CompletionToken Reader;
 	};
 
 	std::shared_ptr<QueueSubmission> Submit;
@@ -60,7 +66,9 @@ struct SceneEnvironment::RemoteSkyView
 	int Policy = -1;
 	UINT Next = 0;
 	GDX12SkyConstants Medium, Multiple;
+	GDX12SkyConstants CompatibleMedium, CompatibleMultiple;
 	Publication *Latest = nullptr, *Selected = nullptr;
+	std::optional<View> Displayed;
 	NativeWork RemoteWork, PrimaryWork;
 	Schedule Plan;
 	std::vector<ID3D12Resource*> Bindings;
@@ -109,24 +117,64 @@ struct SceneEnvironment::RemoteSkyView
 	               const GDX12SkyConstants& multiple)
 	{
 		if (Policy == mode && CameraRevision == camera && SkyRevision == sky &&
-		    !Different(Medium, medium) && !Different(Multiple, multiple)) return;
+		    !Different(CompatibleMedium, medium) && !Different(CompatibleMultiple, multiple)) return;
 		Policy = mode;
 		CameraRevision = camera;
 		SkyRevision = sky;
+		CompatibleMedium = medium;
+		CompatibleMultiple = multiple;
 		++Generation;
 		Latest = Selected = nullptr;
+		Displayed.reset();
 		Ordered = Imported = Reports = 0;
+	}
+
+	void SelectCompleted()
+	{
+		Selected = nullptr;
+		uint64_t version = Displayed ? Displayed->Version : 0;
+		for (auto& slot : Ring)
+		{
+			if (slot.Generation != Generation || slot.Version <= version || !Submit->Complete(slot.Ready)) continue;
+			Selected = &slot;
+			version = slot.Version;
+		}
+	}
+
+	std::optional<UINT> BeginOrder()
+	{
+		const UINT size = UINT(Ring.size());
+		if (Policy != 3)
+		{
+			const UINT index = Next++ % size;
+			const auto& slot = Ring[index];
+			if (&slot == Latest) throw std::logic_error("Overwriting the latest SkyView request");
+			Recorder.Begin(index);
+			if (slot.Reader && !Submit->Complete(slot.Reader))
+				throw std::logic_error("SkyView transfer slot still in use by GPU0");
+			return index;
+		}
+		const uint64_t displayed = Selected ? Selected->Version : Displayed ? Displayed->Version : 0;
+		for (UINT offset = 0; offset < size; ++offset)
+		{
+			const UINT index = (Next + offset) % size;
+			const auto& slot = Ring[index];
+			// Preserve newer publications, including any that completed after this frame's selection.
+			if (&slot == Latest || &slot == Selected || (slot.Generation == Generation && slot.Version > displayed) ||
+			    (slot.Ready && !Submit->Complete(slot.Ready)) || (slot.Reader && !Submit->Complete(slot.Reader)) ||
+			    !Recorder.TryBegin(index)) continue;
+			Next = (index + 1) % size;
+			return index;
+		}
+		return std::nullopt;
 	}
 	Publication* PrepareOrder(const GDX12SkyConstants& key, const GDX12SkyConstants& medium,
 	                          const GDX12SkyConstants& multiple)
 	{
 		if (Latest && !Different(Latest->Key, key)) return nullptr;
-		const UINT index = Next++ % UINT(Ring.size());
-		auto& slot = Ring[index];
-		if (&slot == Latest) throw std::logic_error("Overwriting the latest SkyView request");
-		Recorder.Begin(index);
-		if (slot.Reader && !Submit->Complete(slot.Reader))
-			throw std::logic_error("SkyView transfer slot still in use by GPU0");
+		const auto index = BeginOrder();
+		if (!index) return nullptr; // The caller retries the latest desired key on each frame, including when it stops changing.
+		auto& slot = Ring[*index];
 		if (!slot.Constants)
 			slot.Constants = std::make_unique<GDX12UploadBuffer<GDX12SkyConstants>>(Resources.Device, 1);
 		if (!slot.Shared.Resources[0]) slot.Shared = Submit->CreateTransferBuffer(Device, Bytes);
@@ -292,6 +340,7 @@ bool SceneEnvironment::PrepareSkyView(Executor& primary, uint64_t frame, bool at
 		if (!_remoteSkyView)
 			_remoteSkyView = std::make_unique<RemoteSkyView>(primary, device, UINT(_resources.FrameConstants.size()), sources);
 		_remoteSkyView->Configure(mode, _common.HistoryRevision, skyRevision, _mediumConstants, _multipleConstants);
+		if (mode == 3) _remoteSkyView->SelectCompleted();
 		order = _remoteSkyView->PrepareOrder(_viewConstants, _mediumConstants, _multipleConstants);
 	}
 	catch (const DxException& e)
@@ -309,7 +358,14 @@ bool SceneEnvironment::PrepareSkyView(Executor& primary, uint64_t frame, bool at
 	// Capture the request of the preceding frame, even when that frame did not dispatch.
 	auto* previous = remote.Latest;
 	if (order) remote.Publish(*order, _mediumConstants, _multipleConstants, frame);
-	remote.Selected = mode == 0 && previous ? previous : remote.Latest;
+	if (mode != 3) remote.Selected = mode == 0 && previous ? previous : remote.Latest;
+	if (remote.Selected) remote.Displayed = static_cast<const RemoteSkyView::View&>(*remote.Selected);
+	if (!remote.Displayed)
+	{
+		remote.Displayed = RemoteSkyView::View{_viewConstants, 0, frame};
+		localChanged = true;
+		return false;
+	}
 	return true;
 }
 
@@ -535,7 +591,7 @@ void SceneEnvironment::Build(Executor& primary, uint64_t frameNumber)
 	changed |= lightingChanged;
 	const bool remoteSkyView = PrepareSkyView(primary, frameNumber, state.Source == SkySource::SkyAtmosphere,
 	    state.Revision, viewChanged);
-	const auto& visibleKey = remoteSkyView ? _remoteSkyView->Selected->Key : constants;
+	const auto& visibleKey = _remoteSkyView && _remoteSkyView->Displayed ? _remoteSkyView->Displayed->Key : constants;
 	auto& sampling = _skyViewSampling.at(r.CurrFrameConstantsIndex);
 	if (!sampling) sampling = std::make_unique<GDX12UploadBuffer<XMFLOAT4>>(r.Device, 1);
 	sampling->CopyData(0, XMFLOAT4(visibleKey.CameraPosition.x, visibleKey.CameraPosition.y,
@@ -884,6 +940,8 @@ void SceneEnvironment::AddSkyViewWaits(const Schedule& schedule, std::vector<Pac
 	{
 		if (remote.ImportPacket >= remote.Consumer || remote.Consumer >= schedule.Packets.size())
 			throw std::logic_error("SkyView import must precede visible deferred lighting");
+		if (remote.Policy == 3 && !remote.Submit->Complete(remote.Selected->Ready))
+			throw std::logic_error("Latest-ready SkyView selected an unfinished publication");
 		waits.push_back({remote.ImportPacket, remote.Selected->Ready});
 	}
 }
@@ -900,13 +958,15 @@ void SceneEnvironment::SkyViewSubmitted(uint64_t frame, const std::vector<Comple
 	}
 	if (remote.Consumer >= completions.size() || !completions[remote.Consumer] || remote.Reports >= 6) return;
 	++remote.Reports;
-	const auto& displayed = *remote.Selected;
+	const auto& displayed = *remote.Displayed;
 	Log::Info("RenderGraph", "Visible SkyView CrossSync=", remote.Policy, " frame=", frame,
 	    " GPU=", remote.Submit->AdapterLabel(remote.Device), " displayGPU=", remote.Submit->AdapterLabel(0),
-	    " ordered=", remote.Latest->Version, " orderedFrame=", remote.Latest->SourceFrame,
+	    " ordered=", remote.Latest ? remote.Latest->Version : 0,
+	    " orderedFrame=", remote.Latest ? remote.Latest->SourceFrame : 0,
 	    " shown=", displayed.Version, " shownFrame=", displayed.SourceFrame,
 	    " inputs=", displayed.Inputs, " exportFence=", displayed.Ready.Value, " importFence=", imported.Value,
-	    " generation=", remote.Generation, " firstConsumer=clustered deferred lighting consumerFence=",
+	    " generation=", remote.Generation, " orderedInputs=", remote.Latest ? remote.Latest->Inputs : 0,
+	    " firstConsumer=clustered deferred lighting consumerFence=",
 	    completions[remote.Consumer].Value);
 }
 std::vector<Access> SceneEnvironment::Reads(Graph& graph, std::vector<ID3D12Resource*>& bindings) const
