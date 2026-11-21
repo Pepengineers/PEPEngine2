@@ -88,18 +88,21 @@ private:
     };
     using FieldBuffer = GDX12UploadBuffer<XMFLOAT4>;
     using VelocityBuffers = std::array<std::unique_ptr<FieldBuffer>, 2>;
-    struct WindState
+    struct WindSample
     {
         GDX12WindInstance Source;
-        VelocityBuffers Velocity, Pressure;
-        std::unique_ptr<FieldBuffer> Advected, Divergence;
         float Time = 0;
         float PreviousTime = 0;
         UINT Resolution = 0;
-        bool Initialized = false;
         bool ResetHistory = true;
-        bool Remote = false;
         uint64_t SettingsHash = 0;
+    };
+    struct WindState : WindSample
+    {
+        VelocityBuffers Velocity, Pressure;
+        std::unique_ptr<FieldBuffer> Advected, Divergence;
+        bool Initialized = false;
+        bool Remote = false;
     };
     struct WindJob
     {
@@ -145,6 +148,7 @@ private:
     void EnsureNeutralWind();
     void PlanLocalWind(WindState&, uint64_t independentWind);
     void FallBackToLocalWind(uint64_t independentWind);
+    void ApplyWindHistory();
     const VelocityBuffers& Velocity(const WindState&);
     void UpdateWind(WindState& state, bool reset);
     void WindDispatch(UINT stage, const WindParameters& parameters,

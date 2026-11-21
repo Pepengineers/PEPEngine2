@@ -400,6 +400,10 @@ void GDX12GrassRenderer::BeginFrame(const RenderPipelineCommonData& common,
         RetireWind(it->second);
         it = _wind.erase(it);
     }
+}
+
+void GDX12GrassRenderer::ApplyWindHistory()
+{
     for (const auto id : _drawOrder)
     {
         auto& state = _grass.at(id);
@@ -428,11 +432,6 @@ void GDX12GrassRenderer::FallBackToLocalWind(uint64_t independentWind)
     auto& imports = CurrentFrame().ImportedWind;
     for (const auto& entry : imports)
         PlanLocalWind(_wind.at(entry.first), independentWind);
-    for (auto id : _drawOrder)
-    {
-        auto& grass = _grass.at(id);
-        if (imports.count(grass.Source.WindId)) grass.ResetHistory = true;
-    }
     imports.clear();
 }
 

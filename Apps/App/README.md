@@ -55,7 +55,7 @@ GPU0 import queue. A wait for an already completed export incurs no GPU stall.
 
 | Mode | Who starts GPU1 work | Version used by GPU0 | Wait and first frame | Available techniques |
 | --- | --- | --- | --- | --- |
-| `0` | Bistro orders N | Exactly N−1 | Wait for N−1 if pending. First uses N, so the first pairs are 1/1, 2/1, 3/2. | Cloud Picture **(default)**, AO, particles, water **(default)** |
+| `0` | Bistro orders N | Exactly N−1 | Wait for N−1 if pending. First uses N, so the first pairs are 1/1, 2/1, 3/2. | Cloud Picture **(default)**, AO, particles, water **(default)**, ProjectedGrid wind |
 | `1` | Bistro orders N | Exactly N | Wait for N if pending, including the first frame. | Cloud Picture, AO **(default)**, particles **(default)**, water, ProjectedGrid wind **(default)** |
 | `2` | GPU1 advances independently | Newest completed publication | Cloud Picture and water can wait for the first issued export token, then wait on that fence at import. Particles start empty until a snapshot completes. After bootstrap each technique uses completed exports. | Cloud Picture, particles, water |
 | `3` | Bistro orders N | Newest completed publication | Starts empty until the first export completes. No wait for pending results at import. | Particles |
@@ -68,12 +68,16 @@ Set `App.Grass.Wind.Algorithm = 1` and select a secondary GPU with
 `App.Grass.Wind.Adapter`. Its default `-1` runs wind on GPU0. An unavailable
 adapter falls back to GPU0. Analytic wind also runs on GPU0.
 
-`App.Grass.Wind.CrossSync = 1` is the supported remote mode. GPU1 solves each
-active grass field and the Linden crown field separately and exports the
-current and previous velocity grids together. GPU0 waits at import. Grass
-uses both grids, while Linden evaluates its next pose from the current grid
-with that field's area, time and resolution. The existing Linden pose display
-order remains in effect.
+GPU1 solves each active grass field and the Linden crown field separately.
+`App.Grass.Wind.CrossSync = 1` (default) imports that frame's publication.
+Mode `0` imports exactly the preceding publication, with ordered/imported
+pairs `1/1 → 2/1 → 3/2` at startup. A new or reset field starts with its
+current publication. GPU0 waits on the selected export at import.
+
+Grass uses the selected publication's current and previous velocity grids.
+When a field repeats, grass uses the repeated grid for both velocity samples.
+Linden evaluates its next pose from the selected current grid with its area,
+time and resolution, and displays poses in the existing order.
 
 ### Remote ambient occlusion
 

@@ -17,8 +17,8 @@ AutoConsoleVariable<int> WindAdapter(L"App.Grass.Wind.Adapter", -1,
     L"Hardware GPU index for Bistro ProjectedGrid wind. -1 keeps wind on the primary GPU.",
     EConsoleVariableFlags::Default, [](int value) { return value >= -1; });
 AutoConsoleVariable<int> WindCrossSync(L"App.Grass.Wind.CrossSync", 1,
-    L"Remote ProjectedGrid wind: 1 imports the current frame's current and previous velocity.",
-    EConsoleVariableFlags::Default, [](int value) { return value == 1; });
+    L"Remote ProjectedGrid wind: 0 exact previous frame (first uses current), 1 exact current frame.",
+    EConsoleVariableFlags::Default, [](int value) { return value == 0 || value == 1; });
 // ECS wind owners count upward from one. Reserve the last ID for the scene mesh.
 constexpr uint64_t LindenWindOwner = UINT64_MAX;
 
@@ -39,12 +39,9 @@ struct SceneGrass::RemoteWind
 {
 	struct Field
 	{
-		uint64_t Owner, Offset, Bytes;
-		UINT Resolution;
-		float Time;
-		std::array<Id, 2> Local{Invalid, Invalid};
-		Id Consumer = Invalid;
-		std::string ConsumerName;
+		GDX12GrassRenderer::WindSample Sample;
+		uint64_t Offset, Bytes;
+		bool Shown = false;
 	};
 	struct Frame
 	{
@@ -52,7 +49,21 @@ struct SceneGrass::RemoteWind
 		std::vector<Field> Fields;
 		uint64_t Capacity = 0, Version = 0;
 		CompletionToken Ready, Reader;
-		Id Import = Invalid, ImportPacket = Invalid;
+	};
+	struct DisplayField
+	{
+		Field* Published;
+		bool Repeat;
+		bool UseCurrentAsPrevious;
+		std::array<Id, 2> Local{Invalid, Invalid};
+		Id Consumer = Invalid;
+		std::string ConsumerName;
+	};
+	struct Import
+	{
+		Frame* Source = nullptr;
+		std::vector<DisplayField> Fields;
+		Id Operation = Invalid, Packet = Invalid;
 	};
 
 	std::shared_ptr<QueueSubmission> Submissions;
@@ -61,13 +72,19 @@ struct SceneGrass::RemoteWind
 	std::unique_ptr<GDX12GrassRenderer> Solver;
 	Executor Recorder;
 	std::vector<Frame> Frames;
+	std::array<Import, 2> Imports;
+	Frame* Current = nullptr;
+	Frame* Previous = nullptr;
 	std::set<uint64_t> Reported;
+	size_t Next = 0;
 	uint64_t Ordered = 0;
+	int Mode = -1;
 	bool Imported = false;
 
 	RemoteWind(GDX12DeviceResources& primary, Executor& executor, Id device)
 	    : Submissions(executor.Submissions()), Device(device),
-	      Recorder(Submissions, device, UINT(primary.FrameConstants.size()), 1), Frames(primary.FrameConstants.size())
+	      Recorder(Submissions, device, UINT(primary.FrameConstants.size() + 1), 1),
+	      Frames(primary.FrameConstants.size() + 1)
 	{
 		Resources.Device = &Submissions->Device(device);
 		Resources.FrameConstants.resize(Frames.size());
@@ -78,17 +95,27 @@ struct SceneGrass::RemoteWind
 		Solver->InitializeWind();
 	}
 
-	void Begin(UINT slot)
+	void Begin(int mode)
 	{
+		if (Mode != mode)
+		{
+			Mode = mode;
+			Previous = nullptr;
+			Ordered = 0;
+			Reported.clear();
+		}
+		Imports = {};
+		const UINT slot = UINT(Next++ % Frames.size());
+		Current = &Frames[slot];
+		if (Current == Previous) throw std::logic_error("Overwriting the previous wind publication");
 		Recorder.Begin(slot);
 		Resources.CurrFrameConstantsIndex = slot;
-		auto& publication = Frames[slot];
-		// The primary frame-slot retirement covers the previous import and its readers.
+		auto& publication = *Current;
+		// The extra slot covers the extra frame that can import this publication.
 		if (publication.Reader && !Submissions->Complete(publication.Reader))
 			throw std::logic_error("Wind display slot still in use by GPU0");
 		publication.Fields.clear();
 		publication.Ready = publication.Reader = {};
-		publication.Import = publication.ImportPacket = Invalid;
 		auto& frame = Solver->CurrentFrame();
 		frame.RetiredFields.clear();
 		frame.WindCursor = 0;
@@ -97,8 +124,21 @@ struct SceneGrass::RemoteWind
 
 	bool Publish(GDX12GrassRenderer& primary)
 	{
-		auto& frame = Frames[Resources.CurrFrameConstantsIndex];
+		auto& frame = *Current;
 		const auto& imports = primary.CurrentFrame().ImportedWind;
+		if (imports.empty())
+		{
+			// An idle frame has no new terminal fence to retire the former solver buffers.
+			if (!Solver->_wind.empty())
+			{
+				Recorder.Drain();
+				Solver->_wind.clear();
+			}
+			Previous = nullptr;
+			Ordered = 0;
+			Reported.clear();
+			return true;
+		}
 		for (auto it = Solver->_wind.begin(); it != Solver->_wind.end();)
 			if (!imports.count(it->first))
 			{
@@ -106,7 +146,6 @@ struct SceneGrass::RemoteWind
 				it = Solver->_wind.erase(it);
 			}
 			else ++it;
-		if (imports.empty()) return true;
 
 		Graph graph;
 		graph.Device = Device;
@@ -122,7 +161,7 @@ struct SceneGrass::RemoteWind
 		{
 			const auto& field = Solver->_wind.at(entry.first);
 			const uint64_t size = uint64_t(field.Resolution) * field.Resolution * sizeof(XMFLOAT4);
-			frame.Fields.push_back({entry.first, bytes, size, field.Resolution, field.Time});
+			frame.Fields.push_back({primary._wind.at(entry.first), bytes, size});
 			for (const auto& velocity : field.Velocity)
 			{
 				auto* source = velocity->GetResource().D3DResource.Get();
@@ -163,7 +202,36 @@ struct SceneGrass::RemoteWind
 		Recorder.Execute(schedule, bindings, [&](Id operation, uint32_t, auto* cmd) { work.Record(operation, cmd); });
 		frame.Ready = Recorder.Completions().back();
 		frame.Version = ++Ordered;
+		SelectDisplay(primary);
 		return true;
+	}
+
+	void SelectDisplay(GDX12GrassRenderer& primary)
+	{
+		Imports[0].Source = Previous;
+		Imports[1].Source = Current;
+		for (auto& ordered : Current->Fields)
+		{
+			Field* shown = &ordered;
+			if (Mode == 0 && Previous && !ordered.Sample.ResetHistory)
+			{
+				const auto found = std::find_if(Previous->Fields.begin(), Previous->Fields.end(), [&](const auto& field) {
+					return field.Sample.Source.Id == ordered.Sample.Source.Id &&
+					    field.Sample.SettingsHash == ordered.Sample.SettingsHash;
+				});
+				if (found != Previous->Fields.end()) shown = &*found;
+			}
+			const bool repeat = shown->Shown;
+			const bool bootstrap = Current->Version == 1 || (Mode == 0 && shown == &ordered);
+			const bool useCurrentAsPrevious = repeat || (Mode == 0 && bootstrap);
+			auto& view = static_cast<GDX12GrassRenderer::WindSample&>(primary._wind.at(ordered.Sample.Source.Id));
+			view = shown->Sample;
+			view.ResetHistory = !repeat && (view.ResetHistory || bootstrap);
+			if (useCurrentAsPrevious) view.PreviousTime = view.Time;
+			auto& selected = Imports[shown == &ordered ? 1 : 0];
+			selected.Fields.push_back({shown, repeat, useCurrentAsPrevious});
+		}
+		Previous = Current;
 	}
 };
 
@@ -232,7 +300,7 @@ void SceneGrass::Prepare(RenderPipelineContext& c, float dt, Executor& primary, 
 	    std::any_of(_scene._wind.begin(), _scene._wind.end(), [](const auto& wind) {
 		    return wind.Implementation == GDX12WindImplementation::ProjectedGrid;
 	    });
-	const int requested = projected && WindCrossSync.GetValue() == 1 ? WindAdapter.GetValue() : -1;
+	const int requested = projected ? WindAdapter.GetValue() : -1;
 	if (_failedWindAdapter != requested) _failedWindAdapter = -1;
 	const Id device = requested >= 0 && requested != _failedWindAdapter ?
 	    primary.Submissions()->SelectAdapter(requested) : 0;
@@ -255,7 +323,7 @@ void SceneGrass::Prepare(RenderPipelineContext& c, float dt, Executor& primary, 
 			Log::Warning("RenderGraph", "Using local ProjectedGrid wind: ", e.what());
 		}
 	}
-	if (_remoteWind) _remoteWind->Begin(_resources.CurrFrameConstantsIndex);
+	if (_remoteWind) _remoteWind->Begin(WindCrossSync.GetValue());
 	_gpu->BeginFrame(c.Common, _scene._grass, _scene._wind, _scene._controls, _scene._sources, _scene._deltaSeconds,
 	                 enable ? LindenWindOwner : 0, _remoteWind ? _remoteWind->Solver.get() : nullptr);
 	if (_remoteWind && !_remoteWind->Publish(*_gpu))
@@ -265,6 +333,7 @@ void SceneGrass::Prepare(RenderPipelineContext& c, float dt, Executor& primary, 
 		_failedWindAdapter = requested;
 		_gpu->FallBackToLocalWind(enable ? LindenWindOwner : 0);
 	}
+	_gpu->ApplyWindHistory();
 	LindenWindSample sample;
 	sample.Revision = _lindenWind.Revision;
 	if (enable)
@@ -284,86 +353,107 @@ void SceneGrass::Prepare(RenderPipelineContext& c, float dt, Executor& primary, 
 
 Id SceneGrass::WindExecutionDevice() const
 {
-	return _remoteWind && _remoteWind->Frames[_resources.CurrFrameConstantsIndex].Ready ? _remoteWind->Device : 0;
+	return _remoteWind && _remoteWind->Current && _remoteWind->Current->Ready ? _remoteWind->Device : 0;
 }
 
 void SceneGrass::AppendWindImport(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work)
 {
 	if (!WindExecutionDevice()) return;
-	auto& frame = _remoteWind->Frames[_resources.CurrFrameConstantsIndex];
-	auto* shared = frame.Shared.Resources[0].Get();
-	std::vector<Access> accesses{{NativeWork::ResourceFor(graph, bindings, shared, "shared wind velocity"),
-	                              Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE}};
-	std::vector<WindCopy> copies;
-	for (auto& field : frame.Fields)
+	// On a mixed reset frame queue the previous publication's copy before any wait for the current one.
+	for (auto& import : _remoteWind->Imports)
 	{
-		const auto& velocity = _gpu->CurrentFrame().ImportedWind.at(field.Owner);
-		for (size_t i = 0; i < velocity.size(); ++i)
+		if (import.Fields.empty()) continue;
+		auto* shared = import.Source->Shared.Resources[0].Get();
+		std::vector<Access> accesses{{NativeWork::ResourceFor(graph, bindings, shared, "shared wind velocity"),
+		                              Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE}};
+		std::vector<WindCopy> copies;
+		for (auto& display : import.Fields)
 		{
-			auto* target = velocity[i]->GetResource().D3DResource.Get();
-			field.Local[i] = NativeWork::ResourceFor(graph, bindings, target, "imported wind velocity");
-			copies.push_back({target, field.Offset + i * field.Bytes, field.Bytes});
-			accesses.push_back({field.Local[i], Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST});
+			const auto& field = *display.Published;
+			const auto& velocity = _gpu->CurrentFrame().ImportedWind.at(field.Sample.Source.Id);
+			for (size_t i = 0; i < velocity.size(); ++i)
+			{
+				auto* target = velocity[i]->GetResource().D3DResource.Get();
+				const uint64_t grid = display.UseCurrentAsPrevious ? 0 : i;
+				display.Local[i] = NativeWork::ResourceFor(graph, bindings, target, "imported wind velocity");
+				copies.push_back({target, field.Offset + grid * field.Bytes, field.Bytes});
+				accesses.push_back({display.Local[i], Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST});
+			}
 		}
+		import.Operation = work.Add(graph, "GPU0 import ProjectedGrid velocity", std::move(accesses),
+		    [shared, copies = std::move(copies)](auto* cmd)
+		    {
+			    for (const auto& copy : copies) cmd->CopyBufferRegion(copy.Buffer, 0, shared, copy.Offset, copy.Bytes);
+		    }, {}, Queue::Copy);
 	}
-	frame.Import = work.Add(graph, "GPU0 import ProjectedGrid velocity", std::move(accesses),
-	    [shared, copies = std::move(copies)](auto* cmd)
-	    {
-		    for (const auto& copy : copies) cmd->CopyBufferRegion(copy.Buffer, 0, shared, copy.Offset, copy.Bytes);
-	    }, {}, Queue::Copy);
 }
 
 void SceneGrass::AddWindWaits(const Schedule& schedule, std::vector<PacketWait>& waits)
 {
 	if (!WindExecutionDevice()) return;
-	auto& frame = _remoteWind->Frames[_resources.CurrFrameConstantsIndex];
-	if (frame.Import == Invalid) throw std::logic_error("Missing ProjectedGrid import operation");
-	for (Id index = 0; index < schedule.Packets.size(); ++index)
+	const bool traceStartup = _remoteWind->Mode == 0 && _remoteWind->Current->Version <= 4;
+	for (auto& import : _remoteWind->Imports)
 	{
-		const auto& packet = schedule.Packets[index];
-		if (packet.Operation == frame.Import)
+		if (import.Fields.empty()) continue;
+		if (import.Operation == Invalid) throw std::logic_error("Missing ProjectedGrid import operation");
+		for (Id index = 0; index < schedule.Packets.size(); ++index)
 		{
-			frame.ImportPacket = index;
-			continue;
+			const auto& packet = schedule.Packets[index];
+			if (packet.Operation == import.Operation)
+			{
+				import.Packet = index;
+				continue;
+			}
+			for (auto& field : import.Fields)
+			{
+				if (field.Consumer != Invalid ||
+				    (!traceStartup && _remoteWind->Reported.count(field.Published->Sample.Source.Id))) continue;
+				if (!std::any_of(packet.Accesses.begin(), packet.Accesses.end(), [&](const auto& access) {
+					    return access.Usage == Mode::Read &&
+					        (access.Resource == field.Local[0] || access.Resource == field.Local[1]);
+				    })) continue;
+				if (import.Packet == Invalid)
+					throw std::logic_error("Wind field consumed before GPU0 import");
+				field.Consumer = index;
+				field.ConsumerName = packet.Name;
+			}
 		}
-		for (auto& field : frame.Fields)
-		{
-			if (field.Consumer != Invalid || _remoteWind->Reported.count(field.Owner)) continue;
-			if (!std::any_of(packet.Accesses.begin(), packet.Accesses.end(), [&](const auto& access) {
-				    return access.Usage == Mode::Read &&
-				        (access.Resource == field.Local[0] || access.Resource == field.Local[1]);
-			    })) continue;
-			if (frame.ImportPacket == Invalid)
-				throw std::logic_error("Wind field consumed before GPU0 import");
-			field.Consumer = index;
-			field.ConsumerName = packet.Name;
-		}
+		if (import.Packet == Invalid) throw std::logic_error("Missing ProjectedGrid import packet");
+		waits.push_back({import.Packet, import.Source->Ready});
 	}
-	if (frame.ImportPacket == Invalid) throw std::logic_error("Missing ProjectedGrid import packet");
-	waits.push_back({frame.ImportPacket, frame.Ready});
 }
 
 void SceneGrass::WindSubmitted(uint64_t frameNumber, const std::vector<CompletionToken>& completions)
 {
 	if (!WindExecutionDevice()) return;
-	auto& frame = _remoteWind->Frames[_resources.CurrFrameConstantsIndex];
-	if (frame.ImportPacket >= completions.size() || !completions[frame.ImportPacket]) return;
-	frame.Reader = completions[frame.ImportPacket];
-	if (!_remoteWind->Imported)
+	const auto& ordered = *_remoteWind->Current;
+	for (auto& import : _remoteWind->Imports)
 	{
-		_remoteWind->Submissions->LogFirstImport("ProjectedGrid wind", frame.Ready, frame.Reader);
-		_remoteWind->Imported = true;
-	}
-	for (const auto& field : frame.Fields)
-	{
-		if (field.Consumer >= completions.size() || !completions[field.Consumer]) continue;
-		_remoteWind->Reported.insert(field.Owner);
-		Log::Info("RenderGraph", "ProjectedGrid wind CrossSync=1 frame=", frameNumber,
-		    " field=", field.Owner == LindenWindOwner ? "Linden" : "Grass", " id=", field.Owner,
-		    " grid=", field.Resolution, " time=", field.Time,
-		    " exported=", frame.Version, " imported=", frame.Version, " exportFence=", frame.Ready.Value,
-		    " importFence=", frame.Reader.Value, " firstConsumer=", field.ConsumerName,
-		    " consumerFence=", completions[field.Consumer].Value);
+		if (import.Packet >= completions.size() || !completions[import.Packet]) continue;
+		auto& publication = *import.Source;
+		publication.Reader = completions[import.Packet];
+		if (!_remoteWind->Imported)
+		{
+			_remoteWind->Submissions->LogFirstImport("ProjectedGrid wind", publication.Ready, publication.Reader);
+			_remoteWind->Imported = true;
+		}
+		for (const auto& field : import.Fields)
+		{
+			field.Published->Shown = true;
+			const auto& sample = field.Published->Sample;
+			const auto owner = sample.Source.Id;
+			const bool read = field.Consumer < completions.size() && completions[field.Consumer];
+			const bool first = read && _remoteWind->Reported.insert(owner).second;
+			if (!first && !(_remoteWind->Mode == 0 && ordered.Version <= 4)) continue;
+			Log::Info("RenderGraph", "ProjectedGrid wind CrossSync=", _remoteWind->Mode, " frame=", frameNumber,
+			    " field=", owner == LindenWindOwner ? "Linden" : "Grass", " id=", owner,
+			    " grid=", sample.Resolution, " time=", sample.Time,
+			    " ordered=", ordered.Version, " imported=", publication.Version, " waitExportFence=", publication.Ready.Value,
+			    " orderedExportFence=", ordered.Ready.Value, " importFence=", publication.Reader.Value,
+			    " repeat=", field.Repeat, " previousIsCurrent=", field.UseCurrentAsPrevious,
+			    " firstConsumer=", read ? field.ConsumerName.c_str() : "none",
+			    " consumerFence=", read ? completions[field.Consumer].Value : 0);
+		}
 	}
 }
 
