@@ -133,6 +133,10 @@ protected:
     bool ShouldRender() override;
 
 private:
+    // Install the selected mesh on component creation or when its mesh-change event arrives.
+    // Requires submitted geometry and a valid material slot for every submesh.
+    // Waits for GPU work, disables the previous commands, and allocates fresh instance slots.
+    void BindMesh(StaticMeshRenderComponent& component);
     void WriteMeshDrawCommands(const StaticMeshRenderComponent& component);
     // Disable this mesh's submesh slots on every adapter after the last queue read.
     void DisableMeshInstanceDrawCommands(const std::vector<UINT>& instances);

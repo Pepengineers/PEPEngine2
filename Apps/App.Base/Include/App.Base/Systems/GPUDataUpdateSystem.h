@@ -191,7 +191,7 @@ public:
                     {
                         if (!(flags & RENDER_PASS_FLAG_USE_INSTANCES)) { continue; }
                         auto& instanceCache = renderModule->GetCurrentFrameConstants(role)->InstanceCache;
-                        auto gpuMesh = renderModule->GetGPUMesh(role, renderer.MeshHandler);
+                        auto gpuMesh = renderModule->GetGPUMesh(role, renderer._boundMeshHandler);
                         gpuMesh->CPUMesh->GetBounds().Transform(renderer.Bounds, worldMatrix);
                         for (int i = 0; i < gpuMesh->SubMeshes.size(); i++)
                         {

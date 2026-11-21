@@ -583,17 +583,10 @@ void RenderModule::OnCameraComponentUpdated(World& world, Entity entity, CameraC
 
 void RenderModule::OnRenderComponentCreated(World& world, Entity entity, StaticMeshRenderComponent& component)
 {
-    component.DirtyFlag = true;
-    if (_frameGraph) { _frameGraph->WaitForGPUCompletion(); }
-    const auto* mesh = _meshes.at(component.MeshHandler.GetValue());
+    // A copied component belongs to a new entity and receives its own draw slots.
     component._CBufferIndices.clear();
-    for (size_t i = 0; i < mesh->GetSubMeshCount(); i++)
-    {
-        component._CBufferIndices.push_back(_instanceCount++);
-    }
-    ResizeSceneBuffers(_primaryResources, GetDevicePassFlags(DEVICE_ROLE_PRIMARY));
-    ResizeSceneBuffers(_secondaryResources, GetDevicePassFlags(DEVICE_ROLE_SECONDARY));
-    WriteMeshDrawCommands(component);
+    component._boundMeshHandler = {};
+    BindMesh(component);
 }
 
 void RenderModule::OnRenderComponentDestroyed(World& world, Entity entity, StaticMeshRenderComponent& component)
@@ -603,7 +596,32 @@ void RenderModule::OnRenderComponentDestroyed(World& world, Entity entity, Stati
 
 void RenderModule::OnRenderComponentUpdated(World& world, Entity entity, StaticMeshRenderComponent& component)
 {
+    if (component.MeshHandler != component._boundMeshHandler)
+        BindMesh(component);
     component.DirtyFlag = true;
+}
+
+void RenderModule::BindMesh(StaticMeshRenderComponent& component)
+{
+    const auto* mesh = _meshes.at(component.MeshHandler.GetValue());
+    for (const auto& subMesh : mesh->GetSubMeshes())
+    {
+        if (subMesh.MaterialIndex >= component.Materials.size() || !component.Materials[subMesh.MaterialIndex])
+            throw std::invalid_argument("Missing material slot for the mesh. Set Materials before notifying the component update.");
+    }
+
+    // Growing the shared command and instance buffers requires all previous users to finish.
+    component._CBufferIndices.reserve(mesh->GetSubMeshCount());
+    if (_frameGraph) { _frameGraph->WaitForGPUCompletion(); }
+    DisableMeshInstanceDrawCommands(component._CBufferIndices);
+    component._CBufferIndices.clear();
+    for (size_t i = 0; i < mesh->GetSubMeshCount(); ++i)
+        component._CBufferIndices.push_back(_instanceCount++);
+    ResizeSceneBuffers(_primaryResources, GetDevicePassFlags(DEVICE_ROLE_PRIMARY));
+    ResizeSceneBuffers(_secondaryResources, GetDevicePassFlags(DEVICE_ROLE_SECONDARY));
+    component._boundMeshHandler = component.MeshHandler;
+    component.DirtyFlag = true;
+    WriteMeshDrawCommands(component);
 }
 
 void RenderModule::WriteMeshDrawCommands(const StaticMeshRenderComponent& component)
@@ -612,7 +630,7 @@ void RenderModule::WriteMeshDrawCommands(const StaticMeshRenderComponent& compon
     {
         if (!PipelineHasFlag(role, RENDER_PASS_FLAG_USE_INSTANCES)) continue;
         auto& resources = GetDeviceResources(role);
-        resources.SetMeshDrawCommands(component._CBufferIndices, resources.GeometryBuffer->GetGPUMeshByHandle(component.MeshHandler));
+        resources.SetMeshDrawCommands(component._CBufferIndices, resources.GeometryBuffer->GetGPUMeshByHandle(component._boundMeshHandler));
     }
 }
 
@@ -826,7 +844,7 @@ void RenderModule::UploadSceneResources(GDX12DeviceResources& resources, uint32_
         {
             world->GetECS().ForEach<StaticMeshRenderComponent>([&](Entity, const StaticMeshRenderComponent& mesh)
             {
-                resources.SetMeshDrawCommands(mesh._CBufferIndices, resources.GeometryBuffer->GetGPUMeshByHandle(mesh.MeshHandler));
+                resources.SetMeshDrawCommands(mesh._CBufferIndices, resources.GeometryBuffer->GetGPUMeshByHandle(mesh._boundMeshHandler));
             });
         }
     }
