@@ -13,7 +13,7 @@ RWStructuredBuffer<uint> SortData : register(u11);
 
 void CullParticle(Particle particle)
 {
-    if (Paused != 0)
+    if (Paused != 0 || ResetMotion != 0)
     {
         particle.Previous = particle.Position;
         particle.PreviousAge = particle.Age;

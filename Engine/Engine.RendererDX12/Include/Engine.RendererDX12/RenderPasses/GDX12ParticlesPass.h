@@ -22,7 +22,8 @@ public:
     std::vector<GDX12ResourceAccess> NativePreparationAccesses(const GDX12ParticleRenderFrame& frame, bool opaque) const;
     std::vector<GDX12ResourceAccess> NativeRasterAccesses(bool includeMotion) const;
     GDX12Texture* MotionOutput() const;
-    void PrepareRenderData(GDX12CommandList* commands, const GDX12ParticleRenderFrame& frame, bool opaque);
+    void PrepareRenderData(GDX12CommandList* commands, const GDX12ParticleRenderFrame& frame, bool opaque,
+        GDX12Resource* visibilityReadback = nullptr, UINT firstRemote = 0);
     void DrawOpaque(GDX12CommandList* commands, GDX12Texture* depth, D3D12_CPU_DESCRIPTOR_HANDLE dsv,
         const D3D12_CPU_DESCRIPTOR_HANDLE* targets, UINT targetCount, OpaqueStage);
     void DrawWeightedAndMotion(GDX12CommandList* commands);

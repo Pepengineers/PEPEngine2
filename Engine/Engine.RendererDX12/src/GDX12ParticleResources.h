@@ -182,5 +182,7 @@ struct GDX12ParticleSimulation::State
     std::unique_ptr<GDX12RootSignature> Root;
     std::unordered_map<std::string, ComPtr<ID3D12PipelineState>> Compute;
     ComPtr<ID3D12CommandSignature> DispatchSignature;
+    GDX12Descriptor NullDepth;
+    std::unique_ptr<ParticleResources::Buffer<GDX12CameraConstants>> NullCamera;
 
 };

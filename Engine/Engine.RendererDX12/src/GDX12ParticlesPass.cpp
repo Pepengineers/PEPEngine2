@@ -417,7 +417,7 @@ bool GDX12ParticlesPass::InitializeOpaque(const std::array<GDX12Texture*, 5>& gb
 }
 
 void GDX12ParticlesPass::PrepareRenderData(GDX12CommandList* commands,
-    const GDX12ParticleRenderFrame& particles, bool opaque)
+    const GDX12ParticleRenderFrame& particles, bool opaque, GDX12Resource* visibilityReadback, UINT firstRemote)
 {
     if (!_state || !_state->Active) return;
     auto& state = *_state;
@@ -448,13 +448,21 @@ void GDX12ParticlesPass::PrepareRenderData(GDX12CommandList* commands,
     commands->SetPipelineState(state.Compute.at("ClearDraws"));
     commands->Dispatch(1, 1, 1);
     UAV(commands, *state.Counts);
+    const auto sampleCount = [&](UINT index) {
+        auto& counts = state.Counts->GetResource();
+        commands->ResourceBarrier({counts.GetCopySourceBarrier()});
+        commands->GetCommandList()->CopyBufferRegion(visibilityReadback->D3DResource.Get(), index * sizeof(UINT),
+            counts.D3DResource.Get(), 0, sizeof(UINT));
+        UAV(commands, *state.Counts);
+    };
     for (UINT i = 0; i < state.ConstantCount; ++i)
     {
+        if (visibilityReadback && i == firstRemote) sampleCount(0);
         const auto& source = particles.Sources[i];
         const auto& emitter = source.Emitter;
         if ((emitter.Blend == ParticleBlend::Opaque) != opaque) continue;
         commands->SetComputeRootConstantBufferView(2, state.Constants[_resources->CurrFrameConstantsIndex]->GetElementAddress(i));
-        const UINT parameters[] = {emitter.MaxParticles, 0, state.Capacity, state.ResetMotion};
+        const UINT parameters[] = {emitter.MaxParticles, 0, state.Capacity, state.ResetMotion || source.ResetMotion};
         commands->GetCommandList()->SetComputeRoot32BitConstants(0, 4, parameters, 0);
         for (UINT j = 0; j < source.SRVs.size(); ++j)
             commands->SetComputeSRV(j, source.SRVs[j]);
@@ -467,6 +475,7 @@ void GDX12ParticlesPass::PrepareRenderData(GDX12CommandList* commands,
         UAV(commands, *state.Keys[0]);
         UAV(commands, *state.Payloads[0]);
     }
+    if (visibilityReadback) sampleCount(1);
     commands->SetPipelineState(state.Compute.at("BuildDrawArgs"));
     commands->Dispatch(1, 1, 1);
     commands->ResourceBarrier({ state.DrawArgs->GetResource().GetIndirectArgsBarrier() });

@@ -37,6 +37,7 @@ struct GDX12ParticleEmitterSettings
     Vector3 ShapeExtents = Vector3(10.0f);
     ParticleSimulation Simulation = ParticleSimulation::AnalyticDrag;
     bool InteractionEnabled = false;
+    bool SimulateOnSecondary = false;
     bool VolumeEnabled = false;
     Vector3 VolumeHalfExtents = Vector3(100.0f); // Emitter-local cm; contains particle centres.
     Vector3 Acceleration = Vector3(0, -98.1f, 0);
@@ -88,6 +89,7 @@ struct GDX12ParticleEmitter : GDX12ParticleEmitterSettings
     uint64_t Id = 0;
     uint64_t ResetRevision = 0;
     uint64_t BurstTotal = 0;
+    uint64_t BurstBaseline = 0; // Already consumed by the previous simulation owner.
     Matrix World = Matrix::Identity;
     float DeltaTime = 0.0f;
     bool Paused = false;
@@ -119,6 +121,7 @@ struct GDX12ParticleRenderSource
     GDX12Resource* Arguments = nullptr;
     std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 3> SRVs{};
     UINT64 CullArgumentsOffset = 0;
+    bool ResetMotion = false;
 };
 
 struct GDX12ParticleRenderFrame
@@ -132,21 +135,28 @@ class GDX12ParticleSimulation
 public:
     GDX12ParticleSimulation();
     ~GDX12ParticleSimulation();
-    void BeginFrame(GDX12DeviceResources* resources, RenderPipelineCommonData& common);
+    void BeginFrame(GDX12DeviceResources* resources, RenderPipelineCommonData& common,
+        const std::vector<uint64_t>* excluded = nullptr);
+    bool BeginFrame(GDX12DeviceResources* resources, const GDX12ParticleSettings& settings,
+        bool resetMotion, const std::vector<uint64_t>* excluded = nullptr);
     void InitializePools(GDX12CommandList* commands, GDX12DeviceResources* resources,
         const std::vector<uint64_t>* emitterIds = nullptr);
     std::vector<GDX12Resource*> GetPoolResources(const std::vector<uint64_t>* emitterIds = nullptr) const;
     std::vector<GDX12Resource*> GetConstantResources(UINT slot, const std::vector<uint64_t>* emitterIds = nullptr) const;
     // Build the draw bindings for the result of this frame's planned simulation.
     GDX12ParticleRenderFrame RenderFrame() const;
+    uint64_t ConsumedBurst(uint64_t id, uint64_t revision) const;
     void SetInteractionField(GDX12ParticleInteractionField field) { _interaction = field; }
     GDX12Resource* GetInteractionResource() const { return _interaction.Resource; }
     void Execute(GDX12CommandList* commands, GDX12DeviceResources* resources,
         RenderPipelineCommonData& common, GDX12Texture* opaqueDepth,
         const std::vector<uint64_t>* emitterIds = nullptr);
+    void ExecuteFrameOnly(GDX12CommandList*, GDX12DeviceResources*);
 
 private:
     struct State;
     std::unique_ptr<State> _state;
     GDX12ParticleInteractionField _interaction;
+    void Execute(GDX12CommandList*, GDX12DeviceResources*, UINT cameraIndex, GDX12Texture*,
+        const std::vector<uint64_t>* emitterIds);
 };

@@ -57,26 +57,47 @@ GDX12ParticleRenderFrame GDX12ParticleSimulation::RenderFrame() const
     return frame;
 }
 
-void GDX12ParticleSimulation::BeginFrame(GDX12DeviceResources* resources, RenderPipelineCommonData& common)
+uint64_t GDX12ParticleSimulation::ConsumedBurst(uint64_t id, uint64_t revision) const
+{
+    if (_state)
+    {
+        const auto pool = _state->Pools.find(id);
+        if (pool != _state->Pools.end() && pool->second->ResetRevision == revision)
+            return pool->second->BurstTotal;
+    }
+    return 0;
+}
+
+void GDX12ParticleSimulation::BeginFrame(GDX12DeviceResources* resources, RenderPipelineCommonData& common,
+    const std::vector<uint64_t>* excluded)
+{
+    if (BeginFrame(resources, GetParticleSettings(), common.ResetHistory, excluded))
+        common.ResetUpscalerHistory = true;
+}
+
+bool GDX12ParticleSimulation::BeginFrame(GDX12DeviceResources* resources, const GDX12ParticleSettings& global,
+    bool resetMotion, const std::vector<uint64_t>* excluded)
 {
     resources->ParticleMotion = nullptr;
-    const auto global = GetParticleSettings();
-    if (resources->ParticleEmitters.empty())
+    std::vector<GDX12ParticleEmitter> emitters;
+    for (const auto& emitter : resources->ParticleEmitters)
+        if (!excluded || std::find(excluded->begin(), excluded->end(), emitter.Id) == excluded->end())
+            emitters.push_back(emitter);
+    if (emitters.empty())
     {
         if (_state)
         {
             resources->Device->GetCommandQueue()->Flush();
             _state.reset();
-            common.ResetUpscalerHistory = true;
+            return true;
         }
-        return;
+        return false;
     }
     if (!global.Enabled)
     {
         if (_state) _state->Active = false;
-        return;
+        return false;
     }
-    std::vector<GDX12ParticleEmitter> emitters = resources->ParticleEmitters;
     std::unordered_set<uint64_t> ids;
     UINT total = 0;
     for (auto& emitter : emitters)
@@ -99,8 +120,19 @@ void GDX12ParticleSimulation::BeginFrame(GDX12DeviceResources* resources, Render
     }
     if (!_state) _state = std::make_unique<State>(resources);
     auto& state = *_state;
+    if (resources->FrameConstants.front() == nullptr && !state.NullCamera)
+    {
+        auto* heap = resources->SRV_UAV_Heap.get();
+        D3D12_SHADER_RESOURCE_VIEW_DESC view{};
+        view.Format = DXGI_FORMAT_R32_FLOAT;
+        view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        view.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        view.Texture2D.MipLevels = 1;
+        state.NullDepth.InitAsSRV(nullptr, &view, heap, heap->GetAvailableIndex());
+        state.NullCamera = std::make_unique<Buffer<GDX12CameraConstants>>(resources->Device, 1);
+    }
     state.Active = true;
-    state.ResetMotion = common.ResetHistory;
+    state.ResetMotion = resetMotion;
     bool changed = total != state.Capacity;
     for (const auto& pool : state.Pools) changed |= ids.count(pool.first) == 0;
     for (const auto& emitter : emitters)
@@ -120,13 +152,14 @@ void GDX12ParticleSimulation::BeginFrame(GDX12DeviceResources* resources, Render
             auto& pool = state.Pools[emitter.Id];
             if (!pool || pool->Capacity != emitter.MaxParticles)
             {
-                const auto consumed = pool && pool->ResetRevision == emitter.ResetRevision ? pool->BurstTotal : 0;
+                const auto consumed = pool && pool->ResetRevision == emitter.ResetRevision
+                    ? pool->BurstTotal : emitter.BurstBaseline;
                 pool = std::make_unique<Pool>(resources, emitter.MaxParticles);
                 pool->ResetRevision = emitter.ResetRevision;
                 pool->BurstTotal = consumed;
             }
         }
-        common.ResetUpscalerHistory = true;
+        state.ResetMotion = true;
     }
     state.Capacity = total;
     for (const auto& emitter : emitters)
@@ -134,8 +167,8 @@ void GDX12ParticleSimulation::BeginFrame(GDX12DeviceResources* resources, Render
         const auto& pool = *state.Pools.at(emitter.Id);
         state.ResetMotion |= pool.NeedsInitialization(emitter.ResetRevision);
     }
-    if (state.ResetMotion) common.ResetUpscalerHistory = true;
     state.Emitters = std::move(emitters);
+    return state.ResetMotion;
 }
 
 void GDX12ParticleSimulation::InitializePools(GDX12CommandList* commands, GDX12DeviceResources* resources,
@@ -152,7 +185,7 @@ void GDX12ParticleSimulation::InitializePools(GDX12CommandList* commands, GDX12D
         auto& pool = *state.Pools.at(emitter.Id);
         if (!pool.NeedsInitialization(emitter.ResetRevision)) continue;
         pool.ReadIndex = 0;
-        if (pool.ResetRevision != emitter.ResetRevision) pool.BurstTotal = 0;
+        if (pool.ResetRevision != emitter.ResetRevision) pool.BurstTotal = emitter.BurstBaseline;
         pool.ResetRevision = emitter.ResetRevision;
         pool.Initialized = true;
         const UINT parameters[] = {pool.Capacity, 0, state.Capacity, 1};
@@ -180,6 +213,17 @@ void GDX12ParticleSimulation::InitializePools(GDX12CommandList* commands, GDX12D
 void GDX12ParticleSimulation::Execute(GDX12CommandList* commands, GDX12DeviceResources* resources,
     RenderPipelineCommonData& common, GDX12Texture* depth, const std::vector<uint64_t>* emitterIds)
 {
+    Execute(commands, resources, common.ActiveCameraCBufferIndex, depth, emitterIds);
+}
+
+void GDX12ParticleSimulation::ExecuteFrameOnly(GDX12CommandList* commands, GDX12DeviceResources* resources)
+{
+    Execute(commands, resources, 0, nullptr, nullptr);
+}
+
+void GDX12ParticleSimulation::Execute(GDX12CommandList* commands, GDX12DeviceResources* resources,
+    UINT cameraIndex, GDX12Texture* depth, const std::vector<uint64_t>* emitterIds)
+{
     if (!_state || !_state->Active) return;
     auto& state = *_state;
     GDX12_SCOPED_EVENT(commands, "Particle simulation", Colors::Orange);
@@ -198,7 +242,17 @@ void GDX12ParticleSimulation::Execute(GDX12CommandList* commands, GDX12DeviceRes
             commands->ResourceBarrier({depth->GetResource()->GetNonPixelShaderResourceBarrier()});
         commands->SetComputeSRV(3, depth->GetSRV()->GPUHandle);
         auto& frame = resources->FrameConstants[resources->CurrFrameConstantsIndex];
-        commands->SetComputeRootConstantBufferView(1, frame->CameraCB->GetElementAddress(common.ActiveCameraCBufferIndex));
+        commands->SetComputeRootConstantBufferView(1, frame->CameraCB->GetElementAddress(cameraIndex));
+    }
+    else
+    {
+        if (std::any_of(state.Emitters.begin(), state.Emitters.end(), [](const auto& emitter) {
+                return emitter.DepthCollision || emitter.InteractionEnabled;
+            }))
+            throw std::logic_error("Frame-only particle simulation requires independent emitters");
+        if (!state.NullCamera) throw std::logic_error("Independent particle bindings were not prepared");
+        commands->SetComputeSRV(3, state.NullDepth.GPUHandle);
+        commands->SetComputeRootConstantBufferView(1, state.NullCamera->GetElementAddress(0));
     }
     for (const auto& emitter : state.Emitters)
     {

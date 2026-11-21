@@ -184,8 +184,10 @@ inline void Create(World& world, GPUTexture* atlas)
 	settings.ColorStart = Vector4(3, 0.6f, 0.05f, 0.3f);
 	settings.ColorEnd = Vector4(1, 0.1f, 0.01f, 0);
 	settings.Blend = ParticleBlend::Additive;
+	settings.SimulateOnSecondary = true;
 	create("BistroTerraceEmbers", {-480, 65, -430}, 2, settings);
 
+	settings.SimulateOnSecondary = false;
 	settings.LifetimeMin = 4;
 	settings.LifetimeMax = 8;
 	settings.SpeedMin = 5;

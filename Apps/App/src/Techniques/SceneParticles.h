@@ -1,5 +1,6 @@
 #pragma once
 #include "NativeWork.h"
+#include "../Graph/RenderGraphExecutor.h"
 #include "Engine.RendererDX12/GDX12Particles.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12ParticlesPass.h"
 #include <array>
@@ -13,7 +14,11 @@ public:
     SceneParticles(GDX12DeviceResources&, RenderPipelineCommonData&);
     ~SceneParticles();
     enum class Inputs { Frame, Interaction, Depth };
-    void BeginSimulation(GDX12ParticleInteractionField);
+    static int SecondaryAdapter();
+    void BeginSimulation(GDX12ParticleInteractionField, Executor&, int activeAdapter);
+    void AddWaits(const Schedule&, std::vector<PacketWait>&);
+    void Submitted(const std::vector<CompletionToken>&);
+    void Presented(uint64_t frame);
     void AppendSimulation(Graph&, std::vector<ID3D12Resource*>&, Inputs, GDX12Texture* depth);
     void PrepareOpaque(const SceneGeometry&, UINT slot);
     void AppendEarlyOpaquePreparation(Graph&, std::vector<ID3D12Resource*>&);
@@ -26,6 +31,7 @@ public:
     GDX12Texture* MotionOutput() const { return _pass.MotionOutput(); }
     bool Record(Id id, ID3D12GraphicsCommandList* cmd) const { return _work.Record(id, cmd); }
 private:
+    struct Remote;
     bool HasDrawSources(bool opaque) const;
     std::vector<Access> DrawReads(Graph&, std::vector<ID3D12Resource*>&, bool opaque);
     void AppendOpaqueDraw(Graph&, std::vector<ID3D12Resource*>&, const SceneGeometry&, UINT,
@@ -40,6 +46,19 @@ private:
     GDX12ParticleInteractionField _interaction{};
     std::array<std::vector<uint64_t>, 3> _groups;
     GDX12ParticleRenderFrame _renderFrame;
+    std::unique_ptr<Remote> _remote;
+    struct VisibilitySample
+    {
+        GDX12Resource Buffer;
+        uint64_t Frame = 0, Version = 0;
+    };
+    std::vector<VisibilitySample> _visibilitySamples;
+    UINT _firstRemote = 0;
+    bool _sampleVisibility = false;
+    bool _visibilityConfirmed = false;
+    uint64_t _attemptedDomain = 0;
+    Id _import = Invalid, _importPacket = Invalid;
+    bool _attemptedRemote = false;
     std::vector<Access> _drawReads;
     GDX12Texture *_accum = nullptr, *_reveal = nullptr;
     UINT _width = 0, _height = 0;

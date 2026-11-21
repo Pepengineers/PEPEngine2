@@ -33,17 +33,17 @@ AutoConsoleVariable<CloudPictureMode> CrossSync(L"App.CloudPicture.CrossSync", C
     L"Remote clouds: 0 imports the previous frame, 1 the current frame, 2 the latest completed independent export.");
 struct Settings {
     bool Active;
-    int Width, Height, Adapter, AOAdapter;
+    int Width, Height, Adapter, AOAdapter, ParticlesAdapter;
     CloudPictureMode Mode;
     bool SamePicture(const Settings& other) const {
         return Active == other.Active && Width == other.Width && Height == other.Height &&
             Adapter == other.Adapter && Mode == other.Mode;
     }
 };
-Settings Requested(int aoAdapter) {
+Settings Requested(int aoAdapter, int particlesAdapter) {
     const int adapter = Adapter.GetValue();
     const auto mode = adapter >= 0 ? CrossSync.GetValue() : CloudPictureMode::Local;
-    return {Enabled.GetValue(), Width.GetValue(), Height.GetValue(), adapter, aoAdapter, mode};
+    return {Enabled.GetValue(), Width.GetValue(), Height.GetValue(), adapter, aoAdapter, particlesAdapter, mode};
 }
 
 bool SameAdapter(LUID a, LUID b) {
@@ -76,14 +76,16 @@ struct SceneCloudPicture::Impl {
 };
 SceneCloudPicture::SceneCloudPicture(RenderPipelineContext& c) : _impl(std::make_shared<Impl>(c)) {}
 SceneCloudPicture::~SceneCloudPicture() = default;
-void SceneCloudPicture::UpdateSettings(std::unique_ptr<Executor>& executor, int aoAdapter) {
+void SceneCloudPicture::UpdateSettings(std::unique_ptr<Executor>& executor, int aoAdapter, int particlesAdapter) {
     auto& p = *_impl;
-    const auto next = Requested(aoAdapter);
+    const auto next = Requested(aoAdapter, particlesAdapter);
     const bool samePicture = p.Attempted && next.SamePicture(*p.Attempted);
-    if (samePicture && next.AOAdapter == p.Attempted->AOAdapter) return;
+    if (samePicture && next.AOAdapter == p.Attempted->AOAdapter &&
+        next.ParticlesAdapter == p.Attempted->ParticlesAdapter) return;
     p.Attempted = next;
     const bool remoteCloud = next.Active && next.Adapter >= 0;
-    int adapter = remoteCloud ? next.Adapter : aoAdapter;
+    const int sceneAdapter = aoAdapter >= 0 ? aoAdapter : particlesAdapter;
+    int adapter = remoteCloud ? next.Adapter : sceneAdapter;
     std::unique_ptr<Executor> replacementExecutor;
     const auto selectAdapter = [&](int index) {
         replacementExecutor.reset();
@@ -124,10 +126,12 @@ void SceneCloudPicture::UpdateSettings(std::unique_ptr<Executor>& executor, int 
             if (IsRemote()) {
                 if (aoAdapter >= 0 && aoAdapter != p.ExecutorAdapter)
                     Log::Warning("RenderGraph", "Using local AO with the retained CloudPicture adapter");
+                if (particlesAdapter >= 0 && particlesAdapter != p.ExecutorAdapter)
+                    Log::Warning("RenderGraph", "Using local particles with the retained CloudPicture adapter");
                 return;
             }
-            if (!ready || adapter != aoAdapter) {
-                adapter = aoAdapter;
+            if (!ready || adapter != sceneAdapter) {
+                adapter = sceneAdapter;
                 selectAdapter(adapter);
             }
             if (!p.Texture) replacement = createPicture(CloudPictureMode::Local);
@@ -141,6 +145,8 @@ void SceneCloudPicture::UpdateSettings(std::unique_ptr<Executor>& executor, int 
     const int effectiveAdapter = replacementExecutor ? adapter : p.ExecutorAdapter;
     if (aoAdapter >= 0 && aoAdapter != effectiveAdapter)
         Log::Warning("RenderGraph", "AO adapter ", aoAdapter, " unavailable in the Bistro submission domain; using local AO");
+    if (particlesAdapter >= 0 && particlesAdapter != effectiveAdapter)
+        Log::Warning("RenderGraph", "Particle adapter ", particlesAdapter, " unavailable in the Bistro submission domain; using local simulation");
 
     if (!replacePicture && !replacementExecutor) return;
     // The primary terminal also retires any AO exchange attached to this domain.

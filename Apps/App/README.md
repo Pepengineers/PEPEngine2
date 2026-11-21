@@ -81,6 +81,21 @@ Resolve and any upsample run on GPU0.
 Use `--read-texture=Scene.AO.Reprojected` to capture the final `Scene.AO` once
 a delayed frame has consumed history.
 
+### Two-adapter particles
+
+Set `App.Particles.Adapter` to a secondary DXGI index from the same list as
+`Render.PrimaryAdapter`. The default `-1` runs simulation on GPU0. Marked
+transparent emitters with frame-only inputs can use GPU1. Bistro enables this
+for Terrace Embers. GPU0 keeps frustum culling, sorting, and all drawing.
+An unavailable or conflicting adapter falls back to local simulation. Cloud
+Picture takes priority when selecting the shared secondary adapter, then AO.
+Changing the owner resets the pool and preserves the already consumed burst
+total for the same emitter revision.
+
+`App.Particles.CrossSync = 1` (default) imports the exact step ordered by
+the current frame. `App.Particles.LogSnapshots = true` enables a short readback
+of remote draw elements that passed the GPU0 particle cull.
+
 ### Read back a scene texture by name
 
 Run `App.exe --read-texture=Scene.AO` for a one-shot readback without opening the

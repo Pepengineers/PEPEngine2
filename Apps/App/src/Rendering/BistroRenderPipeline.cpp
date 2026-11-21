@@ -54,7 +54,7 @@ void BistroRenderPipeline::PrepareMaterialBindings(RenderPipelineContext& c)
 	}
 	else
 		_reportedLocalAO = false;
-	_cloudPicture->UpdateSettings(_executor, _aoAdapter);
+	_cloudPicture->UpdateSettings(_executor, _aoAdapter, BistroRender::SceneParticles::SecondaryAdapter());
 	++_frameNumber;
 	const UINT slot = c.Primary.CurrFrameConstantsIndex;
 	_executor->Begin(slot);
@@ -98,7 +98,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	auto& water = _lighting->Water();
 	using ParticleInputs = BistroRender::SceneParticles::Inputs;
 	auto* depth = _geometry->Depth(slot);
-	particles.BeginSimulation(_geometry->InteractionField());
+	particles.BeginSimulation(_geometry->InteractionField(), *_executor, _cloudPicture->SubmissionAdapter());
 	particles.PrepareOpaque(*_geometry, slot);
 	_post->BeginPlan();
 	auto& textures = _post->Textures();
@@ -202,7 +202,8 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 			_geometry->Record(slot, op, list, commands);
 		}
 	};
-	const auto waits = _cloudPicture->Waits(_schedule);
+	auto waits = _cloudPicture->Waits(_schedule);
+	particles.AddWaits(_schedule, waits);
 	const auto exchange = _lighting->AOExchange(_schedule);
 	uint64_t completion;
 	try
@@ -213,11 +214,13 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	catch (...)
 	{
 		_cloudPicture->Submitted(_executor->Completions());
+		particles.Submitted(_executor->Completions());
 		_lighting->AOSubmitted(_executor->Completions());
 		_post->Reconstruction().CancelRecording();
 		throw;
 	}
 	_cloudPicture->Submitted(_executor->Completions());
+	particles.Submitted(_executor->Completions());
 	_lighting->AOSubmitted(_executor->Completions());
 	_post->Submitted(slot);
 	_environment->Submitted(completion);
@@ -229,6 +232,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 void BistroRenderPipeline::FramePresented()
 {
 	_cloudPicture->Presented();
+	_lighting->Particles().Presented(_frameNumber);
 	_lighting->AOPresented(_frameNumber, _executor->Completions());
 	if (_reportedDepthNormals || !_geometry->PrepassNormals(_executorSlot)) return;
 	_reportedDepthNormals = true;
