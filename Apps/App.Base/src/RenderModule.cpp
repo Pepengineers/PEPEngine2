@@ -589,15 +589,32 @@ void RenderModule::OnUpdate()
     const auto frameSlotIndex = _frameGraph->GetCurrentFrameSlotResourcesIndex();
     _primaryResources.CurrFrameConstantsIndex = frameSlotIndex;
     _primaryResources.UpdateMainCB(_RPcommonData.WindowWidth, _RPcommonData.WindowHeight, _timer);
-    if (PipelineHasFlag(DEVICE_ROLE_PRIMARY, RENDER_PASS_FLAG_USE_MATERIALS))
-    { _primaryResources.UpdateMaterialCB(_materials); }
 
     if (_frameGraph->UsesDevice(DEVICE_ROLE_SECONDARY))
     {
         _secondaryResources.CurrFrameConstantsIndex = frameSlotIndex;
         _secondaryResources.UpdateMainCB(_RPcommonData.WindowWidth, _RPcommonData.WindowHeight, _timer);
-        if (PipelineHasFlag(DEVICE_ROLE_SECONDARY, RENDER_PASS_FLAG_USE_MATERIALS))
-        { _secondaryResources.UpdateMaterialCB(_materials); }
+    }
+    UpdateMaterials();
+}
+
+void RenderModule::UpdateMaterials()
+{
+    const bool primary = PipelineHasFlag(DEVICE_ROLE_PRIMARY, RENDER_PASS_FLAG_USE_MATERIALS);
+    const bool secondary = PipelineHasFlag(DEVICE_ROLE_SECONDARY, RENDER_PASS_FLAG_USE_MATERIALS);
+    if (!primary && !secondary) return;
+
+    for (auto& [name, material] : _materials)
+    {
+        if (material->DirtyFlag)
+        {
+            material->_numFramesDirty = GetFrameSlotCount();
+            material->DirtyFlag = false;
+        }
+        if (!material->_numFramesDirty) continue;
+        if (primary) _primaryResources.UpdateMaterialCB(*material);
+        if (secondary) _secondaryResources.UpdateMaterialCB(*material);
+        --material->_numFramesDirty;
     }
 }
 

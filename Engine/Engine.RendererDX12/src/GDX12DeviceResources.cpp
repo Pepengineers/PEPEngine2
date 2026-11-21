@@ -65,47 +65,28 @@ void GDX12DeviceResources::UpdateMainCB(UINT width, UINT height, GameTimer* time
     frameRes->MainCB->CopyData(0, mainConstants);
 }
 
-void GDX12DeviceResources::UpdateMaterialCB(std::unordered_map<std::string, std::unique_ptr<GDX12Material>>& materials)
+void GDX12DeviceResources::UpdateMaterialCB(const GDX12Material& material)
 {
-    auto currMaterialCB = FrameConstants[CurrFrameConstantsIndex]->MaterialCache.get();
-    for (auto& i : materials)
+    GDX12MaterialConstants materialConstants;
+    materialConstants.Roughness = material.Roughness;
+    materialConstants.Metallic = material.Metallic;
+    materialConstants.Opacity = material.Opacity;
+    materialConstants.RenderLayer = UINT(material.Type);
+
+    const auto textureIndex = [this](const GPUTexture* texture, UINT fallback = UINT_MAX)
     {
-        GDX12Material* material = i.second.get();
-
-        if (material->DirtyFlag)
-        {
-            material->DirtyFlag = false;
-            material->_primaryFramesDirty = static_cast<UINT>(FrameConstants.size());
-            material->_secondaryFramesDirty = static_cast<UINT>(FrameConstants.size());
-        }
-
-        auto& framesDirty = Device->Role == DEVICE_ROLE_PRIMARY
-            ? material->_primaryFramesDirty : material->_secondaryFramesDirty;
-        if (framesDirty > 0)
-        {
-            GDX12MaterialConstants materialConstants;
-            materialConstants.Roughness = material->Roughness;
-            materialConstants.Metallic = material->Metallic;
-            materialConstants.Opacity = material->Opacity;
-            materialConstants.RenderLayer = UINT(material->Type);
-
-            const auto textureIndex = [this](const GPUTexture* texture, UINT fallback = UINT_MAX)
-            {
-                if (!texture) { return fallback; }
-                auto* local = Device->Role == DEVICE_ROLE_PRIMARY ? texture->PrimaryDeviceTexture : texture->SecondaryDeviceTexture;
-                return local ? local->GetSRV()->HeapIndex - Texture2D_StartIndex : fallback;
-            };
-            materialConstants.DiffuseMapIndex = textureIndex(material->Diffuse, 0);
-            materialConstants.DisplacementMapIndex = textureIndex(material->Displacement, 0);
-            materialConstants.NormalMapIndex = textureIndex(material->HasNormalMap ? material->Normal : nullptr);
-            materialConstants.RoughnessMapIndex = textureIndex(material->HasRoughnessMap ? material->RoughnessMap : nullptr);
-            materialConstants.SpecularMapIndex = textureIndex(material->HasSpecularMap ? material->Specular : nullptr);
-            materialConstants.EmissiveMapIndex = textureIndex(material->HasEmissiveMap ? material->Emissive : nullptr);
-            materialConstants.SpecularColor = material->SpecularColor;
-            materialConstants.EmissiveColor = material->EmissiveColor;
-            materialConstants.UseBakedLighting = material->UseBakedLighting;
-            currMaterialCB->CopyData(material->_CBufferIndex, materialConstants);
-            framesDirty--;
-        }
-    }
+        if (!texture) { return fallback; }
+        auto* local = Device->Role == DEVICE_ROLE_PRIMARY ? texture->PrimaryDeviceTexture : texture->SecondaryDeviceTexture;
+        return local ? local->GetSRV()->HeapIndex - Texture2D_StartIndex : fallback;
+    };
+    materialConstants.DiffuseMapIndex = textureIndex(material.Diffuse, 0);
+    materialConstants.DisplacementMapIndex = textureIndex(material.Displacement, 0);
+    materialConstants.NormalMapIndex = textureIndex(material.HasNormalMap ? material.Normal : nullptr);
+    materialConstants.RoughnessMapIndex = textureIndex(material.HasRoughnessMap ? material.RoughnessMap : nullptr);
+    materialConstants.SpecularMapIndex = textureIndex(material.HasSpecularMap ? material.Specular : nullptr);
+    materialConstants.EmissiveMapIndex = textureIndex(material.HasEmissiveMap ? material.Emissive : nullptr);
+    materialConstants.SpecularColor = material.SpecularColor;
+    materialConstants.EmissiveColor = material.EmissiveColor;
+    materialConstants.UseBakedLighting = material.UseBakedLighting;
+    FrameConstants[CurrFrameConstantsIndex]->MaterialCache->CopyData(material._CBufferIndex, materialConstants);
 }

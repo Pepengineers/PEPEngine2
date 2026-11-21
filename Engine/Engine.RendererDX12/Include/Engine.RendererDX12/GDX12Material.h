@@ -50,16 +50,14 @@ public:
 
 private:
 	friend class RenderModule;
-	friend class GDX12DeviceResources;
 
 	GDX12Material() : Name(""), Diffuse(nullptr), Normal(nullptr), Specular(nullptr), RoughnessMap(nullptr),
 		Emissive(nullptr), Displacement(nullptr), Metallic(0.f), Roughness(1.f), Opacity(1.f),
 		SpecularColor(0.0f, 0.0f, 0.0f), EmissiveColor(0.0f, 0.0f, 0.0f),
 		HasNormalMap(false), HasSpecularMap(false), HasRoughnessMap(false), HasEmissiveMap(false),
-		UseBakedLighting(false), DirtyFlag(true), _CBufferIndex(0), _primaryFramesDirty(0), _secondaryFramesDirty(0), Type(MaterialType::Opaque)
+		UseBakedLighting(false), Type(MaterialType::Opaque), DirtyFlag(true), _CBufferIndex(0)
 	{
 
 	}
-	UINT _primaryFramesDirty;
-	UINT _secondaryFramesDirty;
+	UINT _numFramesDirty = 0;
 };
