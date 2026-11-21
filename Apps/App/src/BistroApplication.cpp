@@ -61,12 +61,13 @@ void PrepareStartup()
 	std::filesystem::copy_file(root / "Configs/Startup.ini", root / "Config/Engine.ini",
 	                           std::filesystem::copy_options::overwrite_existing);
 
-	// Initialize the registry now so the invariant is checked before any device is opened.
 	ConsoleModule console;
 	console.Initialize();
-	Require(console.FindConsoleVariable(L"Render.PrimaryAdapter").GetInt() == 0, "Unexpected primary adapter");
-	Log::Info("Bistro", "SCENE EXECUTOR; primary=0; App.Async.Queues=",
-	          console.FindConsoleVariable(L"App.Async.Queues").GetBool());
+	Log::Info("Bistro", "SCENE EXECUTOR; primary=", console.FindConsoleVariable(L"Render.PrimaryAdapter").GetInt(),
+	          "; App.Async.Queues=",
+	          console.FindConsoleVariable(L"App.Async.Queues").GetBool(),
+	          " App.Water.Adapter=", console.FindConsoleVariable(L"App.Water.Adapter").GetInt(),
+	          " App.Water.CrossSync=", console.FindConsoleVariable(L"App.Water.CrossSync").GetInt());
 }
 
 class BistroApplication final : public App
@@ -236,7 +237,7 @@ class BistroApplication final : public App
 
 	void OnPauseChanged(bool paused) override
 	{
-		if (paused && _bistroPipeline) _bistroPipeline->PauseParticleClock();
+		if (paused && _bistroPipeline) _bistroPipeline->PauseIndependentClocks();
 	}
 
 	void OnMouseDown(WPARAM, int x, int y) override

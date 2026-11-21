@@ -190,6 +190,7 @@ void GDX12FluidParticlePass::PrepareFrame(std::vector<GDX12FluidInstance> instan
 {
 	_drawSources.clear();
 	_substeps = 0;
+	_simulatedSeconds = 0;
 	if (role != _role)
 	{
 		if (!_states.empty()) _retire();
@@ -313,6 +314,7 @@ void GDX12FluidParticlePass::ExecuteSimulation(GDX12CommandList* commands)
 		state.Constants->CopyData(constants, parameters);
 		const auto steps = GDX12FluidSolver::PlanSteps(settings, instance.DeltaSeconds * settings.TimeScale);
 		_substeps += steps.Count;
+		_simulatedSeconds += double(steps.Dt) * steps.Count;
 		state.SolverHead = _solver.Record(*commands, state.Solver, state.SolverHead, settings, steps,
 		                                  state.Constants->GetElementAddress(constants));
 		if (seedPending)

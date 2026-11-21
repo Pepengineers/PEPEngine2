@@ -30,7 +30,7 @@ AutoConsoleVariable<int> Adapter(L"App.CloudPicture.Adapter", -1,
     L"Cloud Picture GPU in the Render.PrimaryAdapter hardware list. -1 uses the primary GPU.",
     EConsoleVariableFlags::Default, [](int v) { return v >= -1; });
 AutoConsoleVariable<CloudPictureMode> CrossSync(L"App.CloudPicture.CrossSync", CloudPictureMode::PreviousFrame,
-    L"Remote clouds: 0 imports the previous frame, 1 the current frame, 2 the latest completed independent export.");
+    L"Remote clouds: 0 exact previous (first uses current), 1 exact current, 2 independent GPU1 and latest completed (first can wait for export).");
 struct Settings {
     bool Active;
     int Width, Height, Adapter, AOAdapter, ParticlesAdapter, WaterAdapter;

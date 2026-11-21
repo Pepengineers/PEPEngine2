@@ -39,6 +39,22 @@ remain late overlays with read-only depth.
 Use `--read-texture=Scene.DepthNormals.Normals` or
 `--read-texture=Scene.DepthNormals.Depth` to read at the early graph boundary.
 
+### Two-adapter synchronization
+
+Use `App.CloudPicture.CrossSync`, `App.AO.CrossSync`, `App.Particles.CrossSync`
+or `App.Water.CrossSync` to choose how GPU0 consumes GPU1 publications. N is
+the current frame's order in the publication history. Fence waits run on the
+GPU0 import queue. A wait for an already completed export incurs no GPU stall.
+
+| Mode | Who starts GPU1 work | Version used by GPU0 | Wait and first frame | Available techniques |
+| --- | --- | --- | --- | --- |
+| `0` | Bistro orders N | Exactly N−1 | Wait for N−1 if pending. First uses N, so the first pairs are 1/1, 2/1, 3/2. | Cloud Picture **(default)**, AO, particles, water **(default)** |
+| `1` | Bistro orders N | Exactly N | Wait for N if pending, including the first frame. | Cloud Picture, AO **(default)**, particles **(default)**, water |
+| `2` | GPU1 advances independently | Newest completed publication | Cloud Picture and water can wait for the first issued export token, then wait on that fence at import. Particles start empty until a snapshot completes. After bootstrap each technique uses completed exports. | Cloud Picture, particles, water |
+| `3` | Bistro orders N | Newest completed publication | Starts empty until the first export completes. No wait for pending results at import. | Particles |
+
+For AO, mode `0` reprojects the previous result into the current frame.
+
 ### Two-adapter ambient occlusion
 
 Set `App.AO.Adapter` to a secondary DXGI index from the same list as
@@ -88,11 +104,14 @@ a delayed frame has consumed history.
 on GPU1. Water shares the secondary adapter with Cloud Picture, AO and
 particles. A conflicting or unavailable adapter falls back to local SPH.
 
-`App.Water.CrossSync = 1` (default) imports the solved snapshot ordered by
-the current frame. With `0`, the frame orders N and imports exactly N−1.
-The first frame imports its own snapshot. Switching between `0` and `1`
-starts new publication history and keeps the GPU1 pool and wave phase.
-GPU1 owns the simulation and sends position and speed.
+`App.Water.CrossSync = 0` defaults to exact N−1 when a secondary adapter is
+selected. Mode `1` imports exact N. Mode `2` advances SPH on GPU1 with a
+monotonic clock scaled by game time and the instance's time scale. GPU0
+imports the newest completed display snapshot each visible frame, including
+repeats. The first import can use a seed or frozen state while paused. The
+producer sleeps on control or fence events when it cannot advance. Changing
+mode starts a new publication history and keeps the GPU1 pool and wave phase.
+GPU1 sends position and speed.
 GPU0 draws with its current camera, HDR and depth. Pausing or hiding water
 keeps its pool, and changing GPU owners resets it from the authored seed.
 

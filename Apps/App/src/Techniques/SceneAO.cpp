@@ -18,7 +18,7 @@ AutoConsoleVariable<bool> AsyncAO(L"App.Async.AO", false,
                                   EConsoleVariableFlags::Default);
 
 AutoConsoleVariable<int> CrossSync(L"App.AO.CrossSync", 1,
-    L"Remote AO: 1 imports the current frame; 0 imports and reprojects the exact previous frame.",
+    L"Remote AO: 1 exact current, 0 exact previous with reprojection (first uses current).",
     EConsoleVariableFlags::Default, [](int value) { return value == 0 || value == 1; });
 AutoConsoleVariable<bool> BlurOnSecondary(L"App.AO.BlurOnSecondary", false,
     L"Run SSAO/HBAO blur or XeGTAO denoise on GPU1. CACAO filters inside its SDK context.");

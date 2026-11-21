@@ -67,7 +67,7 @@ class BistroRenderPipeline final : public IRenderPipeline
 	void WriteExecution(std::ostream& output) const override { _schedule.Write(output); }
 	const BistroRender::Schedule& LastSchedule() const { return _schedule; }
 	bool HasRemoteCloudPicture() const { return _cloudPicture->IsRemote(); }
-	void PauseParticleClock();
+	void PauseIndependentClocks();
 
   private:
 	RenderPipelineBindings _bindings;

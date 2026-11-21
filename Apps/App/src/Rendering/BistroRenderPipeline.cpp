@@ -257,7 +257,9 @@ void BistroRenderPipeline::FramePresented()
 	}
 }
 
-void BistroRenderPipeline::PauseParticleClock()
+void BistroRenderPipeline::PauseIndependentClocks()
 {
-	if (_lighting) _lighting->Particles().PauseIndependentClock();
+	if (!_lighting) return;
+	_lighting->Particles().PauseIndependentClock();
+	_lighting->Water().PauseIndependentClock();
 }

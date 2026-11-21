@@ -14,6 +14,7 @@ class SceneWater
 	static int SecondaryAdapter();
 	void SetRetirement(std::function<void()> retire);
 	void Prepare(float delta, Executor&, int activeAdapter);
+	void PauseIndependentClock();
 	void AddWaits(const Schedule&, std::vector<PacketWait>&);
 	void Submitted(const std::vector<CompletionToken>&);
 	void Presented(uint64_t frame, const std::vector<CompletionToken>&);
