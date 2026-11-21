@@ -117,7 +117,7 @@ void SceneGeometry::PrepareVegetation(RenderPipelineContext& c, float dt, Execut
 {
 	_linden = FindLindenMesh(*BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>());
 	if (!_linden) _lindenDraw.Reset();
-	_grass->Prepare(c, dt, executor, _linden ? &_linden->CrownBounds : nullptr);
+	_grass->Prepare(c, dt, executor, _linden, _lindenSimulation);
 }
 
 std::vector<GDX12RenderPrimitive> SceneGeometry::VegetationPrimitives() const

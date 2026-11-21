@@ -1,5 +1,6 @@
 #include "SceneGrass.h"
 #include "BistroGrass.h"
+#include "Techniques/Linden/LindenSimulation.h"
 #include "Techniques/NativeWork.h"
 #include "Engine.Core/BenchmarkEngine.h"
 #include "Engine.Core/Logging/Logger.h"
@@ -19,6 +20,8 @@ AutoConsoleVariable<int> WindAdapter(L"App.Grass.Wind.Adapter", -1,
 AutoConsoleVariable<int> WindCrossSync(L"App.Grass.Wind.CrossSync", 1,
     L"Remote ProjectedGrid wind: 0 exact previous frame (first uses current), 1 exact current frame.",
     EConsoleVariableFlags::Default, [](int value) { return value == 0 || value == 1; });
+AutoConsoleVariable<bool> LindenResponseOnSecondary(L"App.Grass.Wind.LindenResponseOnSecondary", false,
+    L"Evaluate Linden crown fragments on the adapter running its ProjectedGrid. Deform vertices on the primary GPU.");
 // ECS wind owners count upward from one. Reserve the last ID for the scene mesh.
 constexpr uint64_t LindenWindOwner = UINT64_MAX;
 
@@ -33,6 +36,11 @@ struct WindCopy
 	ID3D12Resource* Buffer;
 	uint64_t Offset, Bytes;
 };
+
+XMFLOAT4 CrownArea(const GDX12WindInstance& field)
+{
+	return {field.CenterCm.x, field.CenterCm.y, field.ExtentsCm.x, field.ExtentsCm.y};
+}
 }
 
 struct SceneGrass::RemoteWind
@@ -41,6 +49,7 @@ struct SceneGrass::RemoteWind
 	{
 		GDX12GrassRenderer::WindSample Sample;
 		uint64_t Offset, Bytes;
+		std::shared_ptr<const LindenMesh> ResponseMesh;
 		bool Shown = false;
 	};
 	struct Frame
@@ -70,6 +79,11 @@ struct SceneGrass::RemoteWind
 	Id Device;
 	GDX12DeviceResources Resources;
 	std::unique_ptr<GDX12GrassRenderer> Solver;
+	std::unique_ptr<LindenResponse> CrownEvaluator;
+	std::shared_ptr<const LindenMesh> CrownMesh;
+	std::unique_ptr<GDX12UploadBuffer<LindenFragment>> CrownFragments, CrownUpload;
+	std::unique_ptr<GDX12UploadBuffer<FragmentPose>> CrownResponse;
+	bool CrownUploaded = false;
 	Executor Recorder;
 	std::vector<Frame> Frames;
 	std::array<Import, 2> Imports;
@@ -122,7 +136,47 @@ struct SceneGrass::RemoteWind
 		frame.WindJobs.clear();
 	}
 
-	bool Publish(GDX12GrassRenderer& primary)
+	void PrepareResponse(const std::shared_ptr<const LindenMesh>& mesh, GDX12DeviceResources& primary,
+	                     std::unique_ptr<GDX12UploadBuffer<FragmentPose>>& display)
+	{
+		const UINT count = UINT(mesh->Fragments.size());
+		if (!display || display->GetElementCount() != count)
+			display = LindenResponse::CreateBuffer(primary, count, false);
+		if (CrownMesh == mesh) return;
+		if (CrownMesh) Recorder.Drain();
+		if (!CrownEvaluator) CrownEvaluator = std::make_unique<LindenResponse>(Resources);
+		CrownFragments = std::make_unique<GDX12UploadBuffer<LindenFragment>>(Resources.Device, count, EBufferType::Default, false);
+		auto* heap = Resources.SRV_UAV_Heap.get();
+		CrownFragments->CreateSRV(heap, heap->GetAvailableIndex());
+		CrownUpload = std::make_unique<GDX12UploadBuffer<LindenFragment>>(Resources.Device, count, EBufferType::Upload, false);
+		CrownUpload->CopyData(0, mesh->Fragments.data(), count);
+		CrownResponse = LindenResponse::CreateBuffer(Resources, count, true);
+		CrownMesh = mesh;
+		CrownUploaded = false;
+	}
+
+	void AppendResponse(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work,
+	                     const GDX12GrassRenderer::WindState& field)
+	{
+		if (!CrownUploaded)
+		{
+			auto* upload = CrownUpload->GetResource().D3DResource.Get();
+			auto* dest = CrownFragments->GetResource().D3DResource.Get();
+			const auto bytes = uint64_t(CrownMesh->Fragments.size()) * sizeof(LindenFragment);
+			work.Add(graph, CrownMesh->Label + " secondary attachments upload",
+			    {{NativeWork::ResourceFor(graph, bindings, upload, "linden upload"), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ},
+			     {NativeWork::ResourceFor(graph, bindings, dest, "linden attachments"), Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
+			    [=](auto* cmd) { cmd->CopyBufferRegion(dest, 0, upload, 0, bytes); }, {}, Queue::Compute);
+		}
+		LindenWindSample wind;
+		wind.Grid = field.Velocity[0].get();
+		wind.Area = CrownArea(field.Source);
+		wind.Time = field.Time;
+		wind.Resolution = field.Resolution;
+		CrownEvaluator->Append(graph, bindings, work, *CrownMesh, *CrownFragments, wind, *CrownResponse);
+	}
+
+	bool Publish(GDX12GrassRenderer& primary, bool response)
 	{
 		auto& frame = *Current;
 		const auto& imports = primary.CurrentFrame().ImportedWind;
@@ -160,16 +214,24 @@ struct SceneGrass::RemoteWind
 		for (const auto& entry : imports)
 		{
 			const auto& field = Solver->_wind.at(entry.first);
-			const uint64_t size = uint64_t(field.Resolution) * field.Resolution * sizeof(XMFLOAT4);
-			frame.Fields.push_back({primary._wind.at(entry.first), bytes, size});
-			for (const auto& velocity : field.Velocity)
+			const auto mesh = response && entry.first == LindenWindOwner ? CrownMesh : nullptr;
+			const uint64_t size = mesh ? mesh->Fragments.size() * sizeof(FragmentPose) :
+			    uint64_t(field.Resolution) * field.Resolution * sizeof(XMFLOAT4);
+			frame.Fields.push_back({primary._wind.at(entry.first), bytes, size, mesh});
+			const auto addCopy = [&](auto& buffer)
 			{
-				auto* source = velocity->GetResource().D3DResource.Get();
-				accesses.push_back({NativeWork::ResourceFor(graph, bindings, source, "wind velocity"),
+				auto* source = buffer.GetResource().D3DResource.Get();
+				accesses.push_back({NativeWork::ResourceFor(graph, bindings, source, "wind publication payload"),
 				                    Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE});
 				copies.push_back({source, bytes, size});
 				bytes += size;
+			};
+			if (mesh)
+			{
+				AppendResponse(graph, bindings, work, field);
+				addCopy(*CrownResponse);
 			}
+			else for (const auto& velocity : field.Velocity) addCopy(*velocity);
 		}
 		if (bytes > frame.Capacity)
 		{
@@ -200,6 +262,7 @@ struct SceneGrass::RemoteWind
 		const auto schedule = Compile(graph);
 		Recorder.Reserve(schedule);
 		Recorder.Execute(schedule, bindings, [&](Id operation, uint32_t, auto* cmd) { work.Record(operation, cmd); });
+		if (response) CrownUploaded = true;
 		frame.Ready = Recorder.Completions().back();
 		frame.Version = ++Ordered;
 		SelectDisplay(primary);
@@ -217,11 +280,13 @@ struct SceneGrass::RemoteWind
 			{
 				const auto found = std::find_if(Previous->Fields.begin(), Previous->Fields.end(), [&](const auto& field) {
 					return field.Sample.Source.Id == ordered.Sample.Source.Id &&
-					    field.Sample.SettingsHash == ordered.Sample.SettingsHash;
+					    field.Sample.SettingsHash == ordered.Sample.SettingsHash &&
+					    field.ResponseMesh == ordered.ResponseMesh;
 				});
 				if (found != Previous->Fields.end()) shown = &*found;
 			}
 			const bool repeat = shown->Shown;
+			shown->Shown = true;
 			const bool bootstrap = Current->Version == 1 || (Mode == 0 && shown == &ordered);
 			const bool useCurrentAsPrevious = repeat || (Mode == 0 && bootstrap);
 			auto& view = static_cast<GDX12GrassRenderer::WindSample&>(primary._wind.at(ordered.Sample.Source.Id));
@@ -280,9 +345,11 @@ void SceneGrass::RetireRemoteWind(Executor& primary)
 	_remoteWind.reset();
 }
 
-void SceneGrass::Prepare(RenderPipelineContext& c, float dt, Executor& primary, const BoundingBox* crown)
+void SceneGrass::Prepare(RenderPipelineContext& c, float dt, Executor& primary,
+                         const std::shared_ptr<const LindenMesh>& mesh, const LindenSimulation& linden)
 {
 	_scene.CollectScene(dt);
+	const auto* crown = mesh ? &mesh->CrownBounds : nullptr;
 	const bool enable = crown && BistroGrass::WindEnabled.GetValue() && _scene._controls.WindEnabled &&
 	                    _scene._controls.WindQuality > 0;
 	if (enable)
@@ -324,14 +391,39 @@ void SceneGrass::Prepare(RenderPipelineContext& c, float dt, Executor& primary, 
 		}
 	}
 	if (_remoteWind) _remoteWind->Begin(WindCrossSync.GetValue());
+	bool remoteResponse = _remoteWind && enable && _scene._wind.back().Implementation == GDX12WindImplementation::ProjectedGrid &&
+	    LindenResponseOnSecondary.GetValue();
 	_gpu->BeginFrame(c.Common, _scene._grass, _scene._wind, _scene._controls, _scene._sources, _scene._deltaSeconds,
-	                 enable ? LindenWindOwner : 0, _remoteWind ? _remoteWind->Solver.get() : nullptr);
-	if (_remoteWind && !_remoteWind->Publish(*_gpu))
+	                 enable ? LindenWindOwner : 0, _remoteWind ? _remoteWind->Solver.get() : nullptr,
+	                 remoteResponse ? LindenWindOwner : 0);
+	auto& display = _frames.at(_resources.CurrFrameConstantsIndex).LindenResponse;
+	bool responseReady = true;
+	if (remoteResponse)
+	{
+		try { _remoteWind->PrepareResponse(mesh, _resources, display); }
+		catch (const DxException& e)
+		{
+			if (IsDeviceLoss(e.ErrorCode)) throw;
+			primary.Submissions()->CheckHealth();
+			Log::Warning("RenderGraph", "Using local ProjectedGrid wind: Linden response: ", e.ToString());
+			responseReady = false;
+		}
+		catch (const std::exception& e)
+		{
+			primary.Submissions()->CheckHealth();
+			Log::Warning("RenderGraph", "Using local ProjectedGrid wind: Linden response: ", e.what());
+			responseReady = false;
+		}
+	}
+	else display.reset();
+	if (_remoteWind && (!responseReady || !_remoteWind->Publish(*_gpu, remoteResponse)))
 	{
 		// Only transfer allocation can fall back. Earlier frames can still hold both sides of the shared ring.
 		RetireRemoteWind(primary);
 		_failedWindAdapter = requested;
 		_gpu->FallBackToLocalWind(enable ? LindenWindOwner : 0);
+		remoteResponse = false;
+		display.reset();
 	}
 	_gpu->ApplyWindHistory();
 	LindenWindSample sample;
@@ -340,14 +432,17 @@ void SceneGrass::Prepare(RenderPipelineContext& c, float dt, Executor& primary, 
 	{
 		const auto& field = _gpu->_wind.at(LindenWindOwner);
 		const auto& s = field.Source;
-		sample.Grid = _gpu->Velocity(field)[0].get();
-		sample.Area = {s.CenterCm.x, s.CenterCm.y, s.ExtentsCm.x, s.ExtentsCm.y};
+		if (remoteResponse) sample.Response = display.get();
+		else sample.Grid = _gpu->Velocity(field)[0].get();
+		sample.Area = CrownArea(s);
 		sample.Time = field.Time;
 		sample.Resolution = field.Resolution;
-		if (!_lindenWind.Grid || field.ResetHistory || sample.Time != _lindenWind.Time) ++sample.Revision;
+		if (!_lindenWind.Resolution || field.ResetHistory || sample.Time != _lindenWind.Time ||
+		    (sample.Response != nullptr) != (_lindenWind.Response != nullptr)) ++sample.Revision;
 	}
-	else if (_lindenWind.Grid) ++sample.Revision;
+	else if (_lindenWind.Resolution) ++sample.Revision;
 	_lindenWind = sample;
+	_importLindenResponse = sample.Response && linden.NeedsResponse(mesh, sample.Revision);
 	_gpu->PublishPrimitives(_resources.Primitives, &_scene);
 }
 
@@ -370,6 +465,15 @@ void SceneGrass::AppendWindImport(Graph& graph, std::vector<ID3D12Resource*>& bi
 		for (auto& display : import.Fields)
 		{
 			const auto& field = *display.Published;
+			if (field.ResponseMesh)
+			{
+				if (!_importLindenResponse) continue;
+				auto* target = _lindenWind.Response->GetResource().D3DResource.Get();
+				display.Local[0] = NativeWork::ResourceFor(graph, bindings, target, "imported linden fragment response");
+				copies.push_back({target, field.Offset, field.Bytes});
+				accesses.push_back({display.Local[0], Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST});
+				continue;
+			}
 			const auto& velocity = _gpu->CurrentFrame().ImportedWind.at(field.Sample.Source.Id);
 			for (size_t i = 0; i < velocity.size(); ++i)
 			{
@@ -380,7 +484,8 @@ void SceneGrass::AppendWindImport(Graph& graph, std::vector<ID3D12Resource*>& bi
 				accesses.push_back({display.Local[i], Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST});
 			}
 		}
-		import.Operation = work.Add(graph, "GPU0 import ProjectedGrid velocity", std::move(accesses),
+		if (copies.empty()) continue;
+		import.Operation = work.Add(graph, "GPU0 import ProjectedGrid publication", std::move(accesses),
 		    [shared, copies = std::move(copies)](auto* cmd)
 		    {
 			    for (const auto& copy : copies) cmd->CopyBufferRegion(copy.Buffer, 0, shared, copy.Offset, copy.Bytes);
@@ -394,8 +499,7 @@ void SceneGrass::AddWindWaits(const Schedule& schedule, std::vector<PacketWait>&
 	const bool traceStartup = _remoteWind->Mode == 0 && _remoteWind->Current->Version <= 4;
 	for (auto& import : _remoteWind->Imports)
 	{
-		if (import.Fields.empty()) continue;
-		if (import.Operation == Invalid) throw std::logic_error("Missing ProjectedGrid import operation");
+		if (import.Operation == Invalid) continue;
 		for (Id index = 0; index < schedule.Packets.size(); ++index)
 		{
 			const auto& packet = schedule.Packets[index];
@@ -439,12 +543,25 @@ void SceneGrass::WindSubmitted(uint64_t frameNumber, const std::vector<Completio
 		}
 		for (const auto& field : import.Fields)
 		{
-			field.Published->Shown = true;
+			if (field.Local[0] == Invalid) continue;
 			const auto& sample = field.Published->Sample;
 			const auto owner = sample.Source.Id;
 			const bool read = field.Consumer < completions.size() && completions[field.Consumer];
 			const bool first = read && _remoteWind->Reported.insert(owner).second;
 			if (!first && !(_remoteWind->Mode == 0 && ordered.Version <= 4)) continue;
+			if (field.Published->ResponseMesh)
+			{
+				Log::Info("RenderGraph", "Linden MGPU response CrossSync=", _remoteWind->Mode, " frame=", frameNumber,
+				    " mesh=", field.Published->ResponseMesh->Label, " owner=", owner,
+				    " ordered=", ordered.Version, " fieldVersion=", publication.Version,
+				    " responseVersion=", publication.Version, " bytes=", field.Published->Bytes,
+				    " waitExportFence=", publication.Ready.Value, " importFence=", publication.Reader.Value,
+				    " EvaluateFragmentsGPU=", _remoteWind->Submissions->AdapterLabel(publication.Ready.Device),
+				    " DeformVerticesGPU=", _remoteWind->Submissions->AdapterLabel(publication.Reader.Device),
+				    " firstConsumer=", read ? field.ConsumerName.c_str() : "none",
+				    " consumerFence=", read ? completions[field.Consumer].Value : 0);
+				continue;
+			}
 			Log::Info("RenderGraph", "ProjectedGrid wind CrossSync=", _remoteWind->Mode, " frame=", frameNumber,
 			    " field=", owner == LindenWindOwner ? "Linden" : "Grass", " id=", owner,
 			    " grid=", sample.Resolution, " time=", sample.Time,

@@ -9,9 +9,13 @@
 
 namespace BistroRender
 {
+class LindenSimulation;
+struct FragmentPose;
+struct LindenMesh;
 struct LindenWindSample
 {
 	GDX12UploadBuffer<XMFLOAT4>* Grid = nullptr;
+	GDX12UploadBuffer<FragmentPose>* Response = nullptr;
 	XMFLOAT4 Area{};
 	float Time = 0;
 	UINT Resolution = 0;
@@ -22,7 +26,7 @@ class SceneGrass
   public:
 	explicit SceneGrass(RenderPipelineContext&);
 	~SceneGrass();
-	void Prepare(RenderPipelineContext&, float dt, Executor&, const BoundingBox* crown);
+	void Prepare(RenderPipelineContext&, float dt, Executor&, const std::shared_ptr<const LindenMesh>&, const LindenSimulation&);
 	Id WindExecutionDevice() const;
 	void AddWindWaits(const Schedule&, std::vector<PacketWait>&);
 	void WindSubmitted(uint64_t frame, const std::vector<CompletionToken>&);
@@ -54,6 +58,7 @@ class SceneGrass
 		};
 		std::vector<BuiltPatch> Built;
 		std::unique_ptr<GDX12UploadBuffer<float>> HiZ;
+		std::unique_ptr<GDX12UploadBuffer<FragmentPose>> LindenResponse;
 		NativeWork Work;
 	};
 	GDX12DeviceResources& _resources;
@@ -62,6 +67,7 @@ class SceneGrass
 	std::unique_ptr<RemoteWind> _remoteWind;
 	int _failedWindAdapter = -1;
 	LindenWindSample _lindenWind;
+	bool _importLindenResponse = false;
 	std::vector<RecordedFrame> _frames;
 	std::unique_ptr<GDX12RootSignature> _geometryRoot, _hiZRoot;
 	ComPtr<ID3D12PipelineState> _buildGeometry, _cullGeometry, _clearGeometry, _buildHiZ;

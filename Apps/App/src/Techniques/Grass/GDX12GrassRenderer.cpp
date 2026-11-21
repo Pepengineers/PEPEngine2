@@ -182,7 +182,7 @@ void GDX12GrassRenderer::RetireWind(WindState& state)
 void GDX12GrassRenderer::BeginFrame(const RenderPipelineCommonData& common,
     std::vector<GDX12GrassInstance> grass, std::vector<GDX12WindInstance> wind, GDX12GrassWindControls controls,
     const std::vector<BistroInteractionSource>& sources, float deltaSeconds, uint64_t independentWind,
-    GDX12GrassRenderer* windDevice)
+    GDX12GrassRenderer* windDevice, uint64_t responseWind)
 {
     auto& frame = CurrentFrame();
     frame.RetiredFields.clear();
@@ -381,10 +381,14 @@ void GDX12GrassRenderer::BeginFrame(const RenderPipelineCommonData& common,
                 state.PreviousTime = solver.PreviousTime;
                 state.Resolution = solver.Resolution;
                 auto& buffers = frame.ImportedWind[state.Source.Id];
-                const UINT count = state.Resolution * state.Resolution;
-                for (auto& buffer : buffers)
-                    if (!buffer || buffer->GetElementCount() != count)
-                        buffer = Buffer<XMFLOAT4>(count, true, false);
+                if (state.Source.Id == responseWind) buffers = {};
+                else
+                {
+                    const UINT count = state.Resolution * state.Resolution;
+                    for (auto& buffer : buffers)
+                        if (!buffer || buffer->GetElementCount() != count)
+                            buffer = Buffer<XMFLOAT4>(count, true, false);
+                }
                 continue;
             }
             PlanLocalWind(state, independentWind);

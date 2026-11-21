@@ -29,7 +29,7 @@ public:
     void BeginFrame(const RenderPipelineCommonData& common,
         std::vector<GDX12GrassInstance> grass, std::vector<GDX12WindInstance> wind, GDX12GrassWindControls controls,
         const std::vector<BistroInteractionSource>& sources = {}, float deltaSeconds = 0, uint64_t independentWind = 0,
-        GDX12GrassRenderer* windDevice = nullptr);
+        GDX12GrassRenderer* windDevice = nullptr, uint64_t responseWind = 0);
     GDX12ParticleInteractionField InteractionField() const;
     void PrepareView(const GDX12GeometryContext& view, UINT patch, GDX12Descriptor* materialOverride = nullptr, bool cullPatch = true);
     UINT PatchCount() const { return static_cast<UINT>(_drawOrder.size()); }

@@ -79,6 +79,13 @@ When a field repeats, grass uses the repeated grid for both velocity samples.
 Linden evaluates its next pose from the selected current grid with its area,
 time and resolution, and displays poses in the existing order.
 
+`App.Grass.Wind.LindenResponseOnSecondary = true` evaluates Linden's crown
+fragments on the same GPU as its remote ProjectedGrid. The default is `false`.
+The selected publication carries one 28-byte response per fragment for Linden
+in place of its velocity grids. GPU0 imports the response for vertex deformation
+and keeps the existing neutral first pose and displayed pose history. Grass still
+imports its velocity grids. Local and Analytic wind keep evaluation on GPU0.
+
 ### Remote ambient occlusion
 
 Set `App.AO.Adapter` to a secondary DXGI index from the same list as
