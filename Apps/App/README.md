@@ -81,6 +81,18 @@ Resolve and any upsample run on GPU0.
 Use `--read-texture=Scene.AO.Reprojected` to capture the final `Scene.AO` once
 a delayed frame has consumed history.
 
+### Two-adapter SPH water
+
+`App.Water.Adapter = -1` (default) keeps the local SPH path and
+`App.Async.Water` queue selection. Set it to a secondary DXGI index to run SPH
+on GPU1. Water shares the secondary adapter with Cloud Picture, AO and
+particles. A conflicting or unavailable adapter falls back to local SPH.
+
+`App.Water.CrossSync = 1` (default) imports the solved snapshot ordered by
+the current frame. GPU1 owns the simulation and sends position and speed.
+GPU0 draws with its current camera, HDR and depth. Pausing or hiding water
+keeps its pool, and changing GPU owners resets it from the authored seed.
+
 ### Two-adapter particles
 
 Set `App.Particles.Adapter` to a secondary DXGI index from the same list as

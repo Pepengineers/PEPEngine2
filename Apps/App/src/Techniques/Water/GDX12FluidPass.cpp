@@ -32,46 +32,47 @@ GDX12FluidParticlePass::GDX12FluidParticlePass(GDX12DeviceResources& resources, 
 GDX12FluidParticlePass::~GDX12FluidParticlePass() = default;
 void GDX12FluidParticlePass::CreatePipelines()
 {
-	if (_surfaceRoot)
+	if (_role != Role::Solver && !_surfaceRoot)
 	{
-		return;
+		GDX12RootSignatureDesc surface;
+		surface.VolatileSRVData = true;
+		surface.Constants = {1}; // b0 precedes the fluid and camera constant buffers.
+		surface.NumSingleCBVSlots = 2;
+		surface.NumSingleSRVSlots = 1;
+		_surfaceRoot = std::make_unique<GDX12RootSignature>(_resources.Device, surface);
+		auto& compiler = GDX12ShaderCompiler::GetInstance();
+		auto vs =
+		    compiler.CompileShader(_resources.Device, APP_SHADERS_FOLDER "FluidParticleDraw.hlsl", nullptr, "VS", "vs");
+		auto ps =
+		    compiler.CompileShader(_resources.Device, APP_SHADERS_FOLDER "FluidParticleDraw.hlsl", nullptr, "PS", "ps");
+		D3D12_GRAPHICS_PIPELINE_STATE_DESC desc{};
+		desc.pRootSignature = _surfaceRoot->GetRootSignature().Get();
+		desc.VS = {vs->GetBufferPointer(), vs->GetBufferSize()};
+		desc.PS = {ps->GetBufferPointer(), ps->GetBufferSize()};
+		desc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+		desc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+		desc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+		desc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+		desc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
+		desc.SampleMask = UINT_MAX;
+		desc.SampleDesc.Count = 1;
+		desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+		desc.NumRenderTargets = 1;
+		desc.RTVFormats[0] = DXGI_FORMAT_R16G16B16A16_FLOAT;
+		desc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+		ThrowIfFailed(_resources.Device->GetDevice()->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&_particleDraw)));
 	}
-	GDX12RootSignatureDesc surface;
-	surface.VolatileSRVData = true;
-	surface.Constants = {1}; // b0 precedes the fluid and camera constant buffers.
-	surface.NumSingleCBVSlots = 2;
-	surface.NumSingleSRVSlots = 1;
-	_surfaceRoot = std::make_unique<GDX12RootSignature>(_resources.Device, surface);
-	auto& compiler = GDX12ShaderCompiler::GetInstance();
-	auto vs =
-	    compiler.CompileShader(_resources.Device, APP_SHADERS_FOLDER "FluidParticleDraw.hlsl", nullptr, "VS", "vs");
-	auto ps =
-	    compiler.CompileShader(_resources.Device, APP_SHADERS_FOLDER "FluidParticleDraw.hlsl", nullptr, "PS", "ps");
-	D3D12_GRAPHICS_PIPELINE_STATE_DESC desc{};
-	desc.pRootSignature = _surfaceRoot->GetRootSignature().Get();
-	desc.VS = {vs->GetBufferPointer(), vs->GetBufferSize()};
-	desc.PS = {ps->GetBufferPointer(), ps->GetBufferSize()};
-	desc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-	desc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
-	desc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-	desc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-	desc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
-	desc.SampleMask = UINT_MAX;
-	desc.SampleDesc.Count = 1;
-	desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-	desc.NumRenderTargets = 1;
-	desc.RTVFormats[0] = DXGI_FORMAT_R16G16B16A16_FLOAT;
-	desc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
-	ThrowIfFailed(_resources.Device->GetDevice()->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&_particleDraw)));
-
-	GDX12RootSignatureDesc pack;
-	pack.Constants = {1};
-	pack.NumSingleSRVSlots = 1;
-	pack.NumSingleUAVSlots = 1;
-	_packRoot = std::make_unique<GDX12RootSignature>(_resources.Device, pack);
-	const D3D_SHADER_MACRO packDefines[] = {{"FLUID_PACK_DISPLAY", "1"}, {nullptr, nullptr}};
-	_packDisplay = GDX12RenderHelpers::CreateComputePipeline(
-	    _resources.Device, _packRoot.get(), APP_SHADERS_FOLDER "FluidParticleDraw.hlsl", "PackCS", packDefines);
+	if (_role != Role::Display && !_packRoot)
+	{
+		GDX12RootSignatureDesc pack;
+		pack.Constants = {1};
+		pack.NumSingleSRVSlots = 1;
+		pack.NumSingleUAVSlots = 1;
+		_packRoot = std::make_unique<GDX12RootSignature>(_resources.Device, pack);
+		const D3D_SHADER_MACRO packDefines[] = {{"FLUID_PACK_DISPLAY", "1"}, {nullptr, nullptr}};
+		_packDisplay = GDX12RenderHelpers::CreateComputePipeline(
+		    _resources.Device, _packRoot.get(), APP_SHADERS_FOLDER "FluidParticleDraw.hlsl", "PackCS", packDefines);
+	}
 }
 void GDX12FluidParticlePass::PrepareStates()
 {
@@ -147,8 +148,8 @@ void GDX12FluidParticlePass::PrepareStates()
 		auto replacement = std::make_unique<State>();
 		replacement->Source = source;
 		replacement->Revision = instance.Component.GetResetRevision();
-		replacement->Solver =
-		    GDX12FluidSolver::CreateBuffers(_resources.Device, _resources.SRV_UAV_Heap.get(), instance);
+		if (_role != Role::Display)
+			replacement->Solver = GDX12FluidSolver::CreateBuffers(_resources.Device, _resources.SRV_UAV_Heap.get(), instance);
 		replacement->Constants = std::make_unique<GDX12UploadBuffer<GDX12FluidParameters>>(
 		    _resources.Device, ParameterSlotsPerFrame * static_cast<UINT>(_resources.FrameConstants.size()));
 		state = std::move(replacement);
@@ -181,12 +182,21 @@ std::vector<GDX12ResourceAccess> GDX12FluidParticlePass::GetSimulationBufferAcce
 	return accesses;
 }
 
-void GDX12FluidParticlePass::PrepareFrame(std::vector<GDX12FluidInstance> instances)
+void GDX12FluidParticlePass::PrepareFrame(std::vector<GDX12FluidInstance> instances,
+                                         GDX12FluidControls controls, Role role)
 {
 	_drawSources.clear();
+	_substeps = 0;
+	if (role != _role)
+	{
+		if (!_states.empty()) _retire();
+		_states.clear();
+		_role = role;
+		_commonData.ResetHistory = true;
+	}
 	_instances = std::move(instances);
 	const auto previousControls = _controls;
-	_controls = GetFluidControls();
+	_controls = controls;
 	PrepareStates();
 	// The frame-slot wait covers the final DIRECT fence and its COMPUTE join.
 	for (auto& [id, state] : _states)
@@ -230,7 +240,7 @@ void GDX12FluidParticlePass::PrepareFrame(std::vector<GDX12FluidInstance> instan
 		CreatePipelines();
 		PrepareDrawSources();
 	}
-	_solver.Initialize(_resources.Device);
+	if (_role != Role::Display) _solver.Initialize(_resources.Device);
 }
 
 void GDX12FluidParticlePass::PrepareDrawSources()
@@ -254,9 +264,10 @@ void GDX12FluidParticlePass::PrepareDrawSources()
 		if (!display)
 		{
 			display = std::make_unique<GDX12UploadBuffer<XMFLOAT4>>(
-			    _resources.Device, state.Solver.Count, EBufferType::Default, false);
+			    _resources.Device, UINT(state.Source->size()), EBufferType::Default, false);
 			display->CreateSRV(heap, heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength));
-			display->CreateUAV(heap, heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength));
+			if (_role != Role::Display)
+				display->CreateUAV(heap, heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength));
 		}
 		auto parameters = MakeFluidParameters(instance.ContainerToWorld, settings);
 		if (settings.ReferenceModel)
@@ -264,7 +275,7 @@ void GDX12FluidParticlePass::PrepareDrawSources()
 			parameters.Radius *= std::cbrt(std::abs(instance.ContainerToWorld.Determinant()));
 		}
 		const UINT element = ParameterSlotsPerFrame * slot + 1;
-		state.Constants->CopyData(element, parameters);
+		if (_role != Role::Solver) state.Constants->CopyData(element, parameters);
 		_drawSources.push_back({instance.Id, display.get(), &state.Constants->GetResource(),
 		                       state.Constants->GetElementAddress(element)});
 		state.WasRendered = true;
@@ -302,6 +313,7 @@ void GDX12FluidParticlePass::ExecuteSimulation(GDX12CommandList* commands)
 
 		state.Constants->CopyData(constants, parameters);
 		const auto steps = GDX12FluidSolver::PlanSteps(settings, instance.DeltaSeconds * settings.TimeScale);
+		_substeps += steps.Count;
 		state.SolverHead = _solver.Record(*commands, state.Solver, state.SolverHead, settings, steps,
 		                                  state.Constants->GetElementAddress(constants));
 		if (seedPending)

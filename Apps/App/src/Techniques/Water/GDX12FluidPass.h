@@ -7,6 +7,7 @@
 class GDX12FluidParticlePass final
 {
   public:
+	enum class Role { Local, Solver, Display };
 	struct DrawSource
 	{
 		uint64_t Instance;
@@ -17,10 +18,11 @@ class GDX12FluidParticlePass final
 
 	GDX12FluidParticlePass(GDX12DeviceResources&, RenderPipelineCommonData&);
 	~GDX12FluidParticlePass();
-	void PrepareFrame(std::vector<GDX12FluidInstance>);
+	void PrepareFrame(std::vector<GDX12FluidInstance>, GDX12FluidControls, Role = Role::Local);
 	void SetResourceRetirement(std::function<void()> retire) { _retire = std::move(retire); }
 	bool HasRetirement() const { return bool(_retire); }
 	bool NeedsSimulation() const { return _rendering || _simulating; }
+	UINT Substeps() const { return _substeps; }
 	const std::vector<DrawSource>& DrawSources() const { return _drawSources; }
 	void DrawParticles(GDX12CommandList*, GDX12Texture*, D3D12_CPU_DESCRIPTOR_HANDLE, const std::vector<DrawSource>&);
 	void ExecuteSimulation(GDX12CommandList*);
@@ -43,6 +45,8 @@ class GDX12FluidParticlePass final
 	std::unique_ptr<GDX12RootSignature> _surfaceRoot, _packRoot;
 	ComPtr<ID3D12PipelineState> _particleDraw, _packDisplay;
 	GDX12FluidControls _controls = {false, 0};
+	Role _role = Role::Local;
+	UINT _substeps = 0;
 	std::function<void()> _retire;
 	bool _rendering = false, _simulating = false;
 };

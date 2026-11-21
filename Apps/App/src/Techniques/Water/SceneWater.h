@@ -2,6 +2,7 @@
 #include "Techniques/Water/GDX12FluidPass.h"
 #include "Techniques/NativeWork.h"
 #include "Techniques/Water/BistroWaterRendering.h"
+#include "Graph/RenderGraphExecutor.h"
 
 namespace BistroRender
 {
@@ -9,8 +10,13 @@ class SceneWater
 {
   public:
 	SceneWater(GDX12DeviceResources&, RenderPipelineCommonData&);
+	~SceneWater();
+	static int SecondaryAdapter();
 	void SetRetirement(std::function<void()> retire);
-	void Prepare(float delta);
+	void Prepare(float delta, Executor&, int activeAdapter);
+	void AddWaits(const Schedule&, std::vector<PacketWait>&);
+	void Submitted(const std::vector<CompletionToken>&);
+	void Presented(uint64_t frame, const std::vector<CompletionToken>&);
 	void AppendSimulation(Graph&, std::vector<ID3D12Resource*>&);
 	void SetSceneInputs(GDX12Texture* opaqueDepth, GDX12Texture* opaqueMotion);
 	void AppendDraw(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* hdr, D3D12_CPU_DESCRIPTOR_HANDLE depth);
@@ -19,11 +25,18 @@ class SceneWater
 	bool Record(Id id, ID3D12GraphicsCommandList* commands) const { return _work.Record(id, commands); }
 
   private:
-	void Packet(Graph&, std::vector<ID3D12Resource*>&, const char*, const std::vector<GDX12ResourceAccess>&,
+	static Id Packet(NativeWork&, Graph&, std::vector<ID3D12Resource*>&, const char*, const std::vector<GDX12ResourceAccess>&,
 	            std::function<void(GDX12CommandList*)>, Queue target = Queue::Direct);
+	struct Remote;
+	void RetireRemote(Executor&);
+	GDX12DeviceResources& _resources;
+	RenderPipelineCommonData& _common;
 	BistroWaterRendering _collector;
 	GDX12FluidParticlePass _surface;
 	NativeWork _work;
+	std::unique_ptr<Remote> _remote;
+	uint64_t _attemptedDomain = 0, _failedDomain = 0;
+	Id _import = Invalid, _draw = Invalid, _importPacket = Invalid, _drawPacket = Invalid;
 	GDX12Texture* _depth = nullptr;
 	GDX12Texture* _motion = nullptr;
 };

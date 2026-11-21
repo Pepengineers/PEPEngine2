@@ -8,7 +8,7 @@ class SceneCloudPicture {
 public:
     explicit SceneCloudPicture(RenderPipelineContext&);
     ~SceneCloudPicture();
-    void UpdateSettings(std::unique_ptr<Executor>& executor, int aoAdapter, int particlesAdapter);
+    void UpdateSettings(std::unique_ptr<Executor>& executor, int aoAdapter, int particlesAdapter, int waterAdapter);
     int SubmissionAdapter() const;
     void Prepare(UINT slot, double time);
     GDX12Texture* Image() const;

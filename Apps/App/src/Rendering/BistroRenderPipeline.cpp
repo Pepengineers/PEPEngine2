@@ -54,7 +54,8 @@ void BistroRenderPipeline::PrepareMaterialBindings(RenderPipelineContext& c)
 	}
 	else
 		_reportedLocalAO = false;
-	_cloudPicture->UpdateSettings(_executor, _aoAdapter, BistroRender::SceneParticles::SecondaryAdapter());
+	_cloudPicture->UpdateSettings(_executor, _aoAdapter, BistroRender::SceneParticles::SecondaryAdapter(),
+	    BistroRender::SceneWater::SecondaryAdapter());
 	++_frameNumber;
 	const UINT slot = c.Primary.CurrFrameConstantsIndex;
 	_executor->Begin(slot);
@@ -110,7 +111,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 		textures.Name("Scene.DepthNormals.Depth", depth, View::Depth);
 		textures.Name("Scene.DepthNormals.Normals", _geometry->PrepassNormals(slot), View::Normals);
 	}
-	water.Prepare(float(delta));
+	water.Prepare(float(delta), *_executor, _cloudPicture->SubmissionAdapter());
 	water.SetSceneInputs(depth, _geometry->GBuffer(slot, 1));
 	auto* target = c.BackBuffer->GetCurrentBuffer();
 	const bool singleDirect = !AsyncQueues.GetValue();
@@ -204,6 +205,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 		}
 	};
 	auto waits = _cloudPicture->Waits(_schedule);
+	water.AddWaits(_schedule, waits);
 	std::vector<BistroRender::Executor::PacketExchange> exchanges;
 	particles.AddExchanges(_schedule, waits, exchanges);
 	if (auto ao = _lighting->AOExchange(_schedule)) exchanges.push_back(std::move(*ao));
@@ -216,12 +218,14 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	catch (...)
 	{
 		_cloudPicture->Submitted(_executor->Completions());
+		water.Submitted(_executor->Completions());
 		particles.Submitted(_executor->Completions());
 		_lighting->AOSubmitted(_executor->Completions());
 		_post->Reconstruction().CancelRecording();
 		throw;
 	}
 	_cloudPicture->Submitted(_executor->Completions());
+	water.Submitted(_executor->Completions());
 	particles.Submitted(_executor->Completions());
 	_lighting->AOSubmitted(_executor->Completions());
 	_post->Submitted(slot);
@@ -234,6 +238,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 void BistroRenderPipeline::FramePresented()
 {
 	_cloudPicture->Presented();
+	_lighting->Water().Presented(_frameNumber, _executor->Completions());
 	_lighting->Particles().Presented(_frameNumber);
 	_lighting->AOPresented(_frameNumber, _executor->Completions());
 	if (_reportedDepthNormals || !_geometry->PrepassNormals(_executorSlot)) return;
