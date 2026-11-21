@@ -31,6 +31,12 @@ public:
     GDX12Texture* MotionOutput() const { return _pass.MotionOutput(); }
     bool Record(Id id, ID3D12GraphicsCommandList* cmd) const { return _work.Record(id, cmd); }
 private:
+    struct EmitterLayout
+    {
+        uint64_t Id;
+        UINT Capacity;
+        bool operator==(const EmitterLayout& rhs) const { return Id == rhs.Id && Capacity == rhs.Capacity; }
+    };
     struct Remote;
     bool HasDrawSources(bool opaque) const;
     std::vector<Access> DrawReads(Graph&, std::vector<ID3D12Resource*>&, bool opaque);
@@ -57,6 +63,7 @@ private:
     bool _sampleVisibility = false;
     bool _visibilityConfirmed = false;
     uint64_t _attemptedDomain = 0;
+    std::vector<EmitterLayout> _attemptedLayout;
     Id _import = Invalid, _importPacket = Invalid;
     bool _attemptedRemote = false;
     std::vector<Access> _drawReads;

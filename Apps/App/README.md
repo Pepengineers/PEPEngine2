@@ -96,6 +96,11 @@ total for the same emitter revision.
 the current frame. With `0`, the same frame orders step N and imports N−1.
 The first frame of each history shows its own step. Changing between these
 policies starts fresh publication history and keeps the live GPU1 pool.
+With `3`, Bistro orders one step per frame and displays the newest completed
+snapshot. The source stays empty until a snapshot completes. Repeated frames
+reuse the GPU0 copy. Busy output slots can skip publication while the solver
+continues advancing. The bounded input upload ring may wait for prior use
+to retire. This is separate from the import, which selects completed exports.
 `App.Particles.LogSnapshots = true` enables a short readback
 of remote draw elements that passed the GPU0 particle cull.
 
