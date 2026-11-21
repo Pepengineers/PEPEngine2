@@ -205,6 +205,13 @@ struct SceneParticles::Remote
 		const auto gpu = Submit->Device(1).GetAdapterLuid();
 		Log::Info("RenderGraph", "Particles MGPU solver GPU1 LUID=", gpu.HighPart, ":", gpu.LowPart,
 		    " emitters=", Imported.size(), " snapshotBytes=", bytes);
+		if (LogSnapshots.GetValue())
+			for (const auto& source : frame.Sources)
+			{
+				const auto& e = source.Emitter;
+				Log::Info("RenderGraph", "Particles MGPU snapshot source id=", e.Id, " blend=", unsigned(e.Blend),
+				    " capacity=", e.MaxParticles, " origin=", e.World._41, ",", e.World._42, ",", e.World._43);
+			}
 	}
 
 	void Drain()
@@ -672,15 +679,20 @@ void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, 
 	auto& sample = _visibilitySamples.at(_resources.CurrFrameConstantsIndex);
 	if (sample.Frame)
 	{
-		const D3D12_RANGE bytes{0, 2 * sizeof(UINT)};
+		const D3D12_RANGE bytes{0, (sample.SourceIds.size() + 1) * sizeof(UINT)};
 		void* mapped = nullptr;
 		ThrowIfFailed(sample.Buffer.D3DResource->Map(0, &bytes, &mapped));
 		const auto* counts = static_cast<const UINT*>(mapped);
-		const UINT visible = counts[1] - counts[0];
-		if (sample.Frame <= 12 || (visible && !_visibilityConfirmed))
-			Log::Info("RenderGraph", "Particles MGPU visible GPU0 frame=", sample.Frame,
-			    " shown=", sample.Version, " remoteDrawElements=", visible);
-		_visibilityConfirmed |= visible != 0;
+		for (size_t i = 0; i < sample.SourceIds.size(); ++i)
+		{
+			const auto id = sample.SourceIds[i];
+			const UINT visible = counts[i + 1] - counts[i];
+			if (std::find(_visibleSources.begin(), _visibleSources.end(), id) != _visibleSources.end()) continue;
+			if (sample.Frame <= 12 || visible)
+				Log::Info("RenderGraph", "Particles MGPU visible GPU0 frame=", sample.Frame, " shown=", sample.Version,
+				    " id=", id, " remoteDrawElements=", visible);
+			if (visible) _visibleSources.push_back(id);
+		}
 		const D3D12_RANGE noWrites{0, 0};
 		sample.Buffer.D3DResource->Unmap(0, &noWrites);
 		sample.Frame = 0;
@@ -958,12 +970,20 @@ void SceneParticles::AppendPreparation(Graph& graph, std::vector<ID3D12Resource*
 	std::vector<Access> preparation{camera};
 	AddAccesses(graph, bindings, preparation, _pass.NativePreparationAccesses(_renderFrame, opaque));
 	GDX12Resource* readback = nullptr;
-	if (!opaque && _remote && _remote->Selected && LogSnapshots.GetValue() && !_visibilityConfirmed)
+	if (!opaque && _remote && _remote->Selected && LogSnapshots.GetValue() &&
+	    std::any_of(_renderFrame.Sources.begin() + _firstRemote, _renderFrame.Sources.end(), [&](const auto& source) {
+		    return std::find(_visibleSources.begin(), _visibleSources.end(), source.Emitter.Id) == _visibleSources.end();
+	    }))
 	{
-		auto& buffer = _visibilitySamples.at(slot).Buffer;
-		if (!buffer.D3DResource)
+		auto& sample = _visibilitySamples.at(slot);
+		auto& buffer = sample.Buffer;
+		sample.SourceIds.clear();
+		for (size_t i = _firstRemote; i < _renderFrame.Sources.size(); ++i)
+			sample.SourceIds.push_back(_renderFrame.Sources[i].Emitter.Id);
+		const UINT64 bytes = (sample.SourceIds.size() + 1) * sizeof(UINT);
+		if (!buffer.D3DResource || buffer.D3DResource->GetDesc().Width < bytes)
 			buffer.D3DResource = _resources.Device->CreateResource(D3D12_HEAP_TYPE_READBACK,
-			    CD3DX12_RESOURCE_DESC::Buffer(2 * sizeof(UINT)), D3D12_RESOURCE_STATE_COPY_DEST);
+			    CD3DX12_RESOURCE_DESC::Buffer(bytes), D3D12_RESOURCE_STATE_COPY_DEST);
 		preparation.push_back(ResourceAccess(graph, bindings, &buffer, Mode::Write, CopyDest));
 		readback = &buffer;
 		_sampleVisibility = true;

@@ -245,6 +245,7 @@ inline void Create(World& world, GPUTexture* atlas)
 	settings.SizeEnd = 0.5f;
 	settings.ColorStart = Vector4(0.8f, 0.7f, 0.5f, 0.12f);
 	settings.ColorEnd = Vector4(0.8f, 0.7f, 0.5f, 0);
+	settings.SimulateOnSecondary = true;
 	create("BistroInteriorDust", {160, 180, -160}, 1, settings);
 
 	settings.LifetimeMin = 2;

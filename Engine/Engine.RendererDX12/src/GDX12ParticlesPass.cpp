@@ -474,8 +474,8 @@ void GDX12ParticlesPass::PrepareRenderData(GDX12CommandList* commands,
         UAV(commands, *state.Indices);
         UAV(commands, *state.Keys[0]);
         UAV(commands, *state.Payloads[0]);
+        if (visibilityReadback && i >= firstRemote) sampleCount(i - firstRemote + 1);
     }
-    if (visibilityReadback) sampleCount(1);
     commands->SetPipelineState(state.Compute.at("BuildDrawArgs"));
     commands->Dispatch(1, 1, 1);
     commands->ResourceBarrier({ state.DrawArgs->GetResource().GetIndirectArgsBarrier() });

@@ -86,7 +86,8 @@ a delayed frame has consumed history.
 Set `App.Particles.Adapter` to a secondary DXGI index from the same list as
 `Render.PrimaryAdapter`. The default `-1` runs simulation on GPU0. Marked
 transparent emitters with frame-only inputs can use GPU1. Bistro enables this
-for Terrace Embers. GPU0 keeps frustum culling, sorting, and all drawing.
+for Terrace Embers, Interior Dust and Table Steam. These emitters share one
+publication. GPU0 keeps frustum culling, sorting, soft-particle depth and all drawing.
 An unavailable or conflicting adapter falls back to local simulation. Cloud
 Picture takes priority when selecting the shared secondary adapter, then AO.
 Changing the owner resets the pool and preserves the already consumed burst

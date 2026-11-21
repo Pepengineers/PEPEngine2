@@ -58,11 +58,12 @@ private:
     {
         GDX12Resource Buffer;
         uint64_t Frame = 0, Version = 0;
+        std::vector<uint64_t> SourceIds;
     };
     std::vector<VisibilitySample> _visibilitySamples;
     UINT _firstRemote = 0;
     bool _sampleVisibility = false;
-    bool _visibilityConfirmed = false;
+    std::vector<uint64_t> _visibleSources;
     uint64_t _attemptedDomain = 0, _generationSeed = 0;
     std::vector<EmitterLayout> _attemptedLayout;
     Id _import = Invalid, _importPacket = Invalid;
