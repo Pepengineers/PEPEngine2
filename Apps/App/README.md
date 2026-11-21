@@ -28,8 +28,8 @@ legacy per-technique async switches.
 
 ### Early camera DepthNormals
 
-Set `App.DepthNormalsPrepass = true` in Startup.ini or change it in the CVar
-editor. The default keeps the existing depth-only path. The packet
+DepthNormals is enabled by default. Set `App.DepthNormalsPrepass = false`
+in Startup.ini or the CVar editor to use the depth-only path. The packet
 `scene DepthNormals ready` publishes depth and a separate world-space
 normal/roughness target before the G-buffer. Opaque particles share one set of
 culled draws across both passes. Their depth/normal draw follows actual readers

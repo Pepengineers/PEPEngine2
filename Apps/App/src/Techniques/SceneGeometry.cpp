@@ -16,7 +16,7 @@ namespace
 {
 constexpr DXGI_FORMAT Formats[] = {DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R16G16_FLOAT, DXGI_FORMAT_R16G16B16A16_FLOAT,
                                    DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_R16G16B16A16_FLOAT};
-AutoConsoleVariable<bool> DepthNormalsPrepass(L"App.DepthNormalsPrepass", false,
+AutoConsoleVariable<bool> DepthNormalsPrepass(L"App.DepthNormalsPrepass", true,
     L"Write camera depth and material normals (including opaque particles) before the G-buffer.");
 constexpr UINT UploadBucketCount = 4;
 constexpr UINT CounterBytes = sizeof(UINT);
