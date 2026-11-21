@@ -7,6 +7,7 @@
 #include "Engine.RendererDX12/GDX12CommandQueue.h"
 #include "Engine.RendererDX12/GDX12DescriptorHeap.h"
 #include "Engine.RendererDX12/GDX12Device.h"
+#include "Engine.RendererDX12/GDX12DeviceFactory.h"
 #include "Engine.RendererDX12/GDX12Texture.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
 #include "Engine.RendererDX12/GDX12Reconstruction.h"
@@ -40,6 +41,8 @@ namespace Engine::UI
 #endif
         bool Visible = false;
         std::string LayoutPath;
+        std::vector<std::string> AdapterLabels;
+        int PrimaryIndex = -1;
 
         void DrawPhysicsQuality(ConsoleModule& console)
         {
@@ -79,6 +82,37 @@ namespace Engine::UI
                     Select(variable);
             }
 
+            void DrawAdapter(IConsoleVariable& variable)
+            {
+                const int requested = variable.GetInt();
+                const auto local = "Primary GPU (local): " + AdapterLabels.at(PrimaryIndex);
+                const bool listed = requested >= 0 && static_cast<size_t>(requested) < AdapterLabels.size();
+                const auto preview = requested == -1 ? local : listed ? AdapterLabels[requested]
+                    : "Unavailable GPU [" + std::to_string(requested) + "]";
+                ImGui::TextUnformatted("Requested GPU");
+                ImGui::SetNextItemWidth(-1);
+                if (ImGui::BeginCombo("##adapter", preview.c_str()))
+                {
+                    const auto option = [&](int index, const std::string& label)
+                    {
+                        if (ImGui::Selectable(label.c_str(), index == requested) && index != requested)
+                            Apply(variable, std::to_string(index));
+                        if (index == requested) ImGui::SetItemDefaultFocus();
+                    };
+                    option(-1, local);
+                    for (int i = 0; i < static_cast<int>(AdapterLabels.size()); ++i)
+                        if (i != PrimaryIndex) option(i, AdapterLabels[i]);
+                    ImGui::EndCombo();
+                }
+                if (requested == PrimaryIndex)
+                    ImGui::TextWrapped("This index identifies the primary GPU and cannot select a second GPU.");
+                else if (requested != -1 && !listed)
+                    ImGui::TextWrapped("This index is missing from the renderer hardware list.");
+                ImGui::TextWrapped("Configured value: %s. -1 uses the current primary GPU. "
+                    "0, 1, ... are absolute indices in the renderer's filtered hardware list.", Current.c_str());
+                ImGui::TextWrapped("Techniques share one secondary GPU. A conflicting request can fall back to local execution.");
+            }
+
             void Draw(IConsoleVariable& variable)
             {
                 const auto name = std::filesystem::path(Name).u8string();
@@ -95,7 +129,15 @@ namespace Engine::UI
                 {
                     ImGui::TextDisabled("Locked during this run");
                     ImGui::TextWrapped("Current value: %s", Current.c_str());
+                    if (Name == L"Render.PrimaryAdapter")
+                    {
+                        ImGui::TextWrapped("Primary GPU: %s", AdapterLabels.at(PrimaryIndex).c_str());
+                        ImGui::TextWrapped("Startup hardware index (0, 1, ...). -1 is only valid for technique settings.");
+                    }
                 }
+                else if (Name == L"App.CloudPicture.Adapter" || Name == L"App.AO.Adapter" ||
+                    Name == L"App.Particles.Adapter" || Name == L"App.Water.Adapter")
+                    DrawAdapter(variable);
                 else if (variable.GetType() == EConsoleVariableType::Boolean)
                 {
                     bool enabled = Current == "true";
@@ -608,8 +650,20 @@ namespace Engine::UI
         return recording;
     }
 
-    void Initialize(HWND window, GDX12Device* device, int framesInFlight, DXGI_FORMAT format)
+    void Initialize(HWND window, GDX12Device* device, int framesInFlight, DXGI_FORMAT format,
+        const std::vector<DeviceDesc>& adapters)
     {
+        const auto primary = device->GetDevice()->GetAdapterLuid();
+        AdapterLabels.clear();
+        PrimaryIndex = -1;
+        for (const auto& adapter : adapters)
+        {
+            const auto index = AdapterLabels.size();
+            if (adapter.AdapterLuid.HighPart == primary.HighPart && adapter.AdapterLuid.LowPart == primary.LowPart)
+                PrimaryIndex = static_cast<int>(index);
+            AdapterLabels.push_back("[" + std::to_string(index) + "] " + std::filesystem::path(adapter.Name).u8string());
+        }
+        IM_ASSERT(PrimaryIndex >= 0);
         Heap = std::make_unique<GDX12DescriptorHeap>(device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
             64, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
         FreeDescriptors.clear();

@@ -4,6 +4,7 @@
 #include <dxgiformat.h>
 #include <DirectXCollision.h>
 #include <cstddef>
+#include <vector>
 #include <string_view>
 #ifdef _DEBUG
 #include <initializer_list>
@@ -11,13 +12,15 @@
 #endif
 
 class GDX12Device;
+struct DeviceDesc;
 class GDX12CommandList;
 class GDX12Texture;
 struct GDX12ReconstructionStatus;
 
 namespace Engine::UI
 {
-    void Initialize(HWND window, GDX12Device* device, int framesInFlight, DXGI_FORMAT format);
+    void Initialize(HWND window, GDX12Device* device, int framesInFlight, DXGI_FORMAT format,
+        const std::vector<DeviceDesc>& adapters);
     void BeginFrame();
     void DrawReconstructionStatus(const GDX12ReconstructionStatus&, unsigned renderWidth, unsigned renderHeight,
         unsigned outputWidth, unsigned outputHeight);

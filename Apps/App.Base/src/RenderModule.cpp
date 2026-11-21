@@ -122,7 +122,7 @@ void RenderModule::Initialize()
     RebuildRenderGraph();
 
     Engine::UI::Initialize(_window->GetWindowHandle(), _primaryDevice.get(),
-        static_cast<int>(_primaryResources.FrameConstants.size()), _backBuffer->GetFormat());
+        static_cast<int>(_primaryResources.FrameConstants.size()), _backBuffer->GetFormat(), adapters);
     _uiInitialized = true;
 
     SubscribeToSceneManager();
