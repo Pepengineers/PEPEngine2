@@ -18,10 +18,10 @@ AutoConsoleVariable<bool> AsyncAO(L"App.Async.AO", false,
                                   EConsoleVariableFlags::Default);
 
 AutoConsoleVariable<int> CrossSync(L"App.AO.CrossSync", 1,
-    L"Remote half-res HBAO: 1 uses this frame, 0 reprojects exactly the previous frame.",
+    L"Remote AO: 1 uses this frame; 0 reprojects previous HBAO and keeps XeGTAO local.",
     EConsoleVariableFlags::Default, [](int value) { return value == 0 || value == 1; });
 AutoConsoleVariable<bool> BlurOnSecondary(L"App.AO.BlurOnSecondary", false,
-    L"Run bilateral blur on the secondary HBAO GPU before exporting visibility.");
+    L"Run HBAO blur or XeGTAO denoise on GPU1 before export when AO is remote.");
 
 void CheckCACAO(FFX_CACAO_Status result)
 {
@@ -43,6 +43,35 @@ void CopyTexture(ID3D12GraphicsCommandList* cmd, const D3D12_TEXTURE_COPY_LOCATI
 {
     cmd->CopyTextureRegion(&target, 0, 0, 0, &source, nullptr);
 }
+struct SharedImage
+{
+    QueueSubmission::TransferBuffer Buffer;
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT Layout{};
+
+    void Initialize(QueueSubmission& submit, const D3D12_RESOURCE_DESC& desc)
+    {
+        uint64_t bytes = 0, primaryBytes = 0;
+        D3D12_PLACED_SUBRESOURCE_FOOTPRINT primary{};
+        submit.Device(1).GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &Layout, nullptr, nullptr, &bytes);
+        submit.Device(0).GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &primary, nullptr, nullptr, &primaryBytes);
+        if (!bytes || bytes == UINT64_MAX || bytes != primaryBytes ||
+            Layout.Footprint.RowPitch != primary.Footprint.RowPitch)
+            throw std::runtime_error("AO adapters need matching texture footprints");
+        Buffer = submit.CreateTransferBuffer(bytes);
+    }
+    ID3D12Resource* Resource(Id device) const { return Buffer.Resources.at(device).Get(); }
+
+    void Export(ID3D12GraphicsCommandList* cmd, Id device, ID3D12Resource* source) const
+    {
+        CopyTexture(cmd, CD3DX12_TEXTURE_COPY_LOCATION(Resource(device), Layout),
+                    CD3DX12_TEXTURE_COPY_LOCATION(source, 0u));
+    }
+    void Import(ID3D12GraphicsCommandList* cmd, Id device, ID3D12Resource* target) const
+    {
+        CopyTexture(cmd, CD3DX12_TEXTURE_COPY_LOCATION(target, 0u),
+                    CD3DX12_TEXTURE_COPY_LOCATION(Resource(device), Layout));
+    }
+};
 } // namespace
 
 struct SceneAO::Remote
@@ -50,11 +79,12 @@ struct SceneAO::Remote
     std::shared_ptr<QueueSubmission> Submit;
     GDX12ResourceHandle Depth;
     std::array<GDX12ResourceHandle, 2> Visibility;
-    GDX12Texture HistoryDepth;
-    QueueSubmission::TransferBuffer DepthTransfer, VisibilityTransfer;
-    D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{};
+    GDX12Texture HistoryDepth, XeInputDepth;
+    std::vector<ID3D12Resource*> XeBindings;
+    SharedImage DepthTransfer, VisibilityTransfer, NormalTransfer, EdgeTransfer;
+    GDX12ResourceHandle Normals, Pyramid, Edges;
     std::unique_ptr<GDX12RootSignature> Root;
-    ComPtr<ID3D12PipelineState> Pipeline, Blur;
+    ComPtr<ID3D12PipelineState> Pipeline, Blur, Prefilter;
     std::unique_ptr<GDX12DescriptorHeap> Heap;
     GDX12UploadBuffer<GDX12AmbientOcclusionPass::ShaderConstants> Constants;
     GDX12UploadBuffer<XeGTAO::GTAOConstants> Projection;
@@ -65,30 +95,27 @@ struct SceneAO::Remote
     XMFLOAT2 Jitter{}, DepthUnpack{};
     uint64_t Version = 0;
     UINT Width, Height, FullWidth, FullHeight;
-    bool Delayed, SecondaryBlur;
-    int BlurPasses;
+    bool Delayed, SecondaryBlur, Xe;
+    int BlurPasses, LocalXePasses;
 
     Remote(std::shared_ptr<QueueSubmission> submit, UINT width, UINT height, UINT fullWidth, UINT fullHeight,
-           bool delayed, bool secondaryBlur, int blurPasses)
+           bool delayed, bool secondaryBlur, int denoisePasses, bool xe)
         : Submit(std::move(submit)), Constants(&Submit->Device(1), 1), Projection(&Submit->Device(1), 1),
           GPU1(Submit, 1, 1, 1), Width(width), Height(height), FullWidth(fullWidth), FullHeight(fullHeight),
-          Delayed(delayed), SecondaryBlur(secondaryBlur), BlurPasses(blurPasses)
+          Delayed(delayed), SecondaryBlur(secondaryBlur), Xe(xe),
+          BlurPasses(secondaryBlur ? denoisePasses : 0), LocalXePasses(xe && !secondaryBlur ? denoisePasses : 0)
     {
+        if (Xe)
+        {
+            InitializeXe();
+            return;
+        }
         auto& device = Submit->Device(1);
         auto* native = device.GetDevice().Get();
         constexpr auto format = DXGI_FORMAT_R32_FLOAT;
         auto desc = CD3DX12_RESOURCE_DESC::Tex2D(format, width, height, 1, 1);
-        uint64_t bytes = 0, primaryBytes = 0;
-        D3D12_PLACED_SUBRESOURCE_FOOTPRINT primaryFootprint{};
-        native->GetCopyableFootprints(&desc, 0, 1, 0, &Footprint, nullptr, nullptr, &bytes);
-        Submit->Device(0).GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &primaryFootprint, nullptr, nullptr,
-                                                          &primaryBytes);
-        if (!bytes || bytes == UINT64_MAX || bytes != primaryBytes ||
-            Footprint.Footprint.RowPitch != primaryFootprint.Footprint.RowPitch)
-            throw std::runtime_error("HBAO adapters need matching R32_FLOAT footprints");
-
-        DepthTransfer = Submit->CreateTransferBuffer(bytes);
-        VisibilityTransfer = Submit->CreateTransferBuffer(bytes);
+        DepthTransfer.Initialize(*Submit, desc);
+        VisibilityTransfer.Initialize(*Submit, desc);
         Depth = device.CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc, D3D12_RESOURCE_STATE_COMMON);
         desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
         Visibility[0] = device.CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc, D3D12_RESOURCE_STATE_COMMON);
@@ -138,6 +165,173 @@ struct SceneAO::Remote
         assert(ScheduleGPU1.Packets.front().Operation == 0);
     }
 
+    enum XeResource : Id
+    {
+        SharedDepth, SharedNormals, LocalDepth, LocalNormals, DepthPyramid, Terms0, Terms1, LocalEdges,
+        SharedTerms, SharedEdges
+    };
+
+    void InitializeXe()
+    {
+        auto& device = Submit->Device(1);
+        auto* native = device.GetDevice().Get();
+        const auto texture = [this](DXGI_FORMAT format) {
+            return CD3DX12_RESOURCE_DESC::Tex2D(format, Width, Height, 1, 1);
+        };
+        const auto depth = texture(DXGI_FORMAT_R32_FLOAT);
+        const auto normals = texture(DXGI_FORMAT_R16G16B16A16_FLOAT);
+        auto terms = texture(DXGI_FORMAT_R8_UINT);
+        auto edges = texture(DXGI_FORMAT_R8_UNORM);
+        for (auto format : {depth.Format, terms.Format, edges.Format})
+        {
+            D3D12_FEATURE_DATA_FORMAT_SUPPORT support{format};
+            ThrowIfFailed(native->CheckFeatureSupport(D3D12_FEATURE_FORMAT_SUPPORT, &support, sizeof(support)));
+            if (!(support.Support2 & D3D12_FORMAT_SUPPORT2_UAV_TYPED_STORE))
+                throw std::runtime_error("XeGTAO GPU1 requires typed UAV stores for its depth, terms and edges");
+        }
+        DepthTransfer.Initialize(*Submit, depth);
+        NormalTransfer.Initialize(*Submit, normals);
+        VisibilityTransfer.Initialize(*Submit, terms);
+        if (LocalXePasses) EdgeTransfer.Initialize(*Submit, edges);
+
+        const auto allocate = [&device](const D3D12_RESOURCE_DESC& desc) {
+            return device.CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc, D3D12_RESOURCE_STATE_COMMON);
+        };
+        Depth = allocate(depth);
+        Normals = allocate(normals);
+        terms.Flags = edges.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+        Visibility[0] = allocate(terms);
+        Visibility[1] = allocate(terms);
+        Edges = allocate(edges);
+        Pyramid = allocate(CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R32_FLOAT,
+            (Width + 15) / 16 * 16, (Height + 15) / 16 * 16, 1, 5, 1, 0,
+            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS));
+
+        GDX12RootSignatureDesc root;
+        root.Constants = {8};
+        root.NumSingleCBVSlots = 3;
+        root.NumSingleSRVSlots = 5;
+        root.NumSingleUAVSlots = 9;
+        root.StaticSamplers.emplace_back(0, D3D12_FILTER_MIN_MAG_MIP_POINT,
+            D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
+        Root = std::make_unique<GDX12RootSignature>(&device, root);
+        const auto kernel = [&](const char* entry) {
+            return GDX12RenderHelpers::CreateComputePipeline(&device, Root.get(),
+                SHADERS_FOLDER "AmbientOcclusion.hlsl", entry);
+        };
+        Prefilter = kernel("XePrefilterCS");
+        Pipeline = kernel("XeMainCS");
+        if (BlurPasses) Blur = kernel("XeDenoiseCS");
+        Heap = std::make_unique<GDX12DescriptorHeap>(&device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 14,
+                                                    D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
+        ID3D12Resource* srvs[] = {Depth.Get(), Normals.Get(), Pyramid.Get(),
+                                  Visibility[0].Get(), Visibility[1].Get(), Edges.Get()};
+        for (UINT i = 0; i < std::size(srvs); ++i)
+            native->CreateShaderResourceView(srvs[i], nullptr, Heap->GetCPUHandle(i));
+        D3D12_UNORDERED_ACCESS_VIEW_DESC mip{};
+        mip.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+        mip.Format = DXGI_FORMAT_R32_FLOAT;
+        for (UINT i = 0; i < 5; ++i)
+        {
+            mip.Texture2D.MipSlice = i;
+            native->CreateUnorderedAccessView(Pyramid.Get(), nullptr, &mip, Heap->GetCPUHandle(6 + i));
+        }
+        for (UINT i = 0; i < 2; ++i)
+            native->CreateUnorderedAccessView(Visibility[i].Get(), nullptr, nullptr, Heap->GetCPUHandle(11 + i));
+        native->CreateUnorderedAccessView(Edges.Get(), nullptr, nullptr, Heap->GetCPUHandle(13));
+
+        Graph graph;
+        graph.Device = 1;
+        graph.FrameBoundary = false;
+        graph.TerminalQueue = Queue::Compute;
+        graph.Resources = {{"Xe shared depth", 0, 0, false, true}, {"Xe shared normals", 0, 0, false, true},
+            {"Xe depth", 0, 0}, {"Xe normals", 0, 0}, {"Xe depth pyramid", 0, 0, true},
+            {"Xe terms 0", 0, 0, true}, {"Xe terms 1", 0, 0, true}, {"Xe edges", 0, 0, true},
+            {"Xe shared terms", 0, 0, false, true}};
+        XeBindings = {DepthTransfer.Resource(1), NormalTransfer.Resource(1), Depth.Get(), Normals.Get(),
+                      Pyramid.Get(), Visibility[0].Get(), Visibility[1].Get(), Edges.Get(),
+                      VisibilityTransfer.Resource(1)};
+        graph.Operations = {
+            {"XeGTAO GPU1 import inputs", {{SharedDepth, Mode::Read, CopyRead}, {SharedNormals, Mode::Read, CopyRead},
+                {LocalDepth, Mode::Write, CopyWrite}, {LocalNormals, Mode::Write, CopyWrite}}},
+            {"XeGTAO GPU1 depth pyramid", {{LocalDepth, Mode::Read, Read}, {DepthPyramid, Mode::Write, UnorderedAccess}}},
+            {"XeGTAO GPU1 main", {{LocalDepth, Mode::Read, Read}, {LocalNormals, Mode::Read, Read},
+                {DepthPyramid, Mode::Read, Read}, {Terms0, Mode::Write, UnorderedAccess},
+                {LocalEdges, Mode::Write, UnorderedAccess}}}};
+        for (int pass = 0; pass < BlurPasses; ++pass)
+            graph.Operations.push_back({"XeGTAO GPU1 denoise", {{LocalDepth, Mode::Read, Read},
+                {Id(Terms0 + pass % 2), Mode::Read, Read}, {LocalEdges, Mode::Read, Read},
+                {Id(Terms0 + 1 - pass % 2), Mode::Write, UnorderedAccess}}});
+        graph.Operations.push_back({"XeGTAO GPU1 export terms",
+            {{Id(Terms0 + BlurPasses % 2), Mode::Read, CopyRead}, {SharedTerms, Mode::Write, CopyWrite}}});
+        if (LocalXePasses)
+        {
+            graph.Resources.push_back({"Xe shared edges", 0, 0, false, true});
+            XeBindings.push_back(EdgeTransfer.Resource(1));
+            graph.Operations.back().Accesses.push_back({LocalEdges, Mode::Read, CopyRead});
+            graph.Operations.back().Accesses.push_back({SharedEdges, Mode::Write, CopyWrite});
+        }
+        for (auto& operation : graph.Operations) operation.Target = Queue::Compute;
+        ScheduleGPU1 = Compile(graph);
+        assert(ScheduleGPU1.Packets.front().Operation == 0);
+    }
+
+    void ExecuteXe(CompletionToken depthReady)
+    {
+        GPU1.Execute(ScheduleGPU1, XeBindings, [&](Id operation, uint32_t, auto* cmd) {
+            if (operation == 0)
+            {
+                DepthTransfer.Import(cmd, 1, Depth.Get());
+                NormalTransfer.Import(cmd, 1, Normals.Get());
+                return;
+            }
+            if (operation == Id(3 + BlurPasses))
+            {
+                VisibilityTransfer.Export(cmd, 1, Visibility[BlurPasses % 2].Get());
+                if (LocalXePasses) EdgeTransfer.Export(cmd, 1, Edges.Get());
+                return;
+            }
+            const auto srv = [&](UINT reg, UINT descriptor) {
+                cmd->SetComputeRootDescriptorTable(Root->GetTRootParamIndex(reg), Heap->GetGPUHandle(descriptor));
+            };
+            const auto uav = [&](UINT reg, UINT descriptor) {
+                cmd->SetComputeRootDescriptorTable(Root->GetURootParamIndex(reg), Heap->GetGPUHandle(descriptor));
+            };
+            auto* heap = Heap->GetHeap().Get();
+            cmd->SetDescriptorHeaps(1, &heap);
+            cmd->SetComputeRootSignature(Root->GetRootSignature().Get());
+            cmd->SetComputeRootConstantBufferView(Root->GetBRootParamIndex(3), Projection.GetElementAddress(0));
+            srv(0, 0);
+            if (operation == 1)
+            {
+                cmd->SetPipelineState(Prefilter.Get());
+                for (UINT mip = 0; mip < 5; ++mip) uav(2 + mip, 6 + mip);
+                cmd->Dispatch((Width + 15) / 16, (Height + 15) / 16, 1);
+            }
+            else if (operation == 2)
+            {
+                cmd->SetPipelineState(Pipeline.Get());
+                cmd->SetComputeRootConstantBufferView(Root->GetBRootParamIndex(2), Constants.GetElementAddress(0));
+                srv(1, 1);
+                srv(2, 2);
+                uav(7, 11);
+                uav(8, 13);
+                cmd->Dispatch((Width + 7) / 8, (Height + 7) / 8, 1);
+            }
+            else
+            {
+                const UINT pass = operation - 3;
+                const UINT constants[8] = {0, UINT(pass + 1 == UINT(BlurPasses))};
+                cmd->SetPipelineState(Blur.Get());
+                cmd->SetComputeRoot32BitConstants(0, 8, constants, 0);
+                srv(3, 3 + pass % 2);
+                srv(4, 5);
+                uav(7, 12 - pass % 2);
+                cmd->Dispatch((Width + 15) / 16, (Height + 7) / 8, 1);
+            }
+        }, nullptr, nullptr, nullptr, {{0, depthReady}});
+    }
+
     void RetireReaders()
     {
         for (auto token : Readers)
@@ -161,16 +355,21 @@ struct SceneAO::Remote
     CompletionToken Execute(CompletionToken depthReady)
     {
         DepthReady = depthReady;
-        auto* depthShared = DepthTransfer.Resources[1].Get();
-        auto* visibilityShared = VisibilityTransfer.Resources[1].Get();
+        if (Xe)
+        {
+            ExecuteXe(depthReady);
+            VisibilityReady = GPU1.Completions().back();
+            return VisibilityReady;
+        }
+        auto* depthShared = DepthTransfer.Resource(1);
+        auto* visibilityShared = VisibilityTransfer.Resource(1);
         std::vector<ID3D12Resource*> resources{depthShared, Depth.Get(), Visibility[0].Get(), visibilityShared};
         if (BlurPasses) resources.push_back(Visibility[1].Get());
         GPU1.Execute(ScheduleGPU1, resources,
             [&](Id operation, uint32_t, auto* cmd) {
                 if (operation == 0)
                 {
-                    CopyTexture(cmd, CD3DX12_TEXTURE_COPY_LOCATION(Depth.Get(), 0u),
-                                CD3DX12_TEXTURE_COPY_LOCATION(depthShared, Footprint));
+                    DepthTransfer.Import(cmd, 1, Depth.Get());
                 }
                 else if (operation < Id(2 + BlurPasses))
                 {
@@ -194,8 +393,7 @@ struct SceneAO::Remote
                 }
                 else
                 {
-                    CopyTexture(cmd, CD3DX12_TEXTURE_COPY_LOCATION(visibilityShared, Footprint),
-                                CD3DX12_TEXTURE_COPY_LOCATION(Visibility[BlurPasses % 2].Get(), 0u));
+                    VisibilityTransfer.Export(cmd, 1, Visibility[BlurPasses % 2].Get());
                 }
             }, nullptr, nullptr, nullptr, {{0, depthReady}});
         VisibilityReady = GPU1.Completions().back();
@@ -214,11 +412,23 @@ SceneAO::~SceneAO()
 {
     _pass.ClearDenendencies();
 }
-void SceneAO::Freeze(GDX12Texture* depth, GDX12Texture* normals, GDX12Texture* motion, UINT& temporalIndex,
+bool SceneAO::SupportsRemote(const GDX12AOSettings& settings, bool depthNormals)
+{
+    return settings.IsActive() &&
+        ((settings.Implementation == 1 && settings.Resolution == GDX12AOResolution::Half) ||
+         (settings.Implementation == 2 && settings.Resolution == GDX12AOResolution::Full &&
+          depthNormals && CrossSync.GetValue() == 1));
+}
+
+void SceneAO::Freeze(GDX12Texture* depth, GDX12Texture* normals, GDX12Texture* motion,
+                     GDX12Texture* earlyNormals, UINT& temporalIndex,
                      const std::shared_ptr<QueueSubmission>& remote, History& history)
 {
     _import.reset();
     _motion = motion;
+    _earlyNormals = earlyNormals;
+    _work.Commands.clear();
+    _depthExport = _visibilityImport = _reproject = _importPacket = _reprojectPacket = Invalid;
     auto& p = _pass;
     p.SetInputs({depth, normals});
     if (p._output.GetWidth() != depth->GetWidth() || p._output.GetHeight() != depth->GetHeight())
@@ -233,29 +443,32 @@ void SceneAO::Freeze(GDX12Texture* depth, GDX12Texture* normals, GDX12Texture* m
     _width = _half ? (depth->GetWidth() + 1) / 2 : depth->GetWidth();
     _height = _half ? (depth->GetHeight() + 1) / 2 : depth->GetHeight();
     auto& grid = p._grids[_half];
-    const auto domain = (remote && _half && s.IsActive() && s.Implementation == 1 && (_width > 1 || _height > 1))
+    const auto domain = (remote && SupportsRemote(s, earlyNormals != nullptr) && (_width > 1 || _height > 1))
         ? remote->Incarnation() : 0;
+    const bool useXe = s.Implementation == 2;
     const UINT fullWidth = depth->GetWidth(), fullHeight = depth->GetHeight();
     const bool delayed = CrossSync.GetValue() == 0;
     const bool secondaryBlur = BlurOnSecondary.GetValue();
-    const int blurPasses = secondaryBlur ? s.DenoisePasses : 0;
+    const int remoteDenoise = useXe || secondaryBlur ? s.DenoisePasses : 0;
     if (!domain || history.CameraRevision != _common.HistoryRevision ||
         (history.Last && (history.Last->Submit->Incarnation() != domain || history.Last->FullWidth != fullWidth ||
                          history.Last->FullHeight != fullHeight || history.Last->Delayed != delayed ||
-                         history.Last->SecondaryBlur != secondaryBlur || history.Last->BlurPasses != blurPasses)))
+                         history.Last->SecondaryBlur != secondaryBlur || history.Last->Xe != useXe ||
+                         history.Last->BlurPasses + history.Last->LocalXePasses != remoteDenoise)))
         history.Last.reset();
     history.CameraRevision = _common.HistoryRevision;
 
     const auto createRemote = [&]() -> std::shared_ptr<Remote> {
         try
         {
-            std::shared_ptr<Remote> slot(new Remote(remote, _width, _height, fullWidth, fullHeight, delayed, secondaryBlur, blurPasses),
+            std::shared_ptr<Remote> slot(new Remote(remote, _width, _height, fullWidth, fullHeight, delayed, secondaryBlur, remoteDenoise, useXe),
                 [](Remote* value) {
                     try { value->Drain(); }
                     catch (...) { return; } // Quarantined queues can still reference this slot.
                     delete value;
                 });
             if (delayed) p.CreateTexture(slot->HistoryDepth, DXGI_FORMAT_R32_FLOAT, _width, _height);
+            if (useXe) p.CreateTexture(slot->XeInputDepth, DXGI_FORMAT_R32_FLOAT, _width, _height);
             return slot;
         }
         catch (const DxException& e) { Log::Warning("RenderGraph", "Local HBAO fallback: ", e.ToString()); }
@@ -263,7 +476,8 @@ void SceneAO::Freeze(GDX12Texture* depth, GDX12Texture* normals, GDX12Texture* m
         return {};
     };
     if (domain != _attemptedDomain || fullWidth != _attemptedWidth || fullHeight != _attemptedHeight ||
-        delayed != _attemptedDelayed || secondaryBlur != _attemptedSecondary || blurPasses != _attemptedBlur)
+        useXe != _attemptedXe || delayed != _attemptedDelayed || secondaryBlur != _attemptedSecondary ||
+        remoteDenoise != _attemptedBlur)
     {
         _remote.reset();
         _spare.reset();
@@ -272,7 +486,8 @@ void SceneAO::Freeze(GDX12Texture* depth, GDX12Texture* normals, GDX12Texture* m
         _attemptedHeight = fullHeight;
         _attemptedDelayed = delayed;
         _attemptedSecondary = secondaryBlur;
-        _attemptedBlur = blurPasses;
+        _attemptedXe = useXe;
+        _attemptedBlur = remoteDenoise;
         if (domain) _remote = createRemote();
     }
     if (_remote && delayed && _remote == history.Last)
@@ -463,21 +678,67 @@ struct SceneAO::Plan
 
 void SceneAO::AppendRemoteDepth(Graph& graph, std::vector<ID3D12Resource*>& bindings)
 {
-    _work.Commands.clear();
-    _depthExport = _visibilityImport = _reproject = _importPacket = _reprojectPacket = Invalid;
-    if (!_offload) return;
+    if (!_offload || _remote->Xe) return;
     auto& pass = _pass;
     Plan plan{*this, graph, bindings, AsyncAO.GetValue() ? Queue::Compute : Queue::Direct};
     const auto inputs = AppendPreparation(plan, pass._inputs[0]->GetTexture(), pass._inputs[1]->GetTexture());
-    const auto footprint = _remote->Footprint;
     auto* source = inputs.Depth->GetResource()->D3DResource.Get();
-    auto* shared = _remote->DepthTransfer.Resources[0].Get();
-    const Id buffer = NativeWork::ResourceFor(graph, bindings, shared, "HBAO shared half-depth");
+    auto* remote = _remote.get();
+    const Id buffer = NativeWork::ResourceFor(graph, bindings, remote->DepthTransfer.Resource(0), "HBAO shared half-depth");
     _depthExport = _work.Add(graph, "HBAO GPU0 export half-depth",
         {plan.access(inputs.Depth, Mode::Read, CopyRead), {buffer, Mode::Write, CopyWrite}},
+        [=](auto* cmd) { remote->DepthTransfer.Export(cmd, 0, source); }, {}, Queue::Copy);
+}
+
+void SceneAO::AppendXeInputs(Graph& graph, std::vector<ID3D12Resource*>& bindings, Id ready)
+{
+    if (!_offload || !_remote->Xe) return;
+    auto& pass = _pass;
+    auto* depth = pass._inputs[0]->GetTexture();
+    auto& packedDepth = _remote->XeInputDepth;
+    auto& preparedNormals = pass._grids[0].Normals;
+    Plan plan{*this, graph, bindings, AsyncAO.GetValue() ? Queue::Compute : Queue::Direct};
+    plan.dispatch("XeGTAO prepare early inputs", pass.PackFull, _width, _height,
+        {plan.access(depth, Mode::Read, Read), plan.access(_earlyNormals, Mode::Read, Read),
+         plan.access(&packedDepth, Mode::Write, UnorderedAccess), plan.access(&preparedNormals, Mode::Write, UnorderedAccess)},
+        {depth, _earlyNormals}, {nullptr, preparedNormals.GetUAV(), nullptr, nullptr, nullptr, nullptr,
+                                nullptr, nullptr, nullptr, packedDepth.GetUAV()});
+    graph.Operations.back().Dependencies.push_back(ready);
+
+    auto* remote = _remote.get();
+    const auto sharedDepth = NativeWork::ResourceFor(graph, bindings, remote->DepthTransfer.Resource(0), "Xe shared depth");
+    const auto sharedNormals = NativeWork::ResourceFor(graph, bindings, remote->NormalTransfer.Resource(0), "Xe shared normals");
+    auto* depthSource = packedDepth.GetResource()->D3DResource.Get();
+    auto* normalSource = preparedNormals.GetResource()->D3DResource.Get();
+    _depthExport = _work.Add(graph, "XeGTAO GPU0 export inputs",
+        {plan.access(&packedDepth, Mode::Read, CopyRead), plan.access(&preparedNormals, Mode::Read, CopyRead),
+         {sharedDepth, Mode::Write, CopyWrite}, {sharedNormals, Mode::Write, CopyWrite}},
         [=](auto* cmd) {
-            CopyTexture(cmd, CD3DX12_TEXTURE_COPY_LOCATION(shared, footprint), CD3DX12_TEXTURE_COPY_LOCATION(source, 0u));
+            remote->DepthTransfer.Export(cmd, 0, depthSource);
+            remote->NormalTransfer.Export(cmd, 0, normalSource);
         }, {}, Queue::Copy);
+}
+
+void SceneAO::AppendXeImport(Plan& plan, GDX12Texture& terms, GDX12Texture& edges)
+{
+    auto* remote = _import.get();
+    const auto sharedTerms = NativeWork::ResourceFor(plan.graph, plan.bindings, remote->VisibilityTransfer.Resource(0),
+                                                    "Xe shared terms");
+    std::vector<Access> accesses{{sharedTerms, Mode::Read, CopyRead}, plan.access(&terms, Mode::Write, CopyWrite)};
+    if (remote->LocalXePasses)
+    {
+        const auto sharedEdges = NativeWork::ResourceFor(plan.graph, plan.bindings, remote->EdgeTransfer.Resource(0),
+                                                        "Xe shared edges");
+        accesses.push_back({sharedEdges, Mode::Read, CopyRead});
+        accesses.push_back(plan.access(&edges, Mode::Write, CopyWrite));
+    }
+    auto* termsTarget = terms.GetResource()->D3DResource.Get();
+    auto* edgeTarget = edges.GetResource()->D3DResource.Get();
+    _visibilityImport = _work.Add(plan.graph, "XeGTAO GPU0 import terms", std::move(accesses),
+        [=](auto* cmd) {
+            remote->VisibilityTransfer.Import(cmd, 0, termsTarget);
+            if (remote->LocalXePasses) remote->EdgeTransfer.Import(cmd, 0, edgeTarget);
+        }, {_depthExport}, Queue::Copy);
 }
 
 void SceneAO::AppendRawVisibility(Plan& plan, const PreparedInputs& inputs, GDX12Texture& visibility)
@@ -490,15 +751,13 @@ void SceneAO::AppendRawVisibility(Plan& plan, const PreparedInputs& inputs, GDX1
             {inputs.Depth, inputs.Normals}, {visibility.GetUAV()});
         return;
     }
-    const auto footprint = _import->Footprint;
     auto* target = visibility.GetResource()->D3DResource.Get();
-    auto* shared = _import->VisibilityTransfer.Resources[0].Get();
-    const Id buffer = NativeWork::ResourceFor(plan.graph, plan.bindings, shared, "HBAO shared visibility");
+    auto* remote = _import.get();
+    const Id buffer = NativeWork::ResourceFor(plan.graph, plan.bindings, remote->VisibilityTransfer.Resource(0),
+                                              "HBAO shared visibility");
     _visibilityImport = _work.Add(plan.graph, "HBAO GPU0 import visibility",
         {{buffer, Mode::Read, CopyRead}, plan.access(&visibility, Mode::Write, CopyWrite)},
-        [=](auto* cmd) {
-            CopyTexture(cmd, CD3DX12_TEXTURE_COPY_LOCATION(target, 0u), CD3DX12_TEXTURE_COPY_LOCATION(shared, footprint));
-        }, {_depthExport}, Queue::Copy);
+        [=](auto* cmd) { remote->VisibilityTransfer.Import(cmd, 0, target); }, {_depthExport}, Queue::Copy);
 }
 
 void SceneAO::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings)
@@ -513,9 +772,9 @@ void SceneAO::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings)
     }
     auto* fullDepth = p._inputs[0]->GetTexture();
     auto* fullNormals = p._inputs[1]->GetTexture();
-    const auto inputs = _offload ? PreparedInputs{_remote->Delayed ? &_remote->HistoryDepth : &p._grids[1].Depth,
-                                                &p._grids[1].Normals}
-                                 : AppendPreparation(plan, fullDepth, fullNormals);
+    const auto inputs = !_offload ? AppendPreparation(plan, fullDepth, fullNormals)
+        : _remote->Xe ? PreparedInputs{&_remote->XeInputDepth, &p._grids[0].Normals}
+        : PreparedInputs{_remote->Delayed ? &_remote->HistoryDepth : &p._grids[1].Depth, &p._grids[1].Normals};
     auto* resolved = AppendVisibility(plan, inputs);
     if (_half)
     {
@@ -592,34 +851,40 @@ GDX12Texture* SceneAO::AppendVisibility(Plan& plan, const PreparedInputs& inputs
     }
     else if (_settings.Implementation == 2)
     {
-        std::array<GDX12Descriptor*, 10> uavs{};
-        for (UINT mip = 0; mip < 5; ++mip)
-            uavs[2 + mip] = &grid.DepthUAVs[mip];
-        plan.dispatch("XeGTAO depth pyramid", p.XePrefilter, grid.XeDepth.GetWidth() / 2, grid.XeDepth.GetHeight() / 2,
-                 {plan.access(depth, Mode::Read, Read), plan.access(normals, Mode::Read, Read),
-                  plan.access(&grid.XeDepth, Mode::Write, UnorderedAccess)},
-                 {depth, normals}, uavs);
-        plan.dispatch("XeGTAO main", p.XeMain, _width, _height,
-                 {plan.access(&grid.XeDepth, Mode::Read, Read), plan.access(normals, Mode::Read, Read),
-                  plan.access(&grid.XeTerms[0], Mode::Write, UnorderedAccess),
-                  plan.access(&grid.XeEdges, Mode::Write, UnorderedAccess)},
-                 {depth, normals, &grid.XeDepth},
-                 {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, grid.XeTerms[0].GetUAV(),
-                  grid.XeEdges.GetUAV()});
+        if (_offload)
+            AppendXeImport(plan, grid.XeTerms[0], grid.XeEdges);
+        else
+        {
+            std::array<GDX12Descriptor*, 10> uavs{};
+            for (UINT mip = 0; mip < 5; ++mip)
+                uavs[2 + mip] = &grid.DepthUAVs[mip];
+            plan.dispatch("XeGTAO depth pyramid", p.XePrefilter, grid.XeDepth.GetWidth() / 2, grid.XeDepth.GetHeight() / 2,
+                     {plan.access(depth, Mode::Read, Read), plan.access(normals, Mode::Read, Read),
+                      plan.access(&grid.XeDepth, Mode::Write, UnorderedAccess)},
+                     {depth, normals}, uavs);
+            plan.dispatch("XeGTAO main", p.XeMain, _width, _height,
+                     {plan.access(&grid.XeDepth, Mode::Read, Read), plan.access(normals, Mode::Read, Read),
+                      plan.access(&grid.XeTerms[0], Mode::Write, UnorderedAccess),
+                      plan.access(&grid.XeEdges, Mode::Write, UnorderedAccess)},
+                     {depth, normals, &grid.XeDepth},
+                     {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, grid.XeTerms[0].GetUAV(),
+                      grid.XeEdges.GetUAV()});
+        }
+        const int denoisePasses = _offload ? _remote->LocalXePasses : _settings.DenoisePasses;
         UINT source = 0;
-        for (int pass = 0; pass < _settings.DenoisePasses; ++pass)
+        for (int pass = 0; pass < denoisePasses; ++pass)
         {
             const UINT target = 1 - source;
             plan.dispatch("XeGTAO denoise", p.XeDenoise, (_width + 1) / 2, _height,
                      {plan.access(&grid.XeTerms[source], Mode::Read, Read), plan.access(&grid.XeEdges, Mode::Read, Read),
                       plan.access(&grid.XeTerms[target], Mode::Write, UnorderedAccess)},
-                     {depth, normals, &grid.XeDepth, &grid.XeTerms[source], &grid.XeEdges},
+                     {depth, normals, _offload ? depth : &grid.XeDepth, &grid.XeTerms[source], &grid.XeEdges},
                      {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, grid.XeTerms[target].GetUAV()}, 0,
-                     pass + 1 == _settings.DenoisePasses);
+                     pass + 1 == denoisePasses);
             source = target;
         }
         terms = &grid.XeTerms[source];
-        visibility = &grid.XeDepth;
+        visibility = _offload ? depth : &grid.XeDepth;
         scale = _settings.DenoisePasses ? 1.f : XE_GTAO_OCCLUSION_TERM_SCALE;
     }
     else
@@ -657,7 +922,9 @@ GDX12Texture* SceneAO::AppendVisibility(Plan& plan, const PreparedInputs& inputs
         terms = &grid.XeTerms[0];
     auto* resolved = _half ? &grid.Visibility : &p._output;
     std::vector<Access> resolve{plan.access(depth, Mode::Read, Read), plan.access(normals, Mode::Read, Read),
-                                plan.access(visibility, Mode::Read, Read), plan.access(resolved, Mode::Write, UnorderedAccess)};
+                                plan.access(resolved, Mode::Write, UnorderedAccess)};
+    if (visibility != depth)
+        resolve.push_back(plan.access(visibility, Mode::Read, Read));
     if (terms)
         resolve.push_back(plan.access(terms, Mode::Read, Read));
     plan.dispatch("AO resolve", p.Resolve, _width, _height, resolve, {depth, normals, visibility, terms},
@@ -701,11 +968,15 @@ void SceneAO::Presented(uint64_t frame, const std::vector<CompletionToken>& comp
     assert(_import->Version == (_remote->Delayed && _version > 1 ? _version - 1 : _version));
     const auto gpu0 = _remote->Submit->Device(0).GetAdapterLuid();
     const auto gpu1 = _remote->Submit->Device(1).GetAdapterLuid();
-    Log::Info("RenderGraph", "HBAO MGPU frame=", frame, " slot=", _resources.CurrFrameConstantsIndex,
-        " half=", _width, "x", _height, " GPU0 LUID=", gpu0.HighPart, ":", gpu0.LowPart,
+    Log::Info("RenderGraph", _remote->Xe ? "XeGTAO MGPU frame=" : "HBAO MGPU frame=", frame, " slot=", _resources.CurrFrameConstantsIndex,
+        " grid=", _width, "x", _height, " GPU0 LUID=", gpu0.HighPart, ":", gpu0.LowPart,
         " GPU1 LUID=", gpu1.HighPart, ":", gpu1.LowPart, " depthFence=", _remote->DepthReady.Value,
         " visibilityFence=", _import->VisibilityReady.Value, " importFence=", imported.Value,
         " ordered=", _version, " imported=", _import->Version, " CrossSync=", _remote->Delayed ? 0 : 1,
         " blurGPU=", _remote->SecondaryBlur ? 1 : 0, " blurPasses=", _settings.DenoisePasses);
+    if (_remote->Xe)
+        Log::Info("RenderGraph", "XeGTAO MGPU payload frame=", frame, " terms=R8_UINT edges=",
+            _remote->LocalXePasses ? "R8_UNORM" : "none", " denoiseGPU0=", _remote->LocalXePasses,
+            " denoiseGPU1=", _remote->BlurPasses);
 }
 } // namespace BistroRender

@@ -17,8 +17,10 @@ class SceneAO
     };
     SceneAO(GDX12DeviceResources&, RenderPipelineCommonData&, GDX12Texture* depth, GDX12Texture* normals);
     ~SceneAO();
-    void Freeze(GDX12Texture* depth, GDX12Texture* normals, GDX12Texture* motion, UINT& temporalIndex,
+    static bool SupportsRemote(const GDX12AOSettings&, bool depthNormals);
+    void Freeze(GDX12Texture* depth, GDX12Texture* normals, GDX12Texture* motion, GDX12Texture* earlyNormals, UINT& temporalIndex,
                 const std::shared_ptr<QueueSubmission>& remote, History&);
+    void AppendXeInputs(Graph&, std::vector<ID3D12Resource*>&, Id ready);
     void AppendRemoteDepth(Graph&, std::vector<ID3D12Resource*>&);
     void Append(Graph&, std::vector<ID3D12Resource*>&);
     std::optional<Executor::PacketExchange> Exchange(const Schedule&, History&);
@@ -42,6 +44,7 @@ class SceneAO
         GDX12Texture* Normals;
     };
     PreparedInputs AppendPreparation(Plan&, GDX12Texture* depth, GDX12Texture* normals);
+    void AppendXeImport(Plan&, GDX12Texture& terms, GDX12Texture& edges);
     void AppendRawVisibility(Plan&, const PreparedInputs&, GDX12Texture&);
     GDX12Texture* AppendVisibility(Plan&, const PreparedInputs&);
 
@@ -53,8 +56,9 @@ class SceneAO
     NativeWork _work;
     std::shared_ptr<Remote> _remote, _spare, _import;
     GDX12Texture* _motion = nullptr;
+    GDX12Texture* _earlyNormals = nullptr;
     uint64_t _version = 0, _attemptedDomain = 0;
-    bool _attemptedDelayed = false, _attemptedSecondary = false;
+    bool _attemptedXe = false, _attemptedDelayed = false, _attemptedSecondary = false;
     int _attemptedBlur = 0;
     UINT _attemptedWidth = 0, _attemptedHeight = 0;
     Id _depthExport = Invalid, _visibilityImport = Invalid, _reproject = Invalid;

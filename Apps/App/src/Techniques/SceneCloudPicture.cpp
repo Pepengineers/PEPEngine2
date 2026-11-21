@@ -123,7 +123,7 @@ void SceneCloudPicture::UpdateSettings(std::unique_ptr<Executor>& executor, int 
         if (remoteCloud && !replacement) {
             if (IsRemote()) {
                 if (aoAdapter >= 0 && aoAdapter != p.ExecutorAdapter)
-                    Log::Warning("RenderGraph", "Using local HBAO with the retained CloudPicture adapter");
+                    Log::Warning("RenderGraph", "Using local AO with the retained CloudPicture adapter");
                 return;
             }
             if (!ready || adapter != aoAdapter) {
@@ -140,7 +140,7 @@ void SceneCloudPicture::UpdateSettings(std::unique_ptr<Executor>& executor, int 
 
     const int effectiveAdapter = replacementExecutor ? adapter : p.ExecutorAdapter;
     if (aoAdapter >= 0 && aoAdapter != effectiveAdapter)
-        Log::Warning("RenderGraph", "HBAO adapter ", aoAdapter, " unavailable in the Bistro submission domain; using local HBAO");
+        Log::Warning("RenderGraph", "AO adapter ", aoAdapter, " unavailable in the Bistro submission domain; using local AO");
 
     if (!replacePicture && !replacementExecutor) return;
     // The primary terminal also retires any AO exchange attached to this domain.

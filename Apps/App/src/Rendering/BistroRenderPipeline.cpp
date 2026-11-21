@@ -11,7 +11,7 @@
 namespace
 {
 AutoConsoleVariable<int> AOAdapter(L"App.AO.Adapter", -1,
-    L"Secondary GPU for Bistro half-resolution HBAO (same hardware list as Render.PrimaryAdapter). -1 uses local AO.",
+    L"Secondary GPU for Bistro half-res HBAO or full-res current-frame XeGTAO. -1 uses local AO.",
     EConsoleVariableFlags::Default, [](int value) { return value >= -1; });
 AutoConsoleVariable<bool> AsyncQueues(L"App.Async.Queues", true,
                                       L"Place explicit local work on COMPUTE/COPY; false uses DIRECT.",
@@ -44,7 +44,7 @@ void BistroRenderPipeline::Initialize(RenderPipelineContext& c)
 void BistroRenderPipeline::PrepareMaterialBindings(RenderPipelineContext& c)
 {
 	const auto ao = GetAmbientOcclusionSettings();
-	_aoAdapter = ao.IsActive() && ao.Implementation == 1 && ao.Resolution == GDX12AOResolution::Half
+	_aoAdapter = BistroRender::SceneAO::SupportsRemote(ao, _geometry->DepthNormalsEnabled())
 	    ? AOAdapter.GetValue() : -1;
 	_cloudPicture->UpdateSettings(_executor, _aoAdapter);
 	++_frameNumber;
@@ -176,6 +176,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	};
 	const auto afterDepthNormals = [&](auto& graph, auto& resources, BistroRender::Id ready)
 	{
+		_lighting->AppendEarlyAO(graph, resources, ready);
 		if (!textures.NeedsReadback("Scene.DepthNormals.Normals") &&
 		    !textures.NeedsReadback("Scene.DepthNormals.Depth")) return;
 		const auto first = graph.Operations.size();
@@ -229,7 +230,8 @@ void BistroRenderPipeline::FramePresented()
 		if (name.find("DepthNormals") != std::string::npos || name == BistroRender::GBufferOperationName ||
 		    name == "particle simulation from depth prepass" || name == "opaque particles frustum cull" ||
 		    name == "particle simulation from interaction field" || name == "opaque particles G-buffer (read-only depth)" ||
-		    name == "read back scene texture")
+		    name == "read back scene texture" || name == "XeGTAO GPU0 export inputs" ||
+		    name == "XeGTAO GPU0 import terms" || name == "XeGTAO denoise")
 			Log::Info("RenderGraph", "DepthNormals frame=", _frameNumber, " packet=", i, " ", name);
 	}
 }

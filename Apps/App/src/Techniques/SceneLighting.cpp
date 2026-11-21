@@ -111,7 +111,7 @@ void SceneLighting::Freeze(SceneGeometry& geometry, UINT slot, const std::shared
 	{
 		frame.AO = std::make_unique<SceneAO>(_resources, _common, scene.DepthView.get(), normals);
 	}
-	frame.AO->Freeze(scene.DepthView.get(), normals, scene.Color[1].get(), _aoTemporalIndex,
+	frame.AO->Freeze(scene.DepthView.get(), normals, scene.Color[1].get(), geometry.PrepassNormals(slot), _aoTemporalIndex,
 	                 aoSubmissions, _aoHistory);
 
 	auto& constants = *_resources.FrameConstants.at(slot);

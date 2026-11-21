@@ -19,6 +19,7 @@ class SceneGeometry
 {
   public:
 	explicit SceneGeometry(RenderPipelineContext&);
+	static bool DepthNormalsEnabled();
 	void PrepareVegetation(RenderPipelineContext& c, float dt);
 	std::vector<GDX12RenderPrimitive> VegetationPrimitives() const;
 	void AppendVegetationView(Graph&, std::vector<ID3D12Resource*>&, UINT slot, const GeometryTarget&);

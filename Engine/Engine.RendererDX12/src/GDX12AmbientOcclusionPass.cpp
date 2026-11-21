@@ -45,7 +45,7 @@ void GDX12AmbientOcclusionPass::Initialize()
         D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
     _root = std::make_unique<GDX12RootSignature>(_resources->Device, root);
     const char* entries[PipelineCount] = { "PrepareNormalsCS", "SSAOCS", "HBAOCS", "BlurCS", "ResolveCS",
-        "XePrefilterCS", "XeMainCS", "XeDenoiseCS", "NeutralCS", "PrepareHalfCS", "UpsampleCS", "PadCACAOCS", "ReprojectHBAOCS" };
+        "XePrefilterCS", "XeMainCS", "XeDenoiseCS", "NeutralCS", "PrepareHalfCS", "UpsampleCS", "PadCACAOCS", "ReprojectHBAOCS", "PackFullCS" };
     for (UINT i = 0; i < PipelineCount; ++i)
     {
         _pipelines[i] = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _root.get(),

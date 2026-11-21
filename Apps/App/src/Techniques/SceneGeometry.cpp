@@ -37,6 +37,8 @@ constexpr Id BatchingOperationCount = 4;
 constexpr State ShaderRead =
     D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 } // namespace
+bool SceneGeometry::DepthNormalsEnabled() { return DepthNormalsPrepass.GetValue(); }
+
 SceneGeometry::SceneGeometry(RenderPipelineContext& c)
     : _resources(c.Primary), _slots(c.Primary.FrameConstants.size()), _lindenSimulation(c.Primary),
       _lindenDraw(c.Primary), _common(c.Common)
@@ -226,7 +228,7 @@ void SceneGeometry::Freeze(UINT index, UINT camera, std::vector<GDX12SkinningWor
 {
 	auto& s = _slots.at(index);
 	auto& f = *_resources.FrameConstants.at(index);
-	s.DepthNormals = DepthNormalsPrepass.GetValue();
+	s.DepthNormals = DepthNormalsEnabled();
 	if (s.DepthNormals && !s.EarlyNormals)
 	{
 		s.EarlyNormals = std::make_unique<GDX12Texture>();

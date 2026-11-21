@@ -62,6 +62,22 @@ upsampling always run on GPU0. To capture the final AO only after reprojection,
 use `--read-texture=Scene.AO.Reprojected`. Launch with `--debug-ui` and select `Scene.AO` in the
 scene texture inspector to view the result.
 
+### Two-adapter XeGTAO
+
+Use `Render.AO.Implementation = 2`, `Render.AO.Resolution = 0`,
+`App.DepthNormalsPrepass = true`, `App.AO.CrossSync = 1` and set
+`App.AO.Adapter` to a secondary DXGI index. GPU0 exports depth and prepared
+view-space normals from the early DepthNormals boundary. GPU1 keeps the depth
+pyramid and computes the current frame's XeGTAO terms. GPU0 imports the result
+before lighting and resolves it locally.
+
+`App.AO.BlurOnSecondary = 0` (default) returns raw terms (R8_UINT) and, when
+denoise is needed, edges (R8_UNORM) for the existing GPU0 denoise passes.
+With `1`, GPU1 denoises and exports terms only. Zero denoise passes return raw
+terms without edges and resolve with the existing raw-terms scale.
+XeGTAO stays local with `CrossSync = 0`, without DepthNormals, or when the
+secondary adapter or configuration is unavailable.
+
 ### Read back a scene texture by name
 
 Run `App.exe --read-texture=Scene.AO` for a one-shot readback without opening the
