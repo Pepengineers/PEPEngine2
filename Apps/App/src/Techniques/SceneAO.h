@@ -7,19 +7,28 @@ namespace BistroRender
 {
 class SceneAO
 {
+    struct Remote;
+
   public:
+    struct History
+    {
+        std::shared_ptr<Remote> Last;
+        uint64_t CameraRevision = 0;
+    };
     SceneAO(GDX12DeviceResources&, RenderPipelineCommonData&, GDX12Texture* depth, GDX12Texture* normals);
     ~SceneAO();
-    void Freeze(GDX12Texture* depth, GDX12Texture* normals, UINT& temporalIndex,
-                const std::shared_ptr<QueueSubmission>& remote = {});
+    void Freeze(GDX12Texture* depth, GDX12Texture* normals, GDX12Texture* motion, UINT& temporalIndex,
+                const std::shared_ptr<QueueSubmission>& remote, History&);
     void AppendRemoteDepth(Graph&, std::vector<ID3D12Resource*>&);
     void Append(Graph&, std::vector<ID3D12Resource*>&);
-    std::optional<Executor::PacketExchange> Exchange(const Schedule&);
+    std::optional<Executor::PacketExchange> Exchange(const Schedule&, History&);
+    void Submitted(const std::vector<CompletionToken>&);
     void Presented(uint64_t frame, const std::vector<CompletionToken>&);
     bool Record(Id id, ID3D12GraphicsCommandList* cmd) const
     {
         return _work.Record(id, cmd);
     }
+    bool UsesHistory() const { return _offload && _import != _remote; }
     GDX12Texture* Output()
     {
         return &_pass._output;
@@ -27,8 +36,6 @@ class SceneAO
 
   private:
     struct Plan;
-    struct Remote;
-    void RetireRemote();
     struct PreparedInputs
     {
         GDX12Texture* Depth;
@@ -44,10 +51,14 @@ class SceneAO
     GDX12AOSettings _settings{};
     Matrix _projection;
     NativeWork _work;
-    std::unique_ptr<Remote> _remote;
-    uint64_t _attemptedDomain = 0;
+    std::shared_ptr<Remote> _remote, _spare, _import;
+    GDX12Texture* _motion = nullptr;
+    uint64_t _version = 0, _attemptedDomain = 0;
+    bool _attemptedDelayed = false, _attemptedSecondary = false;
+    int _attemptedBlur = 0;
     UINT _attemptedWidth = 0, _attemptedHeight = 0;
-    Id _depthExport = Invalid, _visibilityImport = Invalid, _importPacket = Invalid;
+    Id _depthExport = Invalid, _visibilityImport = Invalid, _reproject = Invalid;
+    Id _importPacket = Invalid, _reprojectPacket = Invalid;
     bool _offload = false;
     UINT _width = 0, _height = 0;
     bool _half = false;

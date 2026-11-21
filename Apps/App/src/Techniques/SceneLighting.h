@@ -17,7 +17,11 @@ class SceneLighting
 	void Freeze(SceneGeometry&, UINT slot, const std::shared_ptr<QueueSubmission>& aoSubmissions = {});
 	std::optional<Executor::PacketExchange> AOExchange(const Schedule& schedule)
 	{
-		return _frames.at(_slot).AO->Exchange(schedule);
+		return _frames.at(_slot).AO->Exchange(schedule, _aoHistory);
+	}
+	void AOSubmitted(const std::vector<CompletionToken>& completions)
+	{
+		_frames.at(_slot).AO->Submitted(completions);
 	}
 	void AOPresented(uint64_t frame, const std::vector<CompletionToken>& completions)
 	{
@@ -37,6 +41,11 @@ class SceneLighting
 	GDX12Texture* PostDepth() const { return _transparency->Depth(); }
 	GDX12Texture* PostMotion() const { return _transparency->Motion(); }
 	GDX12Texture* AOTexture(UINT slot) const { return _frames.at(slot).AO->Output(); }
+	GDX12Texture* ReprojectedAOTexture(UINT slot) const
+	{
+		const auto& ao = _frames.at(slot).AO;
+		return ao->UsesHistory() ? ao->Output() : nullptr;
+	}
 	GDX12Texture* DeferredHDR() const { return _deferred._color.get(); }
 	GDX12Texture* SunShadow(UINT slot) const { return _sunShadows->Output(slot); }
 	void SetWaterRetirement(std::function<void()> retire) { _transparency->SetWaterRetirement(std::move(retire)); }
@@ -83,5 +92,6 @@ class SceneLighting
 	GDX12SSRSettings _ssrSettings{};
 	GDX12LightGridSettings _gridSettings{};
 	UINT _aoTemporalIndex = 0;
+	SceneAO::History _aoHistory;
 };
 } // namespace BistroRender

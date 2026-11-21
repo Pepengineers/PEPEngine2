@@ -37,15 +37,15 @@ void GDX12AmbientOcclusionPass::Initialize()
     _constants = std::make_unique<GDX12UploadBuffer<ShaderConstants>>(_resources->Device, frames);
     _xeConstants = std::make_unique<GDX12UploadBuffer<XeGTAO::GTAOConstants>>(_resources->Device, frames);
     GDX12RootSignatureDesc root;
-    root.Constants.push_back(4);
+    root.Constants.push_back(8);
     root.NumSingleCBVSlots = 3;
-    root.NumSingleSRVSlots = 7;
+    root.NumSingleSRVSlots = 9;
     root.NumSingleUAVSlots = 10;
     root.StaticSamplers.emplace_back(0, D3D12_FILTER_MIN_MAG_MIP_POINT,
         D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
     _root = std::make_unique<GDX12RootSignature>(_resources->Device, root);
     const char* entries[PipelineCount] = { "PrepareNormalsCS", "SSAOCS", "HBAOCS", "BlurCS", "ResolveCS",
-        "XePrefilterCS", "XeMainCS", "XeDenoiseCS", "NeutralCS", "PrepareHalfCS", "UpsampleCS", "PadCACAOCS" };
+        "XePrefilterCS", "XeMainCS", "XeDenoiseCS", "NeutralCS", "PrepareHalfCS", "UpsampleCS", "PadCACAOCS", "ReprojectHBAOCS" };
     for (UINT i = 0; i < PipelineCount; ++i)
     {
         _pipelines[i] = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _root.get(),

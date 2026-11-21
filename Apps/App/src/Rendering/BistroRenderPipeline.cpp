@@ -105,6 +105,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 		{
 			textures.Name("Scene.Depth", depth, View::Depth);
 			textures.Name("Scene.AO", _lighting->AOTexture(slot), View::Scalar);
+			textures.Name("Scene.AO.Reprojected", _lighting->ReprojectedAOTexture(slot), View::Scalar);
 			textures.Name("GBuffer.AlbedoMetallic", _geometry->GBuffer(slot, 0));
 			textures.Name("GBuffer.Motion", _geometry->GBuffer(slot, 1), View::Motion);
 			textures.Name("GBuffer.NormalRoughness", _geometry->GBuffer(slot, 2), View::Normals);
@@ -181,10 +182,12 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	catch (...)
 	{
 		_cloudPicture->Submitted(_executor->Completions());
+		_lighting->AOSubmitted(_executor->Completions());
 		_post->Reconstruction().CancelRecording();
 		throw;
 	}
 	_cloudPicture->Submitted(_executor->Completions());
+	_lighting->AOSubmitted(_executor->Completions());
 	_post->Submitted(slot);
 	_environment->Submitted(completion);
 	_lighting->Submitted(completion);

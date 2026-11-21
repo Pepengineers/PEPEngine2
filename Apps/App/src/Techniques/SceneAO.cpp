@@ -17,6 +17,12 @@ AutoConsoleVariable<bool> AsyncAO(L"App.Async.AO", false,
                                   L"Run ambient occlusion passes on the local COMPUTE queue.",
                                   EConsoleVariableFlags::Default);
 
+AutoConsoleVariable<int> CrossSync(L"App.AO.CrossSync", 1,
+    L"Remote half-res HBAO: 1 uses this frame, 0 reprojects exactly the previous frame.",
+    EConsoleVariableFlags::Default, [](int value) { return value == 0 || value == 1; });
+AutoConsoleVariable<bool> BlurOnSecondary(L"App.AO.BlurOnSecondary", false,
+    L"Run bilateral blur on the secondary HBAO GPU before exporting visibility.");
+
 void CheckCACAO(FFX_CACAO_Status result)
 {
     if (result != FFX_CACAO_STATUS_OK)
@@ -42,23 +48,31 @@ void CopyTexture(ID3D12GraphicsCommandList* cmd, const D3D12_TEXTURE_COPY_LOCATI
 struct SceneAO::Remote
 {
     std::shared_ptr<QueueSubmission> Submit;
-    GDX12ResourceHandle Depth, Visibility;
+    GDX12ResourceHandle Depth;
+    std::array<GDX12ResourceHandle, 2> Visibility;
+    GDX12Texture HistoryDepth;
     QueueSubmission::TransferBuffer DepthTransfer, VisibilityTransfer;
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{};
     std::unique_ptr<GDX12RootSignature> Root;
-    ComPtr<ID3D12PipelineState> Pipeline;
+    ComPtr<ID3D12PipelineState> Pipeline, Blur;
     std::unique_ptr<GDX12DescriptorHeap> Heap;
     GDX12UploadBuffer<GDX12AmbientOcclusionPass::ShaderConstants> Constants;
     GDX12UploadBuffer<XeGTAO::GTAOConstants> Projection;
     Schedule ScheduleGPU1;
     Executor GPU1;
     CompletionToken DepthReady, VisibilityReady;
-    UINT Width, Height;
-    bool Logged = false;
+    std::array<CompletionToken, 3> Readers{};
+    XMFLOAT2 Jitter{}, DepthUnpack{};
+    uint64_t Version = 0;
+    UINT Width, Height, FullWidth, FullHeight;
+    bool Delayed, SecondaryBlur;
+    int BlurPasses;
 
-    Remote(std::shared_ptr<QueueSubmission> submit, UINT width, UINT height)
+    Remote(std::shared_ptr<QueueSubmission> submit, UINT width, UINT height, UINT fullWidth, UINT fullHeight,
+           bool delayed, bool secondaryBlur, int blurPasses)
         : Submit(std::move(submit)), Constants(&Submit->Device(1), 1), Projection(&Submit->Device(1), 1),
-          GPU1(Submit, 1, 1, 1), Width(width), Height(height)
+          GPU1(Submit, 1, 1, 1), Width(width), Height(height), FullWidth(fullWidth), FullHeight(fullHeight),
+          Delayed(delayed), SecondaryBlur(secondaryBlur), BlurPasses(blurPasses)
     {
         auto& device = Submit->Device(1);
         auto* native = device.GetDevice().Get();
@@ -77,19 +91,31 @@ struct SceneAO::Remote
         VisibilityTransfer = Submit->CreateTransferBuffer(bytes);
         Depth = device.CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc, D3D12_RESOURCE_STATE_COMMON);
         desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-        Visibility = device.CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc, D3D12_RESOURCE_STATE_COMMON);
+        Visibility[0] = device.CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc, D3D12_RESOURCE_STATE_COMMON);
+        if (BlurPasses)
+            Visibility[1] = device.CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc, D3D12_RESOURCE_STATE_COMMON);
 
         GDX12RootSignatureDesc root;
-        root.NumSingleCBVSlots = 4; // AOParameters at b2 and projection at b3, as in AmbientOcclusion.hlsl.
-        root.NumSingleSRVSlots = 1;
+        root.Constants = {8};
+        root.NumSingleCBVSlots = 3; // b2 and b3 match AmbientOcclusion.hlsl.
+        root.NumSingleSRVSlots = BlurPasses ? 3 : 1;
         root.NumSingleUAVSlots = 1;
         Root = std::make_unique<GDX12RootSignature>(&device, root);
         Pipeline = GDX12RenderHelpers::CreateComputePipeline(&device, Root.get(),
             SHADERS_FOLDER "AmbientOcclusion.hlsl", "HBAOHalfDepthCS");
-        Heap = std::make_unique<GDX12DescriptorHeap>(&device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 2,
-                                                    D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
+        if (BlurPasses)
+            Blur = GDX12RenderHelpers::CreateComputePipeline(&device, Root.get(),
+                SHADERS_FOLDER "AmbientOcclusion.hlsl", "BlurHalfDepthCS");
+        Heap = std::make_unique<GDX12DescriptorHeap>(&device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
+            BlurPasses ? 5 : 2, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
         native->CreateShaderResourceView(Depth.Get(), nullptr, Heap->GetCPUHandle(0));
-        native->CreateUnorderedAccessView(Visibility.Get(), nullptr, nullptr, Heap->GetCPUHandle(1));
+        native->CreateUnorderedAccessView(Visibility[0].Get(), nullptr, nullptr, Heap->GetCPUHandle(1));
+        if (BlurPasses)
+        {
+            native->CreateUnorderedAccessView(Visibility[1].Get(), nullptr, nullptr, Heap->GetCPUHandle(2));
+            for (UINT i = 0; i < 2; ++i)
+                native->CreateShaderResourceView(Visibility[i].Get(), nullptr, Heap->GetCPUHandle(3 + i));
+        }
 
         Graph graph;
         graph.Device = 1;
@@ -99,11 +125,37 @@ struct SceneAO::Remote
                            {"GPU1 HBAO visibility", 0, 0, true}, {"shared HBAO visibility", 0, 0, false, true}};
         graph.Operations = {
             {"HBAO GPU1 import half-depth", {{0, Mode::Read, CopyRead}, {1, Mode::Write, CopyWrite}}},
-            {"HBAO GPU1 depth-only visibility", {{1, Mode::Read, Read}, {2, Mode::Write, UnorderedAccess}}},
-            {"HBAO GPU1 export visibility", {{2, Mode::Read, CopyRead}, {3, Mode::Write, CopyWrite}}}};
+            {"HBAO GPU1 depth-only visibility", {{1, Mode::Read, Read}, {2, Mode::Write, UnorderedAccess}}}};
+        constexpr Id pingPong[] = {2, 4};
+        if (BlurPasses) graph.Resources.push_back({"GPU1 HBAO blur scratch", 0, 0, true});
+        for (int pass = 0; pass < BlurPasses; ++pass)
+            graph.Operations.push_back({"HBAO GPU1 bilateral blur", {{1, Mode::Read, Read},
+                {pingPong[pass % 2], Mode::Read, Read}, {pingPong[1 - pass % 2], Mode::Write, UnorderedAccess}}});
+        graph.Operations.push_back({"HBAO GPU1 export visibility",
+            {{pingPong[BlurPasses % 2], Mode::Read, CopyRead}, {3, Mode::Write, CopyWrite}}});
         for (auto& operation : graph.Operations) operation.Target = Queue::Compute;
         ScheduleGPU1 = Compile(graph);
         assert(ScheduleGPU1.Packets.front().Operation == 0);
+    }
+
+    void RetireReaders()
+    {
+        for (auto token : Readers)
+            if (token) Submit->Wait(token);
+        Readers = {};
+    }
+
+    void NoteReader(CompletionToken token)
+    {
+        if (!token) return;
+        auto& last = Readers.at(static_cast<size_t>(token.Target));
+        if (token.Value > last.Value) last = token;
+    }
+
+    void Drain()
+    {
+        GPU1.Drain();
+        RetireReaders();
     }
 
     CompletionToken Execute(CompletionToken depthReady)
@@ -111,29 +163,39 @@ struct SceneAO::Remote
         DepthReady = depthReady;
         auto* depthShared = DepthTransfer.Resources[1].Get();
         auto* visibilityShared = VisibilityTransfer.Resources[1].Get();
-        GPU1.Execute(ScheduleGPU1, {depthShared, Depth.Get(), Visibility.Get(), visibilityShared},
+        std::vector<ID3D12Resource*> resources{depthShared, Depth.Get(), Visibility[0].Get(), visibilityShared};
+        if (BlurPasses) resources.push_back(Visibility[1].Get());
+        GPU1.Execute(ScheduleGPU1, resources,
             [&](Id operation, uint32_t, auto* cmd) {
                 if (operation == 0)
                 {
                     CopyTexture(cmd, CD3DX12_TEXTURE_COPY_LOCATION(Depth.Get(), 0u),
                                 CD3DX12_TEXTURE_COPY_LOCATION(depthShared, Footprint));
                 }
-                else if (operation == 1)
+                else if (operation < Id(2 + BlurPasses))
                 {
+                    const bool blur = operation > 1;
+                    const UINT axis = blur ? (operation - 2) % 2 : 0;
                     auto* heap = Heap->GetHeap().Get();
                     cmd->SetDescriptorHeaps(1, &heap);
                     cmd->SetComputeRootSignature(Root->GetRootSignature().Get());
-                    cmd->SetPipelineState(Pipeline.Get());
+                    cmd->SetPipelineState(blur ? Blur.Get() : Pipeline.Get());
+                    if (blur)
+                    {
+                        const UINT dispatch[8] = {axis};
+                        cmd->SetComputeRoot32BitConstants(0, 8, dispatch, 0);
+                        cmd->SetComputeRootDescriptorTable(Root->GetTRootParamIndex(2), Heap->GetGPUHandle(3 + axis));
+                    }
                     cmd->SetComputeRootConstantBufferView(Root->GetBRootParamIndex(2), Constants.GetElementAddress(0));
                     cmd->SetComputeRootConstantBufferView(Root->GetBRootParamIndex(3), Projection.GetElementAddress(0));
                     cmd->SetComputeRootDescriptorTable(Root->GetTRootParamIndex(0), Heap->GetGPUHandle(0));
-                    cmd->SetComputeRootDescriptorTable(Root->GetURootParamIndex(0), Heap->GetGPUHandle(1));
+                    cmd->SetComputeRootDescriptorTable(Root->GetURootParamIndex(0), Heap->GetGPUHandle(blur ? 2 - axis : 1));
                     cmd->Dispatch((Width + 7) / 8, (Height + 7) / 8, 1);
                 }
                 else
                 {
                     CopyTexture(cmd, CD3DX12_TEXTURE_COPY_LOCATION(visibilityShared, Footprint),
-                                CD3DX12_TEXTURE_COPY_LOCATION(Visibility.Get(), 0u));
+                                CD3DX12_TEXTURE_COPY_LOCATION(Visibility[BlurPasses % 2].Get(), 0u));
                 }
             }, nullptr, nullptr, nullptr, {{0, depthReady}});
         VisibilityReady = GPU1.Completions().back();
@@ -150,18 +212,13 @@ SceneAO::SceneAO(GDX12DeviceResources& r, RenderPipelineCommonData& c, GDX12Text
 }
 SceneAO::~SceneAO()
 {
-    try { RetireRemote(); }
-    catch (...) { _remote.release(); } // A quarantined queue can still reference the transfer resources.
     _pass.ClearDenendencies();
 }
-void SceneAO::RetireRemote()
+void SceneAO::Freeze(GDX12Texture* depth, GDX12Texture* normals, GDX12Texture* motion, UINT& temporalIndex,
+                     const std::shared_ptr<QueueSubmission>& remote, History& history)
 {
-    if (_remote) _remote->GPU1.Drain();
-    _remote.reset();
-}
-void SceneAO::Freeze(GDX12Texture* depth, GDX12Texture* normals, UINT& temporalIndex,
-                     const std::shared_ptr<QueueSubmission>& remote)
-{
+    _import.reset();
+    _motion = motion;
     auto& p = _pass;
     p.SetInputs({depth, normals});
     if (p._output.GetWidth() != depth->GetWidth() || p._output.GetHeight() != depth->GetHeight())
@@ -178,19 +235,61 @@ void SceneAO::Freeze(GDX12Texture* depth, GDX12Texture* normals, UINT& temporalI
     auto& grid = p._grids[_half];
     const auto domain = (remote && _half && s.IsActive() && s.Implementation == 1 && (_width > 1 || _height > 1))
         ? remote->Incarnation() : 0;
-    if (domain != _attemptedDomain || _width != _attemptedWidth || _height != _attemptedHeight)
-    {
-        RetireRemote();
-        _attemptedDomain = domain;
-        _attemptedWidth = _width;
-        _attemptedHeight = _height;
-        if (domain)
+    const UINT fullWidth = depth->GetWidth(), fullHeight = depth->GetHeight();
+    const bool delayed = CrossSync.GetValue() == 0;
+    const bool secondaryBlur = BlurOnSecondary.GetValue();
+    const int blurPasses = secondaryBlur ? s.DenoisePasses : 0;
+    if (!domain || history.CameraRevision != _common.HistoryRevision ||
+        (history.Last && (history.Last->Submit->Incarnation() != domain || history.Last->FullWidth != fullWidth ||
+                         history.Last->FullHeight != fullHeight || history.Last->Delayed != delayed ||
+                         history.Last->SecondaryBlur != secondaryBlur || history.Last->BlurPasses != blurPasses)))
+        history.Last.reset();
+    history.CameraRevision = _common.HistoryRevision;
+
+    const auto createRemote = [&]() -> std::shared_ptr<Remote> {
+        try
         {
-            try { _remote = std::make_unique<Remote>(remote, _width, _height); }
-            catch (const DxException& e) { Log::Warning("RenderGraph", "Local HBAO fallback: ", e.ToString()); }
-            catch (const std::exception& e) { Log::Warning("RenderGraph", "Local HBAO fallback: ", e.what()); }
+            std::shared_ptr<Remote> slot(new Remote(remote, _width, _height, fullWidth, fullHeight, delayed, secondaryBlur, blurPasses),
+                [](Remote* value) {
+                    try { value->Drain(); }
+                    catch (...) { return; } // Quarantined queues can still reference this slot.
+                    delete value;
+                });
+            if (delayed) p.CreateTexture(slot->HistoryDepth, DXGI_FORMAT_R32_FLOAT, _width, _height);
+            return slot;
         }
+        catch (const DxException& e) { Log::Warning("RenderGraph", "Local HBAO fallback: ", e.ToString()); }
+        catch (const std::exception& e) { Log::Warning("RenderGraph", "Local HBAO fallback: ", e.what()); }
+        return {};
+    };
+    if (domain != _attemptedDomain || fullWidth != _attemptedWidth || fullHeight != _attemptedHeight ||
+        delayed != _attemptedDelayed || secondaryBlur != _attemptedSecondary || blurPasses != _attemptedBlur)
+    {
+        _remote.reset();
+        _spare.reset();
+        _attemptedDomain = domain;
+        _attemptedWidth = fullWidth;
+        _attemptedHeight = fullHeight;
+        _attemptedDelayed = delayed;
+        _attemptedSecondary = secondaryBlur;
+        _attemptedBlur = blurPasses;
+        if (domain) _remote = createRemote();
     }
+    if (_remote && delayed && _remote == history.Last)
+    {
+        // A one-frame renderer still needs a separate slot for the next publication.
+        if (!_spare) _spare = createRemote();
+        if (_spare) std::swap(_remote, _spare);
+        else history.Last.reset();
+    }
+
+    if (_remote)
+    {
+        _version = history.Last ? history.Last->Version + 1 : 1;
+        _import = delayed && history.Last ? history.Last : _remote;
+    }
+    else
+        history.Last.reset();
     if (_offload != bool(_remote)) _common.ResetUpscalerHistory = true;
     _offload = bool(_remote);
     if (!s.IsActive() || (_width == 1 && _height == 1))
@@ -234,8 +333,11 @@ void SceneAO::Freeze(GDX12Texture* depth, GDX12Texture* normals, UINT& temporalI
     p._xeConstants->CopyData(slot, xe);
     if (_offload)
     {
-        // GPU0 retired this frame slot, including its import of the GPU1 terminal token.
-        if (!_remote->GPU1.TryBegin(0)) throw std::logic_error("HBAO GPU1 frame slot still in flight");
+        // Only prior uses of this transfer slot can block. The current order is queued later.
+        _remote->RetireReaders();
+        _remote->GPU1.Begin(0);
+        _remote->Jitter = {_common.ActiveCameraJitterOffsetX, _common.ActiveCameraJitterOffsetY};
+        _remote->DepthUnpack = {xe.DepthUnpackConsts.x, xe.DepthUnpackConsts.y};
         _remote->GPU1.Reserve(_remote->ScheduleGPU1);
         _remote->Constants.CopyData(0, constants);
         _remote->Projection.CopyData(0, xe);
@@ -310,9 +412,9 @@ struct SceneAO::Plan
     }
 
     void dispatch(const std::string& name, UINT pipeline, UINT width, UINT height,
-                  std::vector<Access> accesses, std::array<GDX12Texture*, 7> srvs,
+                  std::vector<Access> accesses, std::array<GDX12Texture*, 9> srvs,
                   std::array<GDX12Descriptor*, 10> uavs, UINT axis = 0, UINT final = 0,
-                  float scale = 1.f)
+                  float scale = 1.f, XMFLOAT4 history = {})
     {
         auto& p = ao._pass;
         const UINT slot = ao._resources.CurrFrameConstantsIndex;
@@ -324,9 +426,9 @@ struct SceneAO::Plan
                             D3D12_RESOURCE_STATE_GENERIC_READ});
         accesses.push_back({id(&p._constants->GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
         accesses.push_back({id(&p._xeConstants->GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
-        std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 7> reads{};
+        std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 9> reads{};
         std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 10> writes{};
-        for (UINT i = 0; i < 7; ++i)
+        for (UINT i = 0; i < reads.size(); ++i)
             if (srvs[i])
                 reads[i] = srvs[i]->GetSRV()->GPUHandle;
         for (UINT i = 0; i < 10; ++i)
@@ -342,12 +444,13 @@ struct SceneAO::Plan
                 UINT Axis, Final;
                 float Scale;
                 UINT Padding;
-            } c{axis, final, scale, 0};
-            cmd->SetComputeRoot32BitConstants(0, 4, &c, 0);
+                XMFLOAT4 History;
+            } c{axis, final, scale, 0, history};
+            cmd->SetComputeRoot32BitConstants(0, sizeof(c) / sizeof(UINT), &c, 0);
             cmd->SetComputeRootConstantBufferView(root->GetBRootParamIndex(1), camera);
             cmd->SetComputeRootConstantBufferView(root->GetBRootParamIndex(2), constants);
             cmd->SetComputeRootConstantBufferView(root->GetBRootParamIndex(3), xe);
-            for (UINT i = 0; i < 7; ++i)
+            for (UINT i = 0; i < reads.size(); ++i)
                 if (reads[i].ptr)
                     cmd->SetComputeRootDescriptorTable(root->GetTRootParamIndex(i), reads[i]);
             for (UINT i = 0; i < 10; ++i)
@@ -361,7 +464,7 @@ struct SceneAO::Plan
 void SceneAO::AppendRemoteDepth(Graph& graph, std::vector<ID3D12Resource*>& bindings)
 {
     _work.Commands.clear();
-    _depthExport = _visibilityImport = _importPacket = Invalid;
+    _depthExport = _visibilityImport = _reproject = _importPacket = _reprojectPacket = Invalid;
     if (!_offload) return;
     auto& pass = _pass;
     Plan plan{*this, graph, bindings, AsyncAO.GetValue() ? Queue::Compute : Queue::Direct};
@@ -387,11 +490,11 @@ void SceneAO::AppendRawVisibility(Plan& plan, const PreparedInputs& inputs, GDX1
             {inputs.Depth, inputs.Normals}, {visibility.GetUAV()});
         return;
     }
-    const auto footprint = _remote->Footprint;
+    const auto footprint = _import->Footprint;
     auto* target = visibility.GetResource()->D3DResource.Get();
-    auto* shared = _remote->VisibilityTransfer.Resources[0].Get();
-    const Id buffer = NativeWork::ResourceFor(plan.graph, plan.bindings, shared, "HBAO shared raw AO");
-    _visibilityImport = _work.Add(plan.graph, "HBAO GPU0 import raw AO",
+    auto* shared = _import->VisibilityTransfer.Resources[0].Get();
+    const Id buffer = NativeWork::ResourceFor(plan.graph, plan.bindings, shared, "HBAO shared visibility");
+    _visibilityImport = _work.Add(plan.graph, "HBAO GPU0 import visibility",
         {{buffer, Mode::Read, CopyRead}, plan.access(&visibility, Mode::Write, CopyWrite)},
         [=](auto* cmd) {
             CopyTexture(cmd, CD3DX12_TEXTURE_COPY_LOCATION(target, 0u), CD3DX12_TEXTURE_COPY_LOCATION(shared, footprint));
@@ -410,7 +513,8 @@ void SceneAO::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings)
     }
     auto* fullDepth = p._inputs[0]->GetTexture();
     auto* fullNormals = p._inputs[1]->GetTexture();
-    const auto inputs = _offload ? PreparedInputs{&p._grids[1].Depth, &p._grids[1].Normals}
+    const auto inputs = _offload ? PreparedInputs{_remote->Delayed ? &_remote->HistoryDepth : &p._grids[1].Depth,
+                                                &p._grids[1].Normals}
                                  : AppendPreparation(plan, fullDepth, fullNormals);
     auto* resolved = AppendVisibility(plan, inputs);
     if (_half)
@@ -427,7 +531,7 @@ SceneAO::PreparedInputs SceneAO::AppendPreparation(Plan& plan, GDX12Texture* ful
 {
     auto& p = _pass;
     auto& grid = p._grids[_half];
-    auto* depth = _half ? &grid.Depth : fullDepth;
+    auto* depth = _offload && _remote->Delayed ? &_remote->HistoryDepth : _half ? &grid.Depth : fullDepth;
     std::vector<Access> prepare{plan.access(fullDepth, Mode::Read, Read), plan.access(fullNormals, Mode::Read, Read),
                                 plan.access(&grid.Normals, Mode::Write, UnorderedAccess)};
     if (_half)
@@ -522,7 +626,22 @@ GDX12Texture* SceneAO::AppendVisibility(Plan& plan, const PreparedInputs& inputs
     {
         AppendRawVisibility(plan, inputs, grid.Scratch[0]);
         UINT source = 0;
-        for (int pass = 0; pass < _settings.DenoisePasses; ++pass)
+        if (_offload && _import != _remote)
+        {
+            auto* oldDepth = &_import->HistoryDepth;
+            const XMFLOAT4 history{_import->Jitter.x - _remote->Jitter.x, _import->Jitter.y - _remote->Jitter.y,
+                                  _import->DepthUnpack.x, _import->DepthUnpack.y};
+            _reproject = Id(plan.graph.Operations.size());
+            plan.dispatch("HBAO GPU0 reproject previous visibility", p.ReprojectHBAO, _width, _height,
+                {plan.access(depth, Mode::Read, Read), plan.access(normals, Mode::Read, Read),
+                 plan.access(&grid.Scratch[0], Mode::Read, Read), plan.access(_motion, Mode::Read, Read),
+                 plan.access(oldDepth, Mode::Read, Read), plan.access(&grid.Scratch[1], Mode::Write, UnorderedAccess)},
+                {depth, normals, &grid.Scratch[0], nullptr, nullptr, nullptr, nullptr, _motion, oldDepth},
+                {grid.Scratch[1].GetUAV()}, 0, 0, 1.f, history);
+            source = 1;
+        }
+        const int localBlurPasses = _offload && _remote->SecondaryBlur ? 0 : _settings.DenoisePasses;
+        for (int pass = 0; pass < localBlurPasses; ++pass)
         {
             const UINT target = 1 - source;
             plan.dispatch("AO bilateral blur", p.Blur, _width, _height,
@@ -546,7 +665,7 @@ GDX12Texture* SceneAO::AppendVisibility(Plan& plan, const PreparedInputs& inputs
     return resolved;
 }
 
-std::optional<Executor::PacketExchange> SceneAO::Exchange(const Schedule& schedule)
+std::optional<Executor::PacketExchange> SceneAO::Exchange(const Schedule& schedule, History& history)
 {
     if (!_offload) return {};
     Id exportPacket = Invalid;
@@ -554,25 +673,39 @@ std::optional<Executor::PacketExchange> SceneAO::Exchange(const Schedule& schedu
     {
         if (schedule.Packets[i].Operation == _depthExport) exportPacket = i;
         if (schedule.Packets[i].Operation == _visibilityImport) _importPacket = i;
+        if (_reproject != Invalid && schedule.Packets[i].Operation == _reproject) _reprojectPacket = i;
     }
     if (_importPacket == Invalid || exportPacket >= _importPacket)
         throw std::logic_error("HBAO cross-adapter packets missing or out of order");
     return Executor::PacketExchange{exportPacket, _importPacket,
-        [this](CompletionToken depthReady) { return _remote->Execute(depthReady); }};
+        [this, &history](CompletionToken depthReady) {
+            _remote->Execute(depthReady);
+            _remote->Version = _version;
+            history.Last = _remote;
+            return _import->VisibilityReady;
+        }};
+}
+
+void SceneAO::Submitted(const std::vector<CompletionToken>& completions)
+{
+    if (!_offload) return;
+    for (const auto packet : {_importPacket, _reprojectPacket})
+        if (packet < completions.size()) _import->NoteReader(completions[packet]);
 }
 
 void SceneAO::Presented(uint64_t frame, const std::vector<CompletionToken>& completions)
 {
-    if (!_offload || _remote->Logged) return;
+    if (!_offload || _version > 3) return;
     const auto imported = completions.at(_importPacket);
-    assert(imported && _remote->DepthReady && _remote->VisibilityReady);
+    assert(imported && _remote->DepthReady && _import->VisibilityReady);
+    assert(_import->Version == (_remote->Delayed && _version > 1 ? _version - 1 : _version));
     const auto gpu0 = _remote->Submit->Device(0).GetAdapterLuid();
     const auto gpu1 = _remote->Submit->Device(1).GetAdapterLuid();
     Log::Info("RenderGraph", "HBAO MGPU frame=", frame, " slot=", _resources.CurrFrameConstantsIndex,
         " half=", _width, "x", _height, " GPU0 LUID=", gpu0.HighPart, ":", gpu0.LowPart,
         " GPU1 LUID=", gpu1.HighPart, ":", gpu1.LowPart, " depthFence=", _remote->DepthReady.Value,
-        " visibilityFence=", _remote->VisibilityReady.Value, " importFence=", imported.Value,
-        " blurPasses=", _settings.DenoisePasses);
-    _remote->Logged = true;
+        " visibilityFence=", _import->VisibilityReady.Value, " importFence=", imported.Value,
+        " ordered=", _version, " imported=", _import->Version, " CrossSync=", _remote->Delayed ? 0 : 1,
+        " blurGPU=", _remote->SecondaryBlur ? 1 : 0, " blurPasses=", _settings.DenoisePasses);
 }
 } // namespace BistroRender

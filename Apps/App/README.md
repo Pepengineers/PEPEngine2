@@ -34,9 +34,19 @@ to the secondary GPU index from the same hardware list as `Render.PrimaryAdapter
 also uses a secondary GPU, both techniques share that adapter. An unavailable or
 conflicting AO adapter falls back to local HBAO.
 
-The secondary GPU computes raw visibility from the current frame's half-resolution
-depth. The primary GPU retains the prepared normals and performs bilateral blur,
-resolve, and upsampling. Launch with `--debug-ui` and select `Scene.AO` in the
+`App.AO.CrossSync = 1` (default) imports the current frame's visibility.
+With `0`, GPU0 imports exactly the preceding frame and reprojects it using
+G-buffer motion, jitter and a history depth check. Invalid history pixels use
+visibility 1. The first frame and the first frame after invalidation import
+their own output as a new history baseline.
+
+`App.AO.BlurOnSecondary = 0` (default) runs the configured bilateral passes on
+GPU0 after import and any reprojection, using current half-depth and G-buffer
+normals. With `1`, GPU1 filters in the source grid before export using normals
+reconstructed from half-depth. Both modes transfer only half-depth and one
+visibility texture. Zero denoise passes skips blur on either GPU. Resolve and
+upsampling always run on GPU0. To capture the final AO only after reprojection,
+use `--read-texture=Scene.AO.Reprojected`. Launch with `--debug-ui` and select `Scene.AO` in the
 scene texture inspector to view the result.
 
 ### Read back a scene texture by name

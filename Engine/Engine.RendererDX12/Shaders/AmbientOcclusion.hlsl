@@ -11,6 +11,8 @@ cbuffer DispatchParameters : register(b0)
     uint FinalDenoise;
     float XeScale;
     uint Unused;
+    float2 HistoryJitterDelta;
+    float2 HistoryDepthUnpack;
 };
 ConstantBuffer<CameraCB> Camera : register(b1);
 cbuffer AOParameters : register(b2)
@@ -31,6 +33,8 @@ Texture2D<uint> XeInput : register(t3);
 Texture2D<float> Edges : register(t4);
 Texture2D<float> FullDepth : register(t5);
 Texture2D<float4> FullNormals : register(t6);
+Texture2D<float2> Motion : register(t7);
+Texture2D<float> HistoryDepth : register(t8);
 RWTexture2D<float> OutputAO : register(u0);
 RWTexture2D<float4> PreparedNormals : register(u1);
 RWTexture2D<float> Depth0 : register(u2);
@@ -188,6 +192,14 @@ float3 DepthTangent(uint2 p, float3 center, int2 axis, uint2 size)
     return hasBefore && (!hasAfter || dot(backward, backward) < dot(forward, forward)) ? backward : forward;
 }
 
+float3 HalfDepthNormal(uint2 p, float3 center, uint2 size)
+{
+    float3 normal = cross(DepthTangent(p, center, int2(1, 0), size),
+                          DepthTangent(p, center, int2(0, 1), size));
+    normal = dot(normal, normal) > 1e-12f ? normalize(normal) : float3(0, 0, -1);
+    return dot(normal, center) > 0 ? -normal : normal;
+}
+
 void HBAO(uint2 p, bool depthOnly)
 {
     uint width, height;
@@ -198,11 +210,7 @@ void HBAO(uint2 p, bool depthOnly)
     if (depthOnly)
     {
         center = HalfDepthPosition(p);
-        uint2 size = uint2(width, height);
-        normal = cross(DepthTangent(p, center, int2(1, 0), size),
-                       DepthTangent(p, center, int2(0, 1), size));
-        normal = dot(normal, normal) > 1e-12f ? normalize(normal) : float3(0, 0, -1);
-        if (dot(normal, center) > 0) normal = -normal;
+        normal = HalfDepthNormal(p, center, uint2(width, height));
     }
     else
     {
@@ -243,14 +251,15 @@ void HBAOCS(uint3 id : SV_DispatchThreadID) { HBAO(id.xy, false); }
 [numthreads(8, 8, 1)]
 void HBAOHalfDepthCS(uint3 id : SV_DispatchThreadID) { HBAO(id.xy, true); }
 
-[numthreads(8, 8, 1)]
-void BlurCS(uint3 id : SV_DispatchThreadID)
+void BilateralBlur(uint2 p, bool depthOnly)
 {
-    uint2 p = id.xy;
-    if (!InBounds(p)) return;
+    uint width, height;
+    Depth.GetDimensions(width, height);
+    const uint2 size = uint2(width, height);
+    if (any(p >= size)) return;
     if (Depth[p] <= 0) { OutputAO[p] = 1; return; }
     float centerDepth = LinearDepth(Depth[p]);
-    float3 normal = Normals[p].xyz * 2 - 1;
+    float3 normal = depthOnly ? HalfDepthNormal(p, HalfDepthPosition(p), size) : Normals[p].xyz * 2 - 1;
     float sum = InputAO[p], weightSum = 1;
     for (int offset = -2; offset <= 2; ++offset)
     {
@@ -258,13 +267,53 @@ void BlurCS(uint3 id : SV_DispatchThreadID)
         int2 q = int2(p) + (BlurAxis == 0 ? int2(offset, 0) : int2(0, offset));
         if (any(q < 0) || !InBounds(q) || Depth[q] <= 0) continue;
         float depthDelta = abs(LinearDepth(Depth[q]) - centerDepth);
-        float3 otherNormal = Normals[q].xyz * 2 - 1;
+        float3 otherNormal = depthOnly ? HalfDepthNormal(q, HalfDepthPosition(q), size) : Normals[q].xyz * 2 - 1;
         float weight = exp2(-offset * offset * 0.5f - depthDelta * lerp(0.01f, 4.0f, Sharpness) / max(RadiusCm * 0.02f, 0.1f));
         weight *= pow(saturate(dot(normal, otherNormal)), 8);
         sum += InputAO[q] * weight;
         weightSum += weight;
     }
     OutputAO[p] = sum / weightSum;
+}
+
+[numthreads(8, 8, 1)]
+void BlurCS(uint3 id : SV_DispatchThreadID) { BilateralBlur(id.xy, false); }
+
+[numthreads(8, 8, 1)]
+void BlurHalfDepthCS(uint3 id : SV_DispatchThreadID) { BilateralBlur(id.xy, true); }
+
+[numthreads(8, 8, 1)]
+void ReprojectHBAOCS(uint3 id : SV_DispatchThreadID)
+{
+    const uint2 p = id.xy;
+    if (!InBounds(p)) return;
+    OutputAO[p] = 1;
+    const float depth = Depth[p];
+    if (!isfinite(depth) || depth <= 0) return;
+
+    uint width, height;
+    Motion.GetDimensions(width, height);
+    const float2 fullSize = float2(width, height);
+    const uint2 representative = RepresentativePixel(p);
+    const float2 currentUV = (representative + 0.5f) / fullSize;
+    // GBuffer.Motion stores previous minus current unjittered NDC.
+    const float2 previousUV = currentUV + Motion[representative] * float2(0.5f, -0.5f)
+                            + HistoryJitterDelta / fullSize;
+    if (!all(isfinite(previousUV)) || any(previousUV < 0) || any(previousUV >= 1)) return;
+    const uint2 previous = uint2(previousUV * fullSize * 0.5f);
+    if (!InBounds(previous)) return;
+
+    const float previousRaw = HistoryDepth[previous];
+    if (!isfinite(previousRaw) || previousRaw <= 0) return;
+    const float previousZ = HistoryDepthUnpack.x / (HistoryDepthUnpack.y - previousRaw);
+    const float4 world = mul(float4(currentUV * float2(2, -2) + float2(-1, 1), depth, 1), Camera.InvViewProj);
+    if (!all(isfinite(world)) || abs(world.w) <= 1e-8f) return;
+    const float expectedZ = mul(world / world.w, Camera.PrevViewProjNoJitter).w;
+    if (!isfinite(expectedZ) || expectedZ <= 0 || !isfinite(previousZ) || previousZ <= 0 ||
+        abs(previousZ - expectedZ) > max(1.0f, 0.02f * expectedZ)) return;
+
+    const float visibility = InputAO[previous];
+    if (isfinite(visibility)) OutputAO[p] = saturate(visibility);
 }
 
 [numthreads(8, 8, 1)]
