@@ -133,7 +133,7 @@ namespace Engine::UI
                     }
                 }
                 else if (Name == L"App.CloudPicture.Adapter" || Name == L"App.AO.Adapter" ||
-                    Name == L"App.Particles.Adapter" || Name == L"App.Water.Adapter")
+                    Name == L"App.Particles.Adapter" || Name == L"App.Water.Adapter" || Name == L"App.Grass.Wind.Adapter")
                     DrawAdapter(variable);
                 else if (variable.GetType() == EConsoleVariableType::Boolean)
                 {

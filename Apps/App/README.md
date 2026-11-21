@@ -42,26 +42,38 @@ Use `--read-texture=Scene.DepthNormals.Normals` or
 ### Two-adapter synchronization
 
 In F1, each technique can select its GPU by name. `App.CloudPicture.Adapter`,
-`App.AO.Adapter`, `App.Particles.Adapter` and `App.Water.Adapter` use absolute
+`App.AO.Adapter`, `App.Particles.Adapter`, `App.Water.Adapter` and `App.Grass.Wind.Adapter` use absolute
 indices in the same hardware list as the startup-only `Render.PrimaryAdapter`.
 The default `-1` and the current primary index both run locally. Techniques can
 share a remote GPU or use different ones. Changing a selection takes effect
 during the run. In the table, GPU0 means the primary and GPU1 means the selected
 remote GPU for that technique.
 
-Use `App.CloudPicture.CrossSync`, `App.AO.CrossSync`, `App.Particles.CrossSync`
-or `App.Water.CrossSync` to choose how GPU0 consumes GPU1 publications. N is
+Use the technique's `CrossSync` setting to choose how GPU0 consumes GPU1 publications. N is
 the current frame's order in the publication history. Fence waits run on the
 GPU0 import queue. A wait for an already completed export incurs no GPU stall.
 
 | Mode | Who starts GPU1 work | Version used by GPU0 | Wait and first frame | Available techniques |
 | --- | --- | --- | --- | --- |
 | `0` | Bistro orders N | Exactly N−1 | Wait for N−1 if pending. First uses N, so the first pairs are 1/1, 2/1, 3/2. | Cloud Picture **(default)**, AO, particles, water **(default)** |
-| `1` | Bistro orders N | Exactly N | Wait for N if pending, including the first frame. | Cloud Picture, AO **(default)**, particles **(default)**, water |
+| `1` | Bistro orders N | Exactly N | Wait for N if pending, including the first frame. | Cloud Picture, AO **(default)**, particles **(default)**, water, ProjectedGrid wind **(default)** |
 | `2` | GPU1 advances independently | Newest completed publication | Cloud Picture and water can wait for the first issued export token, then wait on that fence at import. Particles start empty until a snapshot completes. After bootstrap each technique uses completed exports. | Cloud Picture, particles, water |
 | `3` | Bistro orders N | Newest completed publication | Starts empty until the first export completes. No wait for pending results at import. | Particles |
 
 For AO, mode `0` reprojects the previous result into the current frame.
+
+### Two-adapter ProjectedGrid wind
+
+Set `App.Grass.Wind.Algorithm = 1` and select a secondary GPU with
+`App.Grass.Wind.Adapter`. Its default `-1` runs wind on GPU0. An unavailable
+adapter falls back to GPU0. Analytic wind also runs on GPU0.
+
+`App.Grass.Wind.CrossSync = 1` is the supported remote mode. GPU1 solves each
+active grass field and the Linden crown field separately and exports the
+current and previous velocity grids together. GPU0 waits at import. Grass
+uses both grids, while Linden evaluates its next pose from the current grid
+with that field's area, time and resolution. The existing Linden pose display
+order remains in effect.
 
 ### Remote ambient occlusion
 

@@ -81,8 +81,8 @@ class BistroRenderPipeline final : public IRenderPipeline
 	BistroRender::Schedule _schedule;
 	double _animationTime = 0;
 	uint64_t _frameNumber = 0;
-	std::array<BistroRender::Id, 4> _reportedDevices{
-	    BistroRender::Invalid, BistroRender::Invalid, BistroRender::Invalid, BistroRender::Invalid};
+	std::array<BistroRender::Id, 5> _reportedDevices{
+	    BistroRender::Invalid, BistroRender::Invalid, BistroRender::Invalid, BistroRender::Invalid, BistroRender::Invalid};
 	int _aoAdapter = -1;
 	UINT _executorSlot = 0;
 	bool _reportedDepthNormals = false;

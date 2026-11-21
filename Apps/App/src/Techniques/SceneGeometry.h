@@ -20,7 +20,8 @@ class SceneGeometry
   public:
 	explicit SceneGeometry(RenderPipelineContext&);
 	static bool DepthNormalsEnabled();
-	void PrepareVegetation(RenderPipelineContext& c, float dt);
+	void PrepareVegetation(RenderPipelineContext& c, float dt, Executor&);
+	SceneGrass& Grass() { return *_grass; }
 	std::vector<GDX12RenderPrimitive> VegetationPrimitives() const;
 	void AppendVegetationView(Graph&, std::vector<ID3D12Resource*>&, UINT slot, const GeometryTarget&);
 	GDX12ParticleInteractionField InteractionField() const { return _grass->InteractionField(); }

@@ -3,6 +3,8 @@
 #include "Techniques/GeometryTarget.h"
 #include "App.Base/Rendering/IRenderPipeline.h"
 #include "BistroGrassGeometry.h"
+#include "Graph/RenderGraphExecutor.h"
+#include "Techniques/NativeWork.h"
 #include <functional>
 
 namespace BistroRender
@@ -19,7 +21,11 @@ class SceneGrass
 {
   public:
 	explicit SceneGrass(RenderPipelineContext&);
-	void Prepare(RenderPipelineContext&, float dt, const BoundingBox* crown = nullptr);
+	~SceneGrass();
+	void Prepare(RenderPipelineContext&, float dt, Executor&, const BoundingBox* crown);
+	Id WindExecutionDevice() const;
+	void AddWindWaits(const Schedule&, std::vector<PacketWait>&);
+	void WindSubmitted(uint64_t frame, const std::vector<CompletionToken>&);
 	const LindenWindSample& LindenWind() const { return _lindenWind; }
 	GDX12ParticleInteractionField InteractionField() const { return _gpu->InteractionField(); }
 	std::vector<GDX12RenderPrimitive> Primitives() const;
@@ -30,6 +36,9 @@ class SceneGrass
 	bool Record(UINT slot, Id, ID3D12GraphicsCommandList*) const;
 
   private:
+	struct RemoteWind;
+	static void AppendWindJobs(GDX12GrassRenderer&, Graph&, std::vector<ID3D12Resource*>&, NativeWork&, bool remote);
+	void AppendWindImport(Graph&, std::vector<ID3D12Resource*>&, NativeWork&);
 	struct RecordedFrame
 	{
 		struct MainGeometry
@@ -44,11 +53,13 @@ class SceneGrass
 		};
 		std::vector<BuiltPatch> Built;
 		std::unique_ptr<GDX12UploadBuffer<float>> HiZ;
-		std::vector<std::pair<Id, std::function<void(ID3D12GraphicsCommandList*)>>> Commands;
+		NativeWork Work;
 	};
 	GDX12DeviceResources& _resources;
 	BistroGrassGeometry _scene;
 	std::unique_ptr<GDX12GrassRenderer> _gpu;
+	std::unique_ptr<RemoteWind> _remoteWind;
+	int _failedWindAdapter = -1;
 	LindenWindSample _lindenWind;
 	std::vector<RecordedFrame> _frames;
 	std::unique_ptr<GDX12RootSignature> _geometryRoot, _hiZRoot;

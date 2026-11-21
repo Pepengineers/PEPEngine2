@@ -82,7 +82,7 @@ void BistroRenderPipeline::PrepareFrame(RenderPipelineContext& c)
 		c.Primary.Lighting.SunShadowFlags &= ~2u;
 	}
 	c.Common.AOAfterDepthPrepass = false;
-	_geometry->PrepareVegetation(c, c.Common.GameTimer->DeltaTime());
+	_geometry->PrepareVegetation(c, c.Common.GameTimer->DeltaTime(), *_executor);
 	c.Runtime.PrepareReflectionScene();
 }
 
@@ -100,6 +100,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	_lighting->Freeze(*_geometry, slot, submissions, submissions->SelectAdapter(_aoAdapter));
 	auto& particles = _lighting->Particles();
 	auto& water = _lighting->Water();
+	auto& grass = _geometry->Grass();
 	using ParticleInputs = BistroRender::SceneParticles::Inputs;
 	auto* depth = _geometry->Depth(slot);
 	particles.BeginSimulation(_geometry->InteractionField(), depth, *_executor, submissions->SelectAdapter(BistroRender::SceneParticles::SecondaryAdapter()),
@@ -117,8 +118,8 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	water.Prepare(float(delta), *_executor, submissions->SelectAdapter(BistroRender::SceneWater::SecondaryAdapter()));
 	const std::array placements{
 		_cloudPicture->ExecutionDevice(), _lighting->AOExecutionDevice(),
-		particles.ExecutionDevice(), water.ExecutionDevice()};
-	constexpr std::array names{"CloudPicture", "AO", "Particles", "Water"};
+		particles.ExecutionDevice(), water.ExecutionDevice(), grass.WindExecutionDevice()};
+	constexpr std::array names{"CloudPicture", "AO", "Particles", "Water", "ProjectedGrid wind"};
 	for (size_t i = 0; i < placements.size(); ++i)
 	{
 		if (placements[i] == _reportedDevices[i]) continue;
@@ -219,6 +220,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	};
 	auto waits = _cloudPicture->Waits(_schedule);
 	water.AddWaits(_schedule, waits);
+	grass.AddWindWaits(_schedule, waits);
 	std::vector<BistroRender::Executor::PacketExchange> exchanges;
 	particles.AddExchanges(_schedule, waits, exchanges);
 	if (auto ao = _lighting->AOExchange(_schedule)) exchanges.push_back(std::move(*ao));
@@ -232,6 +234,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	{
 		_cloudPicture->Submitted(_executor->Completions());
 		water.Submitted(_executor->Completions());
+		grass.WindSubmitted(_frameNumber, _executor->Completions());
 		particles.Submitted(_executor->Completions());
 		_lighting->AOSubmitted(_executor->Completions());
 		_post->Reconstruction().CancelRecording();
@@ -239,6 +242,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	}
 	_cloudPicture->Submitted(_executor->Completions());
 	water.Submitted(_executor->Completions());
+	grass.WindSubmitted(_frameNumber, _executor->Completions());
 	particles.Submitted(_executor->Completions());
 	_lighting->AOSubmitted(_executor->Completions());
 	_post->Submitted(slot);

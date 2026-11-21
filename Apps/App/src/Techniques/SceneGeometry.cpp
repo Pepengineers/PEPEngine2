@@ -113,11 +113,11 @@ SceneGeometry::SceneGeometry(RenderPipelineContext& c)
 	p.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
 	ThrowIfFailed(r.Device->GetDevice()->CreateGraphicsPipelineState(&p, IID_PPV_ARGS(&_worldCanvas)));
 }
-void SceneGeometry::PrepareVegetation(RenderPipelineContext& c, float dt)
+void SceneGeometry::PrepareVegetation(RenderPipelineContext& c, float dt, Executor& executor)
 {
 	_linden = FindLindenMesh(*BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>());
 	if (!_linden) _lindenDraw.Reset();
-	_grass->Prepare(c, dt, _linden ? &_linden->CrownBounds : nullptr);
+	_grass->Prepare(c, dt, executor, _linden ? &_linden->CrownBounds : nullptr);
 }
 
 std::vector<GDX12RenderPrimitive> SceneGeometry::VegetationPrimitives() const

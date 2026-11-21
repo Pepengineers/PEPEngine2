@@ -65,6 +65,23 @@ std::unique_ptr<GDX12UploadBuffer<T>> GDX12GrassRenderer::Buffer(UINT count, con
     return buffer;
 }
 
+void GDX12GrassRenderer::InitializeWind()
+{
+    GDX12RootSignatureDesc wind;
+    wind.VolatileSRVData = true;
+    wind.NumSingleCBVSlots = 1;
+    wind.NumSingleSRVSlots = 2;
+    wind.NumSingleUAVSlots = 1;
+    _windRoot = std::make_unique<GDX12RootSignature>(_resources->Device, wind);
+    for (UINT stage = 0; stage < _windPSO.size(); ++stage)
+    {
+        const auto number = std::to_string(stage);
+        D3D_SHADER_MACRO defines[] = { { "WIND_STAGE", number.c_str() }, { nullptr, nullptr } };
+        _windPSO[stage] = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _windRoot.get(),
+            APP_SHADERS_FOLDER "WindField.hlsl", "CS", defines);
+    }
+}
+
 void GDX12GrassRenderer::Initialize()
 {
     GDX12RootSignatureDesc compute;
@@ -73,12 +90,7 @@ void GDX12GrassRenderer::Initialize()
     compute.NumSingleSRVSlots = 5;
     compute.NumSingleUAVSlots = 3;
     _computeRoot = std::make_unique<GDX12RootSignature>(_resources->Device, compute);
-    GDX12RootSignatureDesc wind;
-    wind.VolatileSRVData = true;
-    wind.NumSingleCBVSlots = 1;
-    wind.NumSingleSRVSlots = 2;
-    wind.NumSingleUAVSlots = 1;
-    _windRoot = std::make_unique<GDX12RootSignature>(_resources->Device, wind);
+    InitializeWind();
     GDX12RootSignatureDesc interaction;
     interaction.VolatileSRVData = true;
     interaction.NumSingleCBVSlots = 1;
@@ -102,12 +114,6 @@ void GDX12GrassRenderer::Initialize()
     auto& compiler = GDX12ShaderCompiler::GetInstance();
     _expandPSO = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _computeRoot.get(), APP_SHADERS_FOLDER "GrassExpand.hlsl", "ExpandCS");
     _clearPSO = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _computeRoot.get(), APP_SHADERS_FOLDER "GrassExpand.hlsl", "ClearCS");
-    for (UINT stage = 0; stage < _windPSO.size(); ++stage)
-    {
-        const auto number = std::to_string(stage);
-        D3D_SHADER_MACRO defines[] = { { "WIND_STAGE", number.c_str() }, { nullptr, nullptr } };
-        _windPSO[stage] = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _windRoot.get(), APP_SHADERS_FOLDER "WindField.hlsl", "CS", defines);
-    }
     for (UINT i = 0; i < _graphicsPSO.size(); ++i)
     {
         const auto stage = static_cast<Stage>(i);
@@ -175,7 +181,8 @@ void GDX12GrassRenderer::RetireWind(WindState& state)
 
 void GDX12GrassRenderer::BeginFrame(const RenderPipelineCommonData& common,
     std::vector<GDX12GrassInstance> grass, std::vector<GDX12WindInstance> wind, GDX12GrassWindControls controls,
-    const std::vector<BistroInteractionSource>& sources, float deltaSeconds, uint64_t independentWind)
+    const std::vector<BistroInteractionSource>& sources, float deltaSeconds, uint64_t independentWind,
+    GDX12GrassRenderer* windDevice)
 {
     auto& frame = CurrentFrame();
     frame.RetiredFields.clear();
@@ -324,6 +331,7 @@ void GDX12GrassRenderer::BeginFrame(const RenderPipelineCommonData& common,
         if (activeWind.empty())
         {
             frame.WindParametersBuffers.clear();
+            frame.ImportedWind.clear();
             if (_neutralWind) frame.RetiredFields.push_back(std::move(_neutralWind));
             return;
         }
@@ -339,14 +347,9 @@ void GDX12GrassRenderer::BeginFrame(const RenderPipelineCommonData& common,
         _indices = Buffer<UINT>(indexCapacity, false, true);
     }
     if (vertexCapacity && !_arguments) _arguments = Buffer<UINT>(8, false, true);
-    if (!_neutralWind)
-    {
-        _neutralWind = Buffer<XMFLOAT4>(1, true, true);
-        WindParameters neutral = {};
-        neutral.Resolution = 1;
-        WindDispatch(0, neutral, nullptr, nullptr, _neutralWind.get());
-    }
+    EnsureNeutralWind();
     std::unordered_set<uint64_t> submittedWind;
+    std::unordered_set<uint64_t> remoteWind;
     if (controls.WindEnabled && controls.WindQuality > 0)
     {
         for (auto& source : wind)
@@ -358,16 +361,42 @@ void GDX12GrassRenderer::BeginFrame(const RenderPipelineCommonData& common,
             static_cast<GDX12WindSettings&>(source) = ResolveWindSettings(source, controls.WindQuality);
             const auto signature = SettingsHash(source);
             auto& state = _wind[source.Id];
-            const bool reset = (source.Id == independentWind ? windControlChange : controlChange) || signature != state.SettingsHash;
+            const bool remote = windDevice && source.Implementation == GDX12WindImplementation::ProjectedGrid;
+            const bool reset = (source.Id == independentWind ? windControlChange : controlChange) ||
+                signature != state.SettingsHash || state.Remote != remote ||
+                (remote && !windDevice->_wind.count(source.Id));
             state.Source = std::move(source);
             state.SettingsHash = signature;
             state.ResetHistory = reset;
+            if (remote)
+            {
+                if (!state.Remote) RetireWind(state);
+                state.Remote = true;
+                remoteWind.insert(state.Source.Id);
+                windDevice->EnsureNeutralWind();
+                auto& solver = windDevice->_wind[state.Source.Id];
+                solver.Source = state.Source;
+                windDevice->UpdateWind(solver, reset);
+                state.Time = solver.Time;
+                state.PreviousTime = solver.PreviousTime;
+                state.Resolution = solver.Resolution;
+                auto& buffers = frame.ImportedWind[state.Source.Id];
+                const UINT count = state.Resolution * state.Resolution;
+                for (auto& buffer : buffers)
+                    if (!buffer || buffer->GetElementCount() != count)
+                        buffer = Buffer<XMFLOAT4>(count, true, false);
+                continue;
+            }
+            state.Remote = false;
             const size_t begin = frame.WindJobs.size();
             UpdateWind(state, reset);
             if (state.Source.Id == independentWind)
                 for (size_t i = begin; i < frame.WindJobs.size(); ++i) frame.WindJobs[i].Async = true;
         }
     }
+    for (auto it = frame.ImportedWind.begin(); it != frame.ImportedWind.end();)
+        if (!remoteWind.count(it->first)) it = frame.ImportedWind.erase(it);
+        else ++it;
     // Missing/disabled fields are neutral; never sample a retained owner's old field.
     for (auto it = _wind.begin(); it != _wind.end();)
     {
@@ -381,6 +410,20 @@ void GDX12GrassRenderer::BeginFrame(const RenderPipelineCommonData& common,
         const auto field = _wind.find(state.Source.WindId);
         if (field != _wind.end()) state.ResetHistory |= field->second.ResetHistory;
     }
+}
+
+void GDX12GrassRenderer::EnsureNeutralWind()
+{
+    if (_neutralWind) return;
+    _neutralWind = Buffer<XMFLOAT4>(1, true, true);
+    WindParameters neutral = {};
+    neutral.Resolution = 1;
+    WindDispatch(0, neutral, nullptr, nullptr, _neutralWind.get());
+}
+
+const GDX12GrassRenderer::VelocityBuffers& GDX12GrassRenderer::Velocity(const WindState& field)
+{
+    return field.Remote ? CurrentFrame().ImportedWind.at(field.Source.Id) : field.Velocity;
 }
 
 void GDX12GrassRenderer::WindDispatch(const UINT stage, const WindParameters& parameters,
@@ -538,8 +581,9 @@ void GDX12GrassRenderer::PrepareView(const GDX12GeometryContext& view, UINT patc
         p.Patch.w = field.PreviousTime;
         p.WindMode = 2u;
         p.GridResolution = source.GridResolution;
-        currentWind = field.Velocity[0].get();
-        previousWind = field.Velocity[1].get();
+        const auto& velocity = Velocity(field);
+        currentWind = velocity[0].get();
+        previousWind = velocity[1].get();
     }
     const UINT block = frame.DrawCursor / ParametersPerBuffer;
     const UINT element = frame.DrawCursor++ % ParametersPerBuffer;

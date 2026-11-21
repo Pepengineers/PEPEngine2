@@ -2,13 +2,151 @@
 #include "BistroGrass.h"
 #include "Techniques/NativeWork.h"
 #include "Engine.Core/BenchmarkEngine.h"
+#include "Engine.Core/Logging/Logger.h"
 #include "App.Base/Modules/RenderModule.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
 #include <algorithm>
+#include <set>
 
 namespace BistroRender
 {
+namespace
+{
+AutoConsoleVariable<int> WindAdapter(L"App.Grass.Wind.Adapter", -1,
+    L"Hardware GPU index for Bistro ProjectedGrid wind. -1 keeps wind on the primary GPU.",
+    EConsoleVariableFlags::Default, [](int value) { return value >= -1; });
+AutoConsoleVariable<int> WindCrossSync(L"App.Grass.Wind.CrossSync", 1,
+    L"Remote ProjectedGrid wind: 1 imports the current frame's current and previous velocity.",
+    EConsoleVariableFlags::Default, [](int value) { return value == 1; });
+// ECS wind owners count upward from one. Reserve the last ID for the scene mesh.
+constexpr uint64_t LindenWindOwner = UINT64_MAX;
+
+struct WindCopy
+{
+	ID3D12Resource* Buffer;
+	uint64_t Offset, Bytes;
+};
+}
+
+struct SceneGrass::RemoteWind
+{
+	struct Field
+	{
+		uint64_t Owner, Offset, Bytes;
+		UINT Resolution;
+		float Time;
+		std::array<Id, 2> Local{Invalid, Invalid};
+		Id Consumer = Invalid;
+		std::string ConsumerName;
+	};
+	struct Frame
+	{
+		QueueSubmission::TransferBuffer Shared;
+		std::vector<Field> Fields;
+		uint64_t Capacity = 0, Version = 0;
+		CompletionToken Ready, Reader;
+		Id Import = Invalid, ImportPacket = Invalid;
+	};
+
+	std::shared_ptr<QueueSubmission> Submissions;
+	Id Device;
+	GDX12DeviceResources Resources;
+	std::unique_ptr<GDX12GrassRenderer> Solver;
+	Executor Recorder;
+	std::vector<Frame> Frames;
+	std::set<uint64_t> Reported;
+	uint64_t Ordered = 0;
+	bool Imported = false;
+
+	RemoteWind(GDX12DeviceResources& primary, Executor& executor, Id device)
+	    : Submissions(executor.Submissions()), Device(device),
+	      Recorder(Submissions, device, UINT(primary.FrameConstants.size()), 1), Frames(primary.FrameConstants.size())
+	{
+		Resources.Device = &Submissions->Device(device);
+		Resources.FrameConstants.resize(Frames.size());
+		Resources.SRV_UAV_Heap = std::make_shared<GDX12DescriptorHeap>(Resources.Device,
+		    D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, primary.SRV_UAV_Heap->GetNumDescriptors(),
+		    D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
+		Solver = std::make_unique<GDX12GrassRenderer>(&Resources, 0);
+		Solver->InitializeWind();
+	}
+
+	void Begin(UINT slot)
+	{
+		Recorder.Begin(slot);
+		Resources.CurrFrameConstantsIndex = slot;
+		auto& publication = Frames[slot];
+		// The primary frame-slot retirement covers the previous import and its readers.
+		if (publication.Reader && !Submissions->Complete(publication.Reader))
+			throw std::logic_error("Wind display slot still in use by GPU0");
+		publication.Fields.clear();
+		publication.Ready = publication.Reader = {};
+		publication.Import = publication.ImportPacket = Invalid;
+		auto& frame = Solver->CurrentFrame();
+		frame.RetiredFields.clear();
+		frame.WindCursor = 0;
+		frame.WindJobs.clear();
+	}
+
+	void Publish(GDX12GrassRenderer& primary)
+	{
+		auto& frame = Frames[Resources.CurrFrameConstantsIndex];
+		const auto& imports = primary.CurrentFrame().ImportedWind;
+		for (auto it = Solver->_wind.begin(); it != Solver->_wind.end();)
+			if (!imports.count(it->first))
+			{
+				Solver->RetireWind(it->second);
+				it = Solver->_wind.erase(it);
+			}
+			else ++it;
+		if (imports.empty()) return;
+
+		Graph graph;
+		graph.Device = Device;
+		graph.FrameBoundary = false;
+		graph.TerminalQueue = Queue::Compute;
+		std::vector<ID3D12Resource*> bindings;
+		NativeWork work;
+		SceneGrass::AppendWindJobs(*Solver, graph, bindings, work, true);
+		std::vector<WindCopy> copies;
+		std::vector<Access> accesses;
+		uint64_t bytes = 0;
+		for (const auto& entry : imports)
+		{
+			const auto& field = Solver->_wind.at(entry.first);
+			const uint64_t size = uint64_t(field.Resolution) * field.Resolution * sizeof(XMFLOAT4);
+			frame.Fields.push_back({entry.first, bytes, size, field.Resolution, field.Time});
+			for (const auto& velocity : field.Velocity)
+			{
+				auto* source = velocity->GetResource().D3DResource.Get();
+				accesses.push_back({NativeWork::ResourceFor(graph, bindings, source, "wind velocity"),
+				                    Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE});
+				copies.push_back({source, bytes, size});
+				bytes += size;
+			}
+		}
+		if (bytes > frame.Capacity)
+		{
+			frame.Shared = Submissions->CreateTransferBuffer(Device, bytes);
+			frame.Capacity = bytes;
+		}
+		auto* shared = frame.Shared.Resources[1].Get();
+		accesses.push_back({NativeWork::ResourceFor(graph, bindings, shared, "shared wind velocity"),
+		                    Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST});
+		work.Add(graph, "secondary export ProjectedGrid velocity", std::move(accesses),
+		    [shared, copies = std::move(copies)](auto* cmd)
+		    {
+			    for (const auto& copy : copies) cmd->CopyBufferRegion(shared, copy.Offset, copy.Buffer, 0, copy.Bytes);
+		    }, {}, Queue::Compute);
+		const auto schedule = Compile(graph);
+		Recorder.Reserve(schedule);
+		Recorder.Execute(schedule, bindings, [&](Id operation, uint32_t, auto* cmd) { work.Record(operation, cmd); });
+		frame.Ready = Recorder.Completions().back();
+		frame.Version = ++Ordered;
+	}
+};
+
 SceneGrass::SceneGrass(RenderPipelineContext& c)
     : _resources(c.Primary), _scene(BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>(), c.Runtime)
 {
@@ -40,11 +178,16 @@ SceneGrass::SceneGrass(RenderPipelineContext& c)
 	_buildHiZ = GDX12RenderHelpers::CreateComputePipeline(_resources.Device, _hiZRoot.get(),
 	                                                      APP_SHADERS_FOLDER "GrassHiZ.hlsl", "CS");
 }
-void SceneGrass::Prepare(RenderPipelineContext& c, float dt, const BoundingBox* crown)
+SceneGrass::~SceneGrass()
+{
+	if (!_remoteWind) return;
+	try { _remoteWind->Recorder.Drain(); }
+	catch (...) { (void)_remoteWind.release(); }
+}
+
+void SceneGrass::Prepare(RenderPipelineContext& c, float dt, Executor& primary, const BoundingBox* crown)
 {
 	_scene.CollectScene(dt);
-	// ECS wind owners count upward from one. Reserve the last ID for the imported scene mesh.
-	constexpr uint64_t lindenOwner = UINT64_MAX;
 	const bool enable = crown && BistroGrass::WindEnabled.GetValue() && _scene._controls.WindEnabled &&
 	                    _scene._controls.WindQuality > 0;
 	if (enable)
@@ -52,21 +195,51 @@ void SceneGrass::Prepare(RenderPipelineContext& c, float dt, const BoundingBox* 
 		GDX12WindInstance wind;
 		static_cast<GDX12WindSettings&>(wind) = BistroGrass::ReadWindSettings(
 		    {(std::max)(1.0f, crown->Extents.x), (std::max)(1.0f, crown->Extents.z)});
-		wind.Id = lindenOwner;
+		wind.Id = LindenWindOwner;
 		wind.CenterCm = {crown->Center.x, crown->Center.z};
 		wind.DeltaSeconds = _scene._deltaSeconds;
 		wind.GustStartSeconds = _scene._gustStart;
 		_scene._wind.push_back(wind);
 	}
+	const bool projected = _scene._controls.WindEnabled && _scene._controls.WindQuality > 0 &&
+	    std::any_of(_scene._wind.begin(), _scene._wind.end(), [](const auto& wind) {
+		    return wind.Implementation == GDX12WindImplementation::ProjectedGrid;
+	    });
+	const int requested = projected && WindCrossSync.GetValue() == 1 ? WindAdapter.GetValue() : -1;
+	if (_failedWindAdapter != requested) _failedWindAdapter = -1;
+	const Id device = requested >= 0 && requested != _failedWindAdapter ?
+	    primary.Submissions()->SelectAdapter(requested) : 0;
+	if (_remoteWind && _remoteWind->Device != device)
+	{
+		primary.Drain();
+		_remoteWind->Recorder.Drain();
+		_remoteWind.reset();
+	}
+	if (device && !_remoteWind)
+	{
+		try { _remoteWind = std::make_unique<RemoteWind>(_resources, primary, device); }
+		catch (const DxException& e)
+		{
+			_failedWindAdapter = requested;
+			Log::Warning("RenderGraph", "Using local ProjectedGrid wind: ", e.ToString());
+		}
+		catch (const std::exception& e)
+		{
+			_failedWindAdapter = requested;
+			Log::Warning("RenderGraph", "Using local ProjectedGrid wind: ", e.what());
+		}
+	}
+	if (_remoteWind) _remoteWind->Begin(_resources.CurrFrameConstantsIndex);
 	_gpu->BeginFrame(c.Common, _scene._grass, _scene._wind, _scene._controls, _scene._sources, _scene._deltaSeconds,
-	                 enable ? lindenOwner : 0);
+	                 enable ? LindenWindOwner : 0, _remoteWind ? _remoteWind->Solver.get() : nullptr);
+	if (_remoteWind) _remoteWind->Publish(*_gpu);
 	LindenWindSample sample;
 	sample.Revision = _lindenWind.Revision;
 	if (enable)
 	{
-		const auto& field = _gpu->_wind.at(lindenOwner);
+		const auto& field = _gpu->_wind.at(LindenWindOwner);
 		const auto& s = field.Source;
-		sample.Grid = field.Velocity[0].get();
+		sample.Grid = _gpu->Velocity(field)[0].get();
 		sample.Area = {s.CenterCm.x, s.CenterCm.y, s.ExtentsCm.x, s.ExtentsCm.y};
 		sample.Time = field.Time;
 		sample.Resolution = field.Resolution;
@@ -76,6 +249,92 @@ void SceneGrass::Prepare(RenderPipelineContext& c, float dt, const BoundingBox* 
 	_lindenWind = sample;
 	_gpu->PublishPrimitives(_resources.Primitives, &_scene);
 }
+
+Id SceneGrass::WindExecutionDevice() const
+{
+	return _remoteWind && _remoteWind->Frames[_resources.CurrFrameConstantsIndex].Ready ? _remoteWind->Device : 0;
+}
+
+void SceneGrass::AppendWindImport(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work)
+{
+	if (!WindExecutionDevice()) return;
+	auto& frame = _remoteWind->Frames[_resources.CurrFrameConstantsIndex];
+	auto* shared = frame.Shared.Resources[0].Get();
+	std::vector<Access> accesses{{NativeWork::ResourceFor(graph, bindings, shared, "shared wind velocity"),
+	                              Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE}};
+	std::vector<WindCopy> copies;
+	for (auto& field : frame.Fields)
+	{
+		const auto& velocity = _gpu->CurrentFrame().ImportedWind.at(field.Owner);
+		for (size_t i = 0; i < velocity.size(); ++i)
+		{
+			auto* target = velocity[i]->GetResource().D3DResource.Get();
+			field.Local[i] = NativeWork::ResourceFor(graph, bindings, target, "imported wind velocity");
+			copies.push_back({target, field.Offset + i * field.Bytes, field.Bytes});
+			accesses.push_back({field.Local[i], Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST});
+		}
+	}
+	frame.Import = work.Add(graph, "GPU0 import ProjectedGrid velocity", std::move(accesses),
+	    [shared, copies = std::move(copies)](auto* cmd)
+	    {
+		    for (const auto& copy : copies) cmd->CopyBufferRegion(copy.Buffer, 0, shared, copy.Offset, copy.Bytes);
+	    }, {}, Queue::Copy);
+}
+
+void SceneGrass::AddWindWaits(const Schedule& schedule, std::vector<PacketWait>& waits)
+{
+	if (!WindExecutionDevice()) return;
+	auto& frame = _remoteWind->Frames[_resources.CurrFrameConstantsIndex];
+	if (frame.Import == Invalid) throw std::logic_error("Missing ProjectedGrid import operation");
+	for (Id index = 0; index < schedule.Packets.size(); ++index)
+	{
+		const auto& packet = schedule.Packets[index];
+		if (packet.Operation == frame.Import)
+		{
+			frame.ImportPacket = index;
+			continue;
+		}
+		for (auto& field : frame.Fields)
+		{
+			if (field.Consumer != Invalid || _remoteWind->Reported.count(field.Owner)) continue;
+			if (!std::any_of(packet.Accesses.begin(), packet.Accesses.end(), [&](const auto& access) {
+				    return access.Usage == Mode::Read &&
+				        (access.Resource == field.Local[0] || access.Resource == field.Local[1]);
+			    })) continue;
+			if (frame.ImportPacket == Invalid)
+				throw std::logic_error("Wind field consumed before GPU0 import");
+			field.Consumer = index;
+			field.ConsumerName = packet.Name;
+		}
+	}
+	if (frame.ImportPacket == Invalid) throw std::logic_error("Missing ProjectedGrid import packet");
+	waits.push_back({frame.ImportPacket, frame.Ready});
+}
+
+void SceneGrass::WindSubmitted(uint64_t frameNumber, const std::vector<CompletionToken>& completions)
+{
+	if (!WindExecutionDevice()) return;
+	auto& frame = _remoteWind->Frames[_resources.CurrFrameConstantsIndex];
+	if (frame.ImportPacket >= completions.size() || !completions[frame.ImportPacket]) return;
+	frame.Reader = completions[frame.ImportPacket];
+	if (!_remoteWind->Imported)
+	{
+		_remoteWind->Submissions->LogFirstImport("ProjectedGrid wind", frame.Ready, frame.Reader);
+		_remoteWind->Imported = true;
+	}
+	for (const auto& field : frame.Fields)
+	{
+		if (field.Consumer >= completions.size() || !completions[field.Consumer]) continue;
+		_remoteWind->Reported.insert(field.Owner);
+		Log::Info("RenderGraph", "ProjectedGrid wind CrossSync=1 frame=", frameNumber,
+		    " field=", field.Owner == LindenWindOwner ? "Linden" : "Grass", " id=", field.Owner,
+		    " grid=", field.Resolution, " time=", field.Time,
+		    " exported=", frame.Version, " imported=", frame.Version, " exportFence=", frame.Ready.Value,
+		    " importFence=", frame.Reader.Value, " firstConsumer=", field.ConsumerName,
+		    " consumerFence=", completions[field.Consumer].Value);
+	}
+}
+
 std::vector<GDX12RenderPrimitive> SceneGrass::Primitives() const
 {
 	std::vector<GDX12RenderPrimitive> result;
@@ -88,6 +347,50 @@ std::vector<GDX12RenderPrimitive> SceneGrass::Primitives() const
 	}
 	return result;
 }
+void SceneGrass::AppendWindJobs(GDX12GrassRenderer& gpu, Graph& g, std::vector<ID3D12Resource*>& all,
+                                NativeWork& work, bool remote)
+{
+	auto* heap = gpu._resources->SRV_UAV_Heap->GetHeap().Get();
+	const auto access = [&](auto* buffer, Mode mode, State state)
+	{
+		return Access{NativeWork::ResourceFor(g, all, buffer->GetResource().D3DResource.Get(), "wind solver resource"),
+		              mode, state};
+	};
+	for (const auto& job : gpu.CurrentFrame().WindJobs)
+	{
+		const auto root = gpu._windRoot->GetRootSignature();
+		const auto pipeline = gpu._windPSO.at(job.Stage);
+		const auto cb = job.Constants->GetElementAddress(0);
+		const auto output = job.Output->GetUAV()->GPUHandle;
+		const auto input = (job.Input ? job.Input : gpu._neutralWind.get())->GetSRV()->GPUHandle;
+		const auto pressure = (job.Pressure ? job.Pressure : gpu._neutralWind.get())->GetSRV()->GPUHandle;
+		const UINT b = gpu._windRoot->GetBRootParamIndex(0), t = gpu._windRoot->GetTRootParamIndex(0),
+		           u = gpu._windRoot->GetURootParamIndex(0), groups = (job.Resolution + 7) / 8;
+		std::vector<Access> accesses = {access(job.Constants, Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ),
+		                                access(job.Output, Mode::ReadWrite, UnorderedAccess)};
+		if (job.Input)
+		{
+			accesses.push_back(access(job.Input, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
+		}
+		if (job.Pressure)
+		{
+			accesses.push_back(access(job.Pressure, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
+		}
+		work.Add(g, std::string(remote ? "GPU wind stage " : job.Async ? "linden wind stage " : "grass wind stage ") +
+		    std::to_string(job.Stage), std::move(accesses),
+		    [=](auto* cmd)
+		    {
+			    cmd->SetDescriptorHeaps(1, &heap);
+			    cmd->SetComputeRootSignature(root.Get());
+			    cmd->SetPipelineState(pipeline.Get());
+			    cmd->SetComputeRootConstantBufferView(b, cb);
+			    cmd->SetComputeRootDescriptorTable(t, input);
+			    cmd->SetComputeRootDescriptorTable(t + 1, pressure);
+			    cmd->SetComputeRootDescriptorTable(u, output);
+			    cmd->Dispatch(groups, groups, 1);
+		    }, {}, remote || job.Async ? Queue::Compute : Queue::Direct);
+	}
+}
 void SceneGrass::Append(Graph& g, UINT slot, std::vector<ID3D12Resource*>& all, GDX12Descriptor& materials,
                         const std::vector<GeometryTarget>& targets, bool viewsOnly,
                         const std::function<void()>& afterInteraction, const std::function<void()>& afterDepth,
@@ -98,7 +401,7 @@ void SceneGrass::Append(Graph& g, UINT slot, std::vector<ID3D12Resource*>& all, 
 	auto& recorded = _frames.at(slot);
 	if (!viewsOnly)
 	{
-		recorded.Commands.clear();
+		recorded.Work.Commands.clear();
 	}
 
 	const auto resource = [&](ID3D12Resource* native)
@@ -122,9 +425,7 @@ void SceneGrass::Append(Graph& g, UINT slot, std::vector<ID3D12Resource*>& all, 
 				throw std::logic_error("Conflicting frozen grass access");
 			}
 		}
-		const Id id = Id(g.Operations.size());
-		g.Operations.push_back({std::move(name), std::move(unique)});
-		recorded.Commands.emplace_back(id, std::move(command));
+		recorded.Work.Add(g, std::move(name), std::move(unique), std::move(command));
 	};
 	ID3D12DescriptorHeap* heap = _resources.SRV_UAV_Heap->GetHeap().Get();
 	if (!viewsOnly)
@@ -172,40 +473,8 @@ void SceneGrass::Append(Graph& g, UINT slot, std::vector<ID3D12Resource*>& all, 
 		{
 			afterInteraction();
 		}
-		for (const auto& job : frame.WindJobs)
-		{
-			const auto root = gpu._windRoot->GetRootSignature();
-			const auto pipeline = gpu._windPSO.at(job.Stage);
-			const auto cb = job.Constants->GetElementAddress(0);
-			const auto output = job.Output->GetUAV()->GPUHandle;
-			const auto input = (job.Input ? job.Input : gpu._neutralWind.get())->GetSRV()->GPUHandle;
-			const auto pressure = (job.Pressure ? job.Pressure : gpu._neutralWind.get())->GetSRV()->GPUHandle;
-			const UINT b = gpu._windRoot->GetBRootParamIndex(0), t = gpu._windRoot->GetTRootParamIndex(0),
-			           u = gpu._windRoot->GetURootParamIndex(0), groups = (job.Resolution + 7) / 8;
-			std::vector<Access> accesses = {access(job.Constants, Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ),
-			                                access(job.Output, Mode::ReadWrite, UnorderedAccess)};
-			if (job.Input)
-			{
-				accesses.push_back(access(job.Input, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
-			}
-			if (job.Pressure)
-			{
-				accesses.push_back(access(job.Pressure, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
-			}
-			add(std::string(job.Async ? "linden wind stage " : "grass wind stage ") + std::to_string(job.Stage), accesses,
-			    [=](auto* cmd)
-			    {
-				    cmd->SetDescriptorHeaps(1, &heap);
-				    cmd->SetComputeRootSignature(root.Get());
-				    cmd->SetPipelineState(pipeline.Get());
-				    cmd->SetComputeRootConstantBufferView(b, cb);
-				    cmd->SetComputeRootDescriptorTable(t, input);
-				    cmd->SetComputeRootDescriptorTable(t + 1, pressure);
-				    cmd->SetComputeRootDescriptorTable(u, output);
-				    cmd->Dispatch(groups, groups, 1);
-			    });
-			if (job.Async) g.Operations.back().Target = Queue::Compute;
-		}
+		AppendWindJobs(gpu, g, all, recorded.Work, false);
+		AppendWindImport(g, all, recorded.Work);
 		if (afterWind) afterWind();
 	}
 	if (!recorded.HiZ)
@@ -505,15 +774,7 @@ void SceneGrass::Append(Graph& g, UINT slot, std::vector<ID3D12Resource*>& all, 
 
 bool SceneGrass::Record(UINT slot, Id id, ID3D12GraphicsCommandList* cmd) const
 {
-	const auto& commands = _frames.at(slot).Commands;
-	const auto found = std::lower_bound(commands.begin(), commands.end(), id,
-	                                    [](const auto& entry, Id operation) { return entry.first < operation; });
-	if (found == commands.end() || found->first != id)
-	{
-		return false;
-	}
-	found->second(cmd);
-	return true;
+	return _frames.at(slot).Work.Record(id, cmd);
 }
 
 } // namespace BistroRender
