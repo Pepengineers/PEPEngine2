@@ -32,6 +32,7 @@ namespace Engine::UI
         bool FrameBegun = false;
         bool ScreenFrameReady = false;
         bool ApplicationUIInput = false;
+        bool DebugReconstructionStatusVisible = true;
 #ifdef _DEBUG
         bool DebugEnabled = true;
 #else
@@ -481,7 +482,7 @@ namespace Engine::UI
     OffscreenRenderer::~OffscreenRenderer() = default;
 
     std::shared_ptr<const void> OffscreenRenderer::TryRecord(GDX12CommandList& commands, GDX12ResourceHandle target,
-        std::shared_ptr<const DrawData> frame, const std::vector<TextureBinding>& textures)
+        std::shared_ptr<const DrawData> frame, const std::vector<TextureBinding>& textures, bool clearTarget)
     {
         auto& state = *_impl;
         if (std::this_thread::get_id() != state.OwnerThread)
@@ -591,8 +592,11 @@ namespace Engine::UI
         }
         const auto rtv = state.RtvHeap.GetCPUHandle(slot);
         state.Native->CreateRenderTargetView(recording->Target.Get(), nullptr, rtv);
-        const float clear[4]{};
-        list->ClearRenderTargetView(rtv, clear, 0, nullptr);
+        if (clearTarget)
+        {
+            const float clear[4]{};
+            list->ClearRenderTargetView(rtv, clear, 0, nullptr);
+        }
         list->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
         ID3D12DescriptorHeap* heaps[] = {state.SrvHeap.GetHeap().Get()};
         list->SetDescriptorHeaps(1, heaps);
@@ -622,9 +626,8 @@ namespace Engine::UI
             const auto layoutPath = (configDir / L"ImGui.ini").u8string();
             LayoutPath.assign(reinterpret_cast<const char*>(layoutPath.data()), layoutPath.size());
             io.IniFilename = layoutError ? nullptr : LayoutPath.c_str();
-            io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
         }
-        io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+        io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_DockingEnable;
         ImGui::StyleColorsDark();
         Visible = DebugEnabled;
         try
@@ -748,31 +751,35 @@ namespace Engine::UI
         commands->ResourceBarrier({target->GetResource()->GetPresentBarrier()});
     }
 
-    std::shared_ptr<const DrawData> CaptureScreenFrame(ImDrawList* gameOverlay)
+    std::shared_ptr<const DrawData> CaptureScreenFrame()
     {
-        const auto* background = gameOverlay ? ImGui::GetBackgroundDrawList(ImGui::GetMainViewport()) : nullptr;
         const auto* data = FinalizeScreenFrame();
         if (!data) return {};
         const int frame = ImGui::GetFrameCount();
         // ImGui's dynamic atlas marks real pixel writes dirty, including pending WantCreate textures.
         if (ScreenAtlasFrame != frame && !ImGui::GetIO().Fonts->TexIsBuilt) ++ScreenAtlasGeneration;
         ScreenAtlasFrame = frame;
-        if (!gameOverlay || gameOverlay->VtxBuffer.empty())
-            return data->TotalVtxCount ? CaptureData(*data, true) : nullptr;
+        return data->TotalVtxCount ? CaptureData(*data, true) : nullptr;
+    }
 
-        ImDrawData combined = *data;
-        combined.AddDrawList(gameOverlay);
-        auto* insertion = combined.CmdLists.begin();
-        if (*insertion == background)
-            ++insertion;
-        std::rotate(insertion, combined.CmdLists.end() - 1, combined.CmdLists.end());
-        return CaptureData(combined, true);
+    std::shared_ptr<const DrawData> CaptureScreenOverlay(ImDrawList& overlay)
+    {
+        const auto* frame = ImGui::GetDrawData();
+        if (!frame || overlay.VtxBuffer.empty()) return {};
+        ImDrawData data;
+        data.Valid = true;
+        data.DisplayPos = frame->DisplayPos;
+        data.DisplaySize = frame->DisplaySize;
+        data.FramebufferScale = frame->FramebufferScale;
+        data.OwnerViewport = frame->OwnerViewport;
+        data.AddDrawList(&overlay);
+        return CaptureData(data, true);
     }
 
     void DrawReconstructionStatus(const GDX12ReconstructionStatus& status, unsigned renderWidth, unsigned renderHeight,
         unsigned outputWidth, unsigned outputHeight)
     {
-        if (!DebugUIVisible()) return;
+        if (!DebugReconstructionStatusVisible || !DebugUIVisible()) return;
         ConsoleModule console;
         const auto& provider = console.FindConsoleVariable(L"Render.Upscaler.Provider");
         const auto& quality = console.FindConsoleVariable(L"Render.Upscaler.Quality");
@@ -827,6 +834,7 @@ namespace Engine::UI
     }
 
     void EnableApplicationUIInput() { ApplicationUIInput = true; }
+    void SetDebugReconstructionStatusVisible(bool visible) { DebugReconstructionStatusVisible = visible; }
     void EnableDebugUI() { DebugEnabled = true; }
     bool DebugUIVisible() { return DebugEnabled && FrameBegun && Visible; }
 }

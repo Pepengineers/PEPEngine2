@@ -3,6 +3,7 @@
 #include "App.Base/ECS/World.h"
 #include "App.Base/Modules/RenderModule.h"
 #include "Engine.Core/AssetManager.h"
+#include "Engine.Core/BenchmarkEngine.h"
 
 namespace BistroEntrance
 {

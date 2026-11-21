@@ -134,6 +134,8 @@
     <ClInclude Include="src\Techniques\Linden\LindenDraw.h" />
     <ClCompile Include="src\Rendering\BistroRenderPipeline.cpp" />
     <ClCompile Include="src\Techniques\UI\ScenePostUI.cpp" />
+    <ClCompile Include="src\Techniques\UI\BistroInfoPanel.cpp" />
+    <ClInclude Include="src\Techniques\UI\BistroInfoPanel.h" />
     <ClCompile Include="src\Techniques\UI\SceneTextureInspector.cpp" />
     <ClInclude Include="src\Techniques\UI\SceneTextureInspector.h" />
     <None Include="Shaders\SceneTextureInspector.hlsl" />

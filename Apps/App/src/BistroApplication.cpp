@@ -14,6 +14,7 @@
 #include "Techniques/Water/BistroWater.h"
 #include "BistroReflections.h"
 #include "BistroBenchmark.h"
+#include "Techniques/UI/BistroInfoPanel.h"
 #include "Components/BistroInteractionSource.h"
 #include "Components/FluidRenderComponent.h"
 #include <stdexcept>
@@ -74,8 +75,9 @@ class BistroApplication final : public App
 	BistroApplication() : App(GetModuleHandleW(nullptr)) {}
 	bool AddModules() override
 	{
-		Locator.RegisterModule(
-		    std::make_shared<RenderModule>(GetWindow(), &Timer, std::make_unique<BistroRenderPipeline>()));
+		auto pipeline = std::make_unique<BistroRenderPipeline>();
+		_bistroPipeline = pipeline.get();
+		Locator.RegisterModule(std::make_shared<RenderModule>(GetWindow(), &Timer, std::move(pipeline)));
 		const auto scene = std::filesystem::path(ASSETS_FOLDER) / "Scenes/Amazon Lumberyard Bistro";
 		for (const auto* part : {"Exterior/exterior.obj", "Interior/interior.obj"})
 		{
@@ -113,6 +115,7 @@ class BistroApplication final : public App
 		InitializeCamera(world);
 		_benchmark.Initialize(world);
 		Engine::UI::EnableApplicationUIInput();
+		Engine::UI::SetDebugReconstructionStatusVisible(false);
 		IndirectCommandBuildSystem commands;
 		commands.Schedule(GetJobs(), world, 0).Complete();
 		Log::Info("Bistro",
@@ -132,8 +135,9 @@ class BistroApplication final : public App
 		_bistroBounds->UpdateEmitters(world);
 		BistroParticles::Update(world);
 		App::Update(timer);
-		_bistroReflections.DrawBounds(world, *Locator.GetModule<RenderModule>());
-		_benchmark.Draw();
+		auto render = Locator.GetModule<RenderModule>();
+		_bistroReflections.DrawBounds(world, *render);
+		_info.Draw(*render, *_bistroPipeline, _benchmark, timer.DeltaTime());
 	}
 	void Render(const GameTimer& timer) override
 	{
@@ -157,6 +161,8 @@ class BistroApplication final : public App
 	BistroWater::Scene _bistroWater;
 	BistroReflections::Scene _bistroReflections{1, true};
 	BistroBenchmark _benchmark;
+	BistroInfoPanel _info;
+	BistroRenderPipeline* _bistroPipeline = nullptr;
 	std::unique_ptr<BistroBounds::Scene> _bistroBounds;
 	POINT _lastMousePos{};
 	float _cameraSpeed = 500.f;

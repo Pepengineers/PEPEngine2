@@ -17,8 +17,9 @@ namespace Engine::UI
 
     // Called on the ImGui owner thread while the source draw data and atlas are live.
     std::shared_ptr<const DrawData> CaptureDrawData(const ImDrawData& source);
-    // A separate game overlay is inserted after the screen background and underneath interactive windows.
-    std::shared_ptr<const DrawData> CaptureScreenFrame(ImDrawList* gameOverlay = nullptr);
+    std::shared_ptr<const DrawData> CaptureScreenFrame();
+    // Capture a separate overlay after CaptureScreenFrame finalizes the shared atlas.
+    std::shared_ptr<const DrawData> CaptureScreenOverlay(ImDrawList& overlay);
 
     inline constexpr DXGI_FORMAT OffscreenFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 
@@ -40,11 +41,11 @@ namespace Engine::UI
         OffscreenRenderer& operator=(const OffscreenRenderer&) = delete;
 
         // Target is in RENDER_TARGET; bindings are in PIXEL_SHADER_RESOURCE. States stay unchanged.
-        // The cleared output is linear premultiplied RGBA8. Input vertex/texture RGB is linear and alpha is straight.
+        // The output is linear premultiplied RGBA8. Preserve it when drawing a subsequent layer.
         // Empty return means the next backend slot is busy and no commands were recorded.
         // Retain the returned owner until queue completion, or until the unsubmitted list is discarded.
         [[nodiscard]] std::shared_ptr<const void> TryRecord(GDX12CommandList& commands, GDX12ResourceHandle target,
-            std::shared_ptr<const DrawData> frame, const std::vector<TextureBinding>& textures = {});
+            std::shared_ptr<const DrawData> frame, const std::vector<TextureBinding>& textures = {}, bool clearTarget = true);
 
     private:
         struct Impl;

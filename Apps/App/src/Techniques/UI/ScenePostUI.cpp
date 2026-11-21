@@ -1,4 +1,5 @@
 #include "ScenePostUI.h"
+#include "BistroInfoPanel.h"
 #include "BistroGameHUD.h"
 #include "App.Base/Modules/RenderModule.h"
 #include "App.Base/Modules/SceneManagerModule.h"
@@ -283,6 +284,7 @@ void ScenePostUI::AppendScreen(Graph& graph, std::vector<ID3D12Resource*>& bindi
 	const auto resource = [](GDX12Texture* texture) { return texture->GetResource(); };
 	auto& screen = _slots.at(_resources.CurrFrameConstantsIndex);
 	screen.RasterOwner.reset();
+	screen.GameRasterOwner.reset();
 	screen.CompositeOwner.reset();
 	const bool hud = GameHUD::Enabled.GetValue() && ImGui::GetCurrentContext();
 	GameHUD::Bar bar{};
@@ -305,17 +307,19 @@ void ScenePostUI::AppendScreen(Graph& graph, std::vector<ID3D12Resource*>& bindi
 	{
 		if (!_gameOverlay)
 			_gameOverlay = std::make_unique<ImDrawList>(ImGui::GetDrawListSharedData());
-		bar = GameHUD::Draw(*_gameOverlay, _common.GameTimer ? _common.GameTimer->TotalTime() : 0.f);
+		bar = GameHUD::Draw(*_gameOverlay, _common.GameTimer ? _common.GameTimer->TotalTime() : 0.f,
+		                   BistroInfoPanel::Height(ImGui::GetIO().DisplaySize.x));
 	}
 	auto* preview = _inspector.Append(graph, bindings, _work, *_resources.Device, _resources.CurrFrameConstantsIndex,
 	    resource(target)->D3DResource.Get(), _common.ActiveCameraNearPlane, _common.ActiveCameraFarPlane);
-	screen.Draw = Engine::UI::CaptureScreenFrame(hud ? _gameOverlay.get() : nullptr);
+	screen.Draw = Engine::UI::CaptureScreenFrame();
+	screen.GameDraw = hud ? Engine::UI::CaptureScreenOverlay(*_gameOverlay) : nullptr;
 	Id screenId = dependency;
-	if (screen.Draw)
+	if (screen.Draw || screen.GameDraw)
 	{
 		if (!_screen)
 		{
-			_screen = std::make_unique<Engine::UI::OffscreenRenderer>(*_resources.Device, UINT(_slots.size()), true);
+			_screen = std::make_unique<Engine::UI::OffscreenRenderer>(*_resources.Device, UINT(2 * _slots.size()), true);
 			_composite = std::make_unique<Engine::UI::ScreenComposite>(*_resources.Device);
 		}
 		if (!screen.Target)
@@ -327,13 +331,7 @@ void ScenePostUI::AppendScreen(Graph& graph, std::vector<ID3D12Resource*>& bindi
 		std::vector<std::pair<GDX12Resource*, Mode>> accesses{{resource(screen.Target.get()), Mode::Write}};
 		std::vector<Engine::UI::TextureBinding> hudTextures;
 		std::vector<Id> rasterDependencies{dependency};
-		if (preview)
-		{
-			auto* atlas = resource(preview);
-			accesses.emplace_back(atlas, Mode::Read);
-			hudTextures.push_back({SceneTextureInspector::AtlasId, atlas->D3DResource, preview->GetFormat()});
-		}
-		if (hud)
+		if (screen.GameDraw)
 		{
 			auto* atlas = resource(_hudAtlas);
 			NativeWork::ImportReadOnlyTexture(graph, bindings, *atlas, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE,
@@ -380,19 +378,36 @@ void ScenePostUI::AppendScreen(Graph& graph, std::vector<ID3D12Resource*>& bindi
 			accesses.emplace_back(barResource, Mode::Read);
 			hudTextures.push_back({GameHUD::HealthBar, barResource->D3DResource, Engine::UI::OffscreenFormat});
 		}
-		const auto raster = Packet(
-		    graph, bindings, "Engine.UI explicit font upload / offscreen raster boundary",
-		    std::move(accesses),
-		    [this, &screen, hudTextures = std::move(hudTextures)](auto* cmd)
-		    {
-			    screen.RasterOwner = _screen->TryRecord(*cmd, screen.Target->GetResource()->D3DResource, screen.Draw,
-			                                           hudTextures);
-			    if (!screen.RasterOwner)
+		Id raster = dependency;
+		if (screen.GameDraw)
+		{
+			raster = Packet(graph, bindings, "Game HUD raster", std::move(accesses),
+			    [this, &screen, hudTextures = std::move(hudTextures)](auto* cmd)
 			    {
-				    throw std::logic_error("Screen UI backend slot is still in flight");
-			    }
-		    },
-		    std::move(rasterDependencies), screen.Target.get());
+				    screen.GameRasterOwner = _screen->TryRecord(*cmd, screen.Target->GetResource()->D3DResource,
+				        screen.GameDraw, hudTextures);
+				    if (!screen.GameRasterOwner) throw std::logic_error("Game HUD backend slot is still in flight");
+			    }, std::move(rasterDependencies), screen.Target.get());
+		}
+		if (screen.Draw)
+		{
+			std::vector<std::pair<GDX12Resource*, Mode>> overlayAccesses{
+			    {resource(screen.Target.get()), screen.GameDraw ? Mode::ReadWrite : Mode::Write}};
+			std::vector<Engine::UI::TextureBinding> overlayTextures;
+			if (preview)
+			{
+				auto* atlas = resource(preview);
+				overlayAccesses.emplace_back(atlas, Mode::Read);
+				overlayTextures.push_back({SceneTextureInspector::AtlasId, atlas->D3DResource, preview->GetFormat()});
+			}
+			raster = Packet(graph, bindings, "Information and debug UI raster", std::move(overlayAccesses),
+			    [this, &screen, overlayTextures = std::move(overlayTextures)](auto* cmd)
+			    {
+				    screen.RasterOwner = _screen->TryRecord(*cmd, screen.Target->GetResource()->D3DResource,
+				        screen.Draw, overlayTextures, !screen.GameDraw);
+				    if (!screen.RasterOwner) throw std::logic_error("Screen UI backend slot is still in flight");
+			    }, {raster}, screen.Target.get());
+		}
 		screenId = Packet(
 		    graph, bindings, "Engine.UI screen composition",
 		    {{resource(screen.Target.get()), Mode::Read}, {resource(target), Mode::ReadWrite}},
