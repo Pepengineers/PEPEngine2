@@ -146,7 +146,7 @@ private:
     void UnsubscribeFromAllWorlds();
 
     GDX12Texture* GetEnvironmentMap(EDeviceRole role);
-    GDX12Texture* CreateDX12Texture(const std::string& name, GDX12DeviceResources* resources, const Texture* texture, bool useSRGB = false);
+    GDX12Texture* CreateDX12Texture(const std::string& name, GDX12DeviceResources* resources, const Texture* texture, ETextureType type);
 
     GameTimer* _timer;
     Window* _window;

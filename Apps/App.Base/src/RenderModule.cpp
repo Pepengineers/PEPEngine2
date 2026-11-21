@@ -180,9 +180,9 @@ GPUTexture* RenderModule::CreateTexture(const std::string& name, const Texture* 
     _textures[name]->Name = name;
     _textures[name]->Source = *texture;
     if (GetDevicePassFlags(DEVICE_ROLE_PRIMARY) & RENDER_PASS_FLAG_USE_MATERIALS)
-    { _textures[name]->PrimaryDeviceTexture = CreateDX12Texture(name, &_primaryResources, texture); }
+    { _textures[name]->PrimaryDeviceTexture = CreateDX12Texture(name, &_primaryResources, texture, texture->GetType()); }
     if (GetDevicePassFlags(DEVICE_ROLE_SECONDARY) & RENDER_PASS_FLAG_USE_MATERIALS)
-    { _textures[name]->SecondaryDeviceTexture = CreateDX12Texture(name, &_secondaryResources, texture); }
+    { _textures[name]->SecondaryDeviceTexture = CreateDX12Texture(name, &_secondaryResources, texture, texture->GetType()); }
 
     return _textures[name].get();
 }
@@ -197,15 +197,18 @@ GDX12Texture* RenderModule::GetEnvironmentMap(EDeviceRole role)
     const auto* asset = AssetManager::GetInstance().LoadTexture(std::filesystem::path(TEXTURES_FOLDER) / name);
     if (!asset || !asset->IsCubeMap() || asset->GetArraySize() != 6 || asset->GetSubresourceCount() != 6 * asset->GetMipLevels())
     { throw std::runtime_error("Expected a complete environment cubemap: " + name); }
-    return CreateDX12Texture(name, &resources, asset, true);
+    return CreateDX12Texture(name, &resources, asset, ETextureType::Color);
 }
 
-GDX12Texture* RenderModule::CreateDX12Texture(const std::string& name, GDX12DeviceResources* resources, const Texture* texture, bool useSRGB)
+GDX12Texture* RenderModule::CreateDX12Texture(const std::string& name, GDX12DeviceResources* resources, const Texture* texture, ETextureType type)
 {
     GDX12TextureDesc desc;
     desc.SRV_UAV_Heap = resources->SRV_UAV_Heap.get();
-    desc.Format = desc.SRVDesc.Format = useSRGB ? FormatToSRGB(texture->GetFormat()) : texture->GetFormat();
-    desc.Semantic = ConvertTextureSemantic(texture->GetType());
+    desc.Format = texture->GetFormat();
+    if (type == ETextureType::Color) { desc.Format = DirectX::MakeSRGB(desc.Format); }
+    if (type == ETextureType::Data) { desc.Format = DirectX::MakeLinear(desc.Format); }
+    desc.SRVDesc.Format = desc.Format;
+    desc.Semantic = ConvertTextureSemantic(type);
     desc.Width = texture->GetWidth();
     desc.Height = texture->GetHeight();
 
@@ -758,7 +761,7 @@ void RenderModule::UploadSceneResources(GDX12DeviceResources& resources, uint32_
             auto& texture = *entry.second;
             auto*& gpuTexture = resources.Device == _primaryDevice.get()
                 ? texture.PrimaryDeviceTexture : texture.SecondaryDeviceTexture;
-            if (!gpuTexture) { gpuTexture = CreateDX12Texture(entry.first, &resources, &texture.Source); }
+            if (!gpuTexture) { gpuTexture = CreateDX12Texture(entry.first, &resources, &texture.Source, texture.Source.GetType()); }
         }
     }
 }
