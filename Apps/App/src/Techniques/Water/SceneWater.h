@@ -13,7 +13,8 @@ class SceneWater
 	~SceneWater();
 	static int SecondaryAdapter();
 	void SetRetirement(std::function<void()> retire);
-	void Prepare(float delta, Executor&, int activeAdapter);
+	void Prepare(float delta, Executor&, Id device);
+	Id ExecutionDevice() const;
 	void PauseIndependentClock();
 	void AddWaits(const Schedule&, std::vector<PacketWait>&);
 	void Submitted(const std::vector<CompletionToken>&);
@@ -35,7 +36,7 @@ class SceneWater
 	GDX12FluidParticlePass _surface;
 	NativeWork _work;
 	std::unique_ptr<Remote> _remote;
-	uint64_t _attemptedDomain = 0, _failedDomain = 0;
+	Id _attemptedDevice = 0, _failedDevice = 0;
 	Id _import = Invalid, _draw = Invalid, _importPacket = Invalid, _drawPacket = Invalid;
 	GDX12Texture* _depth = nullptr;
 	GDX12Texture* _motion = nullptr;

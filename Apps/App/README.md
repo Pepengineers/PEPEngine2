@@ -41,6 +41,14 @@ Use `--read-texture=Scene.DepthNormals.Normals` or
 
 ### Two-adapter synchronization
 
+In F1, each technique can select its GPU by name. `App.CloudPicture.Adapter`,
+`App.AO.Adapter`, `App.Particles.Adapter` and `App.Water.Adapter` use absolute
+indices in the same hardware list as the startup-only `Render.PrimaryAdapter`.
+The default `-1` and the current primary index both run locally. Techniques can
+share a remote GPU or use different ones. Changing a selection takes effect
+during the run. In the table, GPU0 means the primary and GPU1 means the selected
+remote GPU for that technique.
+
 Use `App.CloudPicture.CrossSync`, `App.AO.CrossSync`, `App.Particles.CrossSync`
 or `App.Water.CrossSync` to choose how GPU0 consumes GPU1 publications. N is
 the current frame's order in the publication history. Fence waits run on the
@@ -55,13 +63,11 @@ GPU0 import queue. A wait for an already completed export incurs no GPU stall.
 
 For AO, mode `0` reprojects the previous result into the current frame.
 
-### Two-adapter ambient occlusion
+### Remote ambient occlusion
 
 Set `App.AO.Adapter` to a secondary DXGI index from the same list as
-`Render.PrimaryAdapter`. The default `-1` runs AO locally. When Cloud Picture
-also uses a secondary GPU, both techniques must use that adapter. An unavailable
-or conflicting adapter, an unsupported grid, or a missing required prepass falls
-back to local AO.
+`Render.PrimaryAdapter`. The default `-1` runs AO locally. An unavailable
+adapter, an unsupported grid, or a missing required prepass falls back to local AO.
 
 | `Render.AO.Implementation` | Remote grids (`Render.AO.Resolution`) | GPU0 → GPU1 | Filter |
 | --- | --- | --- | --- |
@@ -97,12 +103,11 @@ Resolve and any upsample run on GPU0.
 Use `--read-texture=Scene.AO.Reprojected` to capture the final `Scene.AO` once
 a delayed frame has consumed history.
 
-### Two-adapter SPH water
+### Remote SPH water
 
 `App.Water.Adapter = -1` (default) keeps the local SPH path and
 `App.Async.Water` queue selection. Set it to a secondary DXGI index to run SPH
-on GPU1. Water shares the secondary adapter with Cloud Picture, AO and
-particles. A conflicting or unavailable adapter falls back to local SPH.
+on GPU1. An unavailable adapter falls back to local SPH.
 
 `App.Water.CrossSync = 0` defaults to exact N−1 when a secondary adapter is
 selected. Mode `1` imports exact N. Mode `2` advances SPH on GPU1 with a
@@ -115,7 +120,7 @@ GPU1 sends position and speed.
 GPU0 draws with its current camera, HDR and depth. Pausing or hiding water
 keeps its pool, and changing GPU owners resets it from the authored seed.
 
-### Two-adapter particles
+### Remote particles
 
 Set `App.Particles.Adapter` to a secondary DXGI index from the same list as
 `Render.PrimaryAdapter`. The default `-1` runs simulation on GPU0. Marked
@@ -129,8 +134,7 @@ Entrance Fountain, Blue Fountain, Street Firebursts and Spark Rain share a
 separate publication. GPU1 receives the scene prepass depth and matching camera
 constants at the collision point. GPU0 imports their result before transparent
 cull. Depth collision and analytic colliders run in the existing particle solver.
-An unavailable or conflicting adapter falls back to local simulation. Cloud
-Picture takes priority when selecting the shared secondary adapter, then AO.
+An unavailable adapter falls back to local simulation.
 Changing the owner resets the pool and preserves the already consumed burst
 total for the same emitter revision.
 
@@ -172,7 +176,10 @@ non-finite count, and visibility counts for values below 0.999 and outside [0,1]
 ## Startup and controls
 
 `Configs/Startup.ini` is copied beside the executable by the build. At each start
-it replaces `Config/Engine.ini`.
+it replaces `Config/Engine.ini`. If a configured adapter index is missing,
+Bistro writes primary index `0` and sets all four technique indices to `-1`
+in both files. The log identifies the missing indices, the GPU running each
+technique and the source of each technique's first remote import.
 Edit the source Startup.ini to make startup settings persistent across builds.
 Bistro starts at Medium quality with Balanced TAAU (provider 5, quality 3).
 With provider 5, quality 0 or 1 selects native TAA. Presets

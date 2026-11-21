@@ -10,7 +10,7 @@
 class BistroRenderPipeline final : public IRenderPipeline
 {
   public:
-	void Initialize(RenderPipelineContext&) override;
+	void Initialize(RenderPipelineContext&, const std::vector<DeviceDesc>&) override;
 	void PrepareMaterialBindings(RenderPipelineContext&) override;
 	void DrainExecution() override
 	{
@@ -81,6 +81,8 @@ class BistroRenderPipeline final : public IRenderPipeline
 	BistroRender::Schedule _schedule;
 	double _animationTime = 0;
 	uint64_t _frameNumber = 0;
+	std::array<BistroRender::Id, 4> _reportedDevices{
+	    BistroRender::Invalid, BistroRender::Invalid, BistroRender::Invalid, BistroRender::Invalid};
 	int _aoAdapter = -1;
 	UINT _executorSlot = 0;
 	bool _reportedDepthNormals = false;

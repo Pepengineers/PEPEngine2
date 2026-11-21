@@ -6,6 +6,7 @@
 #include <functional>
 
 class RenderModule;
+struct DeviceDesc;
 class GDX12SwapChain;
 class GDX12ReconstructionPass;
 struct RenderPipelineContext
@@ -28,7 +29,7 @@ class IRenderPipeline
 {
 public:
     virtual ~IRenderPipeline() = default;
-    virtual void Initialize(RenderPipelineContext&) = 0;
+    virtual void Initialize(RenderPipelineContext&, const std::vector<DeviceDesc>&) = 0;
     virtual void PrepareMaterialBindings(RenderPipelineContext&) {}
     virtual void ResetWorldHistory() {}
     virtual std::pair<size_t, size_t> GetWorldProbeReadiness() const { return {}; }

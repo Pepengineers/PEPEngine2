@@ -60,7 +60,7 @@ Schedule Compile(const Graph& g, bool singleDirect) {
     Schedule out;
     out.Device=g.Device; out.FrameBoundary=g.FrameBoundary; out.TerminalQueue=g.TerminalQueue;
     Name(g.TerminalQueue);
-    if(g.Device>1 || (g.FrameBoundary && g.TerminalQueue!=Queue::Direct))
+    if(g.Device==Invalid || (g.FrameBoundary && g.TerminalQueue!=Queue::Direct))
         throw std::invalid_argument("invalid device/terminal boundary");
     for(const auto& r:g.Resources) {
         if(r.Memory!=Heap::Default && r.Memory!=Heap::Upload && r.Memory!=Heap::Readback)

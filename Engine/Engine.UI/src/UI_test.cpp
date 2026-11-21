@@ -101,16 +101,13 @@ namespace Engine::UI
                     };
                     option(-1, local);
                     for (int i = 0; i < static_cast<int>(AdapterLabels.size()); ++i)
-                        if (i != PrimaryIndex) option(i, AdapterLabels[i]);
+                        option(i, i == PrimaryIndex ? AdapterLabels[i] + " (primary GPU)" : AdapterLabels[i]);
                     ImGui::EndCombo();
                 }
-                if (requested == PrimaryIndex)
-                    ImGui::TextWrapped("This index identifies the primary GPU and cannot select a second GPU.");
-                else if (requested != -1 && !listed)
+                if (requested != -1 && !listed)
                     ImGui::TextWrapped("This index is missing from the renderer hardware list.");
                 ImGui::TextWrapped("Configured value: %s. -1 uses the current primary GPU. "
                     "0, 1, ... are absolute indices in the renderer's filtered hardware list.", Current.c_str());
-                ImGui::TextWrapped("Techniques share one secondary GPU. A conflicting request can fall back to local execution.");
             }
 
             void Draw(IConsoleVariable& variable)

@@ -61,10 +61,6 @@ bool BarrierStateAllowed(Queue queue, State state)
 	return queue == Queue::Direct || (state & ~(queue == Queue::Copy ? copy : compute)) == 0;
 }
 } // namespace
-Executor::Executor(GDX12Device& d, uint32_t slots, unsigned threads)
-    : Executor(std::make_shared<QueueSubmission>(d), 0, slots, threads)
-{
-}
 Executor::Executor(std::shared_ptr<QueueSubmission> submissions, Id device, uint32_t slots, unsigned threads)
     : _submissions(std::move(submissions)), _deviceId(device),
       _device(_submissions ? _submissions->Device(device) : throw std::invalid_argument("missing submission domain")),

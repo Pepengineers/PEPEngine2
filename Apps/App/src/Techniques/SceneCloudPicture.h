@@ -8,8 +8,8 @@ class SceneCloudPicture {
 public:
     explicit SceneCloudPicture(RenderPipelineContext&);
     ~SceneCloudPicture();
-    void UpdateSettings(std::unique_ptr<Executor>& executor, int aoAdapter, int particlesAdapter, int waterAdapter);
-    int SubmissionAdapter() const;
+    void UpdateSettings(Executor&);
+    Id ExecutionDevice() const;
     void Prepare(UINT slot, double time);
     GDX12Texture* Image() const;
     bool IsRemote() const;

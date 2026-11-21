@@ -8,7 +8,7 @@ enum class CloudPictureMode { Local = -1, PreviousFrame = 0, CurrentFrame = 1, I
 class CloudPictureTexture {
 public:
     CloudPictureTexture(GDX12DeviceResources& primary, UINT width, UINT height,
-                        std::shared_ptr<QueueSubmission>, CloudPictureMode mode);
+                        std::shared_ptr<QueueSubmission>, Id device, CloudPictureMode mode);
     ~CloudPictureTexture();
     void Prepare(UINT frameSlot, double totalTime);
     GDX12Texture* Texture(UINT frameSlot) const;

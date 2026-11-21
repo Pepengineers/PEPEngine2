@@ -28,7 +28,6 @@ class Executor
 		Id Export, Import;
 		std::function<CompletionToken(CompletionToken)> SubmitRemote;
 	};
-	Executor(GDX12Device&, uint32_t slots, unsigned threads = 4);
 	Executor(std::shared_ptr<QueueSubmission>, Id device, uint32_t slots, unsigned threads = 4);
 	~Executor();
 	void Begin(uint32_t slot);

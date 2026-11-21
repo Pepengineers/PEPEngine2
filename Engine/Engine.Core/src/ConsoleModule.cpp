@@ -244,13 +244,20 @@ bool IConsoleVariable::CanSetValue() const
 bool IConsoleVariable::SaveConfigValue(std::string_view value) const
 {
     if (!StartupComplete.load()) return true;
-    std::scoped_lock lock(ConfigMutex);
     const auto path = ConsoleModule::GetDefaultConfigPath();
-    const auto fail = [&](std::string_view reason)
-    {
-        Log::Error("Config", "Cannot save ", Name, " to ", path, ": ", reason);
-        return false;
-    };
+    const auto result = ConsoleModule{}.UpdateIni(path, {{Name, std::string(value)}});
+    if (result.Error.empty()) return true;
+    Log::Error("Config", "Cannot save ", Name, " to ", path, ": ", result.Error);
+    return false;
+}
+
+ConsoleConfigResult ConsoleModule::UpdateIni(const std::filesystem::path& path, const ConsoleVariablePatch& patch) const
+{
+    std::vector<ResolvedValue> resolved;
+    if (auto result = ResolvePatch(*this, patch, false, resolved); !result.Error.empty()) return result;
+    if (resolved.empty()) return {};
+    std::scoped_lock lock(ConfigMutex);
+    const auto fail = [](std::string message) { return ConsoleConfigResult{0, std::move(message)}; };
     std::error_code error;
     std::string contents;
     if (std::filesystem::exists(path, error))
@@ -262,52 +269,56 @@ bool IConsoleVariable::SaveConfigValue(std::string_view value) const
     }
     if (error) return fail(error.message());
 
-    const auto name = std::filesystem::path(Name).u8string();
-    bool replaced = false;
-    bool hasSection = false;
-    const auto trim = [](std::string_view text)
+    for (const auto& [variable, value] : resolved)
     {
-        const auto begin = text.find_first_not_of(" \t\r");
-        return begin == std::string_view::npos ? std::string_view{} :
-            text.substr(begin, text.find_last_not_of(" \t\r") - begin + 1);
-    };
-    for (size_t start = 0; start < contents.size();)
-    {
-        const auto end = contents.find('\n', start);
-        const auto length = (end == std::string::npos ? contents.size() : end) - start;
-        auto line = std::string_view(contents.data() + start, length);
-        if (start == 0 && line.substr(0, 3) == "\xEF\xBB\xBF") line.remove_prefix(3);
-        const auto trimmed = trim(line);
-        if (trimmed.substr(0, 18) == "[ConsoleVariables]") hasSection = true;
-        const auto equals = line.find('=');
-        if (equals != std::string_view::npos)
+        const std::wstring name(variable->GetName());
+        const auto utf8Name = std::filesystem::path(name).u8string();
+        bool replaced = false;
+        bool hasSection = false;
+        const auto trim = [](std::string_view text)
         {
-            const auto key = trim(line.substr(0, equals));
-            if (!key.empty() && key.front() != ';' && key.front() != '#' &&
-                _wcsicmp(std::filesystem::u8path(key).c_str(), Name.c_str()) == 0)
+            const auto begin = text.find_first_not_of(" \t\r");
+            return begin == std::string_view::npos ? std::string_view{} :
+                text.substr(begin, text.find_last_not_of(" \t\r") - begin + 1);
+        };
+        for (size_t start = 0; start < contents.size();)
+        {
+            const auto end = contents.find('\n', start);
+            const auto length = (end == std::string::npos ? contents.size() : end) - start;
+            auto line = std::string_view(contents.data() + start, length);
+            if (start == 0 && line.substr(0, 3) == "\xEF\xBB\xBF") line.remove_prefix(3);
+            const auto trimmed = trim(line);
+            if (trimmed.substr(0, 18) == "[ConsoleVariables]") hasSection = true;
+            const auto equals = line.find_first_of("=:");
+            if (equals != std::string_view::npos)
             {
-                // Update every duplicate: the loader uses the last occurrence.
-                const auto comment = line.find(';', equals + 1);
-                const auto valueEnd = comment == std::string_view::npos ? line.size() : comment;
-                const auto oldValue = line.substr(equals + 1, valueEnd - equals - 1);
-                const auto first = oldValue.find_first_not_of(" \t\r");
-                const auto last = oldValue.find_last_not_of(" \t\r");
-                const auto offset = first == std::string_view::npos ? 0 : first;
-                contents.replace(static_cast<size_t>(line.data() - contents.data()) + equals + 1 + offset,
-                    first == std::string_view::npos ? 0 : last - first + 1, value);
-                replaced = true;
+                const auto key = trim(line.substr(0, equals));
+                if (!key.empty() && key.front() != ';' && key.front() != '#' &&
+                    _wcsicmp(std::filesystem::u8path(key).c_str(), name.c_str()) == 0)
+                {
+                    // Update every duplicate: the loader uses the last occurrence.
+                    const auto comment = line.find(';', equals + 1);
+                    const auto valueEnd = comment == std::string_view::npos ? line.size() : comment;
+                    const auto oldValue = line.substr(equals + 1, valueEnd - equals - 1);
+                    const auto first = oldValue.find_first_not_of(" \t\r");
+                    const auto last = oldValue.find_last_not_of(" \t\r");
+                    const auto offset = first == std::string_view::npos ? 0 : first;
+                    contents.replace(static_cast<size_t>(line.data() - contents.data()) + equals + 1 + offset,
+                        first == std::string_view::npos ? 0 : last - first + 1, value);
+                    replaced = true;
+                }
             }
+            const auto next = contents.find('\n', start);
+            if (next == std::string::npos) break;
+            start = next + 1;
         }
-        const auto next = contents.find('\n', start);
-        if (next == std::string::npos) break;
-        start = next + 1;
-    }
-    if (!replaced)
-    {
-        const auto newline = contents.find("\r\n") == std::string::npos ? "\n" : "\r\n";
-        if (!contents.empty() && contents.back() != '\n') contents += newline;
-        if (!hasSection) contents += std::string("[ConsoleVariables]") + newline;
-        contents += name + " = " + std::string(value) + newline;
+        if (!replaced)
+        {
+            const auto newline = contents.find("\r\n") == std::string::npos ? "\n" : "\r\n";
+            if (!contents.empty() && contents.back() != '\n') contents += newline;
+            if (!hasSection) contents += std::string("[ConsoleVariables]") + newline;
+            contents += utf8Name + " = " + std::string(value) + newline;
+        }
     }
 
     std::filesystem::create_directories(path.parent_path(), error);
@@ -330,7 +341,7 @@ bool IConsoleVariable::SaveConfigValue(std::string_view value) const
         std::filesystem::remove(temporary, error);
         return fail(message);
     }
-    return true;
+    return {};
 }
 
 IConsoleVariable::~IConsoleVariable()
@@ -456,11 +467,12 @@ void ConsoleModule::Initialize()
     InitializeWithOverlay({});
 }
 
-void ConsoleModule::InitializeWithOverlay(const std::filesystem::path& Overlay, const std::filesystem::path& Overrides)
+void ConsoleModule::InitializeWithOverlay(const std::filesystem::path& Overlay, const std::filesystem::path& Overrides,
+                                          const std::function<void()>& BeforeLock)
 {
     if (StartupComplete.load())
     {
-        if (!Overlay.empty() || !Overrides.empty())
+        if (!Overlay.empty() || !Overrides.empty() || BeforeLock)
             throw ConsoleConfigError("The startup overlay must be applied before initialization");
         return;
     }
@@ -503,6 +515,7 @@ void ConsoleModule::InitializeWithOverlay(const std::filesystem::path& Overlay, 
         }
         throw ConsoleConfigError(message);
     }
+    if (BeforeLock) BeforeLock();
     StartupComplete.store(true);
     Log::Info("Config", "Startup configuration applied; ReadOnly variables are locked");
 }

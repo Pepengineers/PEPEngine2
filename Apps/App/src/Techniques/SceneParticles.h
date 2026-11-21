@@ -15,7 +15,8 @@ public:
     ~SceneParticles();
     enum class Inputs { Frame, Interaction, Depth };
     static int SecondaryAdapter();
-    void BeginSimulation(GDX12ParticleInteractionField, GDX12Texture* depth, Executor&, int activeAdapter, float worldRate);
+    void BeginSimulation(GDX12ParticleInteractionField, GDX12Texture* depth, Executor&, Id device, float worldRate);
+    Id ExecutionDevice() const;
     void PauseIndependentClock();
     void AddExchanges(const Schedule&, std::vector<PacketWait>&, std::vector<Executor::PacketExchange>&);
     void Submitted(const std::vector<CompletionToken>&);
@@ -43,7 +44,8 @@ private:
     {
         std::unique_ptr<Remote> Solver;
         std::vector<EmitterLayout> Layout;
-        uint64_t Domain = 0, Generation = 0;
+        Id Device = 0;
+        uint64_t Generation = 0;
         Id Export = Invalid, Import = Invalid, ImportPacket = Invalid;
         bool Attempted = false;
     };
@@ -62,7 +64,7 @@ private:
     std::array<std::vector<uint64_t>, 3> _groups;
     GDX12ParticleRenderFrame _renderFrame;
     std::shared_ptr<GDX12DescriptorHeap> _secondaryHeap;
-    uint64_t _heapDomain = 0;
+    Id _heapDevice = 0;
     std::array<Lane, 3> _remote;
     struct VisibilitySample
     {

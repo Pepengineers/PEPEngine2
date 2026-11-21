@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Engine.RendererDX12/GDX12DeviceFactory.h"
 #include "Common/GameTimer.h"
 #include "Common/Module.h"
 
@@ -45,7 +46,8 @@ struct TransformCompGPUData
 class RenderModule final : public Module
 {
 public:
-    RenderModule(Window* window, GameTimer* timer, std::unique_ptr<IRenderPipeline> pipeline);
+    RenderModule(Window* window, GameTimer* timer, std::unique_ptr<IRenderPipeline> pipeline,
+                 std::vector<DeviceDesc> adapters);
     ~RenderModule() override;
 
     void Initialize() override;
@@ -289,6 +291,7 @@ private:
     decltype(GpuOwners::SkeletalStates)& _skeletalStates = _gpu->SkeletalStates;
     decltype(GpuOwners::Skinning)& _skinning = _gpu->Skinning;
     decltype(GpuOwners::BackBuffer)& _backBuffer = _gpu->BackBuffer;
+    std::vector<DeviceDesc> _adapters;
     decltype(GpuOwners::Pipeline)& _pipeline = _gpu->Pipeline;
     std::uint64_t _frameSubmission = 0;
     bool _uiInitialized = false;

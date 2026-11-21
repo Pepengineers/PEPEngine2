@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -92,13 +93,15 @@ class ConsoleModule final : public Module
 {
 public:
     void Initialize() override;
-    void InitializeWithOverlay(const std::filesystem::path& Overlay, const std::filesystem::path& Overrides = {});
+    void InitializeWithOverlay(const std::filesystem::path& Overlay, const std::filesystem::path& Overrides = {},
+                               const std::function<void()>& BeforeLock = {});
 
     static std::filesystem::path GetDefaultConfigPath();
     ConsoleConfigResult LoadIni(const std::filesystem::path& Path);
     static ConsoleConfigResult ReadPatchIni(const std::filesystem::path& Path, ConsoleVariablePatch& Out);
     // Call between frames, with jobs quiescent. ReadOnly settings can only be patched during startup.
     ConsoleConfigResult ApplyPatch(const ConsoleVariablePatch& Patch, ConsoleVariablePatch* Previous = nullptr) const;
+    ConsoleConfigResult UpdateIni(const std::filesystem::path&, const ConsoleVariablePatch&) const;
     ConsoleConfigResult SavePatchIni(const std::filesystem::path& Path, const ConsoleVariablePatch& Patch) const;
 
     void Uninitialize() override

@@ -14,7 +14,8 @@ class SceneLighting
   public:
 	SceneLighting(GDX12DeviceResources&, RenderPipelineCommonData&);
 	~SceneLighting();
-	void Freeze(SceneGeometry&, UINT slot, const std::shared_ptr<QueueSubmission>& aoSubmissions = {});
+	void Freeze(SceneGeometry&, UINT slot, const std::shared_ptr<QueueSubmission>&, Id aoDevice);
+	Id AOExecutionDevice() const { return _frames.at(_slot).AO->ExecutionDevice(); }
 	std::optional<Executor::PacketExchange> AOExchange(const Schedule& schedule)
 	{
 		return _frames.at(_slot).AO->Exchange(schedule, _aoHistory);

@@ -11,15 +11,14 @@
 namespace
 {
 AutoConsoleVariable<int> AOAdapter(L"App.AO.Adapter", -1,
-    L"Secondary DXGI index for Bistro AO. -1 uses local AO. Remote grids: SSAO/CACAO full or half, HBAO half, XeGTAO full.",
-    EConsoleVariableFlags::Default, [](int value) { return value >= -1; });
+    L"Hardware GPU index for Bistro AO. -1 uses local AO. Remote grids: SSAO/CACAO full or half, HBAO half, XeGTAO full.");
 AutoConsoleVariable<bool> AsyncQueues(L"App.Async.Queues", true,
                                       L"Place explicit local work on COMPUTE/COPY; false uses DIRECT.",
                                       EConsoleVariableFlags::Default);
 
 }
 
-void BistroRenderPipeline::Initialize(RenderPipelineContext& c)
+void BistroRenderPipeline::Initialize(RenderPipelineContext& c, const std::vector<DeviceDesc>& adapters)
 {
 	c.Primary.SRV_UAV_Heap->UseTransientDescriptorTail();
 	_post = std::make_unique<BistroRender::ScenePostUI>(c);
@@ -35,7 +34,12 @@ void BistroRenderPipeline::Initialize(RenderPipelineContext& c)
 	_bindings.PrimaryPasses = _post->Passes();
 	_bindings.PrimaryPasses.push_back(&_sceneFlags);
 	_bindings.Reconstruction = &_post->Reconstruction();
-	_executor = std::make_unique<BistroRender::Executor>(*c.Primary.Device, UINT(c.Primary.FrameConstants.size()));
+	ConsoleModule console;
+	const int primaryIndex = console.FindConsoleVariable(L"Render.PrimaryAdapter").GetInt();
+	auto submissions = std::make_shared<BistroRender::QueueSubmission>(*c.Primary.Device,
+	    adapters, primaryIndex);
+	Log::Info("Renderer", "Bistro primary GPU ", submissions->AdapterLabel(0));
+	_executor = std::make_unique<BistroRender::Executor>(std::move(submissions), 0, UINT(c.Primary.FrameConstants.size()));
 	_lighting->SetWaterRetirement([this] { _executor->Drain(); });
 	_environment->SetRetirement([this] { _executor->Drain(); });
 	Log::Info("Renderer", "Bistro packet renderer initialized; one rendering path");
@@ -54,8 +58,7 @@ void BistroRenderPipeline::PrepareMaterialBindings(RenderPipelineContext& c)
 	}
 	else
 		_reportedLocalAO = false;
-	_cloudPicture->UpdateSettings(_executor, _aoAdapter, BistroRender::SceneParticles::SecondaryAdapter(),
-	    BistroRender::SceneWater::SecondaryAdapter());
+	_cloudPicture->UpdateSettings(*_executor);
 	++_frameNumber;
 	const UINT slot = c.Primary.CurrFrameConstantsIndex;
 	_executor->Begin(slot);
@@ -93,13 +96,13 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	const auto* world = scenes->GetWorld();
 	const double delta = c.Common.GameTimer ? c.Common.GameTimer->DeltaTime() : 0;
 	_environment->Freeze(world && !world->IsPaused() ? delta * world->GetTimeScale() : 0);
-	const bool remoteAO = _aoAdapter >= 0 && _aoAdapter == _cloudPicture->SubmissionAdapter();
-	_lighting->Freeze(*_geometry, slot, remoteAO ? _executor->Submissions() : nullptr);
+	const auto& submissions = _executor->Submissions();
+	_lighting->Freeze(*_geometry, slot, submissions, submissions->SelectAdapter(_aoAdapter));
 	auto& particles = _lighting->Particles();
 	auto& water = _lighting->Water();
 	using ParticleInputs = BistroRender::SceneParticles::Inputs;
 	auto* depth = _geometry->Depth(slot);
-	particles.BeginSimulation(_geometry->InteractionField(), depth, *_executor, _cloudPicture->SubmissionAdapter(),
+	particles.BeginSimulation(_geometry->InteractionField(), depth, *_executor, submissions->SelectAdapter(BistroRender::SceneParticles::SecondaryAdapter()),
 	    world && !world->IsPaused() ? world->GetTimeScale() : 0.f);
 	particles.PrepareOpaque(*_geometry, slot);
 	_post->BeginPlan();
@@ -111,7 +114,17 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 		textures.Name("Scene.DepthNormals.Depth", depth, View::Depth);
 		textures.Name("Scene.DepthNormals.Normals", _geometry->PrepassNormals(slot), View::Normals);
 	}
-	water.Prepare(float(delta), *_executor, _cloudPicture->SubmissionAdapter());
+	water.Prepare(float(delta), *_executor, submissions->SelectAdapter(BistroRender::SceneWater::SecondaryAdapter()));
+	const std::array placements{
+		_cloudPicture->ExecutionDevice(), _lighting->AOExecutionDevice(),
+		particles.ExecutionDevice(), water.ExecutionDevice()};
+	constexpr std::array names{"CloudPicture", "AO", "Particles", "Water"};
+	for (size_t i = 0; i < placements.size(); ++i)
+	{
+		if (placements[i] == _reportedDevices[i]) continue;
+		_reportedDevices[i] = placements[i];
+		Log::Info("RenderGraph", names[i], " execution GPU ", submissions->AdapterLabel(placements[i]));
+	}
 	water.SetSceneInputs(depth, _geometry->GBuffer(slot, 1));
 	auto* target = c.BackBuffer->GetCurrentBuffer();
 	const bool singleDirect = !AsyncQueues.GetValue();

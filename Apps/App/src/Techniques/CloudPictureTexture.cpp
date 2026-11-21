@@ -88,6 +88,7 @@ struct CloudPictureTexture::Impl
 
 	GDX12DeviceResources& Primary;
 	std::shared_ptr<QueueSubmission> Submit;
+	Id DeviceId;
 	const CloudPictureMode Mode;
 	std::unique_ptr<RemoteProducer> Remote;
 	std::unique_ptr<GDX12RootSignature> Root;
@@ -99,8 +100,8 @@ struct CloudPictureTexture::Impl
 	UINT Width, Height, CurrentSlot = 0;
 	Id ImportOperation = Invalid, ImportPacket = Invalid;
 
-	Impl(GDX12DeviceResources& primary, UINT width, UINT height, std::shared_ptr<QueueSubmission> submit, CloudPictureMode mode)
-	    : Primary(primary), Submit(std::move(submit)), Mode(mode), Slots(primary.FrameConstants.size()), Width(width),
+	Impl(GDX12DeviceResources& primary, UINT width, UINT height, std::shared_ptr<QueueSubmission> submit, Id deviceId, CloudPictureMode mode)
+	    : Primary(primary), Submit(std::move(submit)), DeviceId(deviceId), Mode(mode), Slots(primary.FrameConstants.size()), Width(width),
 	      Height(height)
 	{
 		if (!primary.Device || Slots.empty() || !width || !height || width > D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION ||
@@ -109,7 +110,7 @@ struct CloudPictureTexture::Impl
 			throw std::invalid_argument("Cloud picture grid must be nonzero and within D3D12 Texture2D limits");
 		}
 		const bool remote = mode != CloudPictureMode::Local;
-		auto& device = Submit->Device(remote ? 1 : 0);
+		auto& device = Submit->Device(DeviceId);
 		CheckFormat(*primary.Device, !remote);
 		if (remote)
 		{
@@ -164,7 +165,7 @@ struct CloudPictureTexture::Impl
 		remote.Slots.resize(frameSync ? Slots.size() + historySlots : 3);
 		remote.ExportSchedule = BuildExportSchedule();
 		if (frameSync)
-			remote.FrameExecutor = std::make_unique<Executor>(Submit, 1, UINT(Slots.size()), 1);
+			remote.FrameExecutor = std::make_unique<Executor>(Submit, DeviceId, UINT(Slots.size()), 1);
 		const auto desc = CD3DX12_RESOURCE_DESC::Tex2D(
 		    Format, Width, Height, 1, 1, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
 		uint64_t bytes = 0, primaryBytes = 0;
@@ -186,7 +187,7 @@ struct CloudPictureTexture::Impl
 		device.GetDevice()->CreateUnorderedAccessView(remote.Output.Get(), nullptr, &uav, remote.Heap->GetCPUHandle(0));
 		for (auto& slot : remote.Slots)
 		{
-			slot.Buffer = Submit->CreateTransferBuffer(bytes);
+			slot.Buffer = Submit->CreateTransferBuffer(DeviceId, bytes);
 		}
 		Log::Info("RenderGraph", "CloudPicture transferBytes=", bytes, " rowPitch=", remote.Footprint.Footprint.RowPitch,
 		          " sharedSlots=", remote.Slots.size());
@@ -245,10 +246,10 @@ struct CloudPictureTexture::Impl
 			Submit->CheckHealth();
 		}
 	}
-	static Schedule BuildExportSchedule()
+	Schedule BuildExportSchedule() const
 	{
 		Graph graph;
-		graph.Device = 1;
+		graph.Device = DeviceId;
 		graph.FrameBoundary = false;
 		graph.TerminalQueue = Queue::Compute;
 		graph.Resources = {{"cloud producer UAV", 0, 0, true}, {"cloud shared export buffer", 0, 0, false, true}};
@@ -329,7 +330,7 @@ struct CloudPictureTexture::Impl
 		};
 		try
 		{
-			Executor executor(Submit, 1, 1, 1);
+			Executor executor(Submit, DeviceId, 1, 1);
 			try { Produce(executor, phase, epoch); }
 			catch (...) { fail(); }
 			try
@@ -375,7 +376,7 @@ struct CloudPictureTexture::Impl
 			}
 		}
 		const auto primary = Submit->Device(0).GetDevice()->GetAdapterLuid();
-		const auto secondary = Submit->Device(1).GetDevice()->GetAdapterLuid();
+		const auto secondary = Submit->Device(DeviceId).GetDevice()->GetAdapterLuid();
 		Log::Info("RenderGraph", "CloudPicture MGPU summary GPU0 LUID=", primary.HighPart, ":", primary.LowPart,
 		          " GPU1 LUID=", secondary.HighPart, ":", secondary.LowPart, " exports=", Remote->Exports,
 		          " activeFrames=", Remote->Frames, " imports=", Remote->Imports, " repeatedImports=", Remote->Repeats);
@@ -384,8 +385,8 @@ struct CloudPictureTexture::Impl
 };
 
 CloudPictureTexture::CloudPictureTexture(GDX12DeviceResources& primary, UINT width, UINT height,
-                                         std::shared_ptr<QueueSubmission> submit, CloudPictureMode mode)
-    : _impl(std::make_unique<Impl>(primary, width, height, std::move(submit), mode))
+                                         std::shared_ptr<QueueSubmission> submit, Id deviceId, CloudPictureMode mode)
+    : _impl(std::make_unique<Impl>(primary, width, height, std::move(submit), deviceId, mode))
 {
 }
 CloudPictureTexture::~CloudPictureTexture()
@@ -536,7 +537,7 @@ void CloudPictureTexture::Submitted(const std::vector<CompletionToken>& completi
 			auto& slot = remote.Slots.at(remote.Pinned);
 			const size_t queue = token.Target == Queue::Direct ? 0 : token.Target == Queue::Compute ? 1 : 2;
 			slot.Readers[queue] = token;
-			++remote.Imports;
+			if (++remote.Imports == 1) p.Submit->LogFirstImport("CloudPicture", slot.Export, token);
 			if (remote.ImportedVersion == slot.Version) ++remote.Repeats;
 			remote.ImportedVersion = slot.Version;
 		}

@@ -16,8 +16,7 @@ AutoConsoleVariable<bool> AsyncWater(L"App.Async.Water", false,
                                      L"Run the SPH water simulation on the local COMPUTE queue.",
                                      EConsoleVariableFlags::Default);
 AutoConsoleVariable<int> WaterAdapter(L"App.Water.Adapter", -1,
-    L"Secondary DXGI index for Bistro SPH. -1 keeps the solver on GPU0.",
-    EConsoleVariableFlags::Default, [](int value) { return value >= -1; });
+    L"Hardware GPU index for Bistro SPH. -1 uses the primary GPU.");
 AutoConsoleVariable<int> CrossSync(L"App.Water.CrossSync", 0,
     L"Remote water: 0 exact previous (first uses current), 1 exact current, 2 independent GPU1 and latest completed (first waits for export).",
     EConsoleVariableFlags::Default, [](int value) { return value >= 0 && value <= 2; });
@@ -54,6 +53,7 @@ struct SceneWater::Remote
 	struct ClockState { double Time = 0; float Rate = 0; };
 
 	std::shared_ptr<QueueSubmission> Submit;
+	Id DeviceId;
 	GDX12DeviceResources Secondary;
 	GDX12FluidParticlePass Pass;
 	Executor GPU1;
@@ -80,11 +80,11 @@ struct SceneWater::Remote
 	WaterClock::time_point ClockAnchor{};
 	uint64_t Revision = 0;
 
-	Remote(GDX12DeviceResources& primary, const std::shared_ptr<QueueSubmission>& submit)
-	    : Submit(submit), Pass(Secondary), GPU1(submit, 1, UINT(primary.FrameConstants.size()), 1),
+	Remote(GDX12DeviceResources& primary, const std::shared_ptr<QueueSubmission>& submit, Id device)
+	    : Submit(submit), DeviceId(device), Pass(Secondary), GPU1(submit, DeviceId, UINT(primary.FrameConstants.size()), 1),
 	      Ring(primary.FrameConstants.size() + 1)
 	{
-		Secondary.Device = &Submit->Device(1);
+		Secondary.Device = &Submit->Device(DeviceId);
 		Secondary.FrameConstants.resize(primary.FrameConstants.size()); // Only the upload slot count is needed.
 		Secondary.SRV_UAV_Heap = std::make_shared<GDX12DescriptorHeap>(Secondary.Device,
 		    D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, TextureResources_StartIndex + TextureResources_RangeLength,
@@ -158,7 +158,7 @@ struct SceneWater::Remote
 		}
 		if (bytes > slot.Bytes)
 		{
-			slot.Shared = Submit->CreateTransferBuffer(bytes);
+			slot.Shared = Submit->CreateTransferBuffer(DeviceId, bytes);
 			slot.Bytes = bytes;
 		}
 	}
@@ -167,7 +167,7 @@ struct SceneWater::Remote
 	{
 		Work.Commands.clear();
 		Graph graph;
-		graph.Device = 1;
+		graph.Device = DeviceId;
 		graph.FrameBoundary = false;
 		graph.TerminalQueue = Queue::Compute;
 		std::vector<ID3D12Resource*> bindings;
@@ -325,7 +325,7 @@ struct SceneWater::Remote
 			};
 			try
 			{
-				Executor executor(Submit, 1, 1, 1);
+				Executor executor(Submit, DeviceId, 1, 1);
 				Pass.SetResourceRetirement([&executor] { executor.Drain(); });
 				try { RunIndependent(executor); }
 				catch (...) { fail(false); }
@@ -453,7 +453,7 @@ void SceneWater::RetireRemote(Executor& primary)
 	_remote->Drain();
 	_remote.reset();
 }
-void SceneWater::Prepare(float delta, Executor& primary, int activeAdapter)
+void SceneWater::Prepare(float delta, Executor& primary, Id device)
 {
 	if (!_surface.HasRetirement())
 	{
@@ -464,20 +464,19 @@ void SceneWater::Prepare(float delta, Executor& primary, int activeAdapter)
 	auto instances = _collector.CollectScene(delta);
 	const auto controls = GetFluidControls();
 	const auto& submit = primary.Submissions();
-	const uint64_t domain = activeAdapter >= 0 && activeAdapter == SecondaryAdapter() ? submit->Incarnation() : 0;
-	if (_attemptedDomain != domain)
+	if (_attemptedDevice != device)
 	{
 		RetireRemote(primary);
-		_attemptedDomain = domain;
-		_failedDomain = 0;
+		_attemptedDevice = device;
+		_failedDevice = 0;
 	}
 	// Visibility and simulation flags can leave a live instance temporarily idle.
 	if (instances.empty()) RetireRemote(primary);
 	Remote::Snapshot* slot = nullptr;
 	try
 	{
-		if (domain && !_remote && _failedDomain != domain && controls.Enabled && !instances.empty())
-			_remote = std::make_unique<Remote>(_resources, submit);
+		if (device && !_remote && _failedDevice != device && controls.Enabled && !instances.empty())
+			_remote = std::make_unique<Remote>(_resources, submit, device);
 		if (_remote)
 		{
 			const int mode = CrossSync.GetValue();
@@ -488,13 +487,13 @@ void SceneWater::Prepare(float delta, Executor& primary, int activeAdapter)
 	catch (const DxException& e)
 	{
 		RetireRemote(primary);
-		_failedDomain = domain;
+		_failedDevice = device;
 		Log::Warning("RenderGraph", "Local water fallback: ", e.ToString());
 	}
 	catch (const std::exception& e)
 	{
 		RetireRemote(primary);
-		_failedDomain = domain;
+		_failedDevice = device;
 		Log::Warning("RenderGraph", "Local water fallback: ", e.what());
 	}
 	if (slot) _remote->PublishFrameOrder(*slot);
@@ -620,13 +619,16 @@ void SceneWater::AddWaits(const Schedule& schedule, std::vector<PacketWait>& wai
 	if (_remote->WaitForSelected) waits.push_back({_importPacket, _remote->Selected->Ready});
 }
 
+Id SceneWater::ExecutionDevice() const { return _remote ? _remote->DeviceId : 0; }
+
 void SceneWater::Submitted(const std::vector<CompletionToken>& completions)
 {
 	if (_importPacket < completions.size() && completions[_importPacket])
 	{
 		std::lock_guard lock(_remote->Mutex);
 		_remote->Selected->Reader = completions[_importPacket];
-		++_remote->Imports;
+		if (++_remote->Imports == 1)
+			_remote->Submit->LogFirstImport("Water", _remote->Selected->Ready, _remote->Selected->Reader);
 	}
 }
 

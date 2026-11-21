@@ -4,6 +4,7 @@
 #include "App.Base/App.h"
 #include "Common/RuntimePaths.h"
 #include "Engine.Core/ConsoleModule.h"
+#include "Engine.RendererDX12/GDX12DeviceFactory.h"
 #include "Engine.Core/Logging/Logger.h"
 #include "Engine.Core/AssetManager.h"
 #include "Components/BistroGrassComponents.h"
@@ -54,31 +55,71 @@ void Require(bool value, const char* message)
 	}
 }
 
-void PrepareStartup()
+void ValidateStartupAdapters(ConsoleModule& console, const std::filesystem::path& startup,
+                             const std::vector<DeviceDesc>& adapters)
+{
+    Require(!adapters.empty(), "Bistro requires a hardware GPU");
+    for (size_t index = 0; index < adapters.size(); ++index)
+        Log::Info("Bistro", "Hardware GPU [", index, "] ", adapters[index].Name);
+
+    const ConsoleVariablePatch reset{
+        {L"Render.PrimaryAdapter", "0"},
+        {L"App.CloudPicture.Adapter", "-1"},
+        {L"App.AO.Adapter", "-1"},
+        {L"App.Particles.Adapter", "-1"},
+        {L"App.Water.Adapter", "-1"}};
+    bool invalid = false;
+    for (const auto& [name, fallback] : reset)
+    {
+        const int index = console.FindConsoleVariable(name).GetInt();
+        if ((index == -1 && fallback == "-1") || (index >= 0 && size_t(index) < adapters.size())) continue;
+        Log::Warning("Bistro", name, " requests missing hardware GPU [", index,
+                     "]. Switching all techniques to primary GPU [0].");
+        invalid = true;
+    }
+    if (!invalid) return;
+
+    for (const auto& path : {startup, ConsoleModule::GetDefaultConfigPath()})
+    {
+        const auto result = console.UpdateIni(path, reset);
+        if (!result.Error.empty()) throw ConsoleConfigError(path.u8string() + ": " + result.Error);
+    }
+    const auto result = console.ApplyPatch(reset);
+    if (!result.Error.empty()) throw ConsoleConfigError(result.Error);
+}
+
+std::vector<DeviceDesc> PrepareStartup()
 {
 	const auto root = Engine::Core::GetExecutableDirectory();
 	std::filesystem::create_directories(root / "Config");
-	std::filesystem::copy_file(root / "Configs/Startup.ini", root / "Config/Engine.ini",
+	const auto startup = root / "Configs/Startup.ini";
+	std::filesystem::copy_file(startup, ConsoleModule::GetDefaultConfigPath(),
 	                           std::filesystem::copy_options::overwrite_existing);
 
 	ConsoleModule console;
-	console.Initialize();
+	std::vector<DeviceDesc> adapters;
+	console.InitializeWithOverlay({}, {}, [&] {
+		adapters = GDX12DeviceFactory::GetDeviceDescriptors();
+		ValidateStartupAdapters(console, startup, adapters);
+	});
 	Log::Info("Bistro", "SCENE EXECUTOR; primary=", console.FindConsoleVariable(L"Render.PrimaryAdapter").GetInt(),
 	          "; App.Async.Queues=",
 	          console.FindConsoleVariable(L"App.Async.Queues").GetBool(),
 	          " App.Water.Adapter=", console.FindConsoleVariable(L"App.Water.Adapter").GetInt(),
 	          " App.Water.CrossSync=", console.FindConsoleVariable(L"App.Water.CrossSync").GetInt());
+	return adapters;
 }
 
 class BistroApplication final : public App
 {
   public:
-	BistroApplication() : App(GetModuleHandleW(nullptr)) {}
+	explicit BistroApplication(std::vector<DeviceDesc> adapters)
+	    : App(GetModuleHandleW(nullptr)), _adapters(std::move(adapters)) {}
 	bool AddModules() override
 	{
 		auto pipeline = std::make_unique<BistroRenderPipeline>();
 		_bistroPipeline = pipeline.get();
-		Locator.RegisterModule(std::make_shared<RenderModule>(GetWindow(), &Timer, std::move(pipeline)));
+		Locator.RegisterModule(std::make_shared<RenderModule>(GetWindow(), &Timer, std::move(pipeline), std::move(_adapters)));
 		const auto scene = std::filesystem::path(ASSETS_FOLDER) / "Scenes/Amazon Lumberyard Bistro";
 		for (const auto* part : {"Exterior/exterior.obj", "Interior/interior.obj"})
 		{
@@ -155,6 +196,7 @@ class BistroApplication final : public App
 	}
 
   private:
+	std::vector<DeviceDesc> _adapters;
 	Entity _skyEntity = InvalidEntity;
 	double _sunCyclePhase = 0;
 	BistroGrass::Scene _bistroGrass;
@@ -329,8 +371,7 @@ int RunBistroApplication()
 	SetErrorMode(SEM_NOGPFAULTERRORBOX | SEM_FAILCRITICALERRORS);
 	try
 	{
-		PrepareStartup();
-		BistroApplication app;
+		BistroApplication app(PrepareStartup());
 		Require(app.Initialize(), "Application initialization failed");
 		return app.Run();
 	}

@@ -35,12 +35,14 @@ RenderModule::GpuOwners::~GpuOwners() = default;
 
 
 
-RenderModule::RenderModule(Window* window, GameTimer* timer, std::unique_ptr<IRenderPipeline> pipeline) :
+RenderModule::RenderModule(Window* window, GameTimer* timer, std::unique_ptr<IRenderPipeline> pipeline,
+                           std::vector<DeviceDesc> adapters) :
     _timer(timer), _window(window),
     _primaryPipelineFlags(0)
 {
     if (!pipeline) throw std::invalid_argument("Cannot use a null render pipeline");
     _pipeline = std::move(pipeline);
+    _adapters = std::move(adapters);
     _RPcommonData.GameTimer = _timer;
 }
 
@@ -104,11 +106,12 @@ void RenderModule::Initialize()
         Log::Info("Renderer", "D3D12 debug layer enabled by -d3ddebug");
     }
 
-    _primaryDevice = std::make_unique<GDX12Device>();
-    const auto adapters = GDX12DeviceFactory::GetDeviceDescriptors();
+    ThrowIfFailed(GDX12DeviceFactory::Initialize());
+    const auto& adapters = _adapters;
     const int primaryAdapter = PrimaryAdapter.GetValue();
     if (primaryAdapter < 0 || static_cast<size_t>(primaryAdapter) >= adapters.size())
         throw std::invalid_argument("Primary adapter index out of range");
+    _primaryDevice = std::make_unique<GDX12Device>();
     ThrowIfFailed(_primaryDevice->Initialize(adapters[primaryAdapter].Adapter));
     _primaryResources.Initialize(_primaryDevice.get());
     _primaryGPUTimer = std::make_unique<GDX12GPUTimer>(_primaryDevice.get());
@@ -117,7 +120,7 @@ void RenderModule::Initialize()
     BuildBackBuffer();
     Log::Info("Renderer", "Configuring render passes and pipeline states");
     auto context = PipelineContext();
-    _pipeline->Initialize(context);
+    _pipeline->Initialize(context, adapters);
     RefreshPipelineFlags();
     RebuildRenderGraph();
 

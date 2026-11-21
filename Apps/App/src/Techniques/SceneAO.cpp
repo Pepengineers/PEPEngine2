@@ -131,16 +131,16 @@ struct SharedImage
     QueueSubmission::TransferBuffer Buffer;
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT Layout{};
 
-    void Initialize(QueueSubmission& submit, const D3D12_RESOURCE_DESC& desc)
+    void Initialize(QueueSubmission& submit, Id device, const D3D12_RESOURCE_DESC& desc)
     {
         uint64_t bytes = 0, primaryBytes = 0;
         D3D12_PLACED_SUBRESOURCE_FOOTPRINT primary{};
-        submit.Device(1).GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &Layout, nullptr, nullptr, &bytes);
+        submit.Device(device).GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &Layout, nullptr, nullptr, &bytes);
         submit.Device(0).GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &primary, nullptr, nullptr, &primaryBytes);
         if (!bytes || bytes == UINT64_MAX || bytes != primaryBytes ||
             Layout.Footprint.RowPitch != primary.Footprint.RowPitch)
             throw std::runtime_error("AO adapters need matching texture footprints");
-        Buffer = submit.CreateTransferBuffer(bytes);
+        Buffer = submit.CreateTransferBuffer(device, bytes);
     }
     ID3D12Resource* Resource(Id device) const { return Buffer.Resources.at(device).Get(); }
 
@@ -160,6 +160,7 @@ struct SharedImage
 struct SceneAO::Remote
 {
     std::shared_ptr<QueueSubmission> Submit;
+    Id DeviceId;
     GDX12ResourceHandle Depth;
     std::array<GDX12ResourceHandle, 2> Visibility;
     GDX12Texture InputDepth;
@@ -188,10 +189,10 @@ struct SceneAO::Remote
     bool UsesNormals() const { return Implementation != 1; }
     bool CacaoPadded() const { return Implementation == 3 && PadCacao(Width, Height); }
 
-    Remote(std::shared_ptr<QueueSubmission> submit, UINT width, UINT height, UINT fullWidth, UINT fullHeight,
+    Remote(std::shared_ptr<QueueSubmission> submit, Id deviceId, UINT width, UINT height, UINT fullWidth, UINT fullHeight,
            bool delayed, bool secondaryBlur, const GDX12AOSettings& settings)
-        : Submit(std::move(submit)), Constants(&Submit->Device(1), 1), Projection(&Submit->Device(1), 1),
-          GPU1(Submit, 1, 1, 1), Width(width), Height(height), FullWidth(fullWidth), FullHeight(fullHeight),
+        : Submit(std::move(submit)), DeviceId(deviceId), Constants(&Submit->Device(DeviceId), 1), Projection(&Submit->Device(DeviceId), 1),
+          GPU1(Submit, DeviceId, 1, 1), Width(width), Height(height), FullWidth(fullWidth), FullHeight(fullHeight),
           Delayed(delayed), SecondaryBlur(secondaryBlur), Half(settings.Resolution == GDX12AOResolution::Half),
           Implementation(settings.Implementation), DenoisePasses(settings.DenoisePasses),
           BlurPasses(secondaryBlur && Implementation != 3 ? DenoisePasses : 0),
@@ -204,12 +205,12 @@ struct SceneAO::Remote
             InitializeXe();
             return;
         }
-        auto& device = Submit->Device(1);
+        auto& device = Submit->Device(DeviceId);
         auto* native = device.GetDevice().Get();
         const UINT transferWidth = CacaoPadded() ? 16 : Width;
         auto desc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R32_FLOAT, transferWidth, Height, 1, 1);
-        DepthTransfer.Initialize(*Submit, desc);
-        VisibilityTransfer.Initialize(*Submit, desc);
+        DepthTransfer.Initialize(*Submit, DeviceId, desc);
+        VisibilityTransfer.Initialize(*Submit, DeviceId, desc);
         Depth = device.CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc, D3D12_RESOURCE_STATE_COMMON);
         desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
         Visibility[0] = device.CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc, D3D12_RESOURCE_STATE_COMMON);
@@ -217,7 +218,7 @@ struct SceneAO::Remote
             Visibility[1] = device.CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc, D3D12_RESOURCE_STATE_COMMON);
 
         Graph graph;
-        graph.Device = 1;
+        graph.Device = DeviceId;
         graph.FrameBoundary = false;
         graph.TerminalQueue = Queue::Compute;
         graph.Resources = {{"shared AO depth", 0, 0, false, true}, {"GPU1 AO depth", 0, 0},
@@ -237,7 +238,7 @@ struct SceneAO::Remote
         {
             const auto normalDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R16G16B16A16_FLOAT, transferWidth, Height, 1, 1);
             Normals = device.CreateResource(D3D12_HEAP_TYPE_DEFAULT, normalDesc, D3D12_RESOURCE_STATE_COMMON);
-            NormalTransfer.Initialize(*Submit, normalDesc);
+            NormalTransfer.Initialize(*Submit, DeviceId, normalDesc);
             const Id shared = Id(graph.Resources.size());
             normalId = shared + 1;
             graph.Resources.push_back({"shared AO normals", 0, 0, false, true});
@@ -303,7 +304,7 @@ struct SceneAO::Remote
 
     void InitializeXe()
     {
-        auto& device = Submit->Device(1);
+        auto& device = Submit->Device(DeviceId);
         auto* native = device.GetDevice().Get();
         const auto texture = [this](DXGI_FORMAT format) {
             return CD3DX12_RESOURCE_DESC::Tex2D(format, Width, Height, 1, 1);
@@ -319,10 +320,10 @@ struct SceneAO::Remote
             if (!(support.Support2 & D3D12_FORMAT_SUPPORT2_UAV_TYPED_STORE))
                 throw std::runtime_error("XeGTAO GPU1 requires typed UAV stores for its depth, terms and edges");
         }
-        DepthTransfer.Initialize(*Submit, depth);
-        NormalTransfer.Initialize(*Submit, normals);
-        VisibilityTransfer.Initialize(*Submit, terms);
-        if (LocalXePasses) EdgeTransfer.Initialize(*Submit, edges);
+        DepthTransfer.Initialize(*Submit, DeviceId, depth);
+        NormalTransfer.Initialize(*Submit, DeviceId, normals);
+        VisibilityTransfer.Initialize(*Submit, DeviceId, terms);
+        if (LocalXePasses) EdgeTransfer.Initialize(*Submit, DeviceId, edges);
 
         const auto allocate = [&device](const D3D12_RESOURCE_DESC& desc) {
             return device.CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc, D3D12_RESOURCE_STATE_COMMON);
@@ -371,7 +372,7 @@ struct SceneAO::Remote
         native->CreateUnorderedAccessView(Edges.Get(), nullptr, nullptr, Heap->GetCPUHandle(13));
 
         Graph graph;
-        graph.Device = 1;
+        graph.Device = DeviceId;
         graph.FrameBoundary = false;
         graph.TerminalQueue = Queue::Compute;
         graph.Resources = {{"Xe shared depth", 0, 0, false, true}, {"Xe shared normals", 0, 0, false, true},
@@ -555,7 +556,7 @@ bool SceneAO::SupportsRemote(const GDX12AOSettings& settings, bool depthNormals)
 
 void SceneAO::Freeze(GDX12Texture* depth, GDX12Texture* normals, GDX12Texture* motion,
                      GDX12Texture* earlyNormals, UINT& temporalIndex,
-                     const std::shared_ptr<QueueSubmission>& remote, History& history)
+                     const std::shared_ptr<QueueSubmission>& submit, Id remoteDevice, History& history)
 {
     _import.reset();
     _motion = motion;
@@ -576,13 +577,13 @@ void SceneAO::Freeze(GDX12Texture* depth, GDX12Texture* normals, GDX12Texture* m
     _width = _half ? (depth->GetWidth() + 1) / 2 : depth->GetWidth();
     _height = _half ? (depth->GetHeight() + 1) / 2 : depth->GetHeight();
     auto& grid = p._grids[_half];
-    const auto domain = (remote && SupportsRemote(s, earlyNormals != nullptr) && (_width > 1 || _height > 1))
-        ? remote->Incarnation() : 0;
+    const Id device = (remoteDevice && SupportsRemote(s, earlyNormals != nullptr) && (_width > 1 || _height > 1))
+        ? remoteDevice : 0;
     const UINT fullWidth = depth->GetWidth(), fullHeight = depth->GetHeight();
     const bool delayed = CrossSync.GetValue() == 0;
     const bool secondaryBlur = s.Implementation != 3 && BlurOnSecondary.GetValue();
-    if (!domain || history.CameraRevision != _common.HistoryRevision ||
-        (history.Last && (history.Last->Submit->Incarnation() != domain || history.Last->FullWidth != fullWidth ||
+    if (!device || history.CameraRevision != _common.HistoryRevision ||
+        (history.Last && (history.Last->DeviceId != device || history.Last->FullWidth != fullWidth ||
                          history.Last->FullHeight != fullHeight || history.Last->Delayed != delayed ||
                          history.Last->SecondaryBlur != secondaryBlur ||
                          std::memcmp(&history.Settings, &s, sizeof(s)))))
@@ -593,7 +594,7 @@ void SceneAO::Freeze(GDX12Texture* depth, GDX12Texture* normals, GDX12Texture* m
     const auto createRemote = [&]() -> std::shared_ptr<Remote> {
         try
         {
-            std::shared_ptr<Remote> slot(new Remote(remote, _width, _height, fullWidth, fullHeight, delayed, secondaryBlur, s),
+            std::shared_ptr<Remote> slot(new Remote(submit, device, _width, _height, fullWidth, fullHeight, delayed, secondaryBlur, s),
                 [](Remote* value) {
                     try { value->Drain(); }
                     catch (...) { return; } // Quarantined queues can still reference this slot.
@@ -607,13 +608,13 @@ void SceneAO::Freeze(GDX12Texture* depth, GDX12Texture* normals, GDX12Texture* m
         catch (const std::exception& e) { Log::Warning("RenderGraph", "Local ", AOName(s.Implementation), " fallback: ", e.what()); }
         return {};
     };
-    if (domain != _attemptedDomain || fullWidth != _attemptedWidth || fullHeight != _attemptedHeight ||
+    if (device != _attemptedDevice || fullWidth != _attemptedWidth || fullHeight != _attemptedHeight ||
         s.Implementation != _attemptedImplementation || _half != _attemptedHalf ||
         delayed != _attemptedDelayed || secondaryBlur != _attemptedSecondary || s.DenoisePasses != _attemptedBlur)
     {
         _remote.reset();
         _spare.reset();
-        _attemptedDomain = domain;
+        _attemptedDevice = device;
         _attemptedWidth = fullWidth;
         _attemptedHeight = fullHeight;
         _attemptedDelayed = delayed;
@@ -621,7 +622,7 @@ void SceneAO::Freeze(GDX12Texture* depth, GDX12Texture* normals, GDX12Texture* m
         _attemptedImplementation = s.Implementation;
         _attemptedHalf = _half;
         _attemptedBlur = s.DenoisePasses;
-        if (domain) _remote = createRemote();
+        if (device) _remote = createRemote();
     }
     if (_remote && delayed && _remote == history.Last)
     {
@@ -1095,14 +1096,17 @@ void SceneAO::Submitted(const std::vector<CompletionToken>& completions)
         if (packet < completions.size()) _import->NoteReader(completions[packet]);
 }
 
+Id SceneAO::ExecutionDevice() const { return _remote ? _remote->DeviceId : 0; }
+
 void SceneAO::Presented(uint64_t frame, const std::vector<CompletionToken>& completions)
 {
     if (!_offload || _version > 3) return;
     const auto imported = completions.at(_importPacket);
     assert(imported && _remote->DepthReady && _import->VisibilityReady);
     assert(_import->Version == (_remote->Delayed && _version > 1 ? _version - 1 : _version));
+    if (_version == 1) _remote->Submit->LogFirstImport("AO", _import->VisibilityReady, imported);
     const auto gpu0 = _remote->Submit->Device(0).GetAdapterLuid();
-    const auto gpu1 = _remote->Submit->Device(1).GetAdapterLuid();
+    const auto gpu1 = _remote->Submit->Device(_remote->DeviceId).GetAdapterLuid();
     Log::Info("RenderGraph", AOName(_remote->Implementation), " MGPU frame=", frame, " slot=", _resources.CurrFrameConstantsIndex,
         " grid=", _width, "x", _height, " GPU0 LUID=", gpu0.HighPart, ":", gpu0.LowPart,
         " GPU1 LUID=", gpu1.HighPart, ":", gpu1.LowPart, " depthFence=", _remote->DepthReady.Value,

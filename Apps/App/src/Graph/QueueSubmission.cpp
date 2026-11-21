@@ -1,12 +1,15 @@
 #include "QueueSubmission.h"
 #include "Engine.RendererDX12/GDX12CommandQueue.h"
 #include "Engine.RendererDX12/GDX12CommandList.h"
+#include "Engine.Core/Logging/Logger.h"
 #include <algorithm>
 #include <atomic>
 #include <stdexcept>
 #include <thread>
 #include <chrono>
 #include <climits>
+#include <cassert>
+#include <filesystem>
 namespace BistroRender {
 namespace {
 std::atomic<uint64_t> NextIncarnation{1};
@@ -16,51 +19,143 @@ size_t Index(Queue queue) {
 }
 bool Equal(LUID a,LUID b) { return a.HighPart==b.HighPart && a.LowPart==b.LowPart; }
 }
-QueueSubmission::QueueSubmission(GDX12Device& primary,std::unique_ptr<GDX12Device> secondary)
-    : _secondary(std::move(secondary)),_devices{&primary,_secondary.get()},_incarnation(NextIncarnation.fetch_add(1)) {
-    if(_secondary && Equal(primary.GetAdapterLuid(),_secondary->GetAdapterLuid()))
-        throw std::invalid_argument("two distinct physical adapter LUIDs required");
-    for(Id d=0;d<2;++d) if(_devices[d]) _identities[d]=_devices[d]->GetDevice();
-    for(Id d=0;d<2;++d) if(_devices[d]) for(auto q:{Queue::Direct,Queue::Compute,Queue::Copy}) {
-        auto& t=_queues[d][Index(q)];
-        if(q==Queue::Direct) t.Queue=_devices[d]->GetCommandQueue();
-        else {
-            t.Owned=std::make_unique<GDX12CommandQueue>(_devices[d],q==Queue::Copy ?
-                D3D12_COMMAND_LIST_TYPE_COPY : D3D12_COMMAND_LIST_TYPE_COMPUTE);
-            t.Queue=t.Owned.get();
-        }
-        if(_secondary) {
-            ThrowIfFailed(Device(d).GetDevice()->CreateFence(0,
-                D3D12_FENCE_FLAG_SHARED | D3D12_FENCE_FLAG_SHARED_CROSS_ADAPTER,IID_PPV_ARGS(&t.Shared)));
-            HANDLE handle=nullptr;
-            ThrowIfFailed(Device(d).GetDevice()->CreateSharedHandle(t.Shared.Get(),nullptr,GENERIC_ALL,nullptr, &handle));
-            const auto hr=Device(1-d).GetDevice()->OpenSharedHandle(handle,IID_PPV_ARGS(&t.Remote));
-            CloseHandle(handle); ThrowIfFailed(hr);
-        }
+namespace {
+ComPtr<ID3D12Fence> CreateSharedFence(ID3D12Device& device)
+{
+    ComPtr<ID3D12Fence> fence;
+    ThrowIfFailed(device.CreateFence(0, D3D12_FENCE_FLAG_SHARED | D3D12_FENCE_FLAG_SHARED_CROSS_ADAPTER,
+                                     IID_PPV_ARGS(&fence)));
+    return fence;
+}
+
+ComPtr<ID3D12Fence> OpenFence(ID3D12Device& source, ID3D12Fence& fence, ID3D12Device& destination)
+{
+    HANDLE handle = nullptr;
+    ThrowIfFailed(source.CreateSharedHandle(&fence, nullptr, GENERIC_ALL, nullptr, &handle));
+    ComPtr<ID3D12Fence> opened;
+    const auto hr = destination.OpenSharedHandle(handle, IID_PPV_ARGS(&opened));
+    CloseHandle(handle);
+    ThrowIfFailed(hr);
+    return opened;
+}
+}
+
+QueueSubmission::DeviceContext::DeviceContext(GDX12Device& device, std::unique_ptr<GDX12Device> owned)
+    : Owned(std::move(owned)), Device(device), Identity(device.GetDevice())
+{
+    Queues[0].Queue = device.GetCommandQueue();
+    for (auto queue : {Queue::Compute, Queue::Copy})
+    {
+        auto& timeline = Queues[Index(queue)];
+        timeline.Owned = std::make_unique<GDX12CommandQueue>(&device, queue == Queue::Copy ?
+            D3D12_COMMAND_LIST_TYPE_COPY : D3D12_COMMAND_LIST_TYPE_COMPUTE);
+        timeline.Queue = timeline.Owned.get();
     }
 }
+
+QueueSubmission::QueueSubmission(GDX12Device& primary, std::vector<DeviceDesc> adapters, int primaryIndex)
+    : _adapters(std::move(adapters)), _primaryIndex(primaryIndex), _devices(_adapters.size() + 1),
+      _unavailable(_devices.size()), _incarnation(NextIncarnation.fetch_add(1))
+{
+    if (!Equal(primary.GetAdapterLuid(), _adapters.at(primaryIndex).AdapterLuid))
+        throw std::invalid_argument("Bistro primary device differs from the selected DXGI adapter");
+    for (size_t index = 0; index < _adapters.size(); ++index)
+        _adapterLabels.push_back("[" + std::to_string(index) + "] " +
+            std::filesystem::path(_adapters[index].Name).u8string());
+    _devices[0] = std::make_unique<DeviceContext>(primary);
+}
+
+Id QueueSubmission::SelectAdapter(int hardwareIndex)
+{
+    if (hardwareIndex == -1 || hardwareIndex == _primaryIndex) return 0;
+    if (hardwareIndex < 0 || size_t(hardwareIndex) >= _adapters.size())
+        return 0;
+    // Zero is the primary recording context. Other IDs map to absolute hardware indices plus one.
+    const Id id = Id(hardwareIndex) + 1;
+    std::lock_guard lock(_mutex);
+    if (_devices[id]) return id;
+    if (_unavailable[id]) return 0;
+
+    try {
+        const auto& adapter = _adapters[hardwareIndex];
+        auto device = std::make_unique<GDX12Device>();
+        ThrowIfFailed(device->Initialize(adapter.Adapter));
+        if (!Equal(device->GetAdapterLuid(), adapter.AdapterLuid))
+            throw std::runtime_error("Bistro remote device differs from the selected DXGI adapter");
+        auto& remoteDevice = *device;
+        auto context = std::make_unique<DeviceContext>(remoteDevice, std::move(device));
+        auto& primary = *_devices[0];
+        std::array<ComPtr<ID3D12Fence>, 3> primaryFences;
+        for (size_t index = 0; index < primary.Queues.size(); ++index)
+        {
+            auto& local = primary.Queues[index];
+            auto& remote = context->Queues[index];
+            auto& fence = primaryFences[index];
+            fence = local.Shared;
+            if (!fence) fence = CreateSharedFence(*primary.Identity.Get());
+            remote.PrimaryOnRemote = OpenFence(*primary.Identity.Get(), *fence.Get(), *context->Identity.Get());
+            remote.Shared = CreateSharedFence(*context->Identity.Get());
+            remote.OnPrimary = OpenFence(*context->Identity.Get(), *remote.Shared.Get(), *primary.Identity.Get());
+        }
+        for (size_t index = 0; index < primary.Queues.size(); ++index)
+        {
+            auto& local = primary.Queues[index];
+            if (local.Shared) continue;
+            // Cover primary tokens issued before a remote adapter was selected in F1.
+            if (local.Issued)
+                ThrowIfFailed(local.Queue->GetCommandQueue()->Signal(primaryFences[index].Get(), local.Issued));
+            local.Shared = std::move(primaryFences[index]);
+        }
+        _devices[id] = std::move(context);
+        return id;
+    } catch (const DxException& error) {
+        Log::Warning("RenderGraph", "Bistro adapter ", AdapterLabel(id), " unavailable: ", error.ToString());
+    } catch (const std::exception& error) {
+        Log::Warning("RenderGraph", "Bistro adapter ", AdapterLabel(id), " unavailable: ", error.what());
+    }
+    _unavailable[id] = true;
+    return 0;
+}
+
+const std::string& QueueSubmission::AdapterLabel(Id id) const
+{
+    return _adapterLabels.at(id == 0 ? _primaryIndex : id - 1);
+}
+
+void QueueSubmission::LogFirstImport(const char* technique, CompletionToken source, CompletionToken imported) const
+{
+    assert(source && source.Device != 0 && imported && imported.Device == 0);
+    Log::Info("RenderGraph", technique, " first import from ", AdapterLabel(source.Device), " on primary ",
+              AdapterLabel(0), " exportFence=", source.Value, " importFence=", imported.Value);
+}
+
 QueueSubmission::~QueueSubmission() {
-    // A failed Signal leaves unknown in-flight work. Retain queue, device and
-    // cross-device fence handles rather than release objects under that work.
+    // A failed Signal leaves unknown in-flight work. Quarantine every connected queue and fence.
     try { Check(); } catch(...) { _quarantined.store(true); }
     if(!_quarantined.load()) return;
-    // Any removed device can strand queues on the other device. Quarantine the
-    // entire domain, including healthy-looking queues behind shared waits.
-    for(auto& identity:_identities) identity.Detach();
-    for(auto& device:_queues) for(auto& t:device) {
-        t.Owned.release(); t.Shared.Detach(); t.Remote.Detach();
-        if(t.Queue) t.Queue->GetCommandQueue()->AddRef();
+    for (auto& device : _devices) if (device)
+    {
+        device->Identity.Detach();
+        for (auto& timeline : device->Queues)
+        {
+            timeline.Owned.release();
+            timeline.Shared.Detach();
+            timeline.OnPrimary.Detach();
+            timeline.PrimaryOnRemote.Detach();
+            if (timeline.Queue) timeline.Queue->GetCommandQueue()->AddRef();
+        }
+        device->Owned.release();
     }
-    _secondary.release();
 }
 GDX12Device& QueueSubmission::Device(Id id) const {
-    if(id>1 || !_devices[id]) throw std::invalid_argument("unconfigured device context");
-    return *_devices[id];
+    const auto& context = _devices.at(id);
+    if (!context) throw std::invalid_argument("unconfigured device context");
+    return context->Device;
 }
-QueueSubmission::TransferBuffer QueueSubmission::CreateTransferBuffer(uint64_t bytes) const {
-    if (!bytes) throw std::invalid_argument("empty cross-adapter buffer");
+QueueSubmission::TransferBuffer QueueSubmission::CreateTransferBuffer(Id remote, uint64_t bytes) const {
+    if (!remote || !bytes) throw std::invalid_argument("invalid cross-adapter buffer");
     auto* primary = Device(0).GetDevice().Get();
-    auto* secondary = Device(1).GetDevice().Get();
+    auto* secondary = Device(remote).GetDevice().Get();
     const auto desc = CD3DX12_RESOURCE_DESC::Buffer(bytes, D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER);
     const auto a = primary->GetResourceAllocationInfo(0, 1, &desc);
     const auto b = secondary->GetResourceAllocationInfo(0, 1, &desc);
@@ -79,28 +174,30 @@ QueueSubmission::TransferBuffer QueueSubmission::CreateTransferBuffer(uint64_t b
     CloseHandle(handle);
     ThrowIfFailed(opened);
     for (Id id = 0; id < 2; ++id) {
-        ThrowIfFailed(Device(id).GetDevice()->CreatePlacedResource(buffer.Heaps[id].Get(), 0, &desc,
+        const auto device = id == 0 ? 0 : remote;
+        ThrowIfFailed(Device(device).GetDevice()->CreatePlacedResource(buffer.Heaps[id].Get(), 0, &desc,
             D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&buffer.Resources[id])));
-        ValidateResource(id, buffer.Resources[id].Get());
+        ValidateResource(device, buffer.Resources[id].Get());
     }
     return buffer;
 }
 void QueueSubmission::Check() const {
     if(_quarantined.load()) throw std::runtime_error("submission domain quarantined");
     try {
-        for(Id d=0;d<2;++d) if(_devices[d]) {
-            if(_devices[d]->GetDevice().Get()!=_identities[d].Get())
+        for (const auto& device : _devices) if (device)
+        {
+            if (device->Device.GetDevice().Get() != device->Identity.Get())
                 throw std::runtime_error("device context incarnation changed");
-            ThrowIfFailed(_identities[d]->GetDeviceRemovedReason());
+            ThrowIfFailed(device->Identity->GetDeviceRemovedReason());
+            for (const auto& timeline : device->Queues)
+                if (timeline.Poisoned) throw std::runtime_error("submission domain quarantined after native failure");
         }
-        for(const auto& device:_queues) for(const auto& t:device)
-            if(t.Poisoned) throw std::runtime_error("submission domain quarantined after native failure");
     } catch(...) { _quarantined.store(true); throw; }
 }
 void QueueSubmission::CheckHealth() const { std::lock_guard<std::mutex> lock(_mutex); Check(); }
 const QueueSubmission::Timeline& QueueSubmission::Resolve(CompletionToken token) const {
     Device(token.Device);
-    const auto& t=_queues[token.Device][Index(token.Target)];
+    const auto& t=_devices[token.Device]->Queues[Index(token.Target)];
     if(!token || token.Incarnation!=_incarnation || token.Value>t.Issued)
         throw std::invalid_argument("stale or unissued completion token");
     return t;
@@ -136,7 +233,7 @@ void QueueSubmission::ValidateResource(Id id,ID3D12Resource* resource) const {
 CompletionToken QueueSubmission::Submit(Id device,BistroRender::Queue target,
     const std::vector<ID3D12CommandList*>& lists,const std::vector<CompletionToken>& waits,GDX12CommandList* external) {
     std::lock_guard<std::mutex> lock(_mutex); Check();
-    Device(device); auto& t=_queues.at(device).at(Index(target));
+    Device(device); auto& t=_devices[device]->Queues[Index(target)];
     if((lists.empty() && !external) || lists.size()>UINT_MAX)
         throw std::invalid_argument("empty/oversized packet submission");
     for(auto* list:lists) {
@@ -145,13 +242,18 @@ CompletionToken QueueSubmission::Submit(Id device,BistroRender::Queue target,
         ThrowIfFailed(owner.As(&a)); ThrowIfFailed(Device(device).GetDevice().As(&b));
         if(a.Get()!=b.Get()) throw std::invalid_argument("foreign command list device");
     }
-    for(auto token:waits) Resolve(token); // validate EVERY token before native mutation
+    for (auto token : waits) {
+        Resolve(token); // validate EVERY token before native mutation
+        if (device && token.Device && token.Device != device)
+            throw std::invalid_argument("wait between remote devices is unsupported");
+    }
     try {
         t.Poisoned=true;
         for(auto token:waits) {
             const auto& producer=Resolve(token);
             if(token.Device==device && token.Target==target) continue;
-            auto* fence=token.Device==device ? producer.Queue->GetFence().Get() : producer.Remote.Get();
+            auto* fence = token.Device == device ? producer.Queue->GetFence().Get() :
+                device == 0 ? producer.OnPrimary.Get() : _devices[device]->Queues[Index(token.Target)].PrimaryOnRemote.Get();
             if(!fence) throw std::invalid_argument("missing cross-device fence handle");
             ThrowIfFailed(t.Queue->GetCommandQueue()->Wait(fence,token.Value));
         }

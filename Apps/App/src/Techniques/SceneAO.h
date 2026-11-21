@@ -20,7 +20,7 @@ class SceneAO
     ~SceneAO();
     static bool SupportsRemote(const GDX12AOSettings&, bool depthNormals);
     void Freeze(GDX12Texture* depth, GDX12Texture* normals, GDX12Texture* motion, GDX12Texture* earlyNormals, UINT& temporalIndex,
-                const std::shared_ptr<QueueSubmission>& remote, History&);
+                const std::shared_ptr<QueueSubmission>& submit, Id remoteDevice, History&);
     void AppendEarlyInputs(Graph&, std::vector<ID3D12Resource*>&, Id ready);
     void AppendRemoteDepth(Graph&, std::vector<ID3D12Resource*>&);
     void Append(Graph&, std::vector<ID3D12Resource*>&);
@@ -31,6 +31,7 @@ class SceneAO
     {
         return _work.Record(id, cmd);
     }
+    Id ExecutionDevice() const;
     bool UsesHistory() const { return _offload && _import != _remote; }
     GDX12Texture* Output()
     {
@@ -62,7 +63,8 @@ class SceneAO
     std::shared_ptr<Remote> _remote, _spare, _import;
     GDX12Texture* _motion = nullptr;
     GDX12Texture* _earlyNormals = nullptr;
-    uint64_t _version = 0, _attemptedDomain = 0;
+    uint64_t _version = 0;
+    Id _attemptedDevice = 0;
     bool _attemptedHalf = false, _attemptedDelayed = false, _attemptedSecondary = false;
     int _attemptedImplementation = -1, _attemptedBlur = 0;
     UINT _attemptedWidth = 0, _attemptedHeight = 0;

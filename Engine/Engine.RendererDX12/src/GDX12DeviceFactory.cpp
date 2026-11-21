@@ -48,7 +48,8 @@ HRESULT GDX12DeviceFactory::Initialize()
 
     if (SUCCEEDED(hr))
     {
-        _dxgiFactoryProxy = GDX12StreamlineSDK::Get().CreateProxyFactory(createdFactory);
+        if (GDX12StreamlineSDK::Get().IsEnabled())
+            _dxgiFactoryProxy = GDX12StreamlineSDK::Get().CreateProxyFactory(createdFactory);
         _dxgiFactory = GDX12StreamlineSDK::Get().GetNativeFactory(_dxgiFactoryProxy ? _dxgiFactoryProxy : createdFactory);
         _isInitialized = true;
     }

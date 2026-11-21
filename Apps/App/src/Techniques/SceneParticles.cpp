@@ -19,8 +19,7 @@ AutoConsoleVariable<bool> AsyncSimulation(L"App.Async.Particles", false,
                                           L"Run particle pool initialization and simulation on the local COMPUTE queue.",
                                           EConsoleVariableFlags::Default);
 AutoConsoleVariable<int> Adapter(L"App.Particles.Adapter", -1,
-    L"Secondary DXGI index for marked independent particle emitters. -1 uses GPU0.",
-    EConsoleVariableFlags::Default, [](int value) { return value >= -1; });
+    L"Secondary DXGI index for marked independent particle emitters. -1 uses GPU0.");
 AutoConsoleVariable<int> CrossSync(L"App.Particles.CrossSync", 1,
     L"Remote particles: 1 exact current, 0 exact previous (first uses current), 2 independent and 3 frame-driven (newest completed, empty until ready).",
     EConsoleVariableFlags::Default, [](int value) { return value >= 0 && value <= 3; });
@@ -124,6 +123,7 @@ struct SceneParticles::Remote
 	};
 
 	std::shared_ptr<QueueSubmission> Submit;
+	Id DeviceId;
 	GDX12DeviceResources Secondary;
 	GDX12ParticleSimulation Solver;
 	Executor GPU1;
@@ -175,12 +175,12 @@ struct SceneParticles::Remote
 	ProducerInput Deferred;
 	Publication* DeferredOutput = nullptr;
 
-	Remote(GDX12DeviceResources& primary, const std::shared_ptr<QueueSubmission>& submit,
+	Remote(GDX12DeviceResources& primary, const std::shared_ptr<QueueSubmission>& submit, Id device,
 	       const std::shared_ptr<GDX12DescriptorHeap>& heap, const std::vector<GDX12ParticleEmitter>& snapshot,
 	       GDX12ParticleSettings settings, uint64_t generationSeed)
-	    : Submit(submit), GPU1(Submit, 1, UINT(primary.FrameConstants.size()), 1), Generation(generationSeed)
+	    : Submit(submit), DeviceId(device), GPU1(Submit, DeviceId, UINT(primary.FrameConstants.size()), 1), Generation(generationSeed)
 	{
-		Secondary.Device = &Submit->Device(1);
+		Secondary.Device = &Submit->Device(DeviceId);
 		Secondary.FrameConstants.resize(primary.FrameConstants.size()); // Solver needs only the upload ring size.
 		Secondary.SRV_UAV_Heap = heap;
 		RebuildTransport(primary, snapshot, settings);
@@ -230,8 +230,8 @@ struct SceneParticles::Remote
 				dest.Bindings.SRVs[field] = descriptor.GPUHandle;
 			}
 		}
-		for (auto& slot : Ring) slot.Transfer = Submit->CreateTransferBuffer(bytes);
-		const auto gpu = Submit->Device(1).GetAdapterLuid();
+		for (auto& slot : Ring) slot.Transfer = Submit->CreateTransferBuffer(DeviceId, bytes);
+		const auto gpu = Submit->Device(DeviceId).GetAdapterLuid();
 		Log::Info("RenderGraph", "Particles MGPU solver GPU1 LUID=", gpu.HighPart, ":", gpu.LowPart,
 		    " emitters=", Imported.size(), " snapshotBytes=", bytes);
 		if (LogSnapshots.GetValue())
@@ -298,7 +298,7 @@ struct SceneParticles::Remote
 		const UINT descriptor = FieldSRV.DescType == DESC_TYPE_NONE ? heap->GetAvailableIndex() : FieldSRV.HeapIndex;
 		FieldSRV.InitAsSRV(InputField.D3DResource.Get(), &view, heap, descriptor);
 		InputsRing.resize(Secondary.FrameConstants.size() + 2);
-		for (auto& slot : InputsRing) slot.Buffer = Submit->CreateTransferBuffer(bytes);
+		for (auto& slot : InputsRing) slot.Buffer = Submit->CreateTransferBuffer(DeviceId, bytes);
 	}
 
 	InputSlot* NewestInput()
@@ -506,7 +506,7 @@ struct SceneParticles::Remote
 			if (!e.Paused) elapsed = (std::max)(elapsed, double((std::min)(e.DeltaTime * e.TimeScale, e.MaxDeltaTime)));
 		}
 		Graph graph;
-		graph.Device = 1;
+		graph.Device = DeviceId;
 		graph.FrameBoundary = false;
 		graph.TerminalQueue = Queue::Compute;
 		std::vector<ID3D12Resource*> bindings;
@@ -667,7 +667,7 @@ struct SceneParticles::Remote
 
 	void Produce()
 	{
-		Executor executor(Submit, 1, UINT(Secondary.FrameConstants.size()), 1);
+		Executor executor(Submit, DeviceId, UINT(Secondary.FrameConstants.size()), 1);
 		ProducerInput prior;
 		CompletionToken pending, armed;
 		bool bootstrap = false;
@@ -953,7 +953,7 @@ void SceneParticles::PauseIndependentClock()
 }
 
 void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, GDX12Texture* depth,
-                                     Executor& primary, int activeAdapter, float worldRate)
+                                     Executor& primary, Id device, float worldRate)
 {
 	_work.Commands.clear();
 	for (auto& lane : _remote) lane.Export = lane.Import = lane.ImportPacket = Invalid;
@@ -985,8 +985,7 @@ void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, 
 	simulation->SetInteractionField(interaction);
 	const auto settings = GetParticleSettings();
 	const auto& submit = primary.Submissions();
-	const bool requested = activeAdapter >= 0 && activeAdapter == SecondaryAdapter();
-	const uint64_t domain = requested ? submit->Incarnation() : 0;
+	const bool requested = device != 0;
 	std::array<std::vector<GDX12ParticleEmitter>, 3> remoteEmitters;
 	std::array<std::vector<EmitterLayout>, 3> layouts;
 	if (requested)
@@ -1010,10 +1009,10 @@ void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, 
 		for (const auto& emitter : emitters)
 			layout.push_back({emitter.Id, ResolveParticleEmitterSettings(emitter, settings.Quality).MaxParticles});
 		auto& lane = _remote[i];
-		const bool domainChanged = domain != lane.Domain;
+		const bool deviceChanged = device != lane.Device;
 		rebuild[i] = layout != lane.Layout;
 		replaceInput[i] = lane.Solver && lane.Solver->Shape != inputs[i];
-		if (!(domainChanged || rebuild[i] || replaceInput[i])) continue;
+		if (!(deviceChanged || rebuild[i] || replaceInput[i])) continue;
 		if (lane.Solver)
 		{
 			primary.Drain();
@@ -1022,16 +1021,16 @@ void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, 
 			for (auto& emitter : _resources.ParticleEmitters)
 				emitter.BurstBaseline = (std::max)(emitter.BurstBaseline,
 				    lane.Solver->Solver.ConsumedBurst(emitter.Id, emitter.ResetRevision));
-			if (domainChanged || layout.empty()) lane.Solver.reset();
+			if (deviceChanged || layout.empty()) lane.Solver.reset();
 		}
-		lane.Domain = domain;
+		lane.Device = device;
 		lane.Layout = layout;
 		lane.Attempted = false;
 	}
-	if (_heapDomain != domain)
+	if (_heapDevice != device)
 	{
 		_secondaryHeap.reset();
-		_heapDomain = domain;
+		_heapDevice = device;
 	}
 	std::vector<uint64_t> remoteIds;
 	for (size_t i = 0; i < _remote.size(); ++i)
@@ -1055,10 +1054,10 @@ void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, 
 					// Pool views stay fixed when another group changes. All allocations
 					// happen here on the frame owner, before a producer starts.
 					if (!_secondaryHeap)
-						_secondaryHeap = std::make_shared<GDX12DescriptorHeap>(&submit->Device(1),
+						_secondaryHeap = std::make_shared<GDX12DescriptorHeap>(&submit->Device(device),
 						    D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, _resources.SRV_UAV_Heap->GetNumDescriptors(),
 						    D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
-					lane.Solver = std::make_unique<Remote>(_resources, submit, _secondaryHeap, emitters, settings, lane.Generation);
+					lane.Solver = std::make_unique<Remote>(_resources, submit, device, _secondaryHeap, emitters, settings, lane.Generation);
 				}
 				else if (rebuild[i])
 					lane.Solver->RebuildTransport(_resources, emitters, settings);
@@ -1128,6 +1127,13 @@ void SceneParticles::AddExchanges(const Schedule& schedule, std::vector<PacketWa
 	}
 }
 
+Id SceneParticles::ExecutionDevice() const
+{
+    for (const auto& lane : _remote)
+        if (lane.Solver) return lane.Solver->DeviceId;
+    return 0;
+}
+
 void SceneParticles::Submitted(const std::vector<CompletionToken>& completions)
 {
 	for (auto& lane : _remote)
@@ -1137,7 +1143,8 @@ void SceneParticles::Submitted(const std::vector<CompletionToken>& completions)
 			std::lock_guard lock(remote.Mutex);
 			remote.Selected->Reader = completions[lane.ImportPacket];
 			remote.CachedVersion = remote.Selected->Version;
-			++remote.Stats.Imports;
+			if (++remote.Stats.Imports == 1)
+				remote.Submit->LogFirstImport("Particles", remote.Selected->Ready, remote.Selected->Reader);
 		}
 }
 
