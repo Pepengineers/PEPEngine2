@@ -1,5 +1,6 @@
 #pragma once
 #include "Graph/RenderGraph.h"
+#include "Graph/RenderGraphExecutor.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12EnvironmentIBLPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12CloudComponent.h"
 #include <functional>
@@ -14,7 +15,7 @@ class SceneEnvironment
   public:
     SceneEnvironment(GDX12DeviceResources&, RenderPipelineCommonData&);
     ~SceneEnvironment();
-    void Freeze(double simulationDelta);
+    void Freeze(double simulationDelta, Executor&, uint64_t frame);
     void SetClouds(const GDX12CloudParameters&);
     void ResetClouds();
     void Resize()
@@ -25,6 +26,8 @@ class SceneEnvironment
     bool AsyncComputeEnabled() const;
     bool Record(Id, ID3D12GraphicsCommandList*) const;
     void Submitted(uint64_t fence);
+    void AddSkyViewWaits(const Schedule&, std::vector<PacketWait>&);
+    void SkyViewSubmitted(uint64_t frame, const std::vector<CompletionToken>&);
     void SetRetirement(std::function<void()> retire) { _environment.SetResourceRetirement(std::move(retire)); }
     IRenderPassLink* Output(UINT index)
     {
@@ -32,6 +35,11 @@ class SceneEnvironment
     }
 
     std::vector<Access> Reads(Graph&, std::vector<ID3D12Resource*>&) const;
+    GDX12Texture* VisibleSkyView() const
+    {
+        auto* texture = _environment._luts[2].get();
+        return texture->IsInitialized() ? texture : nullptr;
+    }
 
   private:
     enum class WorkDomain { Cached, Camera };
@@ -43,7 +51,9 @@ class SceneEnvironment
         bool Compute = false;
         WorkDomain Domain = WorkDomain::Cached;
     };
-    void Build();
+    struct RemoteSkyView;
+    void Build(Executor&, uint64_t frame);
+    bool PrepareSkyView(Executor&, uint64_t frame, bool atmosphere, bool& localChanged);
     GDX12DeviceResources& _resources;
     RenderPipelineCommonData& _common;
     GDX12EnvironmentIBLPass _environment;
@@ -57,5 +67,7 @@ class SceneEnvironment
     GDX12SkyConstants _mediumConstants{}, _multipleConstants{}, _captureConstants{}, _viewConstants{}, _aerialConstants{};
     Matrix _aerialViewProjection = Matrix::Identity;
     bool _atmosphereReady = false;
+    std::unique_ptr<RemoteSkyView> _remoteSkyView;
+    int _failedSkyViewAdapter = -1;
 };
 } // namespace BistroRender

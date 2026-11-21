@@ -61,6 +61,12 @@ before the current cloud input export.
 
 ### Two-adapter synchronization
 
+`App.Sky.SkyView.Adapter` selects the GPU for the camera-visible SkyAtmosphere
+SkyView LUT. The default `-1` keeps it local. Remote `App.Sky.SkyView.CrossSync=1`
+(default) imports the current requested view and reuses it while its key stays
+unchanged. The secondary GPU caches matching transmittance and multiple scattering
+tables. Capture sky, IBL and aerial perspective continue to run on GPU0.
+
 In F1, each technique can select its GPU by name. `App.CloudPicture.Adapter`,
 `App.AO.Adapter`, `App.Particles.Adapter`, `App.Water.Adapter` and `App.Grass.Wind.Adapter` use absolute
 indices in the same hardware list as the startup-only `Render.PrimaryAdapter`.

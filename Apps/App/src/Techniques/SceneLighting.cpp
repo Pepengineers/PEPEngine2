@@ -327,6 +327,7 @@ void SceneLighting::AppendDeferred(Graph& graph, std::vector<ID3D12Resource*>& b
 	         {texture(_deferred._color.get(), Mode::Write, D3D12_RESOURCE_STATE_RENDER_TARGET)},
 	         [hdr](auto* cmd) { cmd->DiscardResource(hdr, nullptr); });
 	auto lighting = environment.Reads(graph, bindings);
+	if (auto* skyView = environment.VisibleSkyView()) lighting.push_back(texture(skyView, Mode::Read, read));
 	for (UINT i = 0; i < _deferred._inputs.size(); ++i)
 	{
 		lighting.push_back(texture(_deferred._inputs[i]->GetTexture(), Mode::Read, read));

@@ -95,7 +95,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	const auto scenes = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
 	const auto* world = scenes->GetWorld();
 	const double delta = c.Common.GameTimer ? c.Common.GameTimer->DeltaTime() : 0;
-	_environment->Freeze(world && !world->IsPaused() ? delta * world->GetTimeScale() : 0);
+	_environment->Freeze(world && !world->IsPaused() ? delta * world->GetTimeScale() : 0, *_executor, _frameNumber);
 	const auto& submissions = _executor->Submissions();
 	_lighting->Freeze(*_geometry, slot, submissions, submissions->SelectAdapter(_aoAdapter));
 	auto& particles = _lighting->Particles();
@@ -221,6 +221,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 		}
 	};
 	auto waits = _cloudPicture->Waits(_schedule);
+	_environment->AddSkyViewWaits(_schedule, waits);
 	water.AddWaits(_schedule, waits);
 	grass.AddWindWaits(_schedule, waits);
 	std::vector<BistroRender::Executor::PacketExchange> exchanges;
@@ -236,6 +237,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	catch (...)
 	{
 		_cloudPicture->Submitted(_executor->Completions());
+		_environment->SkyViewSubmitted(_frameNumber, _executor->Completions());
 		_post->PostersSubmitted(_frameNumber, _executor->Completions());
 		water.Submitted(_executor->Completions());
 		grass.WindSubmitted(_frameNumber, _executor->Completions());
@@ -245,6 +247,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 		throw;
 	}
 	_cloudPicture->Submitted(_executor->Completions());
+	_environment->SkyViewSubmitted(_frameNumber, _executor->Completions());
 	water.Submitted(_executor->Completions());
 	grass.WindSubmitted(_frameNumber, _executor->Completions());
 	particles.Submitted(_executor->Completions());

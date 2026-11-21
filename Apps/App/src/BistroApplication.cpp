@@ -69,6 +69,7 @@ void ValidateStartupAdapters(ConsoleModule& console, const std::filesystem::path
         {L"App.AO.Adapter", "-1"},
         {L"App.Particles.Adapter", "-1"},
         {L"App.Water.Adapter", "-1"},
+        {L"App.Sky.SkyView.Adapter", "-1"},
         {L"App.Grass.Wind.Adapter", "-1"}};
     for (const auto& poster : BistroUICanvases::Posters) reset.emplace_back(poster.Adapter, "-1");
     bool invalid = false;
