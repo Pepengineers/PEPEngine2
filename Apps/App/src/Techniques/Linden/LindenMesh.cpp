@@ -15,15 +15,16 @@ namespace BistroRender
 {
 namespace
 {
+enum class TreeQuality : uint8_t { Low, Medium, High, Ultra, Count };
+
 struct LindenComponent : ComponentTag
 {
-    std::array<std::shared_ptr<const LindenMesh>, 2> Lods;
+    std::array<std::shared_ptr<const LindenMesh>, static_cast<size_t>(TreeQuality::Count)> Lods;
 };
 
 constexpr std::string_view NodeName = "Linde_Tree_Large_linde_tree_large";
-enum class TreeQuality : uint8_t { Low, High, Count };
 AutoConsoleVariable<TreeQuality> Quality(L"Render.Tree.Quality", TreeQuality::High,
-    L"Bistro linden simulation and draw geometry: 0 Low (LOD1), 1 High (LOD0)");
+    L"Plaza tree geometry: 0 Low / 1 Medium (linden), 2 High / 3 Ultra (oak)");
 
 void AttachLeaves(LindenMesh& mesh, UINT firstVertex, UINT firstIndex, const Vector3& trunkCenter)
 {
@@ -103,39 +104,41 @@ Vector3 TrunkFoot(const Engine::Core::SubMesh& wood)
     return {(lo.x + hi.x) * .5f, floor, (lo.z + hi.z) * .5f};
 }
 
-UINT TreeMaterial(RenderModule& render, const std::filesystem::path& folder, bool leaves)
+UINT TreeMaterial(RenderModule& render, const std::filesystem::path& folder, const std::string& diffuse,
+                  const char* normal, bool leaves)
 {
-    const std::string prefix = leaves ? "Branch_Linden" : "Bark_Linden";
+    const auto prefix = folder.filename().string() + "/" + diffuse;
     if (auto* existing = render.GetMaterialByName(prefix)) return existing->_CBufferIndex;
-    const auto texture = [&](const std::string& suffix, Engine::Core::ETextureType type)
+    const auto texture = [&](const std::string& file, Engine::Core::ETextureType type)
     {
-        const auto name = prefix + suffix;
-        const auto* image = Engine::Core::AssetManager::GetInstance().LoadTexture(folder / (name + ".png"));
+        const auto name = folder.filename().string() + "/" + file;
+        const auto* image = Engine::Core::AssetManager::GetInstance().LoadTexture(folder / (file + ".png"));
         if (!image) throw std::runtime_error("Missing linden texture: " + name);
         auto* gpu = render.CreateTexture(name, image, type);
         if (!gpu) throw std::runtime_error("Failed to upload linden texture: " + name);
         return gpu;
     };
     auto* material = render.CreateMaterial(prefix);
-    material->Diffuse = texture("_Col", Engine::Core::ETextureType::Color);
-    material->Normal = texture("_N", Engine::Core::ETextureType::Data);
-    material->HasNormalMap = true;
+    material->Diffuse = texture(diffuse, Engine::Core::ETextureType::Color);
+    if (normal) material->Normal = texture(normal, Engine::Core::ETextureType::Data);
+    material->HasNormalMap = normal != nullptr;
     material->Type = leaves ? MaterialType::Masked : MaterialType::Opaque;
     return material->_CBufferIndex;
 }
 
 std::shared_ptr<LindenMesh> BuildLod(const Engine::Core::Mesh& source, const Vector3& offset,
-                                    float scale, const std::array<UINT, 2>& materials, UINT lod)
+                                    float scale, const std::array<UINT, 2>& materials,
+                                    const std::array<const char*, 2>& slots, const char* label)
 {
     auto mesh = std::make_shared<LindenMesh>();
-    mesh->Lod = lod;
+    mesh->Label = label;
     for (UINT group = 0; group < materials.size(); ++group)
     {
         const bool leaves = group == 1;
         const UINT firstIndex = UINT(mesh->Indices.size()), firstVertex = UINT(mesh->Vertices.size());
         for (const auto& part : source.GetSubMeshes())
         {
-            if (source.GetMaterial(part.MaterialIndex).Name != (leaves ? "M_Branch.005" : "M_Bark.005")) continue;
+            if (source.GetMaterial(part.MaterialIndex).Name != slots[group]) continue;
             const UINT base = UINT(mesh->Vertices.size());
             for (const auto& v : part.Vertices)
                 mesh->Vertices.push_back({v.Position * scale + offset, UINT_MAX, v.Normal, 0.f, v.TexCoord});
@@ -149,7 +152,7 @@ std::shared_ptr<LindenMesh> BuildLod(const Engine::Core::Mesh& source, const Vec
         mesh->Batches.push_back({firstIndex, UINT(mesh->Indices.size()) - firstIndex, materials[group], leaves});
     }
     DirectX::BoundingBox::CreateMerged(mesh->Bounds, mesh->WoodBounds, mesh->CrownBounds);
-    Log::Info("BistroLinden", "Georgeous LOD", lod, "; vertices=", mesh->Vertices.size(),
+    Log::Info("BistroLinden", label, "; vertices=", mesh->Vertices.size(),
               "; triangles=", mesh->Indices.size()/3, "; foliage fragments=", mesh->Fragments.size());
     return mesh;
 }
@@ -174,28 +177,41 @@ void ExtractLinden(World& world, const Engine::Core::Mesh& exterior, RenderModul
     }
     if (!wood) return;
 
-    const auto folder = std::filesystem::path(ASSETS_FOLDER) / "Models/GeorgeousLinden";
+    const auto models = std::filesystem::path(ASSETS_FOLDER) / "Models";
     LindenComponent tree;
-    const std::array<UINT, 2> materials{TreeMaterial(render, folder, false), TreeMaterial(render, folder, true)};
-    render.WaitForUploads();
-    Vector3 offset;
-    float scale = 1.f;
-    for (UINT lod = 0; lod < tree.Lods.size(); ++lod)
+    const auto loadPair = [&](const std::filesystem::path& folder, const std::array<UINT, 2>& materials,
+                              const std::array<const char*, 2>& slots, const std::array<const char*, 2>& files,
+                              const std::array<const char*, 2>& labels, TreeQuality fullQuality)
     {
-        const auto* model = Engine::Core::AssetManager::GetInstance().LoadMesh(folder / (lod ? "SM_Linden_.fbx" : "SM_Linden.fbx"));
-        if (!model || model->IsEmpty()) throw std::runtime_error("Cannot load Georgeous linden LOD");
-        if (!lod)
+        Vector3 offset;
+        float scale = 1.f;
+        for (size_t i = 0; i < files.size(); ++i)
         {
-            const auto& parts = model->GetSubMeshes();
-            const auto trunk = std::find_if(parts.begin(), parts.end(), [&](const auto& p)
-                { return model->GetMaterial(p.MaterialIndex).Name == "M_Bark.005"; });
-            if (trunk == parts.end() || model->GetBounds().Extents.y <= 0)
-                throw std::runtime_error("Invalid high detail linden");
-            scale = oldBounds.Extents.y / model->GetBounds().Extents.y;
-            offset = TrunkFoot(*wood) - TrunkFoot(*trunk) * scale;
+            const auto* model = Engine::Core::AssetManager::GetInstance().LoadMesh(folder / files[i]);
+            if (!model || model->IsEmpty()) throw std::runtime_error(std::string("Cannot load ") + files[i]);
+            if (i == 0)
+            {
+                const auto& parts = model->GetSubMeshes();
+                const auto trunk = std::find_if(parts.begin(), parts.end(), [&](const auto& p)
+                    { return model->GetMaterial(p.MaterialIndex).Name == slots[0]; });
+                if (trunk == parts.end() || model->GetBounds().Extents.y <= 0)
+                    throw std::runtime_error(std::string("Invalid tree geometry in ") + files[i]);
+                scale = oldBounds.Extents.y / model->GetBounds().Extents.y;
+                offset = TrunkFoot(*wood) - TrunkFoot(*trunk) * scale;
+            }
+            tree.Lods[static_cast<size_t>(fullQuality) - i] = BuildLod(*model, offset, scale, materials, slots, labels[i]);
         }
-        tree.Lods[lod] = BuildLod(*model, offset, scale, materials, lod);
-    }
+    };
+    const auto linden = models / "GeorgeousLinden";
+    loadPair(linden, {TreeMaterial(render, linden, "Bark_Linden_Col", "Bark_Linden_N", false),
+                      TreeMaterial(render, linden, "Branch_Linden_Col", "Branch_Linden_N", true)},
+             {"M_Bark.005", "M_Branch.005"}, {"SM_Linden.fbx", "SM_Linden_.fbx"},
+             {"linden LOD0", "linden LOD1"}, TreeQuality::Medium);
+    const auto oak = models / "MightyOak";
+    loadPair(oak, {TreeMaterial(render, oak, "bark_color", "bark_normal", false),
+                   TreeMaterial(render, oak, "oak_foliage_plane", nullptr, true)},
+             {"bark", "foliage"}, {"Oak.fbx", "Oak_High.fbx"}, {"oak Ultra", "oak High"}, TreeQuality::Ultra);
+    render.WaitForUploads();
     auto& ecs = world.GetECS();
     ecs.RegisterComponent<LindenComponent>();
     auto entity = ecs.CreateEntity();
@@ -212,7 +228,7 @@ std::shared_ptr<const LindenMesh> FindLindenMesh(SceneManagerModule& scenes)
         auto& ecs = scenes.GetWorld(i)->GetECS();
         ecs.RegisterComponent<LindenComponent>();
         const auto& trees = ecs.GetPool<LindenComponent>().GetDense();
-        if (!trees.empty()) return trees.front().Lods[Quality.GetValue() == TreeQuality::Low ? 1 : 0];
+        if (!trees.empty()) return trees.front().Lods[static_cast<size_t>(Quality.GetValue())];
     }
     return {};
 }

@@ -114,7 +114,7 @@ LindenDisplayedPose LindenSimulation::Append(Graph& graph, std::vector<ID3D12Res
 		reads.push_back(access(wind.Grid, Mode::Read, read, "linden wind grid"));
 		field = wind.Grid->GetSRV()->GPUHandle;
 	}
-	const auto label = "linden LOD" + std::to_string(mesh->Lod);
+	const auto& label = mesh->Label;
 	work.Add(graph, label + " evaluate crown and flutter", std::move(reads),
 	         dispatch(_response, {tree.Fragments->GetSRV()->GPUHandle, field, {}},
 	                  tree.Response->GetUAV()->GPUHandle, (p.Fragments + 63) / 64), {}, Queue::Compute);
