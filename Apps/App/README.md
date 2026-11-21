@@ -31,8 +31,8 @@ legacy per-technique async switches.
 `Configs/Startup.ini` is copied beside the executable by the build. At each start
 it replaces `Config/Engine.ini`.
 Edit the source Startup.ini to make startup settings persistent across builds.
-Native TAA (`Render.Upscaler.Provider=5`, quality 0) is the default.
-With provider 5, `Render.Upscaler.Quality=1` also selects native TAA. Presets
+Bistro starts at Medium quality with Balanced TAAU (provider 5, quality 3).
+With provider 5, quality 0 or 1 selects native TAA. Presets
 `2` (Quality), `3` (Balanced), and `4` (Performance) enable TAAU at roughly
 67%, 59%, and 50% of output width and height, respectively.
 Frame generation defaults to Off (`Render.FrameGeneration.Provider=0`); FSR FG
