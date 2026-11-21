@@ -349,32 +349,35 @@ void SceneGrass::Append(Graph& g, UINT slot, std::vector<ID3D12Resource*>& all, 
 				const auto pipeline = _buildHiZ;
 				const auto depth = target.View.SceneDepth->GetSRV()->GPUHandle, hiz = recorded.HiZ->GetUAV()->GPUHandle;
 				const UINT t = _hiZRoot->GetTRootParamIndex(0), u = _hiZRoot->GetURootParamIndex(0);
-				UINT sourceWidth = 0, sourceHeight = 0, sourceOffset = 0, offset = 0;
-				for (UINT w = target.Width, h = target.Height;; w = (w + 1) / 2, h = (h + 1) / 2)
-				{
-					const std::array<UINT, 6> constants = {w, h, sourceWidth, sourceHeight, sourceOffset, offset};
-					add("grass opaque depth HiZ " + std::to_string(w) + "x" + std::to_string(h),
-					    {{target.Depth, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE},
-					     access(recorded.HiZ.get(), Mode::ReadWrite, UnorderedAccess)},
-					    [=](auto* cmd)
+				const UINT width = target.Width, height = target.Height;
+				const auto barrier = CD3DX12_RESOURCE_BARRIER::UAV(recorded.HiZ->GetResource().D3DResource.Get());
+				add("grass opaque depth HiZ",
+				    {{target.Depth, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE},
+				     access(recorded.HiZ.get(), Mode::ReadWrite, UnorderedAccess)},
+				    [=](auto* cmd)
+				    {
+					    cmd->SetDescriptorHeaps(1, &heap);
+					    cmd->SetComputeRootSignature(root.Get());
+					    cmd->SetPipelineState(pipeline.Get());
+					    cmd->SetComputeRootDescriptorTable(t, depth);
+					    cmd->SetComputeRootDescriptorTable(u, hiz);
+					    UINT sourceWidth = 0, sourceHeight = 0, sourceOffset = 0, offset = 0;
+					    for (UINT w = width, h = height;; w = (w + 1) / 2, h = (h + 1) / 2)
 					    {
-						    cmd->SetDescriptorHeaps(1, &heap);
-						    cmd->SetComputeRootSignature(root.Get());
-						    cmd->SetPipelineState(pipeline.Get());
+						    const std::array<UINT, 6> constants = {w, h, sourceWidth, sourceHeight, sourceOffset, offset};
 						    cmd->SetComputeRoot32BitConstants(0, 6, constants.data(), 0);
-						    cmd->SetComputeRootDescriptorTable(t, depth);
-						    cmd->SetComputeRootDescriptorTable(u, hiz);
 						    cmd->Dispatch((w + 7) / 8, (h + 7) / 8, 1);
-					    });
-					if (w == 1 && h == 1)
-					{
-						break;
-					}
-					sourceWidth = w;
-					sourceHeight = h;
-					sourceOffset = offset;
-					offset += w * h;
-				}
+						    if (w == 1 && h == 1)
+						    {
+							    break;
+						    }
+						    cmd->ResourceBarrier(1, &barrier);
+						    sourceWidth = w;
+						    sourceHeight = h;
+						    sourceOffset = offset;
+						    offset += w * h;
+					    }
+				    });
 				hiZReady = true;
 			}
 			const auto& state = gpu._grass.at(output->Owner);
@@ -421,17 +424,14 @@ void SceneGrass::Append(Graph& g, UINT slot, std::vector<ID3D12Resource*>& all, 
 			    "grass view " + std::to_string(target.View.Key) + " patch " + std::to_string(patch);
 			if (!reuse)
 			{
-				add(name + " clear arguments", accesses,
+				const auto barrier = CD3DX12_RESOURCE_BARRIER::UAV(arguments->GetResource().D3DResource.Get());
+				add(name + " clear arguments and cull indices", std::move(accesses),
 				    [=](auto* cmd)
 				    {
 					    bind(cmd);
 					    cmd->SetPipelineState(clear.Get());
 					    cmd->Dispatch(1, 1, 1);
-				    });
-				add(name + " cull indices", accesses,
-				    [=](auto* cmd)
-				    {
-					    bind(cmd);
+					    cmd->ResourceBarrier(1, &barrier);
 					    cmd->SetPipelineState(expand.Get());
 					    cmd->Dispatch(groups, 1, 1);
 				    });
