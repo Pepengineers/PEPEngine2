@@ -338,6 +338,8 @@ void SceneLighting::AppendDeferred(Graph& graph, std::vector<ID3D12Resource*>& b
 	lighting.push_back({resource(&grid.Constants->GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
 	lighting.push_back({resource(&constants.ShadowCB->GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
 	lighting.push_back({resource(&constants.SkyCB->GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
+	auto& skyViewSampling = environment.SkyViewSampling();
+	lighting.push_back({resource(&skyViewSampling.GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
 	lighting.push_back({scene.FrameIds[0], Mode::Read, State(D3D12_RESOURCE_STATE_GENERIC_READ)});
 	lighting.push_back({scene.FrameIds[1], Mode::Read, State(D3D12_RESOURCE_STATE_GENERIC_READ)});
 	lighting.push_back(texture(_deferred._color.get(), Mode::Write, UnorderedAccess));
@@ -355,9 +357,9 @@ void SceneLighting::AppendDeferred(Graph& graph, std::vector<ID3D12Resource*>& b
 	inputs[15] = _resources.SkyTransmittanceSRV.GPUHandle;
 	inputs[16] = _resources.SkyViewSRV.GPUHandle;
 	inputs[17] = masks->GetSRV()->GPUHandle;
-	const std::array<D3D12_GPU_VIRTUAL_ADDRESS, 5> cbvs{
+	const std::array<D3D12_GPU_VIRTUAL_ADDRESS, 6> cbvs{
 	    scene.Main, scene.Camera, constants.ShadowCB->GetElementAddress(0), constants.SkyCB->GetElementAddress(0),
-	    grid.Constants->GetElementAddress(0)};
+	    grid.Constants->GetElementAddress(0), skyViewSampling.GetElementAddress(0)};
 	const auto output = _deferred._color->GetUAV()->GPUHandle;
 	const UINT width = frame.Width, height = frame.Height;
 
@@ -367,7 +369,7 @@ void SceneLighting::AppendDeferred(Graph& graph, std::vector<ID3D12Resource*>& b
 		         cmd->SetDescriptorHeaps(1, &heap);
 		         cmd->SetComputeRootSignature(root->GetRootSignature().Get());
 		         cmd->SetPipelineState(pipeline);
-		         for (UINT i = 0; i < 5; ++i)
+		         for (UINT i = 0; i < cbvs.size(); ++i)
 		         {
 			         cmd->SetComputeRootConstantBufferView(root->GetBRootParamIndex(i), cbvs[i]);
 		         }

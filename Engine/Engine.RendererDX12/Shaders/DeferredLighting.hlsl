@@ -25,6 +25,12 @@ SamplerComparisonState samShadow : register(s6);
 #define SKY_TRANSMITTANCE_REGISTER t15
 #include "SkyRendering.hlsli"
 Texture2D<float4> VisibleSkyView : register(t16);
+#if DEFERRED_OPAQUE_ONLY
+cbuffer VisibleSkyViewSampling : register(b5)
+{
+    float4 SkyViewObserverRadius;
+};
+#endif
 #define PBR_LIGHTING_ONLY
 #include "PBRSurface.hlsli"
 #define REFLECTION_PROBE_BINDINGS_DEFERRED 1
@@ -62,8 +68,12 @@ void CS(uint3 dispatch : SV_DispatchThreadID)
         // A finite far depth also supports cameras with an infinite reverse-Z far plane.
         float3 ray = WorldPosition(pixel, size, 0.000001f) - CBCamera.CameraLocation;
         ray = SafeNormalize(ray);
+        float4 skyViewObserver = float4(CBSky.CameraPosition.xyz, CBSky.CenterRadius.w);
+#if DEFERRED_OPAQUE_ONLY
+        skyViewObserver = SkyViewObserverRadius;
+#endif
         float3 sky = CBSky.Mode.x == 2 ? VisibleSkyView.SampleLevel(SkySampler,
-            SkyViewUV(ray, CBSky.CameraPosition.xyz, CBSky.CenterRadius.w), 0).rgb :
+            SkyViewUV(ray, skyViewObserver.xyz, skyViewObserver.w), 0).rgb :
             SourceEnvironment.SampleLevel(samLinearClamp, ray, 0).rgb;
         sky += SkySunDisk(ray, CBCamera.CameraLocation);
         SceneColor[pixel] = float4(sky, 1);

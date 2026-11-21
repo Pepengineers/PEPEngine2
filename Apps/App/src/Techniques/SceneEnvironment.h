@@ -40,6 +40,10 @@ class SceneEnvironment
         auto* texture = _environment._luts[2].get();
         return texture->IsInitialized() ? texture : nullptr;
     }
+    GDX12UploadBuffer<XMFLOAT4>& SkyViewSampling() const
+    {
+        return *_skyViewSampling.at(_resources.CurrFrameConstantsIndex);
+    }
 
   private:
     enum class WorkDomain { Cached, Camera };
@@ -53,7 +57,7 @@ class SceneEnvironment
     };
     struct RemoteSkyView;
     void Build(Executor&, uint64_t frame);
-    bool PrepareSkyView(Executor&, uint64_t frame, bool atmosphere, bool& localChanged);
+    bool PrepareSkyView(Executor&, uint64_t frame, bool atmosphere, uint64_t skyRevision, bool& localChanged);
     GDX12DeviceResources& _resources;
     RenderPipelineCommonData& _common;
     GDX12EnvironmentIBLPass _environment;
@@ -68,6 +72,7 @@ class SceneEnvironment
     Matrix _aerialViewProjection = Matrix::Identity;
     bool _atmosphereReady = false;
     std::unique_ptr<RemoteSkyView> _remoteSkyView;
+    std::vector<std::unique_ptr<GDX12UploadBuffer<XMFLOAT4>>> _skyViewSampling;
     int _failedSkyViewAdapter = -1;
 };
 } // namespace BistroRender

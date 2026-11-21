@@ -20,8 +20,8 @@ AutoConsoleVariable<int> SkyViewAdapter(L"App.Sky.SkyView.Adapter", -1,
     L"Hardware GPU for the camera SkyView LUT. -1 keeps SkyView on the primary GPU.",
     EConsoleVariableFlags::Default, [](int value) { return value >= -1; });
 AutoConsoleVariable<int> SkyViewCrossSync(L"App.Sky.SkyView.CrossSync", 1,
-    L"Remote camera SkyView: 1 displays the current requested LUT.",
-    EConsoleVariableFlags::Default, [](int value) { return value == 1; });
+    L"Remote camera SkyView: 0 exact previous frame (first uses current), 1 exact current frame.",
+    EConsoleVariableFlags::Default, [](int value) { return value == 0 || value == 1; });
 
 bool Different(const GDX12SkyConstants& a, const GDX12SkyConstants& b)
 {
@@ -42,7 +42,7 @@ struct SceneEnvironment::RemoteSkyView
 		QueueSubmission::TransferBuffer Shared;
 		std::unique_ptr<GDX12UploadBuffer<GDX12SkyConstants>> Constants;
 		GDX12SkyConstants Key;
-		uint64_t Version = 0, SourceFrame = 0, Inputs = 0;
+		uint64_t Version = 0, SourceFrame = 0, Inputs = 0, Generation = 0;
 		CompletionToken Ready, Reader;
 	};
 
@@ -56,6 +56,8 @@ struct SceneEnvironment::RemoteSkyView
 	Executor Recorder;
 	D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{};
 	uint64_t Bytes = 0, Ordered = 0, InputVersion = 0, Imported = 0;
+	uint64_t Generation = 0, CameraRevision = 0, SkyRevision = 0;
+	int Policy = -1;
 	UINT Next = 0;
 	GDX12SkyConstants Medium, Multiple;
 	Publication *Latest = nullptr, *Selected = nullptr;
@@ -103,6 +105,18 @@ struct SceneEnvironment::RemoteSkyView
 		return true;
 	}
 
+	void Configure(int mode, uint64_t camera, uint64_t sky, const GDX12SkyConstants& medium,
+	               const GDX12SkyConstants& multiple)
+	{
+		if (Policy == mode && CameraRevision == camera && SkyRevision == sky &&
+		    !Different(Medium, medium) && !Different(Multiple, multiple)) return;
+		Policy = mode;
+		CameraRevision = camera;
+		SkyRevision = sky;
+		++Generation;
+		Latest = Selected = nullptr;
+		Ordered = Imported = Reports = 0;
+	}
 	Publication* PrepareOrder(const GDX12SkyConstants& key, const GDX12SkyConstants& medium,
 	                          const GDX12SkyConstants& multiple)
 	{
@@ -177,6 +191,7 @@ struct SceneEnvironment::RemoteSkyView
 		slot.Ready = Recorder.Completions().back();
 		slot.Version = ++Ordered;
 		slot.SourceFrame = frame;
+		slot.Generation = Generation;
 		InputVersion = slot.Inputs;
 		Medium = medium;
 		Multiple = multiple;
@@ -200,7 +215,8 @@ struct SceneEnvironment::RemoteSkyView
 		    }, {}, Queue::Copy);
 	}
 };
-SceneEnvironment::SceneEnvironment(GDX12DeviceResources& r, RenderPipelineCommonData& c) : _resources(r), _common(c)
+SceneEnvironment::SceneEnvironment(GDX12DeviceResources& r, RenderPipelineCommonData& c)
+    : _resources(r), _common(c), _skyViewSampling(r.FrameConstants.size())
 {
 	_environment.Setup(&r, &c);
 	_environment.Initialize();
@@ -245,9 +261,11 @@ void SceneEnvironment::Freeze(double delta, Executor& primary, uint64_t frame)
 	Build(primary, frame);
 }
 
-bool SceneEnvironment::PrepareSkyView(Executor& primary, uint64_t frame, bool atmosphere, bool& localChanged)
+bool SceneEnvironment::PrepareSkyView(Executor& primary, uint64_t frame, bool atmosphere, uint64_t skyRevision,
+                                      bool& localChanged)
 {
-	const int requested = atmosphere && SkyViewCrossSync.GetValue() == 1 ? SkyViewAdapter.GetValue() : -1;
+	const int mode = SkyViewCrossSync.GetValue();
+	const int requested = atmosphere ? SkyViewAdapter.GetValue() : -1;
 	if (_failedSkyViewAdapter != requested) _failedSkyViewAdapter = -1;
 	const auto& submit = primary.Submissions();
 	const Id device = requested >= 0 && requested != _failedSkyViewAdapter ? submit->SelectAdapter(requested) : 0;
@@ -273,6 +291,7 @@ bool SceneEnvironment::PrepareSkyView(Executor& primary, uint64_t frame, bool at
 	{
 		if (!_remoteSkyView)
 			_remoteSkyView = std::make_unique<RemoteSkyView>(primary, device, UINT(_resources.FrameConstants.size()), sources);
+		_remoteSkyView->Configure(mode, _common.HistoryRevision, skyRevision, _mediumConstants, _multipleConstants);
 		order = _remoteSkyView->PrepareOrder(_viewConstants, _mediumConstants, _multipleConstants);
 	}
 	catch (const DxException& e)
@@ -287,8 +306,10 @@ bool SceneEnvironment::PrepareSkyView(Executor& primary, uint64_t frame, bool at
 		return false;
 	}
 	auto& remote = *_remoteSkyView;
+	// Capture the request of the preceding frame, even when that frame did not dispatch.
+	auto* previous = remote.Latest;
 	if (order) remote.Publish(*order, _mediumConstants, _multipleConstants, frame);
-	remote.Selected = remote.Latest;
+	remote.Selected = mode == 0 && previous ? previous : remote.Latest;
 	return true;
 }
 
@@ -512,7 +533,13 @@ void SceneEnvironment::Build(Executor& primary, uint64_t frameNumber)
 		e._resolvedIBL = ibl;
 	}
 	changed |= lightingChanged;
-	const bool remoteSkyView = PrepareSkyView(primary, frameNumber, state.Source == SkySource::SkyAtmosphere, viewChanged);
+	const bool remoteSkyView = PrepareSkyView(primary, frameNumber, state.Source == SkySource::SkyAtmosphere,
+	    state.Revision, viewChanged);
+	const auto& visibleKey = remoteSkyView ? _remoteSkyView->Selected->Key : constants;
+	auto& sampling = _skyViewSampling.at(r.CurrFrameConstantsIndex);
+	if (!sampling) sampling = std::make_unique<GDX12UploadBuffer<XMFLOAT4>>(r.Device, 1);
+	sampling->CopyData(0, XMFLOAT4(visibleKey.CameraPosition.x, visibleKey.CameraPosition.y,
+	    visibleKey.CameraPosition.z, visibleKey.CenterRadius.w));
 	auto& frame = *r.FrameConstants[r.CurrFrameConstantsIndex];
 	frame.SkyCB->CopyData(0, constants);
 	if (changed)
@@ -874,12 +901,13 @@ void SceneEnvironment::SkyViewSubmitted(uint64_t frame, const std::vector<Comple
 	if (remote.Consumer >= completions.size() || !completions[remote.Consumer] || remote.Reports >= 6) return;
 	++remote.Reports;
 	const auto& displayed = *remote.Selected;
-	Log::Info("RenderGraph", "Visible SkyView CrossSync=1 frame=", frame,
+	Log::Info("RenderGraph", "Visible SkyView CrossSync=", remote.Policy, " frame=", frame,
 	    " GPU=", remote.Submit->AdapterLabel(remote.Device), " displayGPU=", remote.Submit->AdapterLabel(0),
 	    " ordered=", remote.Latest->Version, " orderedFrame=", remote.Latest->SourceFrame,
 	    " shown=", displayed.Version, " shownFrame=", displayed.SourceFrame,
 	    " inputs=", displayed.Inputs, " exportFence=", displayed.Ready.Value, " importFence=", imported.Value,
-	    " firstConsumer=clustered deferred lighting consumerFence=", completions[remote.Consumer].Value);
+	    " generation=", remote.Generation, " firstConsumer=clustered deferred lighting consumerFence=",
+	    completions[remote.Consumer].Value);
 }
 std::vector<Access> SceneEnvironment::Reads(Graph& graph, std::vector<ID3D12Resource*>& bindings) const
 {

@@ -64,7 +64,11 @@ before the current cloud input export.
 `App.Sky.SkyView.Adapter` selects the GPU for the camera-visible SkyAtmosphere
 SkyView LUT. The default `-1` keeps it local. Remote `App.Sky.SkyView.CrossSync=1`
 (default) imports the current requested view and reuses it while its key stays
-unchanged. The secondary GPU caches matching transmittance and multiple scattering
+unchanged. Mode `0` displays the exact request of the previous frame, including
+frames with unchanged keys. A new history begins with the current request.
+The displayed LUT carries its observer position and planet radius, while the
+screen ray and remaining atmosphere parameters use the current frame.
+The secondary GPU caches matching transmittance and multiple scattering
 tables. Capture sky, IBL and aerial perspective continue to run on GPU0.
 
 In F1, each technique can select its GPU by name. `App.CloudPicture.Adapter`,
