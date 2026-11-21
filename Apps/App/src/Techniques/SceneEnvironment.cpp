@@ -100,6 +100,7 @@ struct SceneEnvironment::RemoteAtmosphere
 	std::vector<ID3D12Resource*> Bindings;
 	std::array<Id, 2> DisplayResources{Invalid, Invalid};
 	Id ImportOperation = Invalid, ImportPacket = Invalid, Consumer = Invalid;
+	UINT RecordedCopies = 0;
 	std::string ConsumerName;
 	unsigned Reports = 0;
 
@@ -348,7 +349,6 @@ struct SceneEnvironment::RemoteAtmosphere
 			auto* texture = textures[i]->GetResource()->D3DResource.Get();
 			const Id id = NativeWork::ResourceFor(graph, bindings, texture,
 			    Aerial() ? (i == 0 ? "aerial radiance" : "aerial transmittance") : "visible SkyView LUT");
-			if (import) DisplayResources[i] = id;
 			accesses.push_back({id, import ? Mode::Write : Mode::Read, import ? dst : src});
 			const CD3DX12_TEXTURE_COPY_LOCATION packed(shared, Footprints[i]), subresource(texture, 0u);
 			sources[i] = import ? packed : subresource;
@@ -356,9 +356,10 @@ struct SceneEnvironment::RemoteAtmosphere
 		}
 		const char* name = Aerial() ? (import ? "GPU0 import aerial pair" : "aerial pair export")
 		                           : (import ? "GPU0 import visible SkyView" : "SkyView export");
-		return work.Add(graph, name, std::move(accesses), [sources, destinations, count = OutputCount](auto* cmd) {
-			for (UINT i = 0; i < count; ++i)
+		return work.Add(graph, name, std::move(accesses), [this, sources, destinations, import](auto* cmd) {
+			for (UINT i = 0; i < OutputCount; ++i)
 				cmd->CopyTextureRegion(&destinations[i], 0, 0, 0, &sources[i], nullptr);
+			if (import && Aerial()) RecordedCopies = OutputCount;
 		}, {}, import ? Queue::Copy : Queue::Compute);
 	}
 
@@ -367,6 +368,7 @@ struct SceneEnvironment::RemoteAtmosphere
 		PrimaryWork.Commands.clear();
 		DisplayResources.fill(Invalid);
 		ImportOperation = ImportPacket = Consumer = Invalid;
+		RecordedCopies = 0;
 	}
 
 	void AppendImport(Graph& graph, std::vector<ID3D12Resource*>& bindings,
@@ -420,6 +422,9 @@ void SceneEnvironment::Freeze(double delta, Executor& primary, uint64_t frame)
 	_cloudInput = _cloud.CaptureInputs();
 	_work.clear();
 	Build(primary, frame);
+	// The graph can register readers in append before registering environment work in prelude.
+	if (_remoteSkyView) _remoteSkyView->BeginDisplay();
+	if (_remoteAerial) _remoteAerial->BeginDisplay();
 }
 
 bool SceneEnvironment::PrepareAtmosphere(Executor& primary, uint64_t frame, bool atmosphere, uint64_t skyRevision,
@@ -1002,11 +1007,7 @@ void SceneEnvironment::Append(Graph& graph, std::vector<ID3D12Resource*>& bindin
 	}
 	_operations.clear();
 	if (_remoteSkyView)
-	{
-		_remoteSkyView->BeginDisplay();
 		_remoteSkyView->AppendImport(graph, bindings, {_environment._luts[2].get(), nullptr});
-	}
-	if (_remoteAerial) _remoteAerial->BeginDisplay();
 	const bool async = AsyncComputeEnabled();
 	for (const auto& work : _work)
 	{
@@ -1075,13 +1076,13 @@ void SceneEnvironment::AddAtmosphereWaits(const Schedule& schedule, std::vector<
 			if (remote->Aerial() ? reads(remote->DisplayResources[0]) && reads(remote->DisplayResources[1])
 			                     : packet.Name == "clustered deferred lighting") remote->Consumer = i;
 		}
+		if (remote->Aerial() && remote->Consumer != Invalid) remote->ConsumerName = schedule.Packets[remote->Consumer].Name;
 		if (remote->ImportOperation == Invalid) continue;
 		if (remote->ImportPacket >= remote->Consumer || remote->Consumer >= schedule.Packets.size())
 			throw std::logic_error("Atmosphere import must precede its first reader");
 		if (remote->Policy == 3 && !remote->Submit->Complete(remote->Selected->Ready))
 			throw std::logic_error("Latest-ready SkyView selected an unfinished publication");
 		waits.push_back({remote->ImportPacket, remote->Selected->Ready});
-		if (remote->Aerial()) remote->ConsumerName = schedule.Packets[remote->Consumer].Name;
 	}
 }
 
@@ -1109,6 +1110,7 @@ void SceneEnvironment::AtmosphereSubmitted(uint64_t frame, const std::vector<Com
 			    " size=", shape.Width, "x", shape.Height, "x", shape.Depth, " payloadBytes=", remote.Payload,
 			    " inputs=", displayed.Inputs, " sharedInputs=", _remoteSkyView && _remoteSkyView->Input == remote.Input,
 			    " exportFence=", displayed.Ready.Value, " importFence=", imported.Value,
+			    " waitExportFence=", imported ? displayed.Ready.Value : 0, " recordedCopies=", remote.RecordedCopies,
 			    " firstConsumer=", remote.ConsumerName, " consumerFence=", completions[remote.Consumer].Value);
 			continue;
 		}
@@ -1150,9 +1152,13 @@ void SceneEnvironment::AddAerialReads(Graph& graph, std::vector<ID3D12Resource*>
 	if (_environment._source != SkySource::SkyAtmosphere) return;
 	const std::array outputs{_environment._luts[3].get(), _environment._luts[4].get()};
 	if (_remoteAerial) _remoteAerial->AppendImport(graph, bindings, outputs);
-	for (auto* output : outputs)
-		accesses.push_back({NativeWork::ResourceFor(graph, bindings, output->GetResource()->D3DResource.Get(),
-		                                            "camera aerial perspective"), Mode::Read, Read});
+	for (size_t i = 0; i < outputs.size(); ++i)
+	{
+		const Id id = NativeWork::ResourceFor(graph, bindings, outputs[i]->GetResource()->D3DResource.Get(),
+		                                     "camera aerial perspective");
+		if (_remoteAerial) _remoteAerial->DisplayResources[i] = id;
+		accesses.push_back({id, Mode::Read, Read});
+	}
 }
 
 } // namespace BistroRender
