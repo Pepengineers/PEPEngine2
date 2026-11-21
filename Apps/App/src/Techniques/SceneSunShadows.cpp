@@ -15,8 +15,10 @@ namespace
 {
 void DrawCascadeTiles(ID3D12GraphicsCommandList* cmd, UINT cascadeCount, UINT update, UINT resolution,
                       D3D12_CPU_DESCRIPTOR_HANDLE dsv, ID3D12CommandSignature* signature, UINT draws,
-                      const std::array<ID3D12Resource*, 4>& commands, ID3D12Resource* counts)
+                      const std::array<ID3D12Resource*, 4>& commands, ID3D12Resource* counts,
+                      const std::array<ID3D12PipelineState*, 2>& pipelines)
 {
+	const UINT64 commandSectionBytes = UINT64(draws) * sizeof(GDX12IndirectDrawArgs);
 	for (UINT cascade = 0; cascade < cascadeCount; ++cascade)
 	{
 		if (!(update & (1u << cascade)))
@@ -31,11 +33,16 @@ void DrawCascadeTiles(ID3D12GraphicsCommandList* cmd, UINT cascadeCount, UINT up
 		cmd->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1, 0, 1, &rect);
 		cmd->RSSetViewports(1, &viewport);
 		cmd->RSSetScissorRects(1, &rect);
-		cmd->SetGraphicsRoot32BitConstant(0, 0, 0);
-		cmd->SetGraphicsRoot32BitConstant(0, cascade, 1);
 		if (draws)
 		{
-			cmd->ExecuteIndirect(signature, draws, commands[cascade], 0, counts, cascade * sizeof(UINT));
+			cmd->SetGraphicsRoot32BitConstant(0, 0, 0);
+			for (UINT stream = 0; stream < pipelines.size(); ++stream)
+			{
+				cmd->SetPipelineState(pipelines[stream]);
+				cmd->SetGraphicsRoot32BitConstant(0, cascade, 1);
+				cmd->ExecuteIndirect(signature, draws, commands[cascade], stream * commandSectionBytes,
+				                     counts, (2 * cascade + stream) * sizeof(UINT));
+			}
 		}
 	}
 }
@@ -81,7 +88,12 @@ SceneSunShadows::SceneSunShadows(GDX12DeviceResources& r, RenderPipelineCommonDa
 	p.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
 	p.DSVFormat = DXGI_FORMAT_D32_FLOAT;
 	p.SampleDesc.Count = 1;
-	ThrowIfFailed(r.Device->GetDevice()->CreateGraphicsPipelineState(&p, IID_PPV_ARGS(&_draw)));
+	ThrowIfFailed(r.Device->GetDevice()->CreateGraphicsPipelineState(&p, IID_PPV_ARGS(&_maskedDraw)));
+	const D3D_SHADER_MACRO depthDefines[] = {{"SHADOW_UNBATCHED", "1"}, {"SHADOW_DEPTH_ONLY", "1"}, {nullptr, nullptr}};
+	auto depthVS = compiler.CompileShader(r.Device, SHADERS_FOLDER "ShadowPass.hlsl", depthDefines, "VS", "vs");
+	p.VS = {depthVS->GetBufferPointer(), depthVS->GetBufferSize()};
+	p.PS = {};
+	ThrowIfFailed(r.Device->GetDevice()->CreateGraphicsPipelineState(&p, IID_PPV_ARGS(&_opaqueDraw)));
 	_signature = GDX12RenderHelpers::CreateIndexedDrawSignature(r.Device, _graphicsRoot.get());
 }
 
@@ -259,6 +271,10 @@ void SceneSunShadows::PrepareAtlas(Slot& s, UINT resolution)
 
 void SceneSunShadows::PrepareIndirectBuffers(Slot& s, UINT draws)
 {
+	if (draws > UINT_MAX / (2 * sizeof(GDX12IndirectDrawArgs)))
+	{
+		throw std::length_error("Sun shadow command sections exceed buffer size limit");
+	}
 	const auto buffer = [&](auto& target, UINT count)
 	{
 		using Buffer = typename std::remove_reference_t<decltype(target)>::element_type;
@@ -269,10 +285,10 @@ void SceneSunShadows::PrepareIndirectBuffers(Slot& s, UINT draws)
 			                  _resources.SRV_UAV_Heap->GetAvailableIndex(SceneDescriptorStart));
 		}
 	};
-	buffer(s.Counters, UINT(s.Commands.size()));
+	buffer(s.Counters, 2 * UINT(s.Commands.size()));
 	for (auto& commands : s.Commands)
 	{
-		buffer(commands, (std::max)(draws, 1u));
+		buffer(commands, 2 * (std::max)(draws, 1u));
 	}
 }
 
@@ -403,7 +419,7 @@ void SceneSunShadows::Append(
 		         }
 	         });
 	auto* graphics = _graphicsRoot.get();
-	auto* draw = _draw.Get();
+	const std::array<ID3D12PipelineState*, 2> pipelines = {_opaqueDraw.Get(), _maskedDraw.Get()};
 	auto* signature = _signature.Get();
 	auto* counts = s.Counters->GetResource().D3DResource.Get();
 	const auto textures = _resources.SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex);
@@ -412,12 +428,12 @@ void SceneSunShadows::Append(
 	         {
 		         cmd->SetDescriptorHeaps(1, &heap);
 		         cmd->SetGraphicsRootSignature(graphics->GetRootSignature().Get());
-		         cmd->SetPipelineState(draw);
 		         cmd->SetGraphicsRootConstantBufferView(graphics->GetBRootParamIndex(1), cbv);
 		         BindShadowGeometry(cmd, graphics, scene, geometry);
 		         cmd->SetGraphicsRootDescriptorTable(graphics->GetTRootParamIndex(3), textures);
 		         cmd->OMSetRenderTargets(0, nullptr, FALSE, &dsv);
-		         DrawCascadeTiles(cmd, cascadeCount, update, resolution, dsv, signature, draws, commands, counts);
+		         DrawCascadeTiles(cmd, cascadeCount, update, resolution, dsv, signature, draws, commands, counts,
+		                          pipelines);
 	         });
 	if (appendGrass)
 	{

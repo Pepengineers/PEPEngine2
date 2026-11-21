@@ -14,7 +14,7 @@ StructuredBuffer<InstanceData> InstanceCache : register(t0);
 [numthreads(1, 1, 1)]
 void ClearCS()
 {
-    for (uint cascade = 0; cascade < 4; ++cascade) Counters[cascade] = 0;
+    for (uint i = 0; i < 8; ++i) Counters[i] = 0;
 }
 
 bool Visible(InstanceData instance, float4x4 m)
@@ -44,11 +44,14 @@ void CS(uint3 id : SV_DispatchThreadID)
     if (instance.CastsShadows == 0) return;
     Material material = MaterialCache[instance.MaterialIndex];
     if (material.RenderLayer == 2 || material.ReflectionProbePreview != 0) return;
+    // DrawCascadeTiles reads one input-sized command section per stream.
+    uint stream = material.RenderLayer == 1 ? 1 : 0;
     for (uint cascade = 0; cascade < CBShadow.CascadeCount; ++cascade)
     {
         if (!Visible(instance, CBShadow.ViewProj[cascade])) continue;
         uint index;
-        InterlockedAdd(Counters[cascade], 1, index);
+        InterlockedAdd(Counters[2 * cascade + stream], 1, index);
+        index += stream * count;
         if (cascade == 0) Commands0[index] = command;
         else if (cascade == 1) Commands1[index] = command;
         else if (cascade == 2) Commands2[index] = command;
@@ -72,9 +75,11 @@ SamplerState samAnisotropicWrap : register(s4);
 struct VertexOutput
 {
     float4 Position : SV_POSITION;
+#ifndef SHADOW_DEPTH_ONLY
     float2 UV : TEXCOORD0;
     nointerpolation uint MaterialIndex : TEXCOORD1;
     nointerpolation uint CastsShadows : TEXCOORD2;
+#endif
 };
 
 VertexOutput VS(float3 position : POSITION, float2 uv : TEXCOORD, uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
@@ -101,12 +106,15 @@ VertexOutput VS(float3 position : POSITION, float2 uv : TEXCOORD, uint vertexID 
 #else
     output.Position = mul(world, CBShadow.ViewProj[CascadeIndex]);
 #endif
+#ifndef SHADOW_DEPTH_ONLY
     output.UV = uv;
     output.MaterialIndex = instance.MaterialIndex;
     output.CastsShadows = instance.CastsShadows;
+#endif
     return output;
 }
 
+#ifndef SHADOW_DEPTH_ONLY
 void PS(VertexOutput input)
 {
     if (input.CastsShadows == 0) clip(-1.0f);
@@ -115,4 +123,5 @@ void PS(VertexOutput input)
     if (material.RenderLayer == 1)
         clip(Texture2DCache[material.DiffuseIndex].Sample(samAnisotropicWrap, input.UV).a - 0.5f);
 }
+#endif
 #endif

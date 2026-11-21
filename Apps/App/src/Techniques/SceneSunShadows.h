@@ -49,7 +49,7 @@ class SceneSunShadows
 	RenderPipelineCommonData& _common;
 	std::vector<Slot> _slots;
 	std::unique_ptr<GDX12RootSignature> _graphicsRoot, _computeRoot;
-	ComPtr<ID3D12PipelineState> _draw, _cull, _clear;
+	ComPtr<ID3D12PipelineState> _opaqueDraw, _maskedDraw, _cull, _clear;
 	ComPtr<ID3D12CommandSignature> _signature;
 };
 } // namespace BistroRender
