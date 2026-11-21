@@ -2,6 +2,7 @@
 
 #include "Engine.RendererDX12/D3DHelpers.h"
 #include <memory>
+#include <string>
 
 class SceneManagerModule;
 class World;
@@ -33,7 +34,7 @@ struct LindenBatch
 
 struct LindenMesh
 {
-    UINT Lod = 0;
+    std::string Label;
     std::vector<LindenVertex> Vertices;
     std::vector<UINT> Indices;
     std::vector<LindenFragment> Fragments;
