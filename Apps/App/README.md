@@ -26,6 +26,33 @@ Editor/Benchmark application targets are not part of this renderer.
 `false` uses DIRECT. Scheduling is controlled by the graph, with no separate
 legacy per-technique async switches.
 
+### Two-adapter HBAO
+
+Set `Render.AO.Implementation = 1`, `Render.AO.Resolution = 1`, and `App.AO.Adapter`
+to the secondary GPU index from the same hardware list as `Render.PrimaryAdapter`.
+`App.AO.Adapter = -1` selects local AO, which is the default. When Cloud Picture
+also uses a secondary GPU, both techniques share that adapter. An unavailable or
+conflicting AO adapter falls back to local HBAO.
+
+The secondary GPU computes raw visibility from the current frame's half-resolution
+depth. The primary GPU retains the prepared normals and performs bilateral blur,
+resolve, and upsampling. Launch with `--debug-ui` and select `Scene.AO` in the
+scene texture inspector to view the result.
+
+### Read back a scene texture by name
+
+Run `App.exe --read-texture=Scene.AO` for a one-shot readback without opening the
+inspector. Use an exact name from the scene texture catalog, for example
+`Scene.Depth` or `GBuffer.NormalRoughness`. Future techniques can register a
+stable name with `SceneTextureInspector::Name`. The source must be a
+single-sample texture bound to the GPU0 graph.
+
+After the captured frame slot retires, Bistro writes tightly packed bytes for
+subresource 0 to `Logs/SceneTexture.bin` (replacing the previous dump).
+`Logs/Engine.log` provides the DXGI footprint format, width, height, depth,
+row bytes, and row count. For R32_FLOAT it also reports the finite range,
+non-finite count, and visibility counts for values below 0.999 and outside [0,1].
+
 ## Startup and controls
 
 `Configs/Startup.ini` is copied beside the executable by the build. At each start

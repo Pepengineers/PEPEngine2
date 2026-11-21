@@ -33,17 +33,17 @@ AutoConsoleVariable<CloudPictureMode> CrossSync(L"App.CloudPicture.CrossSync", C
     L"Remote clouds: 0 imports the previous frame, 1 the current frame, 2 the latest completed independent export.");
 struct Settings {
     bool Active;
-    int Width, Height, Adapter;
+    int Width, Height, Adapter, AOAdapter;
     CloudPictureMode Mode;
-    bool operator==(const Settings& other) const {
+    bool SamePicture(const Settings& other) const {
         return Active == other.Active && Width == other.Width && Height == other.Height &&
             Adapter == other.Adapter && Mode == other.Mode;
     }
 };
-Settings Requested() {
+Settings Requested(int aoAdapter) {
     const int adapter = Adapter.GetValue();
     const auto mode = adapter >= 0 ? CrossSync.GetValue() : CloudPictureMode::Local;
-    return {Enabled.GetValue(), Width.GetValue(), Height.GetValue(), adapter, mode};
+    return {Enabled.GetValue(), Width.GetValue(), Height.GetValue(), adapter, aoAdapter, mode};
 }
 
 bool SameAdapter(LUID a, LUID b) {
@@ -54,14 +54,14 @@ std::unique_ptr<GDX12Device> OpenSecondary(GDX12Device& primary, int index) {
     if (index < 0) return {};
     const auto adapters = GDX12DeviceFactory::GetDeviceDescriptors();
     if (size_t(index) >= adapters.size())
-        throw std::invalid_argument("Cloud Picture hardware adapter index is out of range");
+        throw std::invalid_argument("Bistro secondary hardware adapter index is out of range");
     const auto& selected = adapters[index];
     if (SameAdapter(selected.AdapterLuid, primary.GetDevice()->GetAdapterLuid()))
-        throw std::invalid_argument("Cloud Picture requires a different physical adapter LUID");
+        throw std::invalid_argument("Bistro requires a different physical adapter LUID");
     auto device = std::make_unique<GDX12Device>();
     ThrowIfFailed(device->Initialize(selected.Adapter));
     if (!SameAdapter(device->GetDevice()->GetAdapterLuid(), selected.AdapterLuid))
-        throw std::runtime_error("Cloud Picture device LUID differs from the selected DXGI adapter");
+        throw std::runtime_error("Bistro secondary device LUID differs from the selected DXGI adapter");
     return device;
 }
 }
@@ -76,58 +76,83 @@ struct SceneCloudPicture::Impl {
 };
 SceneCloudPicture::SceneCloudPicture(RenderPipelineContext& c) : _impl(std::make_shared<Impl>(c)) {}
 SceneCloudPicture::~SceneCloudPicture() = default;
-void SceneCloudPicture::UpdateSettings(std::unique_ptr<Executor>& executor) {
+void SceneCloudPicture::UpdateSettings(std::unique_ptr<Executor>& executor, int aoAdapter) {
     auto& p = *_impl;
-    const auto next = Requested();
-    if (p.Attempted && next == *p.Attempted) return;
+    const auto next = Requested(aoAdapter);
+    const bool samePicture = p.Attempted && next.SamePicture(*p.Attempted);
+    if (samePicture && next.AOAdapter == p.Attempted->AOAdapter) return;
     p.Attempted = next;
-    const int adapter = next.Active ? next.Adapter : -1;
+    const bool remoteCloud = next.Active && next.Adapter >= 0;
+    int adapter = remoteCloud ? next.Adapter : aoAdapter;
     std::unique_ptr<Executor> replacementExecutor;
-    std::unique_ptr<CloudPictureTexture> replacement;
-    const auto reject = [&](const auto& reason) {
-        Log::Error("RenderGraph", "CloudPicture adapter ", adapter, " settings rejected: ", reason);
-    };
-    try {
-        if (adapter != p.ExecutorAdapter) {
-            auto submit = std::make_shared<QueueSubmission>(*p.Resources.Device,
-                OpenSecondary(*p.Resources.Device, adapter));
-            replacementExecutor = std::make_unique<Executor>(submit, 0, UINT(p.Resources.FrameConstants.size()));
-        }
-        if (next.Active) {
-            replacement = std::make_unique<CloudPictureTexture>(p.Resources, next.Width, next.Height,
-                replacementExecutor ? replacementExecutor->Submissions() : executor->Submissions(), next.Mode);
-        }
-    } catch (const DxException& error) {
-        reject(error.ToString());
-    } catch (const std::exception& error) {
-        reject(error.what());
-    }
-
-    if (next.Active && !replacement) {
-        if (p.Texture || adapter < 0) return;
-        const auto fallbackFailed = [](const auto& reason) {
-            Log::Error("RenderGraph", "CloudPicture local fallback failed. Picture disabled: ", reason);
+    const auto selectAdapter = [&](int index) {
+        replacementExecutor.reset();
+        if (index == p.ExecutorAdapter) return true;
+        const auto reject = [&](const auto& reason) {
+            Log::Warning("RenderGraph", "Bistro secondary adapter ", index, " settings rejected: ", reason);
         };
         try {
-            p.Texture = std::make_unique<CloudPictureTexture>(p.Resources, next.Width, next.Height,
-                executor->Submissions(), CloudPictureMode::Local);
+            auto submit = std::make_shared<QueueSubmission>(*p.Resources.Device,
+                OpenSecondary(*p.Resources.Device, index));
+            replacementExecutor = std::make_unique<Executor>(submit, 0, UINT(p.Resources.FrameConstants.size()));
+            return true;
         } catch (const DxException& error) {
-            fallbackFailed(error.ToString());
+            reject(error.ToString());
         } catch (const std::exception& error) {
-            fallbackFailed(error.what());
+            reject(error.what());
         }
-        return;
+        return false;
+    };
+    const auto createPicture = [&](CloudPictureMode mode) -> std::unique_ptr<CloudPictureTexture> {
+        try {
+            return std::make_unique<CloudPictureTexture>(p.Resources, next.Width, next.Height,
+                replacementExecutor ? replacementExecutor->Submissions() : executor->Submissions(), mode);
+        } catch (const DxException& error) {
+            Log::Warning("RenderGraph", "CloudPicture settings rejected: ", error.ToString());
+        } catch (const std::exception& error) {
+            Log::Warning("RenderGraph", "CloudPicture settings rejected: ", error.what());
+        }
+        return {};
+    };
+
+    const bool ready = selectAdapter(adapter);
+    const bool keepPicture = samePicture && !replacementExecutor && (!remoteCloud || ready);
+    std::unique_ptr<CloudPictureTexture> replacement;
+    if (next.Active && !keepPicture) {
+        if (!remoteCloud || ready) replacement = createPicture(next.Mode);
+        if (remoteCloud && !replacement) {
+            if (IsRemote()) {
+                if (aoAdapter >= 0 && aoAdapter != p.ExecutorAdapter)
+                    Log::Warning("RenderGraph", "Using local HBAO with the retained CloudPicture adapter");
+                return;
+            }
+            if (!ready || adapter != aoAdapter) {
+                adapter = aoAdapter;
+                selectAdapter(adapter);
+            }
+            if (!p.Texture) replacement = createPicture(CloudPictureMode::Local);
+        }
     }
-    // Disabling retires the picture even if the current executor has to stay.
-    if (p.Texture) p.Texture->Stop();
+
+    const int effectiveAdapter = replacementExecutor ? adapter : p.ExecutorAdapter;
+    if (aoAdapter >= 0 && aoAdapter != effectiveAdapter)
+        Log::Warning("RenderGraph", "HBAO adapter ", aoAdapter, " unavailable in the Bistro submission domain; using local HBAO");
+
+    const bool replacePicture = replacement || (!next.Active && p.Texture);
+    if (!replacePicture && !replacementExecutor) return;
+    // The primary terminal also retires any AO exchange attached to this domain.
+    if (replacePicture && p.Texture) p.Texture->Stop();
     executor->Drain();
-    p.CurrentImage = nullptr;
-    p.Texture = std::move(replacement);
+    if (replacePicture) {
+        p.CurrentImage = nullptr;
+        p.Texture = std::move(replacement);
+    }
     if (replacementExecutor) {
         executor = std::move(replacementExecutor);
         p.ExecutorAdapter = adapter;
     }
 }
+int SceneCloudPicture::SubmissionAdapter() const { return _impl->ExecutorAdapter; }
 void SceneCloudPicture::Prepare(UINT slot, double time) {
     auto& p = *_impl;
     if (p.Texture) p.Texture->Prepare(slot, time);

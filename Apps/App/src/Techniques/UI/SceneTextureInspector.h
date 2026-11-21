@@ -12,7 +12,11 @@ class SceneTextureInspector
 public:
 	enum class View : UINT { Color, Scalar, Depth, Normals, Motion, HDR };
 
-	explicit SceneTextureInspector(UINT slots) : _slots(slots) {}
+	explicit SceneTextureInspector(UINT slots);
+	bool NeedsReadback() const { return !_readbackName.empty(); }
+	void AppendReadback(Graph&, std::vector<ID3D12Resource*>&, NativeWork&, GDX12Device&, UINT slot,
+	                    ID3D12Resource* backBuffer);
+	void RetireReadback(UINT slot);
 	void BeginPlan() { _named.clear(); }
 	void Name(const char* name, GDX12Texture* texture, View view = View::Color);
 	GDX12Texture* Append(Graph&, std::vector<ID3D12Resource*>&, NativeWork&, GDX12Device&, UINT slot,
@@ -32,7 +36,17 @@ private:
 		std::unique_ptr<GDX12DescriptorHeap> Heap;
 		GDX12Texture Atlas;
 	};
-	std::vector<Source> Collect(Graph&, std::vector<ID3D12Resource*>&, ID3D12Resource* backBuffer);
+	struct Readback
+	{
+		GDX12ResourceHandle Buffer;
+		D3D12_PLACED_SUBRESOURCE_FOOTPRINT Layout{};
+		UINT Rows = 0, Slot = 0;
+		UINT64 RowBytes = 0, Bytes = 0;
+	};
+	std::vector<Source> Collect(Graph&, std::vector<ID3D12Resource*>&, ID3D12Resource* backBuffer, bool raw = false);
+	std::string _readbackName;
+	Readback _readback;
+	bool _loggedMissing = false;
 	std::vector<Source> _named;
 	std::vector<std::string> _selected{"Scene.Depth", "Scene.AO"};
 	std::vector<Slot> _slots;

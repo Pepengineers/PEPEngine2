@@ -10,6 +10,9 @@
 
 namespace
 {
+AutoConsoleVariable<int> AOAdapter(L"App.AO.Adapter", -1,
+    L"Secondary GPU for Bistro half-resolution HBAO (same hardware list as Render.PrimaryAdapter). -1 uses local AO.",
+    EConsoleVariableFlags::Default, [](int value) { return value >= -1; });
 AutoConsoleVariable<bool> AsyncQueues(L"App.Async.Queues", true,
                                       L"Place explicit local work on COMPUTE/COPY; false uses DIRECT.",
                                       EConsoleVariableFlags::Default);
@@ -40,9 +43,14 @@ void BistroRenderPipeline::Initialize(RenderPipelineContext& c)
 
 void BistroRenderPipeline::PrepareMaterialBindings(RenderPipelineContext& c)
 {
-	_cloudPicture->UpdateSettings(_executor);
+	const auto ao = GetAmbientOcclusionSettings();
+	_aoAdapter = ao.IsActive() && ao.Implementation == 1 && ao.Resolution == GDX12AOResolution::Half
+	    ? AOAdapter.GetValue() : -1;
+	_cloudPicture->UpdateSettings(_executor, _aoAdapter);
+	++_frameNumber;
 	const UINT slot = c.Primary.CurrFrameConstantsIndex;
 	_executor->Begin(slot);
+	_post->Textures().RetireReadback(slot);
 	_animationTime += (std::max)(0.0, double(c.Common.GameTimer->DeltaTime()));
 	_cloudPicture->Prepare(slot, _animationTime);
 	_post->PrepareMaterials(_animationTime, _cloudPicture->Image());
@@ -75,7 +83,8 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	const auto* world = scenes->GetWorld();
 	const double delta = c.Common.GameTimer ? c.Common.GameTimer->DeltaTime() : 0;
 	_environment->Freeze(world && !world->IsPaused() ? delta * world->GetTimeScale() : 0);
-	_lighting->Freeze(*_geometry, slot);
+	const bool remoteAO = _aoAdapter >= 0 && _aoAdapter == _cloudPicture->SubmissionAdapter();
+	_lighting->Freeze(*_geometry, slot, remoteAO ? _executor->Submissions() : nullptr);
 	auto& particles = _lighting->Particles();
 	auto& water = _lighting->Water();
 	using ParticleInputs = BistroRender::SceneParticles::Inputs;
@@ -92,7 +101,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 		using View = BistroRender::SceneTextureInspector::View;
 		const bool inspect = Engine::UI::DebugUIVisible();
 		auto& textures = _post->Textures();
-		if (inspect)
+		if (inspect || textures.NeedsReadback())
 		{
 			textures.Name("Scene.Depth", depth, View::Depth);
 			textures.Name("Scene.AO", _lighting->AOTexture(slot), View::Scalar);
@@ -114,7 +123,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 		_lighting->SetHDRContinuation(
 		    [&, inspect](auto& g, auto& bindings, auto* hdr)
 		    {
-			    if (inspect)
+			    if (inspect || textures.NeedsReadback())
 			    {
 				    textures.Name("Lighting.DeferredHDR", _lighting->DeferredHDR(), View::HDR);
 				    textures.Name("Lighting.SunShadowAtlas", _lighting->SunShadow(slot), View::Scalar);
@@ -127,6 +136,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 			                  _lighting->ParticleMotion(), target, finish);
 		    });
 		_lighting->Append(graph, resources, *_geometry, *_environment);
+		_post->AppendTextureReadback(graph, resources, *target);
 		for (auto& op : graph.Operations)
 		{
 			if (op.Name == BistroRender::ProbeColorOperationName)
@@ -161,10 +171,12 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 		}
 	};
 	const auto waits = _cloudPicture->Waits(_schedule);
+	const auto exchange = _lighting->AOExchange(_schedule);
 	uint64_t completion;
 	try
 	{
-		completion = _executor->Execute(_schedule, _geometry->PlannedResources(slot), record, prefix, nullptr, nullptr, waits);
+		completion = _executor->Execute(_schedule, _geometry->PlannedResources(slot), record, prefix, nullptr, nullptr, waits,
+		                                exchange ? &*exchange : nullptr);
 	}
 	catch (...)
 	{

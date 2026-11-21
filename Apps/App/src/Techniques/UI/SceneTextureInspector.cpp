@@ -1,5 +1,7 @@
 #include "SceneTextureInspector.h"
 #include "Common/ConsoleVariables.h"
+#include "Common/RuntimePaths.h"
+#include "Engine.Core/Logging/Logger.h"
 #include "Engine.RendererDX12/GDX12Descriptor.h"
 #include "Engine.RendererDX12/GDX12Device.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
@@ -7,6 +9,9 @@
 #include "Engine.UI/UI_test.h"
 #include <imgui/imgui.h>
 #include <cctype>
+#include <cmath>
+#include <fstream>
+#include <shellapi.h>
 #include <unordered_map>
 
 namespace BistroRender
@@ -57,20 +62,42 @@ View DefaultView(const D3D12_RESOURCE_DESC& desc, DXGI_FORMAT format)
 }
 }
 
+SceneTextureInspector::SceneTextureInspector(UINT slots) : _slots(slots)
+{
+	int count = 0;
+	auto* args = CommandLineToArgvW(GetCommandLineW(), &count);
+	if (!args) ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
+	const std::unique_ptr<void, decltype(&LocalFree)> arguments(args, LocalFree);
+	constexpr std::wstring_view prefix = L"--read-texture=";
+	for (int i = 1; i < count; ++i)
+	{
+		const std::wstring_view arg(args[i]);
+		if (arg.substr(0, prefix.size()) == prefix)
+		{
+			_readbackName = WStringToString(std::wstring(arg.substr(prefix.size())));
+			if (_readbackName.empty()) throw std::invalid_argument("--read-texture expects a texture name");
+		}
+	}
+}
+
 void SceneTextureInspector::Name(const char* name, GDX12Texture* texture, View view)
 {
 	if (!texture || !texture->IsInitialized())
 		return;
 	auto* resource = texture->GetResource()->D3DResource.Get();
 	const auto format = PreviewSRV(resource->GetDesc());
-	if (format != DXGI_FORMAT_UNKNOWN)
+	if (format != DXGI_FORMAT_UNKNOWN || NeedsReadback())
 		_named.push_back({name, resource, format, view});
 }
 
 std::vector<SceneTextureInspector::Source> SceneTextureInspector::Collect(Graph& graph,
-    std::vector<ID3D12Resource*>& bindings, ID3D12Resource* backBuffer)
+    std::vector<ID3D12Resource*>& bindings, ID3D12Resource* backBuffer, bool raw)
 {
 	auto catalog = _named;
+	if (!raw)
+		catalog.erase(std::remove_if(catalog.begin(), catalog.end(),
+		    [](const Source& item) { return item.Format == DXGI_FORMAT_UNKNOWN; }), catalog.end());
+	const auto namedCount = catalog.size();
 	std::vector<const Operation*> writers(bindings.size(), nullptr);
 	for (const auto& pass : graph.Operations)
 		for (const auto access : pass.Accesses)
@@ -87,19 +114,131 @@ std::vector<SceneTextureInspector::Source> SceneTextureInspector::Collect(Graph&
 			graph.Resources[id].Name = alias->Name;
 			continue;
 		}
-		if (!writers[id] || resource == backBuffer || graph.Resources[id].Memory != Heap::Default)
+		if ((!writers[id] && !raw) || resource == backBuffer || graph.Resources[id].Memory != Heap::Default)
 			continue;
 		const auto desc = resource->GetDesc();
 		const auto format = PreviewSRV(desc);
-		if (format == DXGI_FORMAT_UNKNOWN)
+		if (raw ? desc.Dimension == D3D12_RESOURCE_DIMENSION_BUFFER : format == DXGI_FORMAT_UNKNOWN)
 			continue;
-		std::string name = writers[id]->Name + " / " + graph.Resources[id].Name;
+		std::string name = writers[id] ? writers[id]->Name + " / " + graph.Resources[id].Name
+		                               : graph.Resources[id].Name;
+		if (format == DXGI_FORMAT_UNKNOWN) name = "raw / " + name;
 		name += " #" + std::to_string(++ordinals[name]);
 		catalog.push_back({std::move(name), resource, format, DefaultView(desc, format)});
 	}
-	std::sort(catalog.begin() + _named.size(), catalog.end(),
+	std::sort(catalog.begin() + namedCount, catalog.end(),
 	          [](const auto& a, const auto& b) { return a.Name < b.Name; });
 	return catalog;
+}
+
+void SceneTextureInspector::AppendReadback(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work,
+    GDX12Device& device, UINT slot, ID3D12Resource* backBuffer)
+{
+	if (!NeedsReadback() || _readback.Buffer.Get()) return;
+	const auto catalog = Collect(graph, bindings, backBuffer, true);
+	const auto found = std::find_if(catalog.begin(), catalog.end(),
+	    [&](const Source& source) { return source.Name == _readbackName; });
+	if (found == catalog.end() || std::find(bindings.begin(), bindings.end(), found->Resource) == bindings.end())
+	{
+		if (!_loggedMissing)
+			Log::Warning("RenderGraph", "Scene texture readback waiting for ", _readbackName,
+			    " to appear in the GPU0 graph");
+		_loggedMissing = true;
+		return;
+	}
+
+	auto* image = found->Resource;
+	if (std::any_of(std::next(found), catalog.end(), [&](const Source& source) {
+		    return source.Name == _readbackName && source.Resource != image;
+	    }))
+	{
+		Log::Warning("RenderGraph", "Ambiguous scene texture readback name: ", _readbackName);
+		_readbackName.clear();
+		return;
+	}
+	const auto desc = image->GetDesc();
+	if (desc.SampleDesc.Count != 1)
+	{
+		Log::Warning("RenderGraph", "Scene texture readback requires a single-sample resource: ", _readbackName);
+		_readbackName.clear();
+		return;
+	}
+	auto& capture = _readback;
+	capture.Slot = slot;
+	device.GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &capture.Layout, &capture.Rows,
+	                                          &capture.RowBytes, &capture.Bytes);
+	if (!capture.Bytes || capture.Bytes == UINT64_MAX)
+		throw std::runtime_error("Scene texture readback has an invalid copy footprint");
+	capture.Buffer = device.CreateResource(D3D12_HEAP_TYPE_READBACK, CD3DX12_RESOURCE_DESC::Buffer(capture.Bytes),
+	                                      D3D12_RESOURCE_STATE_COPY_DEST);
+	auto* buffer = capture.Buffer.Get();
+	const Id source = NativeWork::ResourceFor(graph, bindings, image, _readbackName);
+	const Id target = NativeWork::ResourceFor(graph, bindings, buffer, "scene texture readback buffer");
+	work.Add(graph, "read back scene texture", {{source, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE},
+	    {target, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
+	    [=, layout = capture.Layout](auto* cmd)
+	    {
+		    const CD3DX12_TEXTURE_COPY_LOCATION src(image, 0u), dst(buffer, layout);
+		    cmd->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+	    }, {}, Queue::Copy);
+}
+
+void SceneTextureInspector::RetireReadback(UINT slot)
+{
+	if (!_readback.Buffer.Get() || _readback.Slot != slot) return;
+	auto capture = std::move(_readback);
+	const auto name = std::move(_readbackName);
+	_readbackName.clear();
+	const auto path = Engine::Core::GetExecutableDirectory() / "Logs" / "SceneTexture.bin";
+	std::ofstream output(path, std::ios::binary | std::ios::trunc);
+	if (!output)
+	{
+		Log::Warning("RenderGraph", "Cannot open scene texture readback file ", path.string());
+		return;
+	}
+	const auto& shape = capture.Layout.Footprint;
+	const D3D12_RANGE read{0, SIZE_T(capture.Bytes)};
+	void* memory = nullptr;
+	ThrowIfFailed(capture.Buffer.Get()->Map(0, &read, &memory));
+	const auto* data = static_cast<const char*>(memory) + capture.Layout.Offset;
+
+	float minimum = (std::numeric_limits<float>::max)(), maximum = -minimum;
+	uint64_t belowOne = 0, nonFinite = 0, outsideUnitRange = 0;
+	for (UINT z = 0; z < shape.Depth; ++z)
+	{
+		for (UINT y = 0; y < capture.Rows; ++y)
+		{
+			const auto* row = data + (uint64_t(z) * capture.Rows + y) * shape.RowPitch;
+			output.write(row, std::streamsize(capture.RowBytes));
+			if (shape.Format == DXGI_FORMAT_R32_FLOAT)
+			{
+				const auto* samples = reinterpret_cast<const float*>(row);
+				for (UINT x = 0; x < shape.Width; ++x)
+				{
+					const float value = samples[x];
+					if (!std::isfinite(value)) { ++nonFinite; continue; }
+					minimum = (std::min)(minimum, value);
+					maximum = (std::max)(maximum, value);
+					if (value < .999f) ++belowOne;
+					if (value < 0.f || value > 1.f) ++outsideUnitRange;
+				}
+			}
+		}
+	}
+	const D3D12_RANGE written{0, 0};
+	capture.Buffer.Get()->Unmap(0, &written);
+	output.close();
+	if (!output)
+	{
+		Log::Warning("RenderGraph", "Cannot write scene texture readback file ", path.string());
+		return;
+	}
+	Log::Info("RenderGraph", "Scene texture readback name=", name, " slot=", slot,
+	    " format=", int(shape.Format), " size=", shape.Width, "x", shape.Height, "x", shape.Depth,
+	    " rowBytes=", capture.RowBytes, " rows=", capture.Rows, " path=", path.string());
+	if (shape.Format == DXGI_FORMAT_R32_FLOAT)
+		Log::Info("RenderGraph", "Scene texture samples name=", name, " min=", minimum, " max=", maximum,
+		    " below0.999=", belowOne, " nonFinite=", nonFinite, " outsideUnitRange=", outsideUnitRange);
 }
 
 GDX12Texture* SceneTextureInspector::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work,

@@ -116,6 +116,10 @@ struct CloudPictureTexture::Impl
 			CheckFormat(device, true);
 			InitializeRemote(device);
 		}
+		else
+		{
+			Submit.reset(); // Local clouds do not own the secondary submission domain.
+		}
 		GDX12RootSignatureDesc root;
 		root.Constants = {sizeof(CloudGeneratorData) / sizeof(UINT)};
 		root.NumSingleUAVSlots = 1;

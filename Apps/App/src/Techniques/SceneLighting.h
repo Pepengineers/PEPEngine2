@@ -14,7 +14,15 @@ class SceneLighting
   public:
 	SceneLighting(GDX12DeviceResources&, RenderPipelineCommonData&);
 	~SceneLighting();
-	void Freeze(SceneGeometry&, UINT slot);
+	void Freeze(SceneGeometry&, UINT slot, const std::shared_ptr<QueueSubmission>& aoSubmissions = {});
+	std::optional<Executor::PacketExchange> AOExchange(const Schedule& schedule)
+	{
+		return _frames.at(_slot).AO->Exchange(schedule);
+	}
+	void AOPresented(uint64_t frame, const std::vector<CompletionToken>& completions)
+	{
+		_frames.at(_slot).AO->Presented(frame, completions);
+	}
 	void AppendGpuLightGrid(Graph&, std::vector<ID3D12Resource*>&, const SceneGeometry&);
 	void AppendAO(Graph&, std::vector<ID3D12Resource*>&);
 	void Append(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, SceneEnvironment&);

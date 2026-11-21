@@ -164,15 +164,51 @@ void SSAOCS(uint3 id : SV_DispatchThreadID)
     OutputAO[p] = saturate(1 - occlusion / Samples);
 }
 
-[numthreads(8, 8, 1)]
-void HBAOCS(uint3 id : SV_DispatchThreadID)
+float3 HalfDepthPosition(uint2 p)
 {
-    uint2 p = id.xy;
+    return XeGTAO_ComputeViewspacePosition((p + 0.5f) * Xe.ViewportPixelSize, LinearDepth(Depth[p]), Xe);
+}
+
+float3 DepthTangent(uint2 p, float3 center, int2 axis, uint2 size)
+{
+    int2 before = int2(p) - axis, after = int2(p) + axis;
+    bool hasBefore = all(before >= 0);
+    bool hasAfter = all(after < int2(size));
+    float3 backward = 0, forward = 0;
+    if (hasBefore)
+    {
+        hasBefore = Depth[before] > 0;
+        if (hasBefore) backward = center - HalfDepthPosition(before);
+    }
+    if (hasAfter)
+    {
+        hasAfter = Depth[after] > 0;
+        if (hasAfter) forward = HalfDepthPosition(after) - center;
+    }
+    return hasBefore && (!hasAfter || dot(backward, backward) < dot(forward, forward)) ? backward : forward;
+}
+
+void HBAO(uint2 p, bool depthOnly)
+{
     uint width, height;
     Depth.GetDimensions(width, height);
     if (any(p >= uint2(width, height))) return;
     if (Depth[p] <= 0) { OutputAO[p] = 1; return; }
-    float3 center = Position(p), normal = Normals[p].xyz * 2 - 1;
+    float3 center, normal;
+    if (depthOnly)
+    {
+        center = HalfDepthPosition(p);
+        uint2 size = uint2(width, height);
+        normal = cross(DepthTangent(p, center, int2(1, 0), size),
+                       DepthTangent(p, center, int2(0, 1), size));
+        normal = dot(normal, normal) > 1e-12f ? normalize(normal) : float3(0, 0, -1);
+        if (dot(normal, center) > 0) normal = -normal;
+    }
+    else
+    {
+        center = Position(p);
+        normal = Normals[p].xyz * 2 - 1;
+    }
     float radiusPixels = RadiusCm / max(center.z * abs(Xe.NDCToViewMul_x_PixelSize.y), 1e-5f);
     float rotation = Noise(p) * 2 * XE_GTAO_PI;
     float occlusion = 0;
@@ -187,7 +223,7 @@ void HBAOCS(uint3 id : SV_DispatchThreadID)
             float distancePixels = max(1, radiusPixels * (step + 0.5f) / Steps);
             int2 q = int2(round(float2(p) + ray * distancePixels));
             if (any(q < 0) || any(uint2(q) >= uint2(width, height)) || Depth[q] <= 0) continue;
-            float3 delta = Position(q) - center;
+            float3 delta = (depthOnly ? HalfDepthPosition(q) : Position(q)) - center;
             float distanceSquared = dot(delta, delta);
             if (distanceSquared < 1e-6f || distanceSquared >= RadiusCm * RadiusCm) continue;
             float sine = dot(normal, delta) * rsqrt(distanceSquared);
@@ -200,6 +236,12 @@ void HBAOCS(uint3 id : SV_DispatchThreadID)
     }
     OutputAO[p] = saturate(1 - occlusion / (Directions * (1 - HorizonBias)));
 }
+
+[numthreads(8, 8, 1)]
+void HBAOCS(uint3 id : SV_DispatchThreadID) { HBAO(id.xy, false); }
+
+[numthreads(8, 8, 1)]
+void HBAOHalfDepthCS(uint3 id : SV_DispatchThreadID) { HBAO(id.xy, true); }
 
 [numthreads(8, 8, 1)]
 void BlurCS(uint3 id : SV_DispatchThreadID)

@@ -36,6 +36,11 @@ class ScenePostUI
 	}
 	void PrepareMaterials(double animationSeconds, GDX12Texture* cloudImage);
 	SceneTextureInspector& Textures() { return _inspector; }
+	void AppendTextureReadback(Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12Texture& backBuffer)
+	{
+		_inspector.AppendReadback(graph, bindings, _work, *_resources.Device, _resources.CurrFrameConstantsIndex,
+		                         backBuffer.GetResource()->D3DResource.Get());
+	}
 	void ReleasePresentation();
 	void Resize(); // Caller drains the executor and the presentation queue first.
 	void Reset();

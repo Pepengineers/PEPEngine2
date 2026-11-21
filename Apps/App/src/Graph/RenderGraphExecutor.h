@@ -23,6 +23,11 @@ class Executor
 {
   public:
 	using Record = std::function<void(Id, uint32_t, ID3D12GraphicsCommandList*)>;
+	struct PacketExchange
+	{
+		Id Export, Import;
+		std::function<CompletionToken(CompletionToken)> SubmitRemote;
+	};
 	Executor(GDX12Device&, uint32_t slots, unsigned threads = 4);
 	Executor(std::shared_ptr<QueueSubmission>, Id device, uint32_t slots, unsigned threads = 4);
 	~Executor();
@@ -33,7 +38,8 @@ class Executor
 	void Reserve(const Schedule& schedule);
 	uint64_t Execute(const Schedule&, const std::vector<ID3D12Resource*>&, const Record&,
 	                 GDX12CommandList* prefix = nullptr, GDX12CommandList* suffix = nullptr,
-	                 const std::atomic<bool>* cancellation = nullptr, const std::vector<PacketWait>& waits = {});
+	                 const std::atomic<bool>* cancellation = nullptr, const std::vector<PacketWait>& waits = {},
+	                 const PacketExchange* exchange = nullptr);
 	void Drain();
 	// Each value belongs to the queue selected by its packet, not one timeline.
 	const std::vector<uint64_t>& Tokens() const { return _tokens; }

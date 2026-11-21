@@ -90,7 +90,7 @@ void SceneLighting::Reset()
 {
 	_pendingReset = true;
 }
-void SceneLighting::Freeze(SceneGeometry& geometry, UINT slot)
+void SceneLighting::Freeze(SceneGeometry& geometry, UINT slot, const std::shared_ptr<QueueSubmission>& aoSubmissions)
 {
 	if (_pendingReset)
 	{
@@ -111,7 +111,7 @@ void SceneLighting::Freeze(SceneGeometry& geometry, UINT slot)
 	{
 		frame.AO = std::make_unique<SceneAO>(_resources, _common, scene.DepthView.get(), normals);
 	}
-	frame.AO->Freeze(scene.DepthView.get(), normals, _aoTemporalIndex);
+	frame.AO->Freeze(scene.DepthView.get(), normals, _aoTemporalIndex, aoSubmissions);
 
 	auto& constants = *_resources.FrameConstants.at(slot);
 	auto vegetation = geometry.VegetationPrimitives();
@@ -237,6 +237,7 @@ void SceneLighting::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings,
                            SceneEnvironment& environment)
 {
 	_work.Commands.clear();
+	_frames.at(_slot).AO->AppendRemoteDepth(graph, bindings);
 	AppendShadows(graph, bindings, geometry, environment);
 	PrepareDeferred(geometry, environment);
 	AppendAO(graph, bindings);
