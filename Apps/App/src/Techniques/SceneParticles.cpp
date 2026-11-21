@@ -137,6 +137,7 @@ struct SceneParticles::Remote
 	D3D12_PLACED_SUBRESOURCE_FOOTPRINT InputFootprint{};
 	UINT64 CameraOffset = 0;
 	uint64_t InputVersion = 0, ConsumedInput = 0;
+	uint64_t LocalInputVersion = 0;
 	InputSlot* InputWrite = nullptr;
 	std::vector<uint64_t> Revisions;
 	UINT NextUpload = 0, NextOutput = 0;
@@ -147,10 +148,11 @@ struct SceneParticles::Remote
 	struct Statistics
 	{
 		uint64_t Frames = 0, Exports = 0, Imports = 0, Repeats = 0, Skipped = 0, Empty = 0;
-		uint64_t InputWaits = 0, OutputWaits = 0, ControlWaits = 0;
+		uint64_t InputWaits = 0, OutputWaits = 0, ControlWaits = 0, InputCopies = 0;
 	} Stats;
 	double GameTime = 0;
 	int Mode = 1;
+	bool Enabled = false;
 
 	struct ProducerInput
 	{
@@ -257,7 +259,7 @@ struct SceneParticles::Remote
 		InputCamera.Reset();
 		InputWrite = nullptr;
 		Shape = shape;
-		ConsumedInput = InputVersion = 0;
+		ConsumedInput = InputVersion = LocalInputVersion = 0;
 		Revisions.clear();
 		if (!External()) return;
 		auto* device = Secondary.Device;
@@ -318,21 +320,31 @@ struct SceneParticles::Remote
 	               GDX12ParticleInteractionField field, GDX12Resource* input, GDX12Resource* camera, UINT64 cameraSourceOffset)
 	{
 		std::lock_guard lock(Mutex);
-		auto* latest = Mode == 2 ? NewestInput() : nullptr;
+		const bool independent = Mode == 2;
+		auto* latest = independent ? NewestInput() : nullptr;
 		InputSlot* candidate = nullptr;
+		InputSlot* retiring = nullptr;
 		for (auto& slot : InputsRing)
 		{
 			if (&slot == latest || slot.Writing || slot.Pinned) continue;
-			if (slot.Reader && !Submit->Complete(slot.Reader))
+			if ((slot.Ready && !Submit->Complete(slot.Ready)) ||
+			    (slot.Reader && !Submit->Complete(slot.Reader)))
 			{
-				if (!candidate) candidate = &slot;
+				if (!retiring) retiring = &slot;
 				continue;
 			}
 			candidate = &slot;
 			break;
 		}
-		if (!candidate) throw std::logic_error("No particle input transfer slot available");
-		if (candidate->Reader) Submit->Wait(candidate->Reader);
+		if (!candidate)
+		{
+			// Keep the latest complete input and let queued exports finish.
+			if (independent) return Invalid;
+			candidate = retiring;
+			if (!candidate) throw std::logic_error("No particle input transfer slot available");
+			if (candidate->Ready) Submit->Wait(candidate->Ready);
+			if (candidate->Reader) Submit->Wait(candidate->Reader);
+		}
 		InputWrite = candidate;
 		candidate->Writing = true;
 		candidate->Reader = {};
@@ -372,7 +384,7 @@ struct SceneParticles::Remote
 		}
 		if (!Deferred.Generation) return {};
 		const auto result = Simulate(GPU1, Deferred.Emitters, Deferred.Settings, DeferredOutput, input);
-		input->Reader = result.Complete;
+		if (result.CopiedInput) input->Reader = result.Complete;
 		ConsumedInput = input->Version;
 		CommitStep(DeferredOutput, result, Generation);
 		Deferred.Generation = 0;
@@ -381,14 +393,15 @@ struct SceneParticles::Remote
 
 	bool LatestReady() const { return Mode == 2 || Mode == 3; }
 
-	void Configure(const std::vector<GDX12ParticleEmitter>& emitters, int mode)
+	void Configure(const std::vector<GDX12ParticleEmitter>& emitters, int mode, bool enabled)
 	{
 		std::vector<uint64_t> revisions;
 		for (const auto& emitter : emitters) revisions.push_back(emitter.ResetRevision);
-		if (revisions != Revisions || mode != Mode)
+		if (revisions != Revisions || mode != Mode || enabled != Enabled)
 		{
 			Revisions = std::move(revisions);
 			Mode = mode;
+			Enabled = enabled;
 			++Generation;
 			Ordered = PresentedVersion = CachedVersion = 0;
 			PresentedSnapshot.clear();
@@ -437,7 +450,7 @@ struct SceneParticles::Remote
 
 	void Step(const std::vector<GDX12ParticleEmitter>& emitters, const GDX12ParticleSettings& settings, int mode)
 	{
-		Configure(emitters, mode);
+		Configure(emitters, mode, settings.Enabled);
 		Selected = LatestReady() ? NewestCompleted() : Mode == 0 ? LastOrder : nullptr;
 		auto* output = ReserveOutput();
 		if (!LatestReady() && !output) throw std::logic_error("No slot for exact particle snapshot");
@@ -470,6 +483,7 @@ struct SceneParticles::Remote
 		CompletionToken Complete;
 		double Elapsed;
 		bool InputWaited;
+		bool CopiedInput;
 		uint64_t InputVersion;
 	};
 
@@ -500,7 +514,25 @@ struct SceneParticles::Remote
 		std::vector<Access> pools;
 		Solver.SetInteractionField({});
 		GDX12ParticleDepthInput depth;
+		// Copies and all local consumers use the same GPU1 compute queue.
+		// Versions stay unique until the transport is drained and rebuilt.
+		const bool copyInput = input && input->Version != LocalInputVersion;
 		if (input)
+		{
+			if (DepthInput())
+			{
+				auto* camera = InputCamera.D3DResource.Get();
+				depth = {&InputField, FieldSRV.GPUHandle, camera->GetGPUVirtualAddress(), UINT(Shape.Width), Shape.Height};
+			}
+			else
+			{
+				auto field = input->Field;
+				field.Resource = &InputField;
+				field.SRV = FieldSRV.GPUHandle;
+				Solver.SetInteractionField(field);
+			}
+		}
+		if (copyInput)
 		{
 			auto* shared = input->Buffer.Resources[1].Get();
 			auto* target = InputField.D3DResource.Get();
@@ -517,18 +549,11 @@ struct SceneParticles::Remote
 					    cmd->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
 					    cmd->CopyBufferRegion(camera, 0, shared, cameraOffset, sizeof(GDX12CameraConstants));
 				    }, {}, Queue::Compute);
-				depth = {&InputField, FieldSRV.GPUHandle, camera->GetGPUVirtualAddress(), UINT(Shape.Width), Shape.Height};
 			}
 			else
-			{
 				work.Add(graph, "GPU1 import particle interaction field", std::move(copies),
 				    [shared, target, bytes = Shape.Width](auto* cmd) { cmd->CopyBufferRegion(target, 0, shared, 0, bytes); },
 				    {}, Queue::Compute);
-				auto field = input->Field;
-				field.Resource = &InputField;
-				field.SRV = FieldSRV.GPUHandle;
-				Solver.SetInteractionField(field);
-			}
 		}
 		for (auto* buffer : Solver.GetPoolResources())
 			pools.push_back(ResourceAccess(graph, bindings, buffer, Mode::ReadWrite, UnorderedAccess));
@@ -564,9 +589,10 @@ struct SceneParticles::Remote
 		const auto schedule = Compile(graph);
 		executor.Reserve(schedule);
 		std::vector<PacketWait> waits;
-		if (input) waits.push_back({0, input->Ready});
+		if (copyInput) waits.push_back({0, input->Ready});
 		executor.Execute(schedule, bindings, [&](Id op, uint32_t, auto* cmd) { work.Record(op, cmd); }, nullptr, nullptr, nullptr, waits);
-		return {executor.Completions().back(), elapsed, inputWaited, input ? input->Version : 0};
+		if (copyInput) LocalInputVersion = input->Version;
+		return {executor.Completions().back(), elapsed, inputWaited, copyInput, input ? input->Version : 0};
 	}
 
 	void CommitStep(Publication* output, StepResult result, uint64_t generation)
@@ -582,6 +608,7 @@ struct SceneParticles::Remote
 		++Ordered;
 		GameTime += result.Elapsed;
 		Stats.InputWaits += result.InputWaited;
+		Stats.InputCopies += result.CopiedInput;
 		if (output)
 		{
 			output->Version = Ordered;
@@ -603,10 +630,11 @@ struct SceneParticles::Remote
 
 	static bool NeedsControl(const ProducerInput& prior, const ProducerInput& next)
 	{
-		if (prior.Generation != next.Generation || prior.Advancing != next.Advancing) return true;
+		// The latest snapshot carries the cumulative burst, including while disabled.
+		if (prior.Generation != next.Generation || prior.Advancing != next.Advancing ||
+		    prior.Settings.Enabled != next.Settings.Enabled) return true;
 		for (size_t i = 0; i < next.Emitters.size(); ++i)
-			if (Paused(prior, i) != Paused(next, i) ||
-			    prior.Emitters[i].BurstTotal != next.Emitters[i].BurstTotal)
+			if (Paused(prior, i) != Paused(next, i))
 				return true;
 		return false;
 	}
@@ -642,6 +670,7 @@ struct SceneParticles::Remote
 		Executor executor(Submit, 1, UINT(Secondary.FrameConstants.size()), 1);
 		ProducerInput prior;
 		CompletionToken pending, armed;
+		bool bootstrap = false;
 		try
 		{
 			std::unique_lock lock(Mutex);
@@ -665,12 +694,22 @@ struct SceneParticles::Remote
 				const bool control = !Controls.empty();
 				const bool steady = LatestInput.Advancing && std::any_of(LatestInput.Emitters.begin(),
 				    LatestInput.Emitters.end(), [](const auto& e) { return !e.Paused && e.TimeScale > 0; });
-				if (!control && !steady)
+				if (!control && !steady && !bootstrap)
 				{
 					sleep({});
 					continue;
 				}
 				auto* external = External() ? NewestInput() : nullptr;
+				if (control && (!Controls.front().Settings.Enabled || (External() && !external)))
+				{
+					// A control can reach the worker before any compatible GPU input.
+					// Keep its clock boundary. LatestInput retains the cumulative burst.
+					prior = std::move(Controls.front());
+					Controls.pop_front();
+					bootstrap = prior.Settings.Enabled;
+					ControlSpace.notify_one();
+					continue;
+				}
 				if (External() && !external)
 				{
 					CompletionToken incoming;
@@ -699,7 +738,7 @@ struct SceneParticles::Remote
 				{
 					auto& emitter = stepEmitters[i];
 					emitter.Paused = Paused(input, i);
-					emitter.DeltaTime = input.Generation == prior.Generation && !emitter.Paused && !Paused(prior, i)
+					emitter.DeltaTime = !bootstrap && input.Generation == prior.Generation && !emitter.Paused && !Paused(prior, i)
 					    ? float(elapsed) : 0.f;
 				}
 				auto settings = input.Settings;
@@ -710,13 +749,14 @@ struct SceneParticles::Remote
 				lock.lock();
 				if (external)
 				{
-					external->Reader = step.Complete;
+					if (step.CopiedInput) external->Reader = step.Complete;
 					external->Pinned = false;
 					ConsumedInput = external->Version;
 				}
 				CommitStep(output, step, input.Generation);
 				pending = step.Complete;
 				prior = std::move(input);
+				bootstrap = false;
 			}
 		}
 		catch (...)
@@ -785,13 +825,14 @@ struct SceneParticles::Remote
 		}
 		std::unique_lock lock(Mutex);
 		if (WorkerFailure) std::rethrow_exception(WorkerFailure);
-		Configure(emitters, mode);
+		Configure(emitters, mode, settings.Enabled);
 		const bool active = settings.Enabled && settings.SimulationEnabled && worldRate > 0;
 		ProducerInput next{emitters, settings, 0, Generation, active};
 		// The previous frame has already registered its copy fence. Drop its pin
 		// before any input back pressure, including with a two-slot output ring.
 		Selected = nullptr;
 		ClockSuspended = false;
+		if (!settings.Enabled && LatestInput.Settings.Enabled) Controls.clear();
 		if (NeedsControl(LatestInput, next) && Controls.size() == 8)
 		{
 			++Stats.ControlWaits;
@@ -1040,6 +1081,7 @@ void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, 
 	}
 	simulation->BeginFrame(&_resources, _common, &remoteIds);
 	_renderFrame = simulation->RenderFrame();
+	_renderFrame.ResetMotion |= _common.ResetHistory;
 	_firstRemote = UINT(_renderFrame.Sources.size());
 	_remoteVersions.clear();
 	for (const auto& lane : _remote)
@@ -1131,7 +1173,7 @@ void SceneParticles::Presented(uint64_t frame)
 			    " publications=", stats.Exports, " imports=", stats.Imports, " repeats=", stats.Repeats,
 			    " skippedShows=", stats.Skipped, " noSnapshotFrames=", stats.Empty,
 			    " inputRetirementWaits=", stats.InputWaits, " outputRetirementWaits=", stats.OutputWaits,
-			    " controlBackPressure=", stats.ControlWaits, " gameSeconds=", remote.GameTime,
+			    " controlBackPressure=", stats.ControlWaits, " inputCopies=", stats.InputCopies, " gameSeconds=", remote.GameTime,
 			    " shownGameSeconds=", selected ? selected->SimulatedSeconds : 0.0);
 	}
 }
