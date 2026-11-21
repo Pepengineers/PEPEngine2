@@ -221,7 +221,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 		}
 	};
 	auto waits = _cloudPicture->Waits(_schedule);
-	_environment->AddSkyViewWaits(_schedule, waits);
+	_environment->AddAtmosphereWaits(_schedule, waits);
 	water.AddWaits(_schedule, waits);
 	grass.AddWindWaits(_schedule, waits);
 	std::vector<BistroRender::Executor::PacketExchange> exchanges;
@@ -237,7 +237,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	catch (...)
 	{
 		_cloudPicture->Submitted(_executor->Completions());
-		_environment->SkyViewSubmitted(_frameNumber, _executor->Completions());
+		_environment->AtmosphereSubmitted(_frameNumber, _executor->Completions());
 		_post->PostersSubmitted(_frameNumber, _executor->Completions());
 		water.Submitted(_executor->Completions());
 		grass.WindSubmitted(_frameNumber, _executor->Completions());
@@ -247,7 +247,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 		throw;
 	}
 	_cloudPicture->Submitted(_executor->Completions());
-	_environment->SkyViewSubmitted(_frameNumber, _executor->Completions());
+	_environment->AtmosphereSubmitted(_frameNumber, _executor->Completions());
 	water.Submitted(_executor->Completions());
 	grass.WindSubmitted(_frameNumber, _executor->Completions());
 	particles.Submitted(_executor->Completions());

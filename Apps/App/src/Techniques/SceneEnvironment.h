@@ -26,8 +26,8 @@ class SceneEnvironment
     bool AsyncComputeEnabled() const;
     bool Record(Id, ID3D12GraphicsCommandList*) const;
     void Submitted(uint64_t fence);
-    void AddSkyViewWaits(const Schedule&, std::vector<PacketWait>&);
-    void SkyViewSubmitted(uint64_t frame, const std::vector<CompletionToken>&);
+    void AddAtmosphereWaits(const Schedule&, std::vector<PacketWait>&);
+    void AtmosphereSubmitted(uint64_t frame, const std::vector<CompletionToken>&);
     void SetRetirement(std::function<void()> retire) { _environment.SetResourceRetirement(std::move(retire)); }
     IRenderPassLink* Output(UINT index)
     {
@@ -35,6 +35,7 @@ class SceneEnvironment
     }
 
     std::vector<Access> Reads(Graph&, std::vector<ID3D12Resource*>&) const;
+    void AddAerialReads(Graph&, std::vector<ID3D12Resource*>&, std::vector<Access>&);
     GDX12Texture* VisibleSkyView() const
     {
         auto* texture = _environment._luts[2].get();
@@ -55,9 +56,10 @@ class SceneEnvironment
         bool Compute = false;
         WorkDomain Domain = WorkDomain::Cached;
     };
-    struct RemoteSkyView;
+    struct RemoteAtmosphere;
     void Build(Executor&, uint64_t frame);
-    bool PrepareSkyView(Executor&, uint64_t frame, bool atmosphere, uint64_t skyRevision, bool& localChanged);
+    bool PrepareAtmosphere(Executor&, uint64_t frame, bool atmosphere, uint64_t skyRevision, bool& localChanged,
+                           const GDX12CameraConstants* camera = nullptr, bool invalidated = false);
     GDX12DeviceResources& _resources;
     RenderPipelineCommonData& _common;
     GDX12EnvironmentIBLPass _environment;
@@ -71,8 +73,8 @@ class SceneEnvironment
     GDX12SkyConstants _mediumConstants{}, _multipleConstants{}, _captureConstants{}, _viewConstants{}, _aerialConstants{};
     Matrix _aerialViewProjection = Matrix::Identity;
     bool _atmosphereReady = false;
-    std::unique_ptr<RemoteSkyView> _remoteSkyView;
+    std::unique_ptr<RemoteAtmosphere> _remoteSkyView, _remoteAerial;
     std::vector<std::unique_ptr<GDX12UploadBuffer<XMFLOAT4>>> _skyViewSampling;
-    int _failedSkyViewAdapter = -1;
+    int _failedSkyViewAdapter = -1, _failedAerialAdapter = -1;
 };
 } // namespace BistroRender

@@ -135,7 +135,7 @@ namespace Engine::UI
                 }
                 else if (Name == L"App.CloudPicture.Adapter" || Name == L"App.AO.Adapter" ||
                     Name == L"App.Particles.Adapter" || Name == L"App.Water.Adapter" || Name == L"App.Grass.Wind.Adapter" ||
-                    Name == L"App.Sky.SkyView.Adapter" || canvasAdapter)
+                    Name == L"App.Sky.SkyView.Adapter" || Name == L"App.Sky.AerialPerspective.Adapter" || canvasAdapter)
                     DrawAdapter(variable);
                 else if (Name.rfind(L"App.UI.WorldCanvas.CrossSync.", 0) == 0)
                 {

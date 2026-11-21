@@ -83,6 +83,7 @@ GDX12Texture* SceneTransparency::AppendPhase(Graph& graph, std::vector<ID3D12Res
 	const State read = D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE;
 	const State depthRead = D3D12_RESOURCE_STATE_DEPTH_READ | read;
 	auto accesses = environment.Reads(graph, bindings);
+	environment.AddAerialReads(graph, bindings, accesses);
 	accesses.insert(
 	    accesses.end(),
 	    {texture(rasterDepth, Mode::Read, depthRead),
@@ -181,7 +182,8 @@ GDX12Texture* SceneTransparency::AppendPhase(Graph& graph, std::vector<ID3D12Res
 	                                                        atmosphere[2]};
 	const auto target = output->GetRTV()->CPUHandle;
 	const char* resolveName = "mesh WBOIT resolve";
-	auto composition = environment.Reads(graph, bindings);
+	std::vector<Access> composition;
+	if (!_opaqueContinuation) environment.AddAerialReads(graph, bindings, composition);
 	composition.insert(composition.end(), {texture(hdr, Mode::Read, read),
 	                                       texture(accum, Mode::Read, read),
 	                                       texture(reveal, Mode::Read, read),

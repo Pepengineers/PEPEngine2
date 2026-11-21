@@ -72,7 +72,14 @@ secondary ring is busy, subsequent frames retry the latest desired view.
 The displayed LUT carries its observer position and planet radius, while the
 screen ray and remaining atmosphere parameters use the current frame.
 The secondary GPU caches matching transmittance and multiple scattering
-tables. Capture sky, IBL and aerial perspective continue to run on GPU0.
+tables. Capture sky and IBL continue to run on GPU0.
+
+`App.Sky.AerialPerspective.Adapter` independently selects the GPU for the active
+camera's aerial radiance and transmittance volumes. Its default `-1` runs on GPU0.
+`App.Sky.AerialPerspective.CrossSync=1` imports the current camera's matching pair
+before the first draw that samples it. Unchanged inputs reuse the current pair.
+SkyView and Aerial Perspective share the input tables when assigned to the same
+secondary GPU. Both adapter selectors show GPU names in F1.
 
 In F1, each technique can select its GPU by name. `App.CloudPicture.Adapter`,
 `App.AO.Adapter`, `App.Particles.Adapter`, `App.Water.Adapter` and `App.Grass.Wind.Adapter` use absolute

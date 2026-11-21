@@ -23,6 +23,12 @@ AutoConsoleVariable<int> SkyViewAdapter(L"App.Sky.SkyView.Adapter", -1,
 AutoConsoleVariable<int> SkyViewCrossSync(L"App.Sky.SkyView.CrossSync", 1,
     L"Remote camera SkyView: 0 exact previous, 1 exact current, 3 latest completed with local bootstrap.",
     EConsoleVariableFlags::Default, [](int value) { return value == 0 || value == 1 || value == 3; });
+AutoConsoleVariable<int> AerialAdapter(L"App.Sky.AerialPerspective.Adapter", -1,
+    L"Hardware GPU for the active camera's aerial perspective volumes. -1 keeps them on the primary GPU.",
+    EConsoleVariableFlags::Default, [](int value) { return value >= -1; });
+AutoConsoleVariable<int> AerialCrossSync(L"App.Sky.AerialPerspective.CrossSync", 1,
+    L"Remote aerial perspective: 1 imports the current camera's matching volume pair.",
+    EConsoleVariableFlags::Default, [](int value) { return value == 1; });
 
 bool Different(const GDX12SkyConstants& a, const GDX12SkyConstants& b)
 {
@@ -36,8 +42,27 @@ bool DeviceLost(HRESULT code)
 }
 }
 
-struct SceneEnvironment::RemoteSkyView
+struct SceneEnvironment::RemoteAtmosphere
 {
+	using Textures = std::array<GDX12Texture*, 4>;
+	struct Inputs
+	{
+		GDX12DeviceResources Resources;
+		std::array<GDX12Texture, 2> Luts;
+		GDX12SkyConstants Medium, Multiple;
+		uint64_t Version = 0;
+
+		Inputs(GDX12Device& device, const Textures& source)
+		{
+			Resources.Device = &device;
+			Resources.SRV_UAV_Heap = std::make_shared<GDX12DescriptorHeap>(&device,
+			    D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, TextureResources_StartIndex + TextureResources_RangeLength,
+			    D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
+			for (size_t i = 0; i < Luts.size(); ++i)
+				GDX12RenderHelpers::InitializeComputeTexture(Luts[i], Resources, source[i]->GetWidth(),
+				    source[i]->GetHeight(), source[i]->GetFormat(), false);
+		}
+	};
 	struct View
 	{
 		GDX12SkyConstants Key;
@@ -48,75 +73,121 @@ struct SceneEnvironment::RemoteSkyView
 	{
 		QueueSubmission::TransferBuffer Shared;
 		std::unique_ptr<GDX12UploadBuffer<GDX12SkyConstants>> Constants;
+		std::unique_ptr<GDX12UploadBuffer<GDX12CameraConstants>> Camera;
 		uint64_t Generation = 0;
 		CompletionToken Reader;
 	};
 
 	std::shared_ptr<QueueSubmission> Submit;
 	Id Device;
-	GDX12DeviceResources Resources;
-	std::array<GDX12Texture, 3> Luts;
+	const UINT OutputCount;
+	std::shared_ptr<Inputs> Input;
+	std::array<GDX12Texture, 2> Outputs;
 	std::unique_ptr<GDX12RootSignature> Root;
 	std::array<ComPtr<ID3D12PipelineState>, 3> Pipelines;
 	std::vector<Publication> Ring;
 	Executor Recorder;
-	D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{};
-	uint64_t Bytes = 0, Ordered = 0, InputVersion = 0, Imported = 0;
+	std::array<D3D12_PLACED_SUBRESOURCE_FOOTPRINT, 2> Footprints{};
+	uint64_t Bytes = 0, Payload = 0, Ordered = 0, Imported = 0;
 	uint64_t Generation = 0, CameraRevision = 0, SkyRevision = 0;
 	int Policy = -1;
 	UINT Next = 0;
-	GDX12SkyConstants Medium, Multiple;
 	GDX12SkyConstants CompatibleMedium, CompatibleMultiple;
 	Publication *Latest = nullptr, *Selected = nullptr;
 	std::optional<View> Displayed;
 	NativeWork RemoteWork, PrimaryWork;
 	Schedule Plan;
 	std::vector<ID3D12Resource*> Bindings;
+	std::array<Id, 2> DisplayResources{Invalid, Invalid};
 	Id ImportOperation = Invalid, ImportPacket = Invalid, Consumer = Invalid;
+	std::string ConsumerName;
 	unsigned Reports = 0;
 
-	RemoteSkyView(Executor& primary, Id device, UINT slots, const std::array<GDX12Texture*, 3>& source)
-	    : Submit(primary.Submissions()), Device(device), Ring(slots + 2), Recorder(Submit, device, slots + 2, 1)
+	RemoteAtmosphere(Executor& primary, Id device, UINT slots, const Textures& source, const RemoteAtmosphere* peer)
+	    : Submit(primary.Submissions()), Device(device), OutputCount(source[3] ? 2 : 1),
+	      Input(peer && peer->Device == device && peer->MatchesInputs(source)
+	          ? peer->Input : std::make_shared<Inputs>(Submit->Device(device), source)),
+	      Ring(slots + 2), Recorder(Submit, device, slots + 2, 1)
 	{
-		Resources.Device = &Submit->Device(device);
-		Resources.SRV_UAV_Heap = std::make_shared<GDX12DescriptorHeap>(Resources.Device,
-		    D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, TextureResources_StartIndex + TextureResources_RangeLength,
-		    D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
-		for (size_t i = 0; i < Luts.size(); ++i)
-			GDX12RenderHelpers::InitializeComputeTexture(Luts[i], Resources, source[i]->GetWidth(),
-			    source[i]->GetHeight(), source[i]->GetFormat(), false);
+		auto& resources = Input->Resources;
 		GDX12RootSignatureDesc root;
-		root.NumSingleCBVSlots = 1;
+		root.NumSingleCBVSlots = Aerial() ? 2 : 1;
 		root.NumSingleSRVSlots = 2;
-		root.NumSingleUAVSlots = 1;
+		root.NumSingleUAVSlots = Aerial() ? 3 : 1;
 		root.StaticSamplers.emplace_back(0, D3D12_FILTER_MIN_MAG_MIP_LINEAR,
 		    D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
-		Root = std::make_unique<GDX12RootSignature>(Resources.Device, root);
-		constexpr const char* entries[]{"TransmittanceCS", "MultipleScatteringCS", "SkyViewCS"};
+		Root = std::make_unique<GDX12RootSignature>(resources.Device, root);
+		const char* entries[]{"TransmittanceCS", "MultipleScatteringCS", Aerial() ? "AerialCS" : "SkyViewCS"};
 		for (size_t i = 0; i < Pipelines.size(); ++i)
-			Pipelines[i] = GDX12RenderHelpers::CreateComputePipeline(Resources.Device, Root.get(),
+			Pipelines[i] = GDX12RenderHelpers::CreateComputePipeline(resources.Device, Root.get(),
 			    SHADERS_FOLDER "SkyAtmosphere.hlsl", entries[i]);
-		const auto desc = source[2]->GetResource()->D3DResource->GetDesc();
-		D3D12_PLACED_SUBRESOURCE_FOOTPRINT other{};
-		uint64_t otherBytes = 0;
-		Submit->Device(0).GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &Footprint, nullptr, nullptr, &Bytes);
-		Resources.Device->GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &other, nullptr, nullptr, &otherBytes);
-		if (!Bytes || Bytes == UINT64_MAX || Bytes != otherBytes || Footprint.Footprint.RowPitch != other.Footprint.RowPitch)
-			throw std::runtime_error("SkyView adapters need matching texture footprints");
+		for (UINT i = 0; i < OutputCount; ++i)
+		{
+			const auto desc = source[i + 2]->GetResource()->D3DResource->GetDesc();
+			if (Aerial())
+			{
+				GDX12TextureDesc texture;
+				texture.Width = UINT(desc.Width);
+				texture.Height = desc.Height;
+				texture.Format = texture.SRVDesc.Format = texture.UAVDesc.Format = desc.Format;
+				texture.CreateUAV = true;
+				texture.SRV_UAV_Heap = resources.SRV_UAV_Heap.get();
+				texture.SRVHeapIndex = texture.SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
+				texture.UAVHeapIndex = texture.SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
+				texture.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+				texture.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
+				texture.SRVDesc.Texture3D.MipLevels = 1;
+				texture.UAVDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
+				texture.UAVDesc.Texture3D.WSize = desc.DepthOrArraySize;
+				texture.ExternalResource = resources.Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc,
+				    D3D12_RESOURCE_STATE_COMMON, nullptr);
+				Outputs[i].Initialize(texture);
+			}
+			else
+				GDX12RenderHelpers::InitializeComputeTexture(Outputs[i], resources, UINT(desc.Width), desc.Height, desc.Format);
+			const uint64_t offset = (Bytes + D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT - 1) &
+			    ~uint64_t(D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT - 1);
+			auto& footprint = Footprints[i];
+			D3D12_PLACED_SUBRESOURCE_FOOTPRINT remote{};
+			uint64_t bytes = 0, remoteBytes = 0, rowBytes = 0;
+			UINT rows = 0;
+			Submit->Device(0).GetDevice()->GetCopyableFootprints(&desc, 0, 1, offset, &footprint, &rows, &rowBytes, &bytes);
+			resources.Device->GetDevice()->GetCopyableFootprints(&desc, 0, 1, offset, &remote, nullptr, nullptr, &remoteBytes);
+			if (!bytes || bytes == UINT64_MAX || bytes != remoteBytes || footprint.Offset != remote.Offset ||
+			    footprint.Footprint.RowPitch != remote.Footprint.RowPitch)
+				throw std::runtime_error("Atmosphere adapters need matching texture footprints");
+			// Reserve full row strides for each depth slice, including final-row padding.
+			Bytes = footprint.Offset + uint64_t(footprint.Footprint.RowPitch) * rows * footprint.Footprint.Depth;
+			Payload += rowBytes * rows * footprint.Footprint.Depth;
+		}
 	}
 
-	bool Matches(const std::array<GDX12Texture*, 3>& source)
+	bool Aerial() const { return OutputCount == 2; }
+
+	static bool SameShape(GDX12Texture& a, GDX12Texture& b)
 	{
-		for (size_t i = 0; i < Luts.size(); ++i)
-			if (Luts[i].GetWidth() != source[i]->GetWidth() || Luts[i].GetHeight() != source[i]->GetHeight() ||
-			    Luts[i].GetFormat() != source[i]->GetFormat()) return false;
+		const auto left = a.GetResource()->D3DResource->GetDesc(), right = b.GetResource()->D3DResource->GetDesc();
+		return left.Dimension == right.Dimension && left.Width == right.Width && left.Height == right.Height &&
+		    left.DepthOrArraySize == right.DepthOrArraySize && left.Format == right.Format;
+	}
+
+	bool MatchesInputs(const Textures& source) const
+	{
+		return SameShape(Input->Luts[0], *source[0]) && SameShape(Input->Luts[1], *source[1]);
+	}
+
+	bool Matches(const Textures& source)
+	{
+		if (!MatchesInputs(source)) return false;
+		for (UINT i = 0; i < OutputCount; ++i)
+			if (!SameShape(Outputs[i], *source[i + 2])) return false;
 		return true;
 	}
 
 	void Configure(int mode, uint64_t camera, uint64_t sky, const GDX12SkyConstants& medium,
-	               const GDX12SkyConstants& multiple)
+	               const GDX12SkyConstants& multiple, bool invalidated)
 	{
-		if (Policy == mode && CameraRevision == camera && SkyRevision == sky &&
+		if (!invalidated && Policy == mode && CameraRevision == camera && SkyRevision == sky &&
 		    !Different(CompatibleMedium, medium) && !Different(CompatibleMultiple, multiple)) return;
 		Policy = mode;
 		CameraRevision = camera;
@@ -169,21 +240,27 @@ struct SceneEnvironment::RemoteSkyView
 		return std::nullopt;
 	}
 	Publication* PrepareOrder(const GDX12SkyConstants& key, const GDX12SkyConstants& medium,
-	                          const GDX12SkyConstants& multiple)
+	                          const GDX12SkyConstants& multiple, const GDX12CameraConstants* camera)
 	{
-		if (Latest && !Different(Latest->Key, key)) return nullptr;
+		if (!camera && Latest && !Different(Latest->Key, key)) return nullptr;
 		const auto index = BeginOrder();
 		if (!index) return nullptr; // The caller retries the latest desired key on each frame, including when it stops changing.
 		auto& slot = Ring[*index];
+		auto& resources = Input->Resources;
 		if (!slot.Constants)
-			slot.Constants = std::make_unique<GDX12UploadBuffer<GDX12SkyConstants>>(Resources.Device, 1);
+			slot.Constants = std::make_unique<GDX12UploadBuffer<GDX12SkyConstants>>(resources.Device, 1);
+		if (camera)
+		{
+			if (!slot.Camera) slot.Camera = std::make_unique<GDX12UploadBuffer<GDX12CameraConstants>>(resources.Device, 1);
+			slot.Camera->CopyData(0, *camera);
+		}
 		if (!slot.Shared.Resources[0]) slot.Shared = Submit->CreateTransferBuffer(Device, Bytes);
 		slot.Constants->CopyData(0, key);
 		slot.Key = key;
 		slot.Reader = {};
-		const bool transmittance = InputVersion == 0 || Different(Medium, medium);
-		const bool scattering = transmittance || Different(Multiple, multiple);
-		slot.Inputs = InputVersion + scattering;
+		const bool transmittance = Input->Version == 0 || Different(Input->Medium, medium);
+		const bool scattering = transmittance || Different(Input->Multiple, multiple);
+		slot.Inputs = Input->Version + scattering;
 
 		Graph graph;
 		graph.Device = Device;
@@ -196,38 +273,51 @@ struct SceneEnvironment::RemoteSkyView
 			return Access{NativeWork::ResourceFor(graph, Bindings, resource, name), mode, state};
 		};
 		constexpr auto read = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-		const auto constants = access(slot.Constants->GetResource().D3DResource.Get(), "SkyView constants",
+		const auto constants = access(slot.Constants->GetResource().D3DResource.Get(), "remote atmosphere constants",
 		    Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ);
 		const auto dispatch = [&](UINT stage, const char* name) {
-			std::vector<Access> accesses{constants, access(native(Luts[stage]), name, Mode::Write, UnorderedAccess)};
-			if (stage >= 1) accesses.push_back(access(native(Luts[0]), "SkyView transmittance", Mode::Read, read));
-			if (stage == 2) accesses.push_back(access(native(Luts[1]), "SkyView multiple scattering", Mode::Read, read));
+			auto& output = stage < 2 ? Input->Luts[stage] : Outputs[0];
+			std::vector<Access> accesses{constants, access(native(output), name, Mode::Write, UnorderedAccess)};
+			if (stage >= 1) accesses.push_back(access(native(Input->Luts[0]), "remote transmittance", Mode::Read, read));
+			if (stage == 2) accesses.push_back(access(native(Input->Luts[1]), "remote multiple scattering", Mode::Read, read));
+			D3D12_GPU_VIRTUAL_ADDRESS cameraCB = 0;
+			if (stage == 2 && camera)
+			{
+				accesses.push_back(access(slot.Camera->GetResource().D3DResource.Get(), "remote aerial camera",
+				    Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ));
+				accesses.push_back(access(native(Outputs[1]), "remote aerial transmittance", Mode::Write, UnorderedAccess));
+				cameraCB = slot.Camera->GetElementAddress(0);
+			}
 			const auto cb = slot.Constants->GetElementAddress(0);
-			RemoteWork.Add(graph, name, std::move(accesses), [this, stage, cb](auto* cmd) {
-				auto* heap = Resources.SRV_UAV_Heap->GetHeap().Get();
+			RemoteWork.Add(graph, name, std::move(accesses), [this, stage, cb, cameraCB, &output](auto* cmd) {
+				auto* heap = Input->Resources.SRV_UAV_Heap->GetHeap().Get();
 				cmd->SetDescriptorHeaps(1, &heap);
 				cmd->SetComputeRootSignature(Root->GetRootSignature().Get());
 				cmd->SetPipelineState(Pipelines[stage].Get());
 				cmd->SetComputeRootConstantBufferView(Root->GetBRootParamIndex(0), cb);
-				if (stage >= 1) cmd->SetComputeRootDescriptorTable(Root->GetTRootParamIndex(0), Luts[0].GetSRV()->GPUHandle);
-				if (stage == 2) cmd->SetComputeRootDescriptorTable(Root->GetTRootParamIndex(1), Luts[1].GetSRV()->GPUHandle);
-				auto& output = Luts[stage];
-				cmd->SetComputeRootDescriptorTable(Root->GetURootParamIndex(0), output.GetUAV()->GPUHandle);
-				cmd->Dispatch((output.GetWidth() + 7) / 8, (output.GetHeight() + 7) / 8, 1);
+				if (stage >= 1) cmd->SetComputeRootDescriptorTable(Root->GetTRootParamIndex(0), Input->Luts[0].GetSRV()->GPUHandle);
+				if (stage == 2) cmd->SetComputeRootDescriptorTable(Root->GetTRootParamIndex(1), Input->Luts[1].GetSRV()->GPUHandle);
+				if (cameraCB)
+				{
+					cmd->SetComputeRootConstantBufferView(Root->GetBRootParamIndex(1), cameraCB);
+					cmd->SetComputeRootDescriptorTable(Root->GetURootParamIndex(1), output.GetUAV()->GPUHandle);
+					cmd->SetComputeRootDescriptorTable(Root->GetURootParamIndex(2), Outputs[1].GetUAV()->GPUHandle);
+					cmd->Dispatch((output.GetWidth() + 3) / 4, (output.GetHeight() + 3) / 4,
+					              (Footprints[0].Footprint.Depth + 3) / 4);
+				}
+				else
+				{
+					cmd->SetComputeRootDescriptorTable(Root->GetURootParamIndex(0), output.GetUAV()->GPUHandle);
+					cmd->Dispatch((output.GetWidth() + 7) / 8, (output.GetHeight() + 7) / 8, 1);
+				}
 			}, {}, Queue::Compute);
 		};
-		if (transmittance) dispatch(0, "SkyView secondary transmittance");
-		if (scattering) dispatch(1, "SkyView secondary multiple scattering");
-		dispatch(2, "SkyView secondary camera LUT");
-		auto* shared = slot.Shared.Resources[1].Get();
-		auto* output = native(Luts[2]);
-		RemoteWork.Add(graph, "SkyView export", {
-		    access(output, "secondary SkyView", Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE),
-		    access(shared, "shared SkyView", Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST)},
-		    [source = CD3DX12_TEXTURE_COPY_LOCATION(output, 0u),
-		     dest = CD3DX12_TEXTURE_COPY_LOCATION(shared, Footprint)](auto* cmd) {
-			    cmd->CopyTextureRegion(&dest, 0, 0, 0, &source, nullptr);
-		    }, {}, Queue::Compute);
+		// Both techniques submit to the same native compute queue on this device. Each graph returns the LUTs to COMMON.
+		if (transmittance) dispatch(0, "secondary atmosphere transmittance");
+		if (scattering) dispatch(1, "secondary atmosphere multiple scattering");
+		dispatch(2, Aerial() ? "secondary camera aerial perspective" : "SkyView secondary camera LUT");
+		std::array<GDX12Texture*, 2> outputs{&Outputs[0], &Outputs[1]};
+		AppendTransfer(graph, Bindings, RemoteWork, outputs, slot.Shared.Resources[1].Get(), false);
 		Plan = Compile(graph);
 		Recorder.Reserve(Plan);
 		return &slot;
@@ -240,27 +330,50 @@ struct SceneEnvironment::RemoteSkyView
 		slot.Version = ++Ordered;
 		slot.SourceFrame = frame;
 		slot.Generation = Generation;
-		InputVersion = slot.Inputs;
-		Medium = medium;
-		Multiple = multiple;
+		Input->Version = slot.Inputs;
+		Input->Medium = medium;
+		Input->Multiple = multiple;
 		Latest = &slot;
 	}
 
-	void AppendImport(Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12Texture& output)
+	Id AppendTransfer(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work,
+	                  const std::array<GDX12Texture*, 2>& textures, ID3D12Resource* shared, bool import)
+	{
+		constexpr State src = D3D12_RESOURCE_STATE_COPY_SOURCE, dst = D3D12_RESOURCE_STATE_COPY_DEST;
+		const Id buffer = NativeWork::ResourceFor(graph, bindings, shared, Aerial() ? "shared aerial pair" : "shared SkyView");
+		std::vector<Access> accesses{{buffer, import ? Mode::Read : Mode::Write, import ? src : dst}};
+		std::array<CD3DX12_TEXTURE_COPY_LOCATION, 2> sources, destinations;
+		for (UINT i = 0; i < OutputCount; ++i)
+		{
+			auto* texture = textures[i]->GetResource()->D3DResource.Get();
+			const Id id = NativeWork::ResourceFor(graph, bindings, texture,
+			    Aerial() ? (i == 0 ? "aerial radiance" : "aerial transmittance") : "visible SkyView LUT");
+			if (import) DisplayResources[i] = id;
+			accesses.push_back({id, import ? Mode::Write : Mode::Read, import ? dst : src});
+			const CD3DX12_TEXTURE_COPY_LOCATION packed(shared, Footprints[i]), subresource(texture, 0u);
+			sources[i] = import ? packed : subresource;
+			destinations[i] = import ? subresource : packed;
+		}
+		const char* name = Aerial() ? (import ? "GPU0 import aerial pair" : "aerial pair export")
+		                           : (import ? "GPU0 import visible SkyView" : "SkyView export");
+		return work.Add(graph, name, std::move(accesses), [sources, destinations, count = OutputCount](auto* cmd) {
+			for (UINT i = 0; i < count; ++i)
+				cmd->CopyTextureRegion(&destinations[i], 0, 0, 0, &sources[i], nullptr);
+		}, {}, import ? Queue::Copy : Queue::Compute);
+	}
+
+	void BeginDisplay()
 	{
 		PrimaryWork.Commands.clear();
+		DisplayResources.fill(Invalid);
 		ImportOperation = ImportPacket = Consumer = Invalid;
-		auto* target = output.GetResource()->D3DResource.Get();
-		const Id display = NativeWork::ResourceFor(graph, bindings, target, "visible SkyView LUT");
-		if (!Selected || Selected->Version == Imported) return;
-		auto* shared = Selected->Shared.Resources[0].Get();
-		const Id buffer = NativeWork::ResourceFor(graph, bindings, shared, "shared SkyView");
-		ImportOperation = PrimaryWork.Add(graph, "GPU0 import visible SkyView",
-		    {{buffer, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE}, {display, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
-		    [source = CD3DX12_TEXTURE_COPY_LOCATION(shared, Footprint),
-		     dest = CD3DX12_TEXTURE_COPY_LOCATION(target, 0u)](auto* cmd) {
-			    cmd->CopyTextureRegion(&dest, 0, 0, 0, &source, nullptr);
-		    }, {}, Queue::Copy);
+	}
+
+	void AppendImport(Graph& graph, std::vector<ID3D12Resource*>& bindings,
+	                  const std::array<GDX12Texture*, 2>& textures)
+	{
+		if (ImportOperation != Invalid || !Selected || Selected->Version == Imported) return;
+		ImportOperation = AppendTransfer(graph, bindings, PrimaryWork, textures, Selected->Shared.Resources[0].Get(), true);
 	}
 };
 SceneEnvironment::SceneEnvironment(GDX12DeviceResources& r, RenderPipelineCommonData& c)
@@ -309,39 +422,45 @@ void SceneEnvironment::Freeze(double delta, Executor& primary, uint64_t frame)
 	Build(primary, frame);
 }
 
-bool SceneEnvironment::PrepareSkyView(Executor& primary, uint64_t frame, bool atmosphere, uint64_t skyRevision,
-                                      bool& localChanged)
+bool SceneEnvironment::PrepareAtmosphere(Executor& primary, uint64_t frame, bool atmosphere, uint64_t skyRevision,
+                                         bool& localChanged, const GDX12CameraConstants* camera, bool invalidated)
 {
-	const int mode = SkyViewCrossSync.GetValue();
-	const int requested = atmosphere ? SkyViewAdapter.GetValue() : -1;
-	if (_failedSkyViewAdapter != requested) _failedSkyViewAdapter = -1;
+	const int mode = camera ? AerialCrossSync.GetValue() : SkyViewCrossSync.GetValue();
+	const int requested = atmosphere ? (camera ? AerialAdapter.GetValue() : SkyViewAdapter.GetValue()) : -1;
+	auto& active = camera ? _remoteAerial : _remoteSkyView;
+	auto& peer = camera ? _remoteSkyView : _remoteAerial;
+	auto& failed = camera ? _failedAerialAdapter : _failedSkyViewAdapter;
+	if (failed != requested) failed = -1;
 	const auto& submit = primary.Submissions();
-	const Id device = requested >= 0 && requested != _failedSkyViewAdapter ? submit->SelectAdapter(requested) : 0;
+	const Id device = requested >= 0 && requested != failed ? submit->SelectAdapter(requested) : 0;
 	const auto& luts = _environment._luts;
-	const std::array sources{luts[0].get(), luts[1].get(), luts[2].get()};
+	const RemoteAtmosphere::Textures sources{luts[0].get(), luts[1].get(),
+	    luts[camera ? 3 : 2].get(), camera ? luts[4].get() : nullptr};
 	const auto retire = [&] {
-		if (!_remoteSkyView) return;
+		if (!active) return;
 		primary.Drain();
-		_remoteSkyView->Recorder.Drain();
-		_remoteSkyView.reset();
+		active->Recorder.Drain();
+		active.reset();
 		localChanged = true;
 	};
-	if (_remoteSkyView && (_remoteSkyView->Device != device || !_remoteSkyView->Matches(sources))) retire();
+	if (active && (active->Device != device || !active->Matches(sources))) retire();
 	if (!device) return false;
-	RemoteSkyView::Publication* order = nullptr;
+	const auto& key = camera ? _aerialConstants : _viewConstants;
+	RemoteAtmosphere::Publication* order = nullptr;
 	const auto fallback = [&](const auto& reason) {
 		submit->CheckHealth();
 		retire();
-		_failedSkyViewAdapter = requested;
-		Log::Warning("RenderGraph", "Using local SkyView: ", reason);
+		failed = requested;
+		Log::Warning("RenderGraph", camera ? "Using local Aerial Perspective: " : "Using local SkyView: ", reason);
 	};
 	try
 	{
-		if (!_remoteSkyView)
-			_remoteSkyView = std::make_unique<RemoteSkyView>(primary, device, UINT(_resources.FrameConstants.size()), sources);
-		_remoteSkyView->Configure(mode, _common.HistoryRevision, skyRevision, _mediumConstants, _multipleConstants);
-		if (mode == 3) _remoteSkyView->SelectCompleted();
-		order = _remoteSkyView->PrepareOrder(_viewConstants, _mediumConstants, _multipleConstants);
+		if (!active)
+			active = std::make_unique<RemoteAtmosphere>(primary, device, UINT(_resources.FrameConstants.size()), sources, peer.get());
+		active->Configure(mode, _common.HistoryRevision, skyRevision, _mediumConstants, _multipleConstants, invalidated);
+		if (mode == 3) active->SelectCompleted();
+		if (!camera || localChanged || !active->Latest)
+			order = active->PrepareOrder(key, _mediumConstants, _multipleConstants, camera);
 	}
 	catch (const DxException& e)
 	{
@@ -354,15 +473,15 @@ bool SceneEnvironment::PrepareSkyView(Executor& primary, uint64_t frame, bool at
 		fallback(e.what());
 		return false;
 	}
-	auto& remote = *_remoteSkyView;
+	auto& remote = *active;
 	// Capture the request of the preceding frame, even when that frame did not dispatch.
 	auto* previous = remote.Latest;
 	if (order) remote.Publish(*order, _mediumConstants, _multipleConstants, frame);
 	if (mode != 3) remote.Selected = mode == 0 && previous ? previous : remote.Latest;
-	if (remote.Selected) remote.Displayed = static_cast<const RemoteSkyView::View&>(*remote.Selected);
+	if (remote.Selected) remote.Displayed = static_cast<const RemoteAtmosphere::View&>(*remote.Selected);
 	if (!remote.Displayed)
 	{
-		remote.Displayed = RemoteSkyView::View{_viewConstants, 0, frame};
+		remote.Displayed = RemoteAtmosphere::View{key, 0, frame};
 		localChanged = true;
 		return false;
 	}
@@ -589,7 +708,8 @@ void SceneEnvironment::Build(Executor& primary, uint64_t frameNumber)
 		e._resolvedIBL = ibl;
 	}
 	changed |= lightingChanged;
-	const bool remoteSkyView = PrepareSkyView(primary, frameNumber, state.Source == SkySource::SkyAtmosphere,
+	const bool atmosphereActive = state.Source == SkySource::SkyAtmosphere;
+	const bool remoteSkyView = PrepareAtmosphere(primary, frameNumber, atmosphereActive,
 	    state.Revision, viewChanged);
 	const auto& visibleKey = _remoteSkyView && _remoteSkyView->Displayed ? _remoteSkyView->Displayed->Key : constants;
 	auto& sampling = _skyViewSampling.at(r.CurrFrameConstantsIndex);
@@ -597,6 +717,12 @@ void SceneEnvironment::Build(Executor& primary, uint64_t frameNumber)
 	sampling->CopyData(0, XMFLOAT4(visibleKey.CameraPosition.x, visibleKey.CameraPosition.y,
 	    visibleKey.CameraPosition.z, visibleKey.CenterRadius.w));
 	auto& frame = *r.FrameConstants[r.CurrFrameConstantsIndex];
+	// This is the same jittered camera snapshot bound to b1 by the local AerialCS.
+	GDX12CameraConstants aerialCamera;
+	if (atmosphereActive && AerialAdapter.GetValue() >= 0)
+		aerialCamera = frame.CameraCB->GetCPUData()[_common.ActiveCameraCBufferIndex];
+	const bool remoteAerial = PrepareAtmosphere(primary, frameNumber, atmosphereActive, state.Revision,
+	    aerialChanged, &aerialCamera, discontinuity);
 	frame.SkyCB->CopyData(0, constants);
 	if (changed)
 	{
@@ -846,7 +972,7 @@ void SceneEnvironment::Build(Executor& primary, uint64_t frameNumber)
 			    (l[2]->GetWidth() + 7) / 8, (l[2]->GetHeight() + 7) / 8, 1, {l[0].get(), l[1].get()}, {l[2]->GetUAV()},
 			    WorkDomain::Camera);
 		}
-		if (aerialChanged)
+		if (aerialChanged && !remoteAerial)
 		{
 			sky(3, 0,
 			    {access(l[0].get(), Mode::Read, Read), access(l[1].get(), Mode::Read, Read),
@@ -875,7 +1001,12 @@ void SceneEnvironment::Append(Graph& graph, std::vector<ID3D12Resource*>& bindin
 		throw std::logic_error("Environment binding mismatch");
 	}
 	_operations.clear();
-	if (_remoteSkyView) _remoteSkyView->AppendImport(graph, bindings, *_environment._luts[2]);
+	if (_remoteSkyView)
+	{
+		_remoteSkyView->BeginDisplay();
+		_remoteSkyView->AppendImport(graph, bindings, {_environment._luts[2].get(), nullptr});
+	}
+	if (_remoteAerial) _remoteAerial->BeginDisplay();
 	const bool async = AsyncComputeEnabled();
 	for (const auto& work : _work)
 	{
@@ -917,6 +1048,7 @@ void SceneEnvironment::Append(Graph& graph, std::vector<ID3D12Resource*>& bindin
 bool SceneEnvironment::Record(Id operation, ID3D12GraphicsCommandList* cmd) const
 {
 	if (_remoteSkyView && _remoteSkyView->PrimaryWork.Record(operation, cmd)) return true;
+	if (_remoteAerial && _remoteAerial->PrimaryWork.Record(operation, cmd)) return true;
 	const auto found = std::lower_bound(_operations.begin(), _operations.end(), operation);
 	if (found == _operations.end() || *found != operation)
 	{
@@ -926,48 +1058,70 @@ bool SceneEnvironment::Record(Id operation, ID3D12GraphicsCommandList* cmd) cons
 	return true;
 }
 
-void SceneEnvironment::AddSkyViewWaits(const Schedule& schedule, std::vector<PacketWait>& waits)
+void SceneEnvironment::AddAtmosphereWaits(const Schedule& schedule, std::vector<PacketWait>& waits)
 {
-	if (!_remoteSkyView) return;
-	auto& remote = *_remoteSkyView;
-	for (Id i = 0; i < schedule.Packets.size(); ++i)
+	for (auto* remote : {_remoteSkyView.get(), _remoteAerial.get()})
 	{
-		const auto& packet = schedule.Packets[i];
-		if (remote.ImportOperation != Invalid && packet.Operation == remote.ImportOperation) remote.ImportPacket = i;
-		if (packet.Name == "clustered deferred lighting") remote.Consumer = i;
-	}
-	if (remote.ImportOperation != Invalid)
-	{
-		if (remote.ImportPacket >= remote.Consumer || remote.Consumer >= schedule.Packets.size())
-			throw std::logic_error("SkyView import must precede visible deferred lighting");
-		if (remote.Policy == 3 && !remote.Submit->Complete(remote.Selected->Ready))
+		if (!remote) continue;
+		for (Id i = 0; i < schedule.Packets.size(); ++i)
+		{
+			const auto& packet = schedule.Packets[i];
+			if (remote->ImportOperation != Invalid && packet.Operation == remote->ImportOperation) remote->ImportPacket = i;
+			if (remote->Consumer != Invalid) continue;
+			const auto reads = [&](Id resource) {
+				return resource != Invalid && std::any_of(packet.Accesses.begin(), packet.Accesses.end(),
+				    [resource](const Access& access) { return access.Usage == Mode::Read && access.Resource == resource; });
+			};
+			if (remote->Aerial() ? reads(remote->DisplayResources[0]) && reads(remote->DisplayResources[1])
+			                     : packet.Name == "clustered deferred lighting") remote->Consumer = i;
+		}
+		if (remote->ImportOperation == Invalid) continue;
+		if (remote->ImportPacket >= remote->Consumer || remote->Consumer >= schedule.Packets.size())
+			throw std::logic_error("Atmosphere import must precede its first reader");
+		if (remote->Policy == 3 && !remote->Submit->Complete(remote->Selected->Ready))
 			throw std::logic_error("Latest-ready SkyView selected an unfinished publication");
-		waits.push_back({remote.ImportPacket, remote.Selected->Ready});
+		waits.push_back({remote->ImportPacket, remote->Selected->Ready});
+		if (remote->Aerial()) remote->ConsumerName = schedule.Packets[remote->Consumer].Name;
 	}
 }
 
-void SceneEnvironment::SkyViewSubmitted(uint64_t frame, const std::vector<CompletionToken>& completions)
+void SceneEnvironment::AtmosphereSubmitted(uint64_t frame, const std::vector<CompletionToken>& completions)
 {
-	if (!_remoteSkyView) return;
-	auto& remote = *_remoteSkyView;
-	const auto imported = remote.ImportPacket < completions.size() ? completions[remote.ImportPacket] : CompletionToken{};
-	if (imported)
+	for (auto* active : {_remoteSkyView.get(), _remoteAerial.get()})
 	{
-		remote.Selected->Reader = imported;
-		remote.Imported = remote.Selected->Version;
+		if (!active) continue;
+		auto& remote = *active;
+		const auto imported = remote.ImportPacket < completions.size() ? completions[remote.ImportPacket] : CompletionToken{};
+		if (imported)
+		{
+			remote.Selected->Reader = imported;
+			remote.Imported = remote.Selected->Version;
+		}
+		if (remote.Consumer >= completions.size() || !completions[remote.Consumer] || remote.Reports >= 6) continue;
+		++remote.Reports;
+		const auto& displayed = *remote.Displayed;
+		if (remote.Aerial())
+		{
+			const auto& shape = remote.Footprints[0].Footprint;
+			Log::Info("RenderGraph", "Aerial Perspective CrossSync=", remote.Policy, " frame=", frame,
+			    " GPU=", remote.Submit->AdapterLabel(remote.Device), " displayGPU=", remote.Submit->AdapterLabel(0),
+			    " ordered=", remote.Latest->Version, " used=", displayed.Version, " usedFrame=", displayed.SourceFrame,
+			    " size=", shape.Width, "x", shape.Height, "x", shape.Depth, " payloadBytes=", remote.Payload,
+			    " inputs=", displayed.Inputs, " sharedInputs=", _remoteSkyView && _remoteSkyView->Input == remote.Input,
+			    " exportFence=", displayed.Ready.Value, " importFence=", imported.Value,
+			    " firstConsumer=", remote.ConsumerName, " consumerFence=", completions[remote.Consumer].Value);
+			continue;
+		}
+		Log::Info("RenderGraph", "Visible SkyView CrossSync=", remote.Policy, " frame=", frame,
+		    " GPU=", remote.Submit->AdapterLabel(remote.Device), " displayGPU=", remote.Submit->AdapterLabel(0),
+		    " ordered=", remote.Latest ? remote.Latest->Version : 0,
+		    " orderedFrame=", remote.Latest ? remote.Latest->SourceFrame : 0,
+		    " shown=", displayed.Version, " shownFrame=", displayed.SourceFrame,
+		    " exportFence=", displayed.Ready.Value, " importFence=", imported.Value,
+		    " inputs=", displayed.Inputs, " generation=", remote.Generation,
+		    " orderedInputs=", remote.Latest ? remote.Latest->Inputs : 0,
+		    " firstConsumer=clustered deferred lighting consumerFence=", completions[remote.Consumer].Value);
 	}
-	if (remote.Consumer >= completions.size() || !completions[remote.Consumer] || remote.Reports >= 6) return;
-	++remote.Reports;
-	const auto& displayed = *remote.Displayed;
-	Log::Info("RenderGraph", "Visible SkyView CrossSync=", remote.Policy, " frame=", frame,
-	    " GPU=", remote.Submit->AdapterLabel(remote.Device), " displayGPU=", remote.Submit->AdapterLabel(0),
-	    " ordered=", remote.Latest ? remote.Latest->Version : 0,
-	    " orderedFrame=", remote.Latest ? remote.Latest->SourceFrame : 0,
-	    " shown=", displayed.Version, " shownFrame=", displayed.SourceFrame,
-	    " inputs=", displayed.Inputs, " exportFence=", displayed.Ready.Value, " importFence=", imported.Value,
-	    " generation=", remote.Generation, " orderedInputs=", remote.Latest ? remote.Latest->Inputs : 0,
-	    " firstConsumer=clustered deferred lighting consumerFence=",
-	    completions[remote.Consumer].Value);
 }
 std::vector<Access> SceneEnvironment::Reads(Graph& graph, std::vector<ID3D12Resource*>& bindings) const
 {
@@ -978,9 +1132,8 @@ std::vector<Access> SceneEnvironment::Reads(Graph& graph, std::vector<ID3D12Reso
 		    {NativeWork::ResourceFor(graph, bindings, texture->GetResource()->D3DResource.Get(), "environment input"),
 		     Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
 	}
-	for (size_t i = 0; i < _environment._luts.size(); ++i)
+	for (size_t i = 0; i < 2; ++i)
 	{
-		if (i == 2) continue; // Only deferred sky samples the camera LUT.
 		const auto& texture = _environment._luts[i];
 		if (texture->IsInitialized())
 		{
@@ -990,6 +1143,16 @@ std::vector<Access> SceneEnvironment::Reads(Graph& graph, std::vector<ID3D12Reso
 		}
 	}
 	return accesses;
+}
+
+void SceneEnvironment::AddAerialReads(Graph& graph, std::vector<ID3D12Resource*>& bindings, std::vector<Access>& accesses)
+{
+	if (_environment._source != SkySource::SkyAtmosphere) return;
+	const std::array outputs{_environment._luts[3].get(), _environment._luts[4].get()};
+	if (_remoteAerial) _remoteAerial->AppendImport(graph, bindings, outputs);
+	for (auto* output : outputs)
+		accesses.push_back({NativeWork::ResourceFor(graph, bindings, output->GetResource()->D3DResource.Get(),
+		                                            "camera aerial perspective"), Mode::Read, Read});
 }
 
 } // namespace BistroRender

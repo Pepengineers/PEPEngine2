@@ -165,7 +165,8 @@ void SceneProbePreview::Append(Graph& graph, std::vector<ID3D12Resource*>& bindi
         [=](auto* cmd) { cmd->CopyResource(depth, sourceDepth); cmd->CopyResource(motion, sourceMotion); });
     auto& scene = geometry._slots.at(slot);
     const State read = D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE;
-    auto backgroundReads = environment.Reads(graph, bindings);
+    std::vector<Access> backgroundReads;
+    environment.AddAerialReads(graph, bindings, backgroundReads);
     backgroundReads.insert(backgroundReads.end(), {
         texture(hdr, Mode::Read, read), texture(inputDepth, Mode::Read, read),
         texture(frame.HDR.get(), Mode::Write, D3D12_RESOURCE_STATE_RENDER_TARGET),
