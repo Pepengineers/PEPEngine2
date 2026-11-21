@@ -15,7 +15,8 @@ public:
     ~SceneParticles();
     enum class Inputs { Frame, Interaction, Depth };
     static int SecondaryAdapter();
-    void BeginSimulation(GDX12ParticleInteractionField, Executor&, int activeAdapter);
+    void BeginSimulation(GDX12ParticleInteractionField, Executor&, int activeAdapter, float worldRate);
+    void PauseIndependentClock();
     void AddWaits(const Schedule&, std::vector<PacketWait>&);
     void Submitted(const std::vector<CompletionToken>&);
     void Presented(uint64_t frame);
@@ -62,7 +63,7 @@ private:
     UINT _firstRemote = 0;
     bool _sampleVisibility = false;
     bool _visibilityConfirmed = false;
-    uint64_t _attemptedDomain = 0;
+    uint64_t _attemptedDomain = 0, _generationSeed = 0;
     std::vector<EmitterLayout> _attemptedLayout;
     Id _import = Invalid, _importPacket = Invalid;
     bool _attemptedRemote = false;

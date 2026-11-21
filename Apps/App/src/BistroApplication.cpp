@@ -234,6 +234,11 @@ class BistroApplication final : public App
 		          "; daylight seconds=", BistroSunCyclePeriod.GetValue());
 	}
 
+	void OnPauseChanged(bool paused) override
+	{
+		if (paused && _bistroPipeline) _bistroPipeline->PauseParticleClock();
+	}
+
 	void OnMouseDown(WPARAM, int x, int y) override
 	{
 		_lastMousePos = {x, y};

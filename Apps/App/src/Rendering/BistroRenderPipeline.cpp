@@ -98,7 +98,8 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	auto& water = _lighting->Water();
 	using ParticleInputs = BistroRender::SceneParticles::Inputs;
 	auto* depth = _geometry->Depth(slot);
-	particles.BeginSimulation(_geometry->InteractionField(), *_executor, _cloudPicture->SubmissionAdapter());
+	particles.BeginSimulation(_geometry->InteractionField(), *_executor, _cloudPicture->SubmissionAdapter(),
+	    world && !world->IsPaused() ? world->GetTimeScale() : 0.f);
 	particles.PrepareOpaque(*_geometry, slot);
 	_post->BeginPlan();
 	auto& textures = _post->Textures();
@@ -246,4 +247,9 @@ void BistroRenderPipeline::FramePresented()
 		    name.find(" GPU0 import ") != std::string::npos || name == "XeGTAO denoise")
 			Log::Info("RenderGraph", "DepthNormals frame=", _frameNumber, " packet=", i, " ", name);
 	}
+}
+
+void BistroRenderPipeline::PauseParticleClock()
+{
+	if (_lighting) _lighting->Particles().PauseIndependentClock();
 }

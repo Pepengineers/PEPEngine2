@@ -7,6 +7,9 @@
 #include "Engine.RendererDX12/GDX12FrameGeneration.h"
 #include "Engine.Core/Logging/Logger.h"
 #include <cassert>
+#include <chrono>
+#include <condition_variable>
+#include <deque>
 
 namespace BistroRender
 {
@@ -19,13 +22,23 @@ AutoConsoleVariable<int> Adapter(L"App.Particles.Adapter", -1,
     L"Secondary DXGI index for marked independent particle emitters. -1 uses GPU0.",
     EConsoleVariableFlags::Default, [](int value) { return value >= -1; });
 AutoConsoleVariable<int> CrossSync(L"App.Particles.CrossSync", 1,
-    L"Remote particles: 1 current step, 0 exact previous step, 3 newest complete frame-driven step.",
-    EConsoleVariableFlags::Default, [](int value) { return value == 0 || value == 1 || value == 3; });
+    L"Remote particles: 1 current, 0 exact previous, 3 newest complete frame-driven, 2 newest complete independent.",
+    EConsoleVariableFlags::Default, [](int value) { return value >= 0 && value <= 3; });
 AutoConsoleVariable<bool> LogSnapshots(L"App.Particles.LogSnapshots", false,
     L"Read back visible remote particle counts for short MGPU diagnostics.");
 
 constexpr State CopySource = D3D12_RESOURCE_STATE_COPY_SOURCE;
 constexpr State CopyDest = D3D12_RESOURCE_STATE_COPY_DEST;
+
+using ParticleClock = std::chrono::steady_clock;
+using ParticleEvent = std::unique_ptr<void, decltype(&CloseHandle)>;
+
+ParticleEvent MakeParticleEvent()
+{
+	ParticleEvent event(CreateEventW(nullptr, FALSE, FALSE, nullptr), CloseHandle);
+	if (!event) ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
+	return event;
+}
 
 auto SnapshotResources(const GDX12ParticleRenderSource& source)
 {
@@ -82,6 +95,8 @@ struct SceneParticles::Remote
 		CompletionToken Ready, Reader;
 		uint64_t Generation = 0, Version = 0;
 		std::vector<GDX12ParticleEmitter> Snapshot;
+		double SimulatedSeconds = 0;
+		bool Writing = false;
 	};
 	struct ImportedEmitter
 	{
@@ -106,16 +121,35 @@ struct SceneParticles::Remote
 	struct Statistics
 	{
 		uint64_t Frames = 0, Exports = 0, Imports = 0, Repeats = 0, Skipped = 0, Empty = 0;
-		uint64_t InputWaits = 0, OutputWaits = 0;
+		uint64_t InputWaits = 0, OutputWaits = 0, ControlWaits = 0;
 	} Stats;
 	double GameTime = 0;
 	int Mode = 1;
 
+	struct ProducerInput
+	{
+		std::vector<GDX12ParticleEmitter> Emitters;
+		GDX12ParticleSettings Settings{};
+		double GameClock = 0;
+		uint64_t Generation = 0;
+		bool Advancing = false;
+	};
+	std::mutex Mutex;
+	std::condition_variable ControlSpace;
+	std::deque<ProducerInput> Controls;
+	ProducerInput LatestInput;
+	double ClockValue = 0, ClockRate = 0;
+	ParticleClock::time_point ClockAnchor{};
+	ParticleEvent Wake{nullptr, CloseHandle}, FenceEvent{nullptr, CloseHandle};
+	std::thread Worker;
+	bool Stopping = false, ClockSuspended = false;
+	std::exception_ptr WorkerFailure;
+
 	Remote(GDX12DeviceResources& primary, const std::shared_ptr<QueueSubmission>& submit,
 	       const std::vector<EmitterLayout>& layout, std::vector<GDX12ParticleEmitter> snapshot,
-	       const GDX12ParticleSettings& settings)
+	       const GDX12ParticleSettings& settings, uint64_t generationSeed)
 	    : Submit(submit), GPU1(Submit, 1, UINT(primary.FrameConstants.size()), 1), Layout(layout),
-	      Imported(layout.size()), Ring(primary.FrameConstants.size() + 1)
+	      Imported(layout.size()), Ring(primary.FrameConstants.size() + 1), Generation(generationSeed)
 	{
 		Secondary.Device = &Submit->Device(1);
 		Secondary.FrameConstants.resize(primary.FrameConstants.size()); // Solver needs only the upload ring size.
@@ -160,9 +194,13 @@ struct SceneParticles::Remote
 		    " emitters=", Layout.size(), " snapshotBytes=", bytes);
 	}
 
-	void Drain() { GPU1.Drain(); }
+	void Drain()
+	{
+		StopWorker();
+		GPU1.Drain();
+	}
 
-	bool LatestReady() const { return Mode == 3; }
+	bool LatestReady() const { return Mode == 2 || Mode == 3; }
 
 	void Configure(const std::vector<GDX12ParticleEmitter>& emitters, int mode)
 	{
@@ -185,7 +223,7 @@ struct SceneParticles::Remote
 	{
 		Publication* latest = nullptr;
 		for (auto& slot : Ring)
-			if (slot.Generation == Generation && slot.Ready && (!latest || slot.Version > latest->Version) &&
+			if (!slot.Writing && slot.Generation == Generation && slot.Ready && (!latest || slot.Version > latest->Version) &&
 			    Submit->Complete(slot.Ready))
 				latest = &slot;
 		return latest;
@@ -198,7 +236,7 @@ struct SceneParticles::Remote
 		for (size_t i = 0; i < Ring.size(); ++i)
 		{
 			auto& output = Ring[NextOutput++ % Ring.size()];
-			if (&output == Selected || &output == latest) continue;
+			if (output.Writing || &output == Selected || &output == latest) continue;
 			if (latestReady && output.Ready && !Submit->Complete(output.Ready)) continue;
 			if (output.Reader && !Submit->Complete(output.Reader))
 			{
@@ -207,6 +245,7 @@ struct SceneParticles::Remote
 				Submit->Wait(output.Reader);
 			}
 			output.Reader = {};
+			output.Writing = true;
 			return &output;
 		}
 		return nullptr;
@@ -218,20 +257,24 @@ struct SceneParticles::Remote
 		Selected = LatestReady() ? NewestCompleted() : Mode == 0 ? LastOrder : nullptr;
 		auto* output = ReserveOutput();
 		if (!LatestReady() && !output) throw std::logic_error("No slot for exact particle snapshot");
-		Simulate(GPU1, emitters, settings, output);
+		CommitStep(output, Simulate(GPU1, emitters, settings, output), Generation);
 		if (!LatestReady() && !Selected) Selected = LastOrder;
 		if (!settings.DrawEnabled) Selected = nullptr;
 	}
 
-	CompletionToken Simulate(Executor& executor, const std::vector<GDX12ParticleEmitter>& emitters,
-	                         const GDX12ParticleSettings& settings, Publication* output)
+	struct StepResult
+	{
+		CompletionToken Complete;
+		double Elapsed;
+		bool InputWaited;
+	};
+
+	StepResult Simulate(Executor& executor, const std::vector<GDX12ParticleEmitter>& emitters,
+	                    const GDX12ParticleSettings& settings, Publication* output)
 	{
 		const UINT slot = InputSlot++ % UINT(Secondary.FrameConstants.size());
-		if (!executor.TryBegin(slot))
-		{
-			++Stats.InputWaits;
-			executor.Begin(slot);
-		}
+		const bool inputWaited = !executor.TryBegin(slot);
+		if (inputWaited) executor.Begin(slot);
 		Secondary.CurrFrameConstantsIndex = slot;
 		Secondary.ParticleEmitters = emitters;
 		Solver.BeginFrame(&Secondary, settings, false);
@@ -282,18 +325,229 @@ struct SceneParticles::Remote
 		const auto schedule = Compile(graph);
 		executor.Reserve(schedule);
 		executor.Execute(schedule, bindings, [&](Id op, uint32_t, auto* cmd) { work.Record(op, cmd); });
-		const auto completed = executor.Completions().back();
-		++Ordered;
-		GameTime += elapsed;
+		return {executor.Completions().back(), elapsed, inputWaited};
+	}
+
+	void CommitStep(Publication* output, StepResult result, uint64_t generation)
+	{
 		if (output)
 		{
-			output->Ready = completed;
+			output->Writing = false;
+			output->Ready = result.Complete;
+			output->Generation = generation;
+		}
+		if (generation != Generation) return;
+		++Ordered;
+		GameTime += result.Elapsed;
+		Stats.InputWaits += result.InputWaited;
+		if (output)
+		{
 			output->Version = Ordered;
-			output->Generation = Generation;
+			output->SimulatedSeconds = GameTime;
 			LastOrder = output;
 			++Stats.Exports;
 		}
-		return completed;
+	}
+
+	double GameClockAt(ParticleClock::time_point now) const
+	{
+		return ClockValue + ClockRate * std::chrono::duration<double>(now - ClockAnchor).count();
+	}
+
+	static bool Paused(const ProducerInput& input, size_t i)
+	{
+		return !input.Advancing || input.Emitters[i].Paused || input.Emitters[i].TimeScale <= 0;
+	}
+
+	static bool NeedsControl(const ProducerInput& prior, const ProducerInput& next)
+	{
+		if (prior.Generation != next.Generation || prior.Advancing != next.Advancing) return true;
+		for (size_t i = 0; i < next.Emitters.size(); ++i)
+			if (Paused(prior, i) != Paused(next, i) ||
+			    prior.Emitters[i].BurstTotal != next.Emitters[i].BurstTotal)
+				return true;
+		return false;
+	}
+
+	CompletionToken OutputRetirement()
+	{
+		auto* latest = NewestCompleted();
+		for (const auto& slot : Ring)
+		{
+			if (&slot == Selected || &slot == latest) continue;
+			if (slot.Ready && !Submit->Complete(slot.Ready)) return slot.Ready;
+			if (slot.Reader && !Submit->Complete(slot.Reader)) return slot.Reader;
+		}
+		return {};
+	}
+
+	void WaitForProducerWork(CompletionToken token, CompletionToken& armed)
+	{
+		if (token && (token.Device != armed.Device || token.Target != armed.Target ||
+		              token.Value != armed.Value || token.Incarnation != armed.Incarnation))
+		{
+			Submit->NotifyOnCompletion(token, FenceEvent.get());
+			armed = token;
+		}
+		const HANDLE events[] = {Wake.get(), FenceEvent.get()};
+		const auto result = WaitForMultipleObjects(2, events, FALSE, token ? 100 : INFINITE);
+		if (result == WAIT_FAILED) ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
+		if (result == WAIT_TIMEOUT) Submit->CheckHealth();
+	}
+
+	void Produce()
+	{
+		Executor executor(Submit, 1, UINT(Secondary.FrameConstants.size()), 1);
+		ProducerInput prior;
+		CompletionToken pending, armed;
+		try
+		{
+			std::unique_lock lock(Mutex);
+			while (!Stopping)
+			{
+				const auto sleep = [&](CompletionToken completion) {
+					lock.unlock();
+					WaitForProducerWork(completion, armed);
+					lock.lock();
+				};
+				if (pending && !Submit->Complete(pending))
+				{
+					sleep(pending);
+					continue;
+				}
+				if (ClockSuspended)
+				{
+					sleep({});
+					continue;
+				}
+				const bool control = !Controls.empty();
+				const bool steady = LatestInput.Advancing && std::any_of(LatestInput.Emitters.begin(),
+				    LatestInput.Emitters.end(), [](const auto& e) { return !e.Paused && e.TimeScale > 0; });
+				if (!control && !steady)
+				{
+					sleep({});
+					continue;
+				}
+				auto* output = ReserveOutput();
+				if (!output)
+				{
+					sleep(OutputRetirement());
+					continue;
+				}
+				ProducerInput input = control ? std::move(Controls.front()) : LatestInput;
+				if (control)
+				{
+					Controls.pop_front();
+					ControlSpace.notify_one();
+				}
+				else input.GameClock = GameClockAt(ParticleClock::now());
+				const auto elapsed = (std::max)(0.0, input.GameClock - prior.GameClock);
+				auto stepEmitters = input.Emitters;
+				for (size_t i = 0; i < stepEmitters.size(); ++i)
+				{
+					auto& emitter = stepEmitters[i];
+					emitter.Paused = Paused(input, i);
+					emitter.DeltaTime = input.Generation == prior.Generation && !emitter.Paused && !Paused(prior, i)
+					    ? float(elapsed) : 0.f;
+				}
+				auto settings = input.Settings;
+				settings.Enabled = true; // Apply paused controls and resets without drawing.
+				lock.unlock();
+				const auto step = Simulate(executor, stepEmitters, settings, output);
+				lock.lock();
+				CommitStep(output, step, input.Generation);
+				pending = step.Complete;
+				prior = std::move(input);
+			}
+		}
+		catch (...)
+		{
+			std::lock_guard lock(Mutex);
+			WorkerFailure = std::current_exception();
+			ControlSpace.notify_all();
+		}
+		executor.Drain();
+	}
+
+	void StopWorker()
+	{
+		if (!Worker.joinable()) return;
+		{
+			std::lock_guard lock(Mutex);
+			Stopping = true;
+		}
+		SetEvent(Wake.get());
+		Worker.join();
+		if (WorkerFailure) std::rethrow_exception(WorkerFailure);
+		Controls.clear();
+		LatestInput = {};
+	}
+
+	void PauseClock()
+	{
+		if (!Worker.joinable()) return;
+		std::lock_guard lock(Mutex);
+		const auto now = ParticleClock::now();
+		ClockValue = GameClockAt(now);
+		ClockAnchor = now;
+		ClockRate = 0;
+		LatestInput.Advancing = false;
+		ClockSuspended = true;
+		SetEvent(Wake.get());
+	}
+
+	void Prepare(const std::vector<GDX12ParticleEmitter>& emitters, const GDX12ParticleSettings& settings,
+	             int mode, float worldRate)
+	{
+		if (mode != 2)
+		{
+			StopWorker();
+			Selected = nullptr;
+			if (settings.Enabled) Step(emitters, settings, mode);
+			return;
+		}
+		if (!Worker.joinable())
+		{
+			GPU1.Drain();
+			Wake = MakeParticleEvent();
+			FenceEvent = MakeParticleEvent();
+			ClockValue = ClockRate = 0;
+			ClockAnchor = ParticleClock::now();
+			Stopping = ClockSuspended = false;
+			Worker = std::thread([this] {
+				try { Produce(); }
+				catch (...)
+				{
+					std::lock_guard lock(Mutex);
+					WorkerFailure = std::current_exception();
+					ControlSpace.notify_all();
+				}
+			});
+		}
+		std::unique_lock lock(Mutex);
+		if (WorkerFailure) std::rethrow_exception(WorkerFailure);
+		Configure(emitters, mode);
+		const bool active = settings.Enabled && settings.SimulationEnabled && worldRate > 0;
+		ProducerInput next{emitters, settings, 0, Generation, active};
+		// The previous frame has already registered its copy fence. Drop its pin
+		// before any input back pressure, including with a two-slot output ring.
+		Selected = nullptr;
+		ClockSuspended = false;
+		if (NeedsControl(LatestInput, next) && Controls.size() == 8)
+		{
+			++Stats.ControlWaits;
+			SetEvent(Wake.get());
+			ControlSpace.wait(lock, [this] { return Controls.size() < 8 || WorkerFailure; });
+			if (WorkerFailure) std::rethrow_exception(WorkerFailure);
+		}
+		const auto now = ParticleClock::now();
+		ClockValue = next.GameClock = GameClockAt(now);
+		ClockAnchor = now;
+		ClockRate = active ? worldRate : 0;
+		if (NeedsControl(LatestInput, next)) Controls.push_back(next);
+		LatestInput = std::move(next);
+		Selected = settings.Enabled && settings.DrawEnabled ? NewestCompleted() : nullptr;
+		SetEvent(Wake.get());
 	}
 
 	void AppendSources(GDX12ParticleRenderFrame& frame) const
@@ -391,7 +645,13 @@ void SceneParticles::Packet(Graph& graph, const std::vector<ID3D12Resource*>& bi
 }
 int SceneParticles::SecondaryAdapter() { return Adapter.GetValue(); }
 
-void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, Executor& primary, int activeAdapter)
+void SceneParticles::PauseIndependentClock()
+{
+	if (_remote) _remote->PauseClock();
+}
+
+void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, Executor& primary, int activeAdapter,
+                                     float worldRate)
 {
 	_work.Commands.clear();
 	_import = _importPacket = Invalid;
@@ -425,10 +685,10 @@ void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, 
 		for (const auto& emitter : _resources.ParticleEmitters)
 			if (emitter.SimulateOnSecondary && !emitter.DepthCollision && !emitter.InteractionEnabled &&
 			    emitter.Blend != ParticleBlend::Opaque)
-			{
 				remoteEmitters.push_back(emitter);
-				layout.push_back({emitter.Id, ResolveParticleEmitterSettings(emitter, settings.Quality).MaxParticles});
-			}
+	std::sort(remoteEmitters.begin(), remoteEmitters.end(), [](const auto& a, const auto& b) { return a.Id < b.Id; });
+	for (const auto& emitter : remoteEmitters)
+		layout.push_back({emitter.Id, ResolveParticleEmitterSettings(emitter, settings.Quality).MaxParticles});
 	const bool replace = domain != _attemptedDomain || _attemptedLayout != layout;
 	if (replace)
 	{
@@ -436,6 +696,7 @@ void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, 
 		{
 			primary.Drain();
 			_remote->Drain();
+			_generationSeed = _remote->Generation;
 			for (auto& emitter : _resources.ParticleEmitters)
 				emitter.BurstBaseline = _remote->Solver.ConsumedBurst(emitter.Id, emitter.ResetRevision);
 			_remote.reset();
@@ -453,7 +714,7 @@ void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, 
 			    [&](const auto& source) { return source.Id == emitter.Id; });
 			emitter.BurstBaseline = (std::max)(live.BurstBaseline, simulation->ConsumedBurst(emitter.Id, emitter.ResetRevision));
 		}
-		try { _remote = std::make_unique<Remote>(_resources, submit, layout, remoteEmitters, settings); }
+		try { _remote = std::make_unique<Remote>(_resources, submit, layout, remoteEmitters, settings, _generationSeed); }
 		catch (const DxException& e) { Log::Warning("RenderGraph", "Local particles fallback: ", e.ToString()); }
 		catch (const std::exception& e) { Log::Warning("RenderGraph", "Local particles fallback: ", e.what()); }
 	}
@@ -462,8 +723,7 @@ void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, 
 	if (_remote)
 	{
 		for (const auto& item : layout) remoteIds.push_back(item.Id);
-		_remote->Selected = nullptr;
-		if (settings.Enabled) _remote->Step(remoteEmitters, settings, CrossSync.GetValue());
+		_remote->Prepare(remoteEmitters, settings, CrossSync.GetValue(), worldRate);
 	}
 	simulation->BeginFrame(&_resources, _common, &remoteIds);
 	_renderFrame = simulation->RenderFrame();
@@ -498,6 +758,7 @@ void SceneParticles::Submitted(const std::vector<CompletionToken>& completions)
 	if (_importPacket < completions.size() && completions[_importPacket])
 	{
 		auto& remote = *_remote;
+		std::lock_guard lock(remote.Mutex);
 		remote.Selected->Reader = completions[_importPacket];
 		remote.CachedVersion = remote.Selected->Version;
 		++remote.Stats.Imports;
@@ -508,6 +769,7 @@ void SceneParticles::Presented(uint64_t frame)
 {
 	if (!_remote) return;
 	auto& remote = *_remote;
+	std::lock_guard lock(remote.Mutex);
 	const auto* selected = remote.Selected;
 	const auto previous = remote.PresentedVersion;
 	remote.PresentedVersion = selected ? selected->Version : 0;
@@ -535,7 +797,8 @@ void SceneParticles::Presented(uint64_t frame)
 		    " publications=", stats.Exports, " imports=", stats.Imports, " repeats=", stats.Repeats,
 		    " skippedShows=", stats.Skipped, " noSnapshotFrames=", stats.Empty,
 		    " inputRetirementWaits=", stats.InputWaits, " outputRetirementWaits=", stats.OutputWaits,
-		    " gameSeconds=", remote.GameTime);
+		    " controlBackPressure=", stats.ControlWaits, " gameSeconds=", remote.GameTime,
+		    " shownGameSeconds=", selected ? selected->SimulatedSeconds : 0.0);
 }
 void SceneParticles::AppendSimulation(Graph& graph, std::vector<ID3D12Resource*>& bindings, Inputs inputs,
                                       GDX12Texture* depth)

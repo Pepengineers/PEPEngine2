@@ -101,6 +101,12 @@ snapshot. The source stays empty until a snapshot completes. Repeated frames
 reuse the GPU0 copy. Busy output slots can skip publication while the solver
 continues advancing. The bounded input upload ring may wait for prior use
 to retire. This is separate from the import, which selects completed exports.
+With `2`, GPU1 advances independently using a monotonic clock scaled by
+game time. Pause freezes the solver and resume excludes paused time. The
+producer sleeps on fences or control events when it cannot publish. GPU0
+uses the same completed-snapshot selection and import cache as mode `3`.
+Repeats and gaps reset particle position, age and rotation history when
+there is no immediately preceding displayed step. Camera motion remains.
 `App.Particles.LogSnapshots = true` enables a short readback
 of remote draw elements that passed the GPU0 particle cull.
 
