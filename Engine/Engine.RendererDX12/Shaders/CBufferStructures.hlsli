@@ -54,6 +54,15 @@ struct GDX12LightConstants
     float Intensity;
     float InnerConeCos;
     float OuterConeCos;
+    uint FirstShadowViewIndex;
+};
+
+struct ShadowView
+{
+    float4x4 ViewProj;
+    uint Layer;
+    float SplitDepth;
+    float NormalBias;
 };
 
 struct LightGridCB

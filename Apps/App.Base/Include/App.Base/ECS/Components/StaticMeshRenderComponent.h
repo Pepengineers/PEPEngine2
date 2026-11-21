@@ -13,6 +13,8 @@ struct StaticMeshRenderComponent : ComponentTag
     // Call MarkComponentUpdated after changing the mesh or its material slots.
     Engine::Core::MeshHandle MeshHandler;
     std::vector<GDX12Material*> Materials;
+    // Set DirtyFlag or call MarkComponentUpdated after changing CastShadows.
+    bool CastShadows = true;
     bool DirtyFlag;
 
     StaticMeshRenderComponent(Engine::Core::MeshHandle meshHandle, std::vector<GDX12Material*> materials)

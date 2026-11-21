@@ -147,6 +147,7 @@ private:
     void ResizeSceneBuffers(GDX12DeviceResources& resources, uint32_t flags);
     void MarkSceneDataDirty();
     
+    void PreRender();
     void UpdateMaterials();
     void SubscribeToSceneManager();
     void UnsubscribeFromSceneManager();

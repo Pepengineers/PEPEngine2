@@ -56,6 +56,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12DeviceFactory.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12FrameConstants.h" />
     <ClInclude Include="Include\Engine.RendererDX12\ClusteredLightingGrid.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\ShadowMapSystem.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12GPUTimer.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12TextureResource.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12RootSignature.h" />
@@ -88,6 +89,7 @@
     <ClCompile Include="src\GDX12DeviceFactory.cpp" />
     <ClCompile Include="src\GDX12FrameConstants.cpp" />
     <ClCompile Include="src\ClusteredLightingGrid.cpp" />
+    <ClCompile Include="src\ShadowMapSystem.cpp" />
     <ClCompile Include="src\GDX12DLSSUpscalePass.cpp" />
     <ClCompile Include="src\GDX12DeferredGeometryPass.cpp" />
     <ClCompile Include="src\GDX12DeferredLightingPass.cpp" />

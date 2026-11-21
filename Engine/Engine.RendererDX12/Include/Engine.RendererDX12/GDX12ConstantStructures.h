@@ -45,8 +45,18 @@ struct GDX12LightConstants
     float Intensity;
     float InnerConeCos;
     float OuterConeCos;
+    UINT FirstShadowViewIndex = UINT_MAX;
 };
-static_assert(sizeof(GDX12LightConstants) == 56);
+static_assert(sizeof(GDX12LightConstants) == 60);
+
+struct ShadowView
+{
+    XMFLOAT4X4 ViewProj;
+    UINT Layer;
+    float SplitDepth;
+    float NormalBias;
+};
+static_assert(sizeof(ShadowView) == 76);
 
 struct GDX12LightGridConstants
 {

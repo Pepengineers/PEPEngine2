@@ -7,6 +7,7 @@
 #include "Engine.RendererDX12/GDX12CommandQueue.h"
 #include "Engine.RendererDX12/GDX12DeviceFactory.h"
 #include "Engine.RendererDX12/GDX12ShaderCompiler.h"
+#include "Engine.RendererDX12/ShadowMapSystem.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
 #include "Engine.RendererDX12/GDX12Descriptor.h"
 #include "Engine.RendererDX12/FrameGraph/PassContext.h"
@@ -56,6 +57,7 @@ static_assert(sizeof(GDX12IndirectDrawArgs) == DrawStreamStride, "FrameGraph Dra
 class RenderPipelineCommonData
 {
 public:
+    ShadowMapSystem ShadowSystem;
     UINT ActiveCameraCBufferIndex = -1;
     float ActiveCameraFOV = 0;
     float ActiveCameraNearPlane = 0;

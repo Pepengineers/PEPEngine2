@@ -25,6 +25,7 @@ public:
     std::unique_ptr<GDX12UploadBuffer<GDX12CameraConstants>> CameraCB;
 
     GDX12LightGridConstants ClusteredLightingConstants = {};
+    std::unique_ptr<GDX12UploadBuffer<ShadowView>> ShadowViews;
     std::unique_ptr<GDX12UploadBuffer<GDX12LightConstants>> LightsCache;
     std::unique_ptr<GDX12UploadBuffer<UINT>> ClusterLightMaskBuffer;
 };

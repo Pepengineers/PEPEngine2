@@ -11,7 +11,13 @@ struct LightComponent : ComponentTag
     float InnerAngle = 20.0f; // Spot half-angles in degrees.
     float OuterAngle = 35.0f;
     bool Enabled = true;
+    bool CastShadows = true;
     bool DirtyFlag = true; // Set after editing light properties directly.
+
+private:
+    friend class RenderModule;
+    friend class GPUDataUpdateSystem;
+
     UINT _CBufferIndex = UINT_MAX;
     UINT _numFramesDirty = 0;
 };

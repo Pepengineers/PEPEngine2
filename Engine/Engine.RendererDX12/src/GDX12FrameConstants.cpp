@@ -10,6 +10,7 @@ GDX12FrameConstants::GDX12FrameConstants(GDX12Device* device)
     TransformCache->CopyData(0, GDX12TransformConstants{});
     InstanceCache = std::make_unique<GDX12UploadBuffer<GDX12InstanceData>>(device, 0, EBufferType::Upload, false);
     MaterialCache = std::make_unique<GDX12UploadBuffer<GDX12MaterialConstants>>(device, 0, EBufferType::Upload, false);
+    ShadowViews = std::make_unique<GDX12UploadBuffer<ShadowView>>(device, 1, EBufferType::Upload, false);
     LightsCache = std::make_unique<GDX12UploadBuffer<GDX12LightConstants>>(device, 1, EBufferType::Upload, false);
     ClusterLightMaskBuffer = std::make_unique<GDX12UploadBuffer<UINT>>(device, 1, EBufferType::Upload, false);
     CameraCB = std::make_unique<GDX12UploadBuffer<GDX12CameraConstants>>(device, 0, EBufferType::Upload, true);

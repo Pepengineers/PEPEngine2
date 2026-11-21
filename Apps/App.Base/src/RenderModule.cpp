@@ -9,6 +9,7 @@
 
 #include "Engine.RendererDX12/GDX12SwapChain.h"
 #include "Engine.RendererDX12/GDX12StreamlineSDK.h"
+#include <algorithm>
 
 namespace
 {
@@ -547,6 +548,8 @@ void RenderModule::OnTransformComponentCreated(World& world, Entity entity, Tran
         world.GetECS().Get<StaticMeshRenderComponent>(entity).DirtyFlag = true;
     if (world.GetECS().Has<CameraComponent>(entity))
         world.GetECS().Get<CameraComponent>(entity).DirtyFlag = true;
+    if (world.GetECS().Has<LightComponent>(entity))
+        world.GetECS().Get<LightComponent>(entity).DirtyFlag = true;
 }
 
 void RenderModule::OnTransformComponentDestroyed(World& world, Entity entity, TransformComponent& component)
@@ -556,6 +559,8 @@ void RenderModule::OnTransformComponentDestroyed(World& world, Entity entity, Tr
         world.GetECS().Get<StaticMeshRenderComponent>(entity).DirtyFlag = true;
     if (world.GetECS().Has<CameraComponent>(entity))
         world.GetECS().Get<CameraComponent>(entity).DirtyFlag = true;
+    if (world.GetECS().Has<LightComponent>(entity))
+        world.GetECS().Get<LightComponent>(entity).DirtyFlag = true;
 }
 
 void RenderModule::OnTransformComponentUpdated(World& world, Entity entity, TransformComponent& component)
@@ -636,6 +641,7 @@ void RenderModule::WriteMeshDrawCommands(const StaticMeshRenderComponent& compon
 
 void RenderModule::DisableMeshInstanceDrawCommands(const std::vector<UINT>& instances)
 {
+    for (UINT instance : instances) _RPcommonData.ShadowSystem.RemoveCaster(instance);
     for (auto* resources : {&_primaryResources, &_secondaryResources})
         resources->SetMeshDrawCommands(instances, nullptr);
 }
@@ -671,6 +677,15 @@ void RenderModule::UpdateMaterials()
     {
         if (material->DirtyFlag)
         {
+            // Material type changes can add or remove shadow casters without changing the mesh.
+            for (const auto& [world, subscriptions] : _worldSubscriptions)
+            {
+                world->GetECS().ForEach<StaticMeshRenderComponent>([&](Entity, StaticMeshRenderComponent& mesh)
+                {
+                    if (std::find(mesh.Materials.begin(), mesh.Materials.end(), material.get()) != mesh.Materials.end())
+                        mesh.DirtyFlag = true;
+                });
+            }
             material->_numFramesDirty = GetFrameSlotCount();
             material->DirtyFlag = false;
         }
@@ -681,14 +696,28 @@ void RenderModule::UpdateMaterials()
     }
 }
 
+void RenderModule::PreRender()
+{
+    auto& shadows = _RPcommonData.ShadowSystem;
+    shadows.BuildViews(_lightingGrid.Lights);
+    for (const auto role : {DEVICE_ROLE_PRIMARY, DEVICE_ROLE_SECONDARY})
+    {
+        if (!PipelineHasFlag(role, RENDER_PASS_FLAG_USE_LIGHTING)) continue;
+        auto* frame = GetCurrentFrameConstants(role);
+        frame->UploadLightingClusters(_lightingGrid);
+        if (!shadows.Views.empty())
+        {
+            const auto count = static_cast<UINT>(shadows.Views.size());
+            frame->ShadowViews->Resize(count);
+            frame->ShadowViews->CopyData(0, shadows.Views.data(), count);
+        }
+    }
+}
+
 void RenderModule::OnRender()
 {
     if (!_frameGraph || _renderingSuspended) { return; }
-    for (const auto role : {DEVICE_ROLE_PRIMARY, DEVICE_ROLE_SECONDARY})
-    {
-        if (PipelineHasFlag(role, RENDER_PASS_FLAG_USE_LIGHTING))
-        { GetCurrentFrameConstants(role)->UploadLightingClusters(_lightingGrid); }
-    }
+    PreRender();
     _frameGraph->ExecuteFrame();
     _backBuffer->Present();
     _metrics.RecordPresentedFrame(*_frameGraph);

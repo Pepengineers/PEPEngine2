@@ -23,6 +23,7 @@ public:
             std::pair{DEVICE_ROLE_PRIMARY, primaryFlags},
             std::pair{DEVICE_ROLE_SECONDARY, secondaryFlags}};
         const auto pipelineFlags = primaryFlags | secondaryFlags;
+        auto& shadows = renderModule->GetRenderPipelineCommonData()->ShadowSystem;
 
         const CameraComponent* lightingCamera = nullptr;
         Matrix lightingView, lightingProjection;
@@ -170,53 +171,70 @@ public:
             });
 
         ecs.ForEach<StaticMeshRenderComponent>(
-            [&ecs, &renderModule, &numFrames, &devices](Entity entity, StaticMeshRenderComponent& renderer)
+            [&ecs, &renderModule, &numFrames, &devices, &shadows, pipelineFlags, primaryFlags](Entity entity, StaticMeshRenderComponent& renderer)
             {
                 if (renderer.DirtyFlag)
                 {
-                    renderer.DirtyFlag = false;
                     renderer._numFramesDirty = numFrames;
                 }
-                if (renderer._numFramesDirty > 0)
+                if (!renderer._numFramesDirty) return;
+                const auto* transform = ecs.Has<TransformComponent>(entity)
+                    ? &renderModule->GetTransformGPUData(entity) : nullptr;
+                const Matrix worldMatrix = transform ? transform->World :
+                    Matrix::CreateScale(DefaultTransform.Scale) *
+                    Matrix::CreateFromYawPitchRoll(XMConvertToRadians(DefaultTransform.Rotation.y),
+                        XMConvertToRadians(DefaultTransform.Rotation.x), XMConvertToRadians(DefaultTransform.Rotation.z)) *
+                    Matrix::CreateTranslation(DefaultTransform.Location);
+                const UINT transformIndex = transform ? transform->CBufferIndex : 0;
+                if (renderer.DirtyFlag && (pipelineFlags & RENDER_PASS_FLAG_USE_GEOMETRY))
                 {
-                    const auto* transform = ecs.Has<TransformComponent>(entity)
-                        ? &renderModule->GetTransformGPUData(entity) : nullptr;
-                    const Matrix worldMatrix = transform ? transform->World :
-                        Matrix::CreateScale(DefaultTransform.Scale) *
-                        Matrix::CreateFromYawPitchRoll(XMConvertToRadians(DefaultTransform.Rotation.y),
-                            XMConvertToRadians(DefaultTransform.Rotation.x), XMConvertToRadians(DefaultTransform.Rotation.z)) *
-                        Matrix::CreateTranslation(DefaultTransform.Location);
-                    const UINT transformIndex = transform ? transform->CBufferIndex : 0;
-                    for (const auto& [role, flags] : devices)
+                    const auto role = (primaryFlags & RENDER_PASS_FLAG_USE_GEOMETRY) ? DEVICE_ROLE_PRIMARY : DEVICE_ROLE_SECONDARY;
+                    const auto* mesh = renderModule->GetGPUMesh(role, renderer._boundMeshHandler);
+                    for (size_t i = 0; i < mesh->SubMeshes.size(); ++i)
                     {
-                        if (!(flags & RENDER_PASS_FLAG_USE_INSTANCES)) { continue; }
-                        auto& instanceCache = renderModule->GetCurrentFrameConstants(role)->InstanceCache;
-                        auto gpuMesh = renderModule->GetGPUMesh(role, renderer._boundMeshHandler);
-                        gpuMesh->CPUMesh->GetBounds().Transform(renderer.Bounds, worldMatrix);
-                        for (int i = 0; i < gpuMesh->SubMeshes.size(); i++)
+                        const auto& subMesh = mesh->SubMeshes[i];
+                        const auto instance = renderer._CBufferIndices[i];
+                        if (!renderer.CastShadows || renderer.Materials[subMesh.MaterialIndex]->Type == MaterialType::Transparent)
                         {
-                            const auto& subMesh = gpuMesh->SubMeshes[i];
-                            const auto& subMeshBounds = gpuMesh->CPUMesh->GetSubMesh(i).Bounds;
-
-                            BoundingBox bounds;
-                            subMeshBounds.Transform(bounds, worldMatrix);
-
-                            GDX12InstanceData instanceData;
-                            instanceData.TransformIndex = transformIndex;
-                            instanceData.MaterialIndex = renderer.Materials[subMesh.MaterialIndex]->_CBufferIndex;
-                            instanceData.BoundingBoxCenter = bounds.Center;
-                            instanceData.BoundingBoxExtents = bounds.Extents;
-
-                            instanceCache->CopyData(renderer._CBufferIndices[i], instanceData);
+                            shadows.RemoveCaster(instance);
+                            continue;
                         }
+                        BoundingBox bounds;
+                        mesh->CPUMesh->GetSubMesh(i).Bounds.Transform(bounds, worldMatrix);
+                        shadows.UpdateCaster(instance, bounds);
                     }
-
-                    renderer._numFramesDirty--;
                 }
+                renderer.DirtyFlag = false;
+                for (const auto& [role, flags] : devices)
+                {
+                    if (!(flags & RENDER_PASS_FLAG_USE_INSTANCES)) { continue; }
+                    auto& instanceCache = renderModule->GetCurrentFrameConstants(role)->InstanceCache;
+                    auto gpuMesh = renderModule->GetGPUMesh(role, renderer._boundMeshHandler);
+                    gpuMesh->CPUMesh->GetBounds().Transform(renderer.Bounds, worldMatrix);
+                    for (int i = 0; i < gpuMesh->SubMeshes.size(); i++)
+                    {
+                        const auto& subMesh = gpuMesh->SubMeshes[i];
+                        const auto& subMeshBounds = gpuMesh->CPUMesh->GetSubMesh(i).Bounds;
+
+                        BoundingBox bounds;
+                        subMeshBounds.Transform(bounds, worldMatrix);
+
+                        GDX12InstanceData instanceData;
+                        instanceData.TransformIndex = transformIndex;
+                        instanceData.MaterialIndex = renderer.Materials[subMesh.MaterialIndex]->_CBufferIndex;
+                        instanceData.BoundingBoxCenter = bounds.Center;
+                        instanceData.BoundingBoxExtents = bounds.Extents;
+
+                        instanceCache->CopyData(renderer._CBufferIndices[i], instanceData);
+                    }
+                }
+
+                renderer._numFramesDirty--;
             });
 
         if (!lightingCamera) { return; }
 
+        shadows.SetCamera(lightingView, lightingProjection, lightingCamera->NearPlane, lightingCamera->FarPlane);
         auto& grid = renderModule->GetLightingGrid();
         const auto& lights = ecs.GetPool<LightComponent>();
         grid.Lights.resize(lights.Size());
@@ -228,16 +246,17 @@ public:
                 renderModule->GetCurrentFrameConstants(role)->LightsCache->Resize(static_cast<UINT>(lights.Size()));
         }
 
+        UINT nextShadowView = 0;
         UINT nextLightIndex = 0;
         ecs.ForEach<LightComponent>([&](Entity entity, LightComponent& light)
         {
             const UINT index = nextLightIndex++;
-            const bool hasTransform = ecs.Has<TransformComponent>(entity);
-            if (light.Enabled && hasTransform) { grid.ActiveLightIndices.push_back(index); }
+            if (light.Enabled) { grid.ActiveLightIndices.push_back(index); }
 
             auto& data = grid.Lights[index];
             // Removing a light can move the last component into its buffer slot.
-            if (light.DirtyFlag || light._CBufferIndex != index)
+            bool updateProjection = light.DirtyFlag || light._CBufferIndex != index;
+            if (updateProjection)
             {
                 data = {};
                 data.Type = light.Type;
@@ -247,19 +266,28 @@ public:
                 const float outer = std::clamp(light.OuterAngle, 1.0f, 89.0f);
                 data.OuterConeCos = std::cos(XMConvertToRadians(outer));
                 data.InnerConeCos = std::cos(XMConvertToRadians(std::clamp(light.InnerAngle, 0.0f, outer)));
-                if (hasTransform)
-                {
-                    const auto& transform = ecs.Get<TransformComponent>(entity);
-                    data.Position = transform.Location;
-                    const auto rotation = Matrix::CreateFromYawPitchRoll(XMConvertToRadians(transform.Rotation.y),
-                        XMConvertToRadians(transform.Rotation.x), XMConvertToRadians(transform.Rotation.z));
-                    data.Direction = -rotation.Forward();
-                }
+                const auto& transform = ecs.Has<TransformComponent>(entity) ? ecs.Get<TransformComponent>(entity) : DefaultTransform;
+                data.Position = transform.Location;
+                const auto rotation = Matrix::CreateFromYawPitchRoll(XMConvertToRadians(transform.Rotation.y),
+                    XMConvertToRadians(transform.Rotation.x), XMConvertToRadians(transform.Rotation.z));
+                data.Direction = -rotation.Forward();
                 light._CBufferIndex = index;
                 light._numFramesDirty = numFrames;
                 light.DirtyFlag = false;
             }
 
+            const bool casts = light.Enabled && light.CastShadows &&
+                (data.Type == LightType::Directional || data.Range > 0);
+            const UINT first = casts ? nextShadowView : UINT_MAX;
+            if (casts) nextShadowView += data.Type == LightType::Directional ? 4 : data.Type == LightType::Point ? 6 : 1;
+            if (data.FirstShadowViewIndex != first)
+            {
+                data.FirstShadowViewIndex = first;
+                light._numFramesDirty = numFrames;
+                updateProjection = true;
+            }
+            if (updateProjection && casts && data.Type != LightType::Directional)
+                shadows.UpdatePointSpotViews(data);
             if (light._numFramesDirty > 0)
             {
                 for (const auto& [role, flags] : devices)
