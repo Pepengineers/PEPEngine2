@@ -134,11 +134,14 @@ void SceneCloudPicture::UpdateSettings(std::unique_ptr<Executor>& executor, int 
         }
     }
 
+    const bool replacePicture = replacement || (!next.Active && p.Texture);
+    // A retained remote picture still submits and imports tokens in its original domain.
+    if (!replacePicture && IsRemote()) replacementExecutor.reset();
+
     const int effectiveAdapter = replacementExecutor ? adapter : p.ExecutorAdapter;
     if (aoAdapter >= 0 && aoAdapter != effectiveAdapter)
         Log::Warning("RenderGraph", "HBAO adapter ", aoAdapter, " unavailable in the Bistro submission domain; using local HBAO");
 
-    const bool replacePicture = replacement || (!next.Active && p.Texture);
     if (!replacePicture && !replacementExecutor) return;
     // The primary terminal also retires any AO exchange attached to this domain.
     if (replacePicture && p.Texture) p.Texture->Stop();
