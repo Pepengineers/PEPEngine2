@@ -15,7 +15,7 @@ public:
     ~SceneParticles();
     enum class Inputs { Frame, Interaction, Depth };
     static int SecondaryAdapter();
-    void BeginSimulation(GDX12ParticleInteractionField, Executor&, int activeAdapter, float worldRate);
+    void BeginSimulation(GDX12ParticleInteractionField, GDX12Texture* depth, Executor&, int activeAdapter, float worldRate);
     void PauseIndependentClock();
     void AddExchanges(const Schedule&, std::vector<PacketWait>&, std::vector<Executor::PacketExchange>&);
     void Submitted(const std::vector<CompletionToken>&);
@@ -61,6 +61,8 @@ private:
     GDX12ParticleInteractionField _interaction{};
     std::array<std::vector<uint64_t>, 3> _groups;
     GDX12ParticleRenderFrame _renderFrame;
+    std::shared_ptr<GDX12DescriptorHeap> _secondaryHeap;
+    uint64_t _heapDomain = 0;
     std::array<Lane, 3> _remote;
     struct VisibilitySample
     {

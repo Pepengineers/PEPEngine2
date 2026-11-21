@@ -213,23 +213,25 @@ void GDX12ParticleSimulation::InitializePools(GDX12CommandList* commands, GDX12D
 void GDX12ParticleSimulation::Execute(GDX12CommandList* commands, GDX12DeviceResources* resources,
     RenderPipelineCommonData& common, GDX12Texture* depth, const std::vector<uint64_t>* emitterIds)
 {
-    Execute(commands, resources, common.ActiveCameraCBufferIndex, depth, emitterIds);
+    GDX12ParticleDepthInput input;
+    if (depth)
+    {
+        auto& frame = resources->FrameConstants[resources->CurrFrameConstantsIndex];
+        input = {depth->GetResource(), depth->GetSRV()->GPUHandle,
+            frame->CameraCB->GetElementAddress(common.ActiveCameraCBufferIndex), depth->GetWidth(), depth->GetHeight()};
+    }
+    ExecuteWithDepth(commands, resources, input, emitterIds);
 }
 
-void GDX12ParticleSimulation::ExecuteFrameOnly(GDX12CommandList* commands, GDX12DeviceResources* resources)
-{
-    Execute(commands, resources, 0, nullptr, nullptr);
-}
-
-void GDX12ParticleSimulation::Execute(GDX12CommandList* commands, GDX12DeviceResources* resources,
-    UINT cameraIndex, GDX12Texture* depth, const std::vector<uint64_t>* emitterIds)
+void GDX12ParticleSimulation::ExecuteWithDepth(GDX12CommandList* commands, GDX12DeviceResources* resources,
+    const GDX12ParticleDepthInput& depth, const std::vector<uint64_t>* emitterIds)
 {
     if (!_state || !_state->Active) return;
     auto& state = *_state;
     GDX12_SCOPED_EVENT(commands, "Particle simulation", Colors::Orange);
     commands->SetComputeRootSignature(state.Root.get());
     commands->SetDescriptorHeaps({resources->SRV_UAV_Heap.get()});
-    if (depth)
+    if (depth.Resource)
     {
         const bool samplesDepth = !emitterIds || std::any_of(state.Emitters.begin(), state.Emitters.end(),
             [&](const auto& emitter) {
@@ -239,10 +241,9 @@ void GDX12ParticleSimulation::Execute(GDX12CommandList* commands, GDX12DeviceRes
         // Keep valid root arguments for all kernels; depth-independent groups
         // bind the descriptor without acquiring a resource they never sample.
         if (samplesDepth)
-            commands->ResourceBarrier({depth->GetResource()->GetNonPixelShaderResourceBarrier()});
-        commands->SetComputeSRV(3, depth->GetSRV()->GPUHandle);
-        auto& frame = resources->FrameConstants[resources->CurrFrameConstantsIndex];
-        commands->SetComputeRootConstantBufferView(1, frame->CameraCB->GetElementAddress(cameraIndex));
+            commands->ResourceBarrier({depth.Resource->GetNonPixelShaderResourceBarrier()});
+        commands->SetComputeSRV(3, depth.SRV);
+        commands->SetComputeRootConstantBufferView(1, depth.Camera);
     }
     else
     {
@@ -262,7 +263,7 @@ void GDX12ParticleSimulation::Execute(GDX12CommandList* commands, GDX12DeviceRes
         const uint64_t pending = emitter.BurstTotal >= pool.BurstTotal ? emitter.BurstTotal - pool.BurstTotal : 0;
         const UINT burst = static_cast<UINT>((std::min)(pending, uint64_t(emitter.MaxParticles)));
         pool.BurstTotal = emitter.BurstTotal;
-        auto constants = MakeConstants(emitter, depth ? depth->GetWidth() : 1, depth ? depth->GetHeight() : 1);
+        auto constants = MakeConstants(emitter, depth.Width, depth.Height);
         if (emitter.InteractionEnabled && _interaction.Resource)
         {
             constants.InteractionArea = _interaction.Area;

@@ -98,7 +98,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	auto& water = _lighting->Water();
 	using ParticleInputs = BistroRender::SceneParticles::Inputs;
 	auto* depth = _geometry->Depth(slot);
-	particles.BeginSimulation(_geometry->InteractionField(), *_executor, _cloudPicture->SubmissionAdapter(),
+	particles.BeginSimulation(_geometry->InteractionField(), depth, *_executor, _cloudPicture->SubmissionAdapter(),
 	    world && !world->IsPaused() ? world->GetTimeScale() : 0.f);
 	particles.PrepareOpaque(*_geometry, slot);
 	_post->BeginPlan();
@@ -245,6 +245,7 @@ void BistroRenderPipeline::FramePresented()
 		    name == "particle simulation from depth prepass" || name == "opaque particles frustum cull" ||
 		    name == "particle simulation from interaction field" || name == "opaque particles G-buffer (read-only depth)" ||
 		    name == "GPU0 export particle interaction field" || name == "GPU0 import particle snapshot" ||
+		    name == "GPU0 export particle depth and camera" || name == "transparent particles cull and global sort" ||
 		    name == "read back scene texture" || name.find(" GPU0 export inputs") != std::string::npos ||
 		    name.find(" GPU0 import ") != std::string::npos || name == "XeGTAO denoise")
 			Log::Info("RenderGraph", "DepthNormals frame=", _frameNumber, " packet=", i, " ", name);

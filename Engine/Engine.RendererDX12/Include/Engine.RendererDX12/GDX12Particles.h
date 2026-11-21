@@ -111,6 +111,14 @@ struct GDX12ParticleInteractionField
     float FloorCm = 0;
 };
 
+struct GDX12ParticleDepthInput
+{
+    GDX12Resource* Resource = nullptr;
+    D3D12_GPU_DESCRIPTOR_HANDLE SRV{};
+    D3D12_GPU_VIRTUAL_ADDRESS Camera = 0;
+    UINT Width = 1, Height = 1;
+};
+
 // Frame-local bindings on the rendering device. Storage and descriptors must outlive the draw frame.
 struct GDX12ParticleRenderSource
 {
@@ -151,12 +159,11 @@ public:
     void Execute(GDX12CommandList* commands, GDX12DeviceResources* resources,
         RenderPipelineCommonData& common, GDX12Texture* opaqueDepth,
         const std::vector<uint64_t>* emitterIds = nullptr);
-    void ExecuteFrameOnly(GDX12CommandList*, GDX12DeviceResources*);
+    void ExecuteWithDepth(GDX12CommandList*, GDX12DeviceResources*, const GDX12ParticleDepthInput&,
+        const std::vector<uint64_t>* emitterIds = nullptr);
 
 private:
     struct State;
     std::unique_ptr<State> _state;
     GDX12ParticleInteractionField _interaction;
-    void Execute(GDX12CommandList*, GDX12DeviceResources*, UINT cameraIndex, GDX12Texture*,
-        const std::vector<uint64_t>* emitterIds);
 };

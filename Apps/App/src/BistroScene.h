@@ -153,6 +153,7 @@ inline void Create(World& world, GPUTexture* atlas)
 	settings.AtlasColumns = settings.AtlasRows = 8;
 	settings.SoftDistance = 2;
 	settings.DepthCollision = true;
+	settings.SimulateOnSecondary = true;
 	settings.CollisionRadius = 7; // Covers the largest fountain billboard's half-diagonal, including size variation.
 	settings.CollisionFriction = 0.2f;
 	// Authored bounds of the closed entrance door and its glass (Exterior nodes 121/123).
@@ -229,6 +230,7 @@ inline void Create(World& world, GPUTexture* atlas)
 	settings.AtlasColumns = settings.AtlasRows = 8;
 	settings.Blend = ParticleBlend::Additive;
 	settings.DepthCollision = true;
+	settings.SimulateOnSecondary = true;
 	create("BistroStreetFirebursts", {-350, 90, -700}, 2, settings);
 
 	settings = {};
@@ -285,6 +287,7 @@ inline void Create(World& world, GPUTexture* atlas)
 	settings.Geometry = ParticleGeometry::WaterDrop;
 	settings.Blend = ParticleBlend::WeightedAlpha;
 	settings.DepthCollision = true;
+	settings.SimulateOnSecondary = true;
 	settings.CollisionRestitution = 0.05f;
 	auto rain = create("BistroSparkRain", BistroWater::Center + Vector3(0, 1000, 0), 1, settings);
 	rain.GetComponent<TransformComponent>().Rotation.y = BistroWater::YawDegrees;

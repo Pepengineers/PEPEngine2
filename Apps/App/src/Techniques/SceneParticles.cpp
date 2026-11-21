@@ -89,11 +89,21 @@ void AddAccesses(Graph& graph, std::vector<ID3D12Resource*>& bindings, std::vect
 
 struct SceneParticles::Remote
 {
+	struct InputShape
+	{
+		UINT64 Width = 0;
+		UINT Height = 0; // Zero denotes the structured agent field.
+		DXGI_FORMAT Format = DXGI_FORMAT_UNKNOWN;
+		bool operator!=(const InputShape& other) const
+		{
+			return Width != other.Width || Height != other.Height || Format != other.Format;
+		}
+	};
 	struct Publication
 	{
 		QueueSubmission::TransferBuffer Transfer;
 		CompletionToken Ready, Reader;
-		uint64_t Generation = 0, Version = 0;
+		uint64_t Generation = 0, Version = 0, InputVersion = 0;
 		std::vector<GDX12ParticleEmitter> Snapshot;
 		double SimulatedSeconds = 0;
 		bool Writing = false;
@@ -121,8 +131,11 @@ struct SceneParticles::Remote
 	std::vector<Publication> Ring;
 	std::vector<InputSlot> InputsRing;
 	GDX12Resource InputField;
+	GDX12Resource InputCamera;
 	GDX12Descriptor FieldSRV;
-	UINT64 InputBytes = 0;
+	InputShape Shape;
+	D3D12_PLACED_SUBRESOURCE_FOOTPRINT InputFootprint{};
+	UINT64 CameraOffset = 0;
 	uint64_t InputVersion = 0, ConsumedInput = 0;
 	InputSlot* InputWrite = nullptr;
 	std::vector<uint64_t> Revisions;
@@ -161,15 +174,13 @@ struct SceneParticles::Remote
 	Publication* DeferredOutput = nullptr;
 
 	Remote(GDX12DeviceResources& primary, const std::shared_ptr<QueueSubmission>& submit,
-	       const std::vector<GDX12ParticleEmitter>& snapshot, GDX12ParticleSettings settings, uint64_t generationSeed)
+	       const std::shared_ptr<GDX12DescriptorHeap>& heap, const std::vector<GDX12ParticleEmitter>& snapshot,
+	       GDX12ParticleSettings settings, uint64_t generationSeed)
 	    : Submit(submit), GPU1(Submit, 1, UINT(primary.FrameConstants.size()), 1), Generation(generationSeed)
 	{
 		Secondary.Device = &Submit->Device(1);
 		Secondary.FrameConstants.resize(primary.FrameConstants.size()); // Solver needs only the upload ring size.
-		// Pools keep their descriptor handles when the group changes. Use the scene
-		// heap budget so adding a pool never requires moving the existing views.
-		Secondary.SRV_UAV_Heap = std::make_shared<GDX12DescriptorHeap>(Secondary.Device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-		    primary.SRV_UAV_Heap->GetNumDescriptors(), D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
+		Secondary.SRV_UAV_Heap = heap;
 		RebuildTransport(primary, snapshot, settings);
 	}
 
@@ -236,25 +247,51 @@ struct SceneParticles::Remote
 		GPU1.Drain();
 	}
 
-	bool External() const { return InputBytes != 0; }
+	bool External() const { return Shape.Width != 0; }
+	bool DepthInput() const { return Shape.Height != 0; }
 
-	void RebuildInput(UINT64 bytes)
+	void RebuildInput(InputShape shape)
 	{
 		InputsRing.clear();
 		InputField.Reset();
+		InputCamera.Reset();
 		InputWrite = nullptr;
-		InputBytes = bytes;
+		Shape = shape;
 		ConsumedInput = InputVersion = 0;
 		Revisions.clear();
-		if (!bytes) return;
+		if (!External()) return;
 		auto* device = Secondary.Device;
+		const auto desc = DepthInput()
+		    ? CD3DX12_RESOURCE_DESC::Tex2D(shape.Format, shape.Width, shape.Height, 1, 1)
+		    : CD3DX12_RESOURCE_DESC::Buffer(shape.Width);
 		InputField.D3DResource = device->CreateResource(D3D12_HEAP_TYPE_DEFAULT,
-		    CD3DX12_RESOURCE_DESC::Buffer(bytes), D3D12_RESOURCE_STATE_COMMON);
+		    desc, D3D12_RESOURCE_STATE_COMMON);
 		D3D12_SHADER_RESOURCE_VIEW_DESC view{};
-		view.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
 		view.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-		view.Buffer.StructureByteStride = sizeof(XMFLOAT4);
-		view.Buffer.NumElements = UINT(bytes / sizeof(XMFLOAT4));
+		UINT64 bytes = shape.Width;
+		if (DepthInput())
+		{
+			view.Format = DXGI_FORMAT_R32_FLOAT;
+			view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+			view.Texture2D.MipLevels = 1;
+			D3D12_PLACED_SUBRESOURCE_FOOTPRINT primaryFootprint{};
+			UINT64 primaryBytes = 0;
+			device->GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &InputFootprint, nullptr, nullptr, &bytes);
+			Submit->Device(0).GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &primaryFootprint, nullptr, nullptr, &primaryBytes);
+			if (!bytes || bytes == UINT64_MAX || bytes != primaryBytes ||
+			    primaryFootprint.Footprint.RowPitch != InputFootprint.Footprint.RowPitch)
+				throw std::runtime_error("Particle depth transfer requires matching adapter footprints");
+			CameraOffset = (bytes + 255) & ~UINT64(255);
+			bytes = CameraOffset + sizeof(GDX12CameraConstants);
+			InputCamera.D3DResource = device->CreateResource(D3D12_HEAP_TYPE_DEFAULT,
+			    CD3DX12_RESOURCE_DESC::Buffer(sizeof(GDX12CameraConstants)), D3D12_RESOURCE_STATE_COMMON);
+		}
+		else
+		{
+			view.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+			view.Buffer.StructureByteStride = sizeof(XMFLOAT4);
+			view.Buffer.NumElements = UINT(bytes / sizeof(XMFLOAT4));
+		}
 		auto* heap = Secondary.SRV_UAV_Heap.get();
 		const UINT descriptor = FieldSRV.DescType == DESC_TYPE_NONE ? heap->GetAvailableIndex() : FieldSRV.HeapIndex;
 		FieldSRV.InitAsSRV(InputField.D3DResource.Get(), &view, heap, descriptor);
@@ -273,6 +310,12 @@ struct SceneParticles::Remote
 	}
 
 	Id AppendInput(NativeWork& work, Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12ParticleInteractionField field)
+	{
+		return AppendInput(work, graph, bindings, field, field.Resource, nullptr, 0);
+	}
+
+	Id AppendInput(NativeWork& work, Graph& graph, std::vector<ID3D12Resource*>& bindings,
+	               GDX12ParticleInteractionField field, GDX12Resource* input, GDX12Resource* camera, UINT64 cameraSourceOffset)
 	{
 		std::lock_guard lock(Mutex);
 		auto* latest = Mode == 2 ? NewestInput() : nullptr;
@@ -295,11 +338,22 @@ struct SceneParticles::Remote
 		candidate->Reader = {};
 		candidate->Field = field;
 		auto* shared = candidate->Buffer.Resources[0].Get();
-		auto* source = field.Resource->D3DResource.Get();
-		return work.Add(graph, "GPU0 export particle interaction field",
-		    {ResourceAccess(graph, bindings, field.Resource, Mode::Read, CopySource),
-		     {NativeWork::ResourceFor(graph, bindings, shared, "shared particle input"), Mode::Write, CopyDest}},
-		    [shared, source, bytes = InputBytes](auto* cmd) { cmd->CopyBufferRegion(shared, 0, source, 0, bytes); }, {}, Queue::Copy);
+		auto* source = input->D3DResource.Get();
+		std::vector<Access> copies{ResourceAccess(graph, bindings, input, Mode::Read, CopySource),
+		    {NativeWork::ResourceFor(graph, bindings, shared, "shared particle input"), Mode::Write, CopyDest}};
+		if (camera)
+		{
+			copies.push_back(ResourceAccess(graph, bindings, camera, Mode::Read));
+			return work.Add(graph, "GPU0 export particle depth and camera", std::move(copies),
+			    [shared, source, camera = camera->D3DResource.Get(), cameraSourceOffset,
+			     layout = InputFootprint, cameraOffset = CameraOffset](auto* cmd) {
+				    const CD3DX12_TEXTURE_COPY_LOCATION dst(shared, layout), src(source, 0u);
+				    cmd->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+				    cmd->CopyBufferRegion(shared, cameraOffset, camera, cameraSourceOffset, sizeof(GDX12CameraConstants));
+			    }, {}, Queue::Copy);
+		}
+		return work.Add(graph, "GPU0 export particle interaction field", std::move(copies),
+		    [shared, source, bytes = Shape.Width](auto* cmd) { cmd->CopyBufferRegion(shared, 0, source, 0, bytes); }, {}, Queue::Copy);
 	}
 
 	CompletionToken SubmitInput(CompletionToken token)
@@ -416,6 +470,7 @@ struct SceneParticles::Remote
 		CompletionToken Complete;
 		double Elapsed;
 		bool InputWaited;
+		uint64_t InputVersion;
 	};
 
 	StepResult Simulate(Executor& executor, const std::vector<GDX12ParticleEmitter>& emitters,
@@ -444,18 +499,36 @@ struct SceneParticles::Remote
 		NativeWork work;
 		std::vector<Access> pools;
 		Solver.SetInteractionField({});
+		GDX12ParticleDepthInput depth;
 		if (input)
 		{
 			auto* shared = input->Buffer.Resources[1].Get();
 			auto* target = InputField.D3DResource.Get();
-			work.Add(graph, "GPU1 import particle interaction field",
-			    {{NativeWork::ResourceFor(graph, bindings, shared, "shared particle input"), Mode::Read, CopySource},
-			     ResourceAccess(graph, bindings, &InputField, Mode::Write, CopyDest)},
-			    [shared, target, bytes = InputBytes](auto* cmd) { cmd->CopyBufferRegion(target, 0, shared, 0, bytes); }, {}, Queue::Compute);
-			auto field = input->Field;
-			field.Resource = &InputField;
-			field.SRV = FieldSRV.GPUHandle;
-			Solver.SetInteractionField(field);
+			std::vector<Access> copies{
+			    {NativeWork::ResourceFor(graph, bindings, shared, "shared particle input"), Mode::Read, CopySource},
+			    ResourceAccess(graph, bindings, &InputField, Mode::Write, CopyDest)};
+			if (DepthInput())
+			{
+				auto* camera = InputCamera.D3DResource.Get();
+				copies.push_back(ResourceAccess(graph, bindings, &InputCamera, Mode::Write, CopyDest));
+				work.Add(graph, "GPU1 import particle depth and camera", std::move(copies),
+				    [shared, target, camera, layout = InputFootprint, cameraOffset = CameraOffset](auto* cmd) {
+					    const CD3DX12_TEXTURE_COPY_LOCATION dst(target, 0u), src(shared, layout);
+					    cmd->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+					    cmd->CopyBufferRegion(camera, 0, shared, cameraOffset, sizeof(GDX12CameraConstants));
+				    }, {}, Queue::Compute);
+				depth = {&InputField, FieldSRV.GPUHandle, camera->GetGPUVirtualAddress(), UINT(Shape.Width), Shape.Height};
+			}
+			else
+			{
+				work.Add(graph, "GPU1 import particle interaction field", std::move(copies),
+				    [shared, target, bytes = Shape.Width](auto* cmd) { cmd->CopyBufferRegion(target, 0, shared, 0, bytes); },
+				    {}, Queue::Compute);
+				auto field = input->Field;
+				field.Resource = &InputField;
+				field.SRV = FieldSRV.GPUHandle;
+				Solver.SetInteractionField(field);
+			}
 		}
 		for (auto* buffer : Solver.GetPoolResources())
 			pools.push_back(ResourceAccess(graph, bindings, buffer, Mode::ReadWrite, UnorderedAccess));
@@ -464,8 +537,10 @@ struct SceneParticles::Remote
 		}, "Particle initialization must not submit", {}, Queue::Compute);
 		AddResources(graph, bindings, pools, Solver.GetConstantResources(slot), Mode::Read);
 		if (input) pools.push_back(ResourceAccess(graph, bindings, &InputField, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
-		work.AddOwned(graph, "GPU1 simulate independent particles", std::move(pools), bindings, [this](auto* cmd) {
-			Solver.ExecuteFrameOnly(cmd, &Secondary);
+		if (depth.Resource)
+			pools.push_back(ResourceAccess(graph, bindings, &InputCamera, Mode::Read, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER));
+		work.AddOwned(graph, "GPU1 simulate particles", std::move(pools), bindings, [this, depth](auto* cmd) {
+			Solver.ExecuteWithDepth(cmd, &Secondary, depth);
 		}, "Particle simulation must not submit", {}, Queue::Compute);
 		if (output)
 		{
@@ -491,7 +566,7 @@ struct SceneParticles::Remote
 		std::vector<PacketWait> waits;
 		if (input) waits.push_back({0, input->Ready});
 		executor.Execute(schedule, bindings, [&](Id op, uint32_t, auto* cmd) { work.Record(op, cmd); }, nullptr, nullptr, nullptr, waits);
-		return {executor.Completions().back(), elapsed, inputWaited};
+		return {executor.Completions().back(), elapsed, inputWaited, input ? input->Version : 0};
 	}
 
 	void CommitStep(Publication* output, StepResult result, uint64_t generation)
@@ -501,6 +576,7 @@ struct SceneParticles::Remote
 			output->Writing = false;
 			output->Ready = result.Complete;
 			output->Generation = generation;
+			output->InputVersion = result.InputVersion;
 		}
 		if (generation != Generation) return;
 		++Ordered;
@@ -835,8 +911,8 @@ void SceneParticles::PauseIndependentClock()
 		if (lane.Solver) lane.Solver->PauseClock();
 }
 
-void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, Executor& primary, int activeAdapter,
-                                     float worldRate)
+void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, GDX12Texture* depth,
+                                     Executor& primary, int activeAdapter, float worldRate)
 {
 	_work.Commands.clear();
 	for (auto& lane : _remote) lane.Export = lane.Import = lane.ImportPacket = Invalid;
@@ -874,11 +950,16 @@ void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, 
 	std::array<std::vector<EmitterLayout>, 3> layouts;
 	if (requested)
 		for (const auto& emitter : _resources.ParticleEmitters)
-			if (emitter.SimulateOnSecondary && !emitter.DepthCollision &&
-			    emitter.InteractionEnabled == (emitter.Blend == ParticleBlend::Opaque))
-				remoteEmitters[size_t(emitter.InteractionEnabled ? Inputs::Interaction : Inputs::Frame)].push_back(emitter);
+		{
+			if (!emitter.SimulateOnSecondary || emitter.InteractionEnabled != (emitter.Blend == ParticleBlend::Opaque) ||
+			    (emitter.DepthCollision && (emitter.InteractionEnabled || !depth))) continue;
+			const auto group = emitter.DepthCollision ? Inputs::Depth : emitter.InteractionEnabled ? Inputs::Interaction : Inputs::Frame;
+			remoteEmitters[size_t(group)].push_back(emitter);
+		}
 	const UINT64 fieldBytes = interaction.Resource ? interaction.Resource->D3DResource->GetDesc().Width : 0;
-	std::array<UINT64, 3> inputs{0, fieldBytes, 0};
+	const auto depthDesc = depth ? depth->GetResource()->D3DResource->GetDesc() : D3D12_RESOURCE_DESC{};
+	const std::array<Remote::InputShape, 3> inputs{{{}, {fieldBytes},
+	    {depthDesc.Width, depthDesc.Height, depthDesc.Format}}};
 	std::array<bool, 3> rebuild{}, replaceInput{};
 	for (size_t i = 0; i < _remote.size(); ++i)
 	{
@@ -890,7 +971,7 @@ void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, 
 		auto& lane = _remote[i];
 		const bool domainChanged = domain != lane.Domain;
 		rebuild[i] = layout != lane.Layout;
-		replaceInput[i] = lane.Solver && lane.Solver->InputBytes != inputs[i];
+		replaceInput[i] = lane.Solver && lane.Solver->Shape != inputs[i];
 		if (!(domainChanged || rebuild[i] || replaceInput[i])) continue;
 		if (lane.Solver)
 		{
@@ -905,6 +986,11 @@ void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, 
 		lane.Domain = domain;
 		lane.Layout = layout;
 		lane.Attempted = false;
+	}
+	if (_heapDomain != domain)
+	{
+		_secondaryHeap.reset();
+		_heapDomain = domain;
 	}
 	std::vector<uint64_t> remoteIds;
 	for (size_t i = 0; i < _remote.size(); ++i)
@@ -924,7 +1010,15 @@ void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, 
 			try
 			{
 				if (create)
-					lane.Solver = std::make_unique<Remote>(_resources, submit, emitters, settings, lane.Generation);
+				{
+					// Pool views stay fixed when another group changes. All allocations
+					// happen here on the frame owner, before a producer starts.
+					if (!_secondaryHeap)
+						_secondaryHeap = std::make_shared<GDX12DescriptorHeap>(&submit->Device(1),
+						    D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, _resources.SRV_UAV_Heap->GetNumDescriptors(),
+						    D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
+					lane.Solver = std::make_unique<Remote>(_resources, submit, _secondaryHeap, emitters, settings, lane.Generation);
+				}
 				else if (rebuild[i])
 					lane.Solver->RebuildTransport(_resources, emitters, settings);
 				if (create || replaceInput[i]) lane.Solver->RebuildInput(inputs[i]);
@@ -1029,7 +1123,8 @@ void SceneParticles::Presented(uint64_t frame)
 			    " generation=", remote.Generation, " ordered=", remote.Ordered, " exported=", remote.LastOrder ? remote.LastOrder->Version : 0,
 			    " shown=", remote.PresentedVersion, " exportFence=", selected ? selected->Ready.Value : 0,
 			    " importFence=", lane.ImportPacket != Invalid && selected ? selected->Reader.Value : 0,
-			    " group=", i, " inputVersion=", remote.ConsumedInput, " readyAtChoice=", remote.LatestReady() && selected, " gameSeconds=", remote.GameTime);
+			    " group=", i, " inputVersion=", remote.ConsumedInput, " shownInputVersion=", selected ? selected->InputVersion : 0,
+			    " readyAtChoice=", remote.LatestReady() && selected, " gameSeconds=", remote.GameTime);
 		if (LogSnapshots.GetValue() && stats.Frames == 24)
 			Log::Info("RenderGraph", "Particles MGPU summary frame=", frame, " CrossSync=", remote.Mode,
 			    " generation=", remote.Generation, " frames=", stats.Frames, " steps=", remote.Ordered,
@@ -1045,7 +1140,17 @@ void SceneParticles::AppendSimulation(Graph& graph, std::vector<ID3D12Resource*>
 {
 	auto& lane = _remote[size_t(inputs)];
 	if (lane.Solver && lane.Solver->External() && GetParticleSettings().Enabled)
-		lane.Export = lane.Solver->AppendInput(_work, graph, bindings, _interaction);
+	{
+		if (inputs == Inputs::Depth)
+		{
+			auto& camera = *_resources.FrameConstants.at(_resources.CurrFrameConstantsIndex)->CameraCB;
+			auto& resource = camera.GetResource();
+			const auto offset = camera.GetElementAddress(_common.ActiveCameraCBufferIndex) - resource.D3DResource->GetGPUVirtualAddress();
+			lane.Export = lane.Solver->AppendInput(_work, graph, bindings, {}, depth->GetResource(), &resource, offset);
+		}
+		else
+			lane.Export = lane.Solver->AppendInput(_work, graph, bindings, _interaction);
+	}
 	const auto& ids = _groups[size_t(inputs)];
 	auto* simulation = _resources.ParticleSimulation.get();
 	std::vector<Access> pools;

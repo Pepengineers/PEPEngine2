@@ -91,6 +91,10 @@ publication. Planter Fireflies use a separate publication and import the
 agent interaction field on GPU1. GPU0 imports their result before the opaque
 cull and draws both DepthNormals and G-buffer from that choice. GPU0 keeps
 frustum culling, sorting, soft-particle depth and all drawing.
+Entrance Fountain, Blue Fountain, Street Firebursts and Spark Rain share a
+separate publication. GPU1 receives the scene prepass depth and matching camera
+constants at the collision point. GPU0 imports their result before transparent
+cull. Depth collision and analytic colliders run in the existing particle solver.
 An unavailable or conflicting adapter falls back to local simulation. Cloud
 Picture takes priority when selecting the shared secondary adapter, then AO.
 Changing the owner resets the pool and preserves the already consumed burst
@@ -109,6 +113,9 @@ With `2`, GPU1 advances independently using a monotonic clock scaled by
 game time. Pause freezes the solver and resume excludes paused time. The
 producer sleeps on fences or control events when it cannot publish. GPU0
 uses the same completed-snapshot selection and import cache as mode `3`.
+Frame-driven modes use the input of the ordered frame. In mode `2`, input-dependent
+producers start when the first external input completes and use the newest
+complete input at each step.
 Repeats and gaps reset particle position, age and rotation history when
 there is no immediately preceding displayed step. Camera motion remains.
 `App.Particles.LogSnapshots = true` enables a short readback
