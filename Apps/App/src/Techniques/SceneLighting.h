@@ -75,6 +75,7 @@ class SceneLighting
   private:
 	struct RemoteShadows;
 	struct ShadowPublication;
+	struct ShadowVertexBaseline;
 	struct Frame
 	{
 		std::unique_ptr<SceneAO> AO;
@@ -111,6 +112,7 @@ class SceneLighting
 	std::unique_ptr<SceneTransparency> _transparency;
 
 	std::vector<Frame> _frames;
+	std::map<Id, std::shared_ptr<ShadowVertexBaseline>> _shadowVertexBaselines;
 	std::map<UINT, std::array<std::shared_ptr<ShadowPublication>, 6>> _latestLocalShadows;
 	std::array<std::shared_ptr<ShadowPublication>, 4> _latestSunShadows;
 	uint64_t _shadowOrder = 0;

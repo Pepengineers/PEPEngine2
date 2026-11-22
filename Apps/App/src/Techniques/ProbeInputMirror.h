@@ -47,7 +47,7 @@ class ProbeInputMirror
 
     ID3D12Resource* Mirror(Graph& primary, std::vector<ID3D12Resource*>& bindings, ID3D12Resource* source,
                           Id primaryResource, bool refresh, std::vector<BufferPatch> patches = {},
-                          std::vector<BufferRange> ranges = {})
+                          std::vector<BufferRange> ranges = {}, ID3D12Resource* baseline = nullptr)
     {
         if (_sealed || !source || primary.Device != 0 || bindings.at(primaryResource) != source)
             throw std::logic_error("Invalid probe input mirror source");
@@ -58,18 +58,22 @@ class ProbeInputMirror
             try { Initialize(mirror, source); }
             catch (...) { _mirrors.erase(entry); throw; }
         }
-        if ((refresh || !mirror.Initialized || !ranges.empty()) && !_pending.count(source))
+        if ((refresh || !mirror.Initialized || !ranges.empty() || baseline) && !_pending.count(source))
         {
             const UINT64 offset = Align(_bytes);
             Pending item{primaryResource, offset};
             if (mirror.Footprints.empty())
             {
-                if (refresh || !mirror.Initialized) ranges = {{0, mirror.Bytes}};
+                if (baseline && (refresh || baseline->GetDesc().Dimension != D3D12_RESOURCE_DIMENSION_BUFFER ||
+                    baseline->GetDesc().Width != mirror.Bytes))
+                    throw std::invalid_argument("Incompatible owner-local mirror baseline");
+                item.Baseline = baseline;
+                if (refresh || (!mirror.Initialized && !baseline)) ranges = {{0, mirror.Bytes}};
                 SelectBufferCopies(item, mirror.Bytes, ranges, std::move(patches));
             }
             else
             {
-                if (!patches.empty() || !ranges.empty())
+                if (!patches.empty() || !ranges.empty() || baseline)
                     throw std::invalid_argument("Partial mirror copies require a buffer");
                 item.TransferBytes = mirror.Bytes;
             }
@@ -87,6 +91,11 @@ class ProbeInputMirror
     {
         const auto entry = _pending.find(source);
         return entry == _pending.end() ? 0 : entry->second.TransferBytes;
+    }
+    UINT64 PendingBaselineBytes(ID3D12Resource* source) const
+    {
+        const auto entry = _pending.find(source);
+        return entry == _pending.end() ? 0 : entry->second.BaselineBytes;
     }
 
     Id AppendExport(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work, Queue queue = Queue::Copy)
@@ -126,7 +135,10 @@ class ProbeInputMirror
         Id Source;
         UINT64 Offset;
         UINT64 TransferBytes = 0;
+        ID3D12Resource* Baseline = nullptr;
+        UINT64 BaselineBytes = 0;
         std::vector<BufferRange> Ranges;
+        std::vector<BufferRange> BaselineRanges;
         std::vector<BufferPatch> Patches;
     };
 
@@ -141,6 +153,12 @@ class ProbeInputMirror
             item.Ranges.push_back({begin, end - begin});
             item.TransferBytes += end - begin;
         };
+        const auto copyBaseline = [&](UINT64 begin, UINT64 end)
+        {
+            if (!item.Baseline || begin == end) return;
+            item.BaselineRanges.push_back({begin, end - begin});
+            item.BaselineBytes += end - begin;
+        };
         auto patch = patches.begin();
         UINT64 previousEnd = 0;
         for (const auto& range : ranges)
@@ -148,6 +166,7 @@ class ProbeInputMirror
             if (!range.Bytes || range.Offset < previousEnd || range.Offset > bufferBytes ||
                 range.Bytes > bufferBytes - range.Offset)
                 throw std::invalid_argument("Invalid mirror buffer range");
+            copyBaseline(previousEnd, range.Offset);
             const UINT64 end = range.Offset + range.Bytes;
             UINT64 cursor = range.Offset;
             for (; patch != patches.end() && patch->DestinationOffset < end; ++patch)
@@ -164,6 +183,7 @@ class ProbeInputMirror
             previousEnd = end;
         }
         if (patch != patches.end()) throw std::invalid_argument("Owner-local patch is outside the mirror update");
+        copyBaseline(previousEnd, bufferBytes);
         item.Patches = std::move(patches);
     }
 
@@ -244,6 +264,8 @@ class ProbeInputMirror
             UINT64 Offset;
             std::vector<BufferRange> Ranges;
             std::vector<BufferPatch> Patches;
+            ID3D12Resource* Baseline;
+            std::vector<BufferRange> BaselineRanges;
         };
         std::vector<Copy> copies;
         for (const auto& [source, item] : _pending)
@@ -254,7 +276,11 @@ class ProbeInputMirror
             const Resource& declaration = graph.Resources.at(id);
             const State read = declaration.Memory == Heap::Upload ? D3D12_RESOURCE_STATE_GENERIC_READ : copySource;
             accesses.push_back({id, importing ? Mode::Write : Mode::Read, importing ? copyDest : read});
-            copies.push_back({resource, &mirror, item.Offset, item.Ranges, item.Patches});
+            copies.push_back({resource, &mirror, item.Offset, item.Ranges, item.Patches,
+                item.Baseline, item.BaselineRanges});
+            if (importing && !item.BaselineRanges.empty())
+                accesses.push_back({NativeWork::ResourceFor(graph, bindings, item.Baseline, "shadow vertex baseline"),
+                    Mode::Read, copySource});
             if (importing)
                 for (const auto& patch : item.Patches)
                 {
@@ -280,8 +306,12 @@ class ProbeInputMirror
                         sharedOffset += range.Bytes;
                     }
                     if (importing)
+                    {
                         for (const auto& patch : copy.Patches)
                             cmd->CopyBufferRegion(copy.Resource, patch.DestinationOffset, patch.Source, patch.SourceOffset, patch.Bytes);
+                        for (const auto& range : copy.BaselineRanges)
+                            cmd->CopyBufferRegion(copy.Resource, range.Offset, copy.Baseline, range.Offset, range.Bytes);
+                    }
                     continue;
                 }
                 for (UINT subresource = 0; subresource < footprints.size(); ++subresource)

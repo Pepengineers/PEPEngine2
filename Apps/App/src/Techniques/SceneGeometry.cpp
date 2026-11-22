@@ -920,12 +920,14 @@ Schedule SceneGeometry::Plan(UINT index, const AppendTechnique& append, const Ap
 	for (const auto& [exportOp, restoreOp] : s.ShadowInputCopies)
 	{
 		const auto& inputs = g.Operations[exportOp].Accesses;
+		const auto& dependencies = g.Operations[exportOp].Dependencies;
 		const auto original = std::find(order.begin(), order.end(), exportOp);
 		auto destination = order.begin();
 		for (auto operation = order.begin(); operation != original; ++operation)
 		{
 			const auto& accesses = g.Operations[*operation].Accesses;
-			if (std::any_of(accesses.begin(), accesses.end(), [&](const auto& access)
+			if (std::find(dependencies.begin(), dependencies.end(), *operation) != dependencies.end() ||
+			    std::any_of(accesses.begin(), accesses.end(), [&](const auto& access)
 			{
 				return access.Usage != Mode::Read && std::any_of(inputs.begin(), inputs.end(),
 				    [&](const auto& input) { return input.Resource == access.Resource; });

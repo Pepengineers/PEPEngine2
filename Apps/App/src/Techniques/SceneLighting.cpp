@@ -106,6 +106,14 @@ struct SceneLighting::ShadowPublication
 	bool LocalStaged = false, SunStaged = false;
 };
 
+struct SceneLighting::ShadowVertexBaseline
+{
+	ComPtr<ID3D12Resource> Source;
+	GDX12ResourceHandle Data;
+	uint64_t Version = 0;
+	CompletionToken Ready;
+};
+
 struct SceneLighting::RemoteShadows
 {
 	RemoteShadows(const std::shared_ptr<QueueSubmission>& submit, Id owner, RenderPipelineCommonData& common)
@@ -132,13 +140,16 @@ struct SceneLighting::RemoteShadows
 	NativeWork Work;
 	std::vector<ID3D12Resource*> Bindings;
 	Id Export = Invalid, Import = Invalid, Input = Invalid;
+	Id SeedVertices = Invalid;
 	CompletionToken Produced, Imported, Consumer;
 	std::shared_ptr<GDX12ResourceHandle> SkinInput;
+	std::shared_ptr<ShadowVertexBaseline> VertexBase;
+	ID3D12Resource* VertexSource = nullptr;
 	struct VertexUpdate
 	{
 		uint64_t From = 0, To = 0;
-		UINT64 TransferBytes = 0, LocalBytes = 0;
-		bool Baseline = false;
+		UINT64 TransferBytes = 0, LocalBytes = 0, BaselineBytes = 0;
+		bool Seed = false, Clone = false;
 	} Vertices;
 	std::vector<UINT> Lights;
 	UINT Count = 0;
@@ -660,6 +671,7 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 	auto& camera = *_resources.FrameConstants.at(_slot)->CameraCB;
 	auto* cameraBuffer = camera.GetResource().D3DResource.Get();
 	live.insert(cameraBuffer);
+	std::map<Id, Id> baselineExports;
 	for (const auto& [lane, batch] : views)
 	{
 		const Id owner = lane.first;
@@ -752,15 +764,31 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 		const auto meshRevision = _resources.GeometryBuffer->GetMeshCacheRevision();
 		const bool meshChanged = remote.MeshRevision != meshRevision;
 		remote.MeshRevision = meshRevision;
-		const bool baseline = !remote.Mirror.Contains(mesh.VertexResource);
-		remote.Vertices = {remote.VertexDeformationRevision, geometry._vertexDeformationRevision, 0, 0, baseline};
+		auto* sourceVertices = mesh.VertexResource;
+		auto& baseline = _shadowVertexBaselines[owner];
+		if (!baseline || baseline->Source.Get() != sourceVertices)
+		{
+			baseline = std::make_shared<ShadowVertexBaseline>();
+			baseline->Source = sourceVertices;
+			baseline->Data = _submissions->Device(owner).CreateResource(D3D12_HEAP_TYPE_DEFAULT,
+			    CD3DX12_RESOURCE_DESC::Buffer(mesh.Vertices.SizeInBytes), D3D12_RESOURCE_STATE_COMMON);
+		}
+		const auto producer = baselineExports.find(owner);
+		const bool seed = !baseline->Ready && producer == baselineExports.end();
+		if (seed) baseline->Version = geometry._vertexDeformationRevision;
+		const bool clone = !seed && (remote.VertexSource != sourceVertices || !remote.Mirror.Contains(sourceVertices));
+		const auto previousVersion = seed ? 0 : clone ? baseline->Version : remote.VertexDeformationRevision;
+		remote.VertexBase = baseline;
+		remote.SeedVertices = Invalid;
+		remote.Vertices = {previousVersion, geometry._vertexDeformationRevision, 0, 0, 0, seed, clone};
 		std::vector<ProbeInputMirror::BufferRange> ranges;
-		if (!baseline && remote.Vertices.From != remote.Vertices.To)
+		if (!seed && remote.Vertices.From != remote.Vertices.To)
 			for (const auto& [first, end] : geometry.ChangedVertexRanges(remote.Vertices.From))
 				ranges.push_back({UINT64(first) * sizeof(Vertex), UINT64(end - first) * sizeof(Vertex)});
 		std::vector<ProbeInputMirror::BufferPatch> patches;
 		const auto skin = scene.RemoteSkin.find(owner);
-		if (skin != scene.RemoteSkin.end() && !skin->second.Ranges.empty())
+		if ((seed || remote.Vertices.From != remote.Vertices.To) &&
+		    skin != scene.RemoteSkin.end() && !skin->second.Ranges.empty())
 		{
 			remote.SkinInput = skin->second.Output;
 			for (const auto& range : skin->second.Ranges)
@@ -771,15 +799,27 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 				remote.Vertices.LocalBytes += bytes;
 			}
 		}
-		auto* sourceVertices = mesh.VertexResource;
 		mesh.VertexResource = remote.Mirror.Mirror(primary, primaryBindings, mesh.VertexResource,
-		    SceneVertices, baseline, std::move(patches), std::move(ranges));
+		    SceneVertices, seed, std::move(patches), std::move(ranges), clone ? baseline->Data.Get() : nullptr);
 		remote.Vertices.TransferBytes = remote.Mirror.PendingTransferBytes(sourceVertices);
+		remote.Vertices.BaselineBytes = remote.Mirror.PendingBaselineBytes(sourceVertices);
 		mesh.IndexResource = mirror(SceneIndices, meshChanged);
 		mesh.Vertices.BufferLocation = mesh.VertexResource->GetGPUVirtualAddress();
 		mesh.Indices.BufferLocation = mesh.IndexResource->GetGPUVirtualAddress();
 		inputs[3] = bind(mesh.VertexResource);
 		inputs[4] = bind(mesh.IndexResource);
+		if (seed)
+		{
+			auto* target = baseline->Data.Get();
+			const Id targetId = bind(target);
+			remote.Vertices.BaselineBytes = mesh.Vertices.SizeInBytes;
+			remote.SeedVertices = work.Add(graph, "seed shadow owner vertex baseline",
+			    {{inputs[3], Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE},
+			     {targetId, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
+			    [target, mesh](auto* cmd)
+			    { cmd->CopyBufferRegion(target, 0, mesh.VertexResource, 0, mesh.Vertices.SizeInBytes); },
+			    {}, Queue::Copy);
+		}
 		const Id cameraSource = NativeWork::ResourceFor(primary, primaryBindings, cameraBuffer, "shadow camera input");
 		auto* localCamera = mirror(cameraSource, true);
 		const Id cameraId = bind(localCamera);
@@ -847,7 +887,11 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 		}
 		std::sort(work.Commands.begin(), work.Commands.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
 		remote.Input = remote.Mirror.AppendImport(graph, bindings, work, true);
+		if (seed) ++remote.SeedVertices; // The scene import was prepended.
 		remote.Export = remote.Mirror.AppendExport(primary, primaryBindings, _work, restore.empty() ? Queue::Copy : Queue::Direct);
+		if (seed) baselineExports.emplace(owner, remote.Export);
+		else if (clone && producer != baselineExports.end())
+			primary.Operations[remote.Export].Dependencies.push_back(producer->second);
 		Id restored = Invalid;
 		if (!restore.empty())
 			restored = _work.Add(primary, "restore GPU0 shadow material textures", UniqueLightingAccesses(std::move(restore)),
@@ -943,16 +987,25 @@ void SceneLighting::AddShadowExchanges(const Schedule& primary, std::vector<Exec
 		if (remote.Export == Invalid) continue;
 		auto schedule = Compile(remote.Plan);
 		const Id input = packet(schedule, remote.Input);
+		const Id seed = remote.SeedVertices == Invalid ? Invalid : packet(schedule, remote.SeedVertices);
 		remote.GPU.Begin(0);
 		remote.GPU.Reserve(schedule);
 		exchanges.push_back({packet(primary, remote.Export), remote.Import,
-		    [&remote, schedule = std::move(schedule), input](CompletionToken source)
+		    [&remote, schedule = std::move(schedule), input, seed](CompletionToken source)
 		    {
+			    std::vector<PacketWait> waits{{input, source}};
+			    if (remote.Vertices.Clone)
+			    {
+				    if (!remote.VertexBase->Ready) throw std::logic_error("Shadow vertex baseline was not submitted");
+				    waits.push_back({input, remote.VertexBase->Ready});
+			    }
 			    remote.GPU.Execute(schedule, remote.Bindings, [&remote](Id op, UINT, ID3D12GraphicsCommandList* cmd)
 			    {
 				    if (!remote.Work.Record(op, cmd)) throw std::logic_error("Missing owner shadow work");
-			    }, nullptr, nullptr, nullptr, {{input, source}});
+			    }, nullptr, nullptr, nullptr, waits);
 			    remote.Produced = remote.GPU.Completions().back();
+			    if (seed != Invalid) remote.VertexBase->Ready = remote.GPU.Completions().at(seed);
+			    remote.VertexSource = remote.VertexBase->Source.Get();
 			    remote.VertexDeformationRevision = remote.Vertices.To;
 			    if (remote.Publication) remote.Publication->Produced = remote.Produced;
 			    return remote.Produced;
@@ -979,13 +1032,14 @@ void SceneLighting::RetireShadowSkinInputs(UINT slot)
 		auto& remote = *entry;
 		if (!remote.Produced || !_submissions->Complete(remote.Produced)) continue;
 		const auto& update = remote.Vertices;
-		auto& reported = update.Baseline ? remote.ReportedVertexBaseline : remote.ReportedVertexDelta;
-		if (!reported && (update.TransferBytes || update.LocalBytes))
+		auto& reported = update.Seed || update.Clone ? remote.ReportedVertexBaseline : remote.ReportedVertexDelta;
+		if (!reported && (update.TransferBytes || update.LocalBytes || update.BaselineBytes))
 		{
-			Log::Info("RenderGraph", "Shadow vertex mirror ", update.Baseline ? "baseline" : "delta",
+			Log::Info("RenderGraph", "Shadow vertex mirror ", update.Seed ? "baseline" : update.Clone ? "clone" : "delta",
 			    " owner=", _submissions->AdapterLabel(lane.first), " slot=", slot, " latest=", lane.second,
 			    " from=", update.From, " version=", update.To, " crossAdapterBytes=", update.TransferBytes,
-			    " ownerLocalBytes=", update.LocalBytes, " shadowFence=", remote.Produced.Value,
+			    " ownerLocalBytes=", update.LocalBytes, " baselineLocalBytes=", update.BaselineBytes,
+			    " shadowFence=", remote.Produced.Value,
 			    " frameFence=", remote.Consumer.Value);
 			reported = true;
 		}
@@ -993,6 +1047,7 @@ void SceneLighting::RetireShadowSkinInputs(UINT slot)
 			Log::Info("RenderGraph", "Shadow owner reused local Exact skinning GPU=", _submissions->AdapterLabel(lane.first),
 			    " slot=", slot, " vertexBytes=", update.LocalBytes, " shadowFence=", remote.Produced.Value);
 		remote.SkinInput.reset();
+		remote.VertexBase.reset();
 	}
 }
 
