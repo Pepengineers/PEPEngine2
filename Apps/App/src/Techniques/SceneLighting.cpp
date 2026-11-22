@@ -98,7 +98,7 @@ void SceneLighting::Freeze(SceneGeometry& geometry, UINT slot, const std::shared
 		_forceReset = true;
 		_pendingReset = false;
 	}
-	_reflections->Freeze();
+	_reflections->Freeze(submissions);
 	_ssrSettings = GetSSRSettings();
 	_gridSettings = GetLightGridSettings();
 	_slot = slot;
@@ -334,6 +334,8 @@ void SceneLighting::AppendDeferred(Graph& graph, std::vector<ID3D12Resource*>& b
 	}
 
 	lighting.push_back({resource(&lights->GetResource()), Mode::Read, read});
+	lighting.push_back(texture(_reflections->Published(), Mode::Read, read));
+	lighting.push_back({resource(&constants.ReflectionProbes->GetResource()), Mode::Read, read});
 	lighting.push_back({resource(&masks->GetResource()), Mode::Read, read});
 	lighting.push_back({resource(&grid.Constants->GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
 	lighting.push_back({resource(&constants.ShadowCB->GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
@@ -353,7 +355,8 @@ void SceneLighting::AppendDeferred(Graph& graph, std::vector<ID3D12Resource*>& b
 		inputs[i < 11 ? i : 14] = _deferred._inputs[i]->GetTexture()->GetSRV()->GPUHandle;
 	}
 	inputs[11] = lights->GetSRV()->GPUHandle;
-
+	inputs[12] = _reflections->Radiance();
+	inputs[13] = constants.ReflectionProbes->GetSRV()->GPUHandle;
 	inputs[15] = _resources.SkyTransmittanceSRV.GPUHandle;
 	inputs[16] = _resources.SkyViewSRV.GPUHandle;
 	inputs[17] = masks->GetSRV()->GPUHandle;
@@ -375,10 +378,7 @@ void SceneLighting::AppendDeferred(Graph& graph, std::vector<ID3D12Resource*>& b
 		         }
 		         for (UINT i = 0; i < 18; ++i)
 		         {
-			         if ((i != 12 && i != 13))
-			         {
-				         cmd->SetComputeRootDescriptorTable(root->GetTRootParamIndex(i), inputs[i]);
-			         }
+			         cmd->SetComputeRootDescriptorTable(root->GetTRootParamIndex(i), inputs[i]);
 		         }
 		         cmd->SetComputeRootDescriptorTable(root->GetURootParamIndex(0), output);
 		         cmd->Dispatch((width + LightingTileSize - 1) / LightingTileSize,
@@ -410,7 +410,6 @@ GDX12Texture* SceneLighting::AppendSSR(Graph& graph, std::vector<ID3D12Resource*
 	if (!ssr)
 	{
 		ssr = std::make_unique<GDX12SSSRPass>();
-		ssr->SetStaticIBLOnly(true);
 		ssr->Setup(&_resources, &_common);
 		ssr->SetInputs(ssrInputs);
 		ssr->Initialize();
@@ -454,13 +453,16 @@ GDX12Texture* SceneLighting::AppendSSR(Graph& graph, std::vector<ID3D12Resource*
 	auto* prepare = p._prepare.Get();
 	auto* resolve = p._resolve.Get();
 	const auto camera = scene.Camera, ssrCB = p._constants->GetElementAddress(_slot);
-	std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 9> srvs{};
+	std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 11> srvs{};
 	for (UINT i = 0; i < 7; ++i)
 	{
 		srvs[i] = p._inputs[i]->GetTexture()->GetSRV()->GPUHandle;
 	}
 	srvs[7] = p._radiance.GetSRV()->GPUHandle;
 	srvs[8] = p._fallback.GetSRV()->GPUHandle;
+	auto& probeData = *_resources.FrameConstants[_slot]->ReflectionProbes;
+	srvs[9] = _reflections->Radiance();
+	srvs[10] = probeData.GetSRV()->GPUHandle;
 
 	const auto bind = [=](auto* cmd, bool resolvedInputs)
 	{
@@ -485,6 +487,8 @@ GDX12Texture* SceneLighting::AppendSSR(Graph& graph, std::vector<ID3D12Resource*
 	ssrReads.push_back({scene.FrameIds[1], Mode::Read, State(D3D12_RESOURCE_STATE_GENERIC_READ)});
 	ssrReads.push_back({resource(&p._constants->GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
 	auto prepareAccess = ssrReads;
+	prepareAccess.push_back(texture(_reflections->Published(), Mode::Read, read));
+	prepareAccess.push_back({resource(&probeData.GetResource()), Mode::Read, read});
 	prepareAccess.push_back(texture(&p._roughness, Mode::Write, UnorderedAccess));
 	prepareAccess.push_back(texture(&p._motion, Mode::Write, UnorderedAccess));
 	prepareAccess.push_back(texture(&p._fallback, Mode::Write, UnorderedAccess));
@@ -591,7 +595,7 @@ void SceneLighting::AppendComposition(Graph& graph, std::vector<ID3D12Resource*>
 	    [this] { return _probePreview->Depth(); }, [this] { return _probePreview->Motion(); },
 	    [this] { return _probePreview->ReadDepth(); });
 	auto* hdr = _transparency->Append(graph, bindings, geometry, _slot, opaqueHDR, _sunShadows->Output(_slot),
-	                                  _localShadows->Output(_slot), environment);
+	                                  _localShadows->Output(_slot), environment, *_reflections);
 	_hdrContinuation(graph, bindings, hdr);
 }
 } // namespace BistroRender

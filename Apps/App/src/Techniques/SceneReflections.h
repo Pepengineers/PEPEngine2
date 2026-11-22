@@ -3,6 +3,7 @@
 #include "SceneEnvironment.h"
 #include "SceneGeometry.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12ReflectionProbePass.h"
+#include <map>
 namespace BistroRender
 {
 class SceneReflections
@@ -10,8 +11,9 @@ class SceneReflections
   public:
     SceneReflections(GDX12DeviceResources&, RenderPipelineCommonData&);
     ~SceneReflections();
-    void Freeze()
+    void Freeze(const std::shared_ptr<QueueSubmission>& submissions)
     {
+        _submissions = submissions;
         _settings = GetReflectionSettings();
         _historyBase = _common.HistoryRevision;
     }
@@ -19,6 +21,8 @@ class SceneReflections
                 GDX12Texture* localShadows = nullptr, GDX12Texture* staticLocalShadows = nullptr);
     bool Record(Id, ID3D12GraphicsCommandList*) const;
     void Submitted(uint64_t fence);
+    void AddExchanges(const Schedule&, std::vector<PacketWait>&, std::vector<Executor::PacketExchange>&);
+    void RemoteSubmitted(const std::vector<CompletionToken>&);
     void Reset();
     std::pair<size_t, size_t> Readiness() const;
     GDX12Texture* Published()
@@ -35,6 +39,12 @@ class SceneReflections
     }
 
   private:
+    struct CaptureInputs;
+    struct Remote;
+    void AppendCapture(Graph&, std::vector<ID3D12Resource*>&, NativeWork&, GDX12ReflectionProbePass&,
+                       GDX12DeviceResources&, const CaptureInputs&, std::vector<Id>&, std::vector<UINT>&);
+    void AppendRemote(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, SceneEnvironment&, UINT,
+                      std::vector<Id>&, bool arrayReplaced);
     struct Publication
     {
         uint64_t Fence = 0;
@@ -51,5 +61,9 @@ class SceneReflections
     uint64_t _history = 0;
     GDX12ReflectionSettings _settings;
     uint64_t _historyBase = 0;
+    std::shared_ptr<QueueSubmission> _submissions;
+    std::map<Id, std::unique_ptr<Remote>> _remotes;
+    std::vector<Id> _owners;
+    UINT _transferProbe = 0;
 };
 } // namespace BistroRender

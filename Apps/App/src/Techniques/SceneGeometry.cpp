@@ -1,6 +1,7 @@
 #include "SceneGeometry.h"
 #include "Techniques/UI/BistroUIPosters.h"
 #include "NativeWork.h"
+#include "ProbeInputMirror.h"
 #include "ShadowGeometry.h"
 #include "Common/ConsoleVariables.h"
 #include "Engine.Core/BenchmarkEngine.h"
@@ -770,6 +771,64 @@ void SceneGeometry::AppendVegetationView(Graph& graph, std::vector<ID3D12Resourc
 	if (s.Linden)
 	{
 		_lindenDraw.Append(graph, bindings, s.LindenWork, slot, target, s.Buffers[2].Srv, s.Linden, s.LindenPose);
+	}
+}
+
+void SceneGeometry::AppendVegetationView(Graph& primary, std::vector<ID3D12Resource*>& primaryBindings,
+                                         ProbeInputMirror& inputs, Graph& remote,
+                                         std::vector<ID3D12Resource*>& remoteBindings, NativeWork& work,
+                                         RemoteProbeVegetation& vegetation, UINT slot, const GeometryTarget& view,
+                                         const GDX12Descriptor& remoteMaterials, Id material, Id main,
+                                         D3D12_GPU_VIRTUAL_ADDRESS mainAddress, D3D12_GPU_DESCRIPTOR_HANDLE localLights)
+{
+	if (!view.View.IncludeApplicationGeometry) return;
+	if (view.View.Stage != GDX12GeometryStage::ReflectionCapture || !view.View.CaptureLighting)
+		throw std::invalid_argument("Remote vegetation requires probe capture lighting");
+	auto& scene = _slots.at(slot);
+	auto& owner = vegetation.Grass.Owner;
+	const auto mirror = [&](GDX12Resource& source, UINT stride) {
+		auto* original = source.D3DResource.Get();
+		const Id primaryId = NativeWork::ResourceFor(primary, primaryBindings, original, "probe vegetation input");
+		auto* local = inputs.Mirror(primary, primaryBindings, original, primaryId, true);
+		ProbeVegetationBuffer result{
+		    NativeWork::ResourceFor(remote, remoteBindings, local, "probe owner vegetation input"), local, {}};
+		if (stride)
+		{
+			auto& descriptor = vegetation.Views[{local, stride}];
+			if (!descriptor)
+			{
+				auto* heap = owner.SRV_UAV_Heap.get();
+				D3D12_SHADER_RESOURCE_VIEW_DESC desc{};
+				desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+				desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+				desc.Buffer.NumElements = UINT(local->GetDesc().Width / stride);
+				desc.Buffer.StructureByteStride = stride;
+				descriptor = std::make_unique<GDX12Descriptor>();
+				descriptor->InitAsSRV(local, &desc, heap, heap->GetAvailableIndex(SceneDescriptorStart));
+			}
+			result.Srv = descriptor->GPUHandle;
+		}
+		return result;
+	};
+	auto target = view;
+	const auto read = [&](Id resource, State state) {
+		if (std::none_of(target.AdditionalReads.begin(), target.AdditionalReads.end(),
+		                 [resource](auto access) { return access.Resource == resource; }))
+			target.AdditionalReads.push_back({resource, Mode::Read, state});
+	};
+	read(material, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
+	for (const auto constant : {main, target.Camera})
+		read(constant, remote.Resources.at(constant).Memory == Heap::Upload ? D3D12_RESOURCE_STATE_GENERIC_READ :
+		                                                                    D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+	_grass->AppendProbeCapture(remote, remoteBindings, work, vegetation.Grass, slot, target, remoteMaterials,
+	                           mainAddress, localLights, mirror);
+	if (scene.Linden)
+	{
+		if (!vegetation.Linden) vegetation.Linden = std::make_unique<LindenDraw>(owner, true);
+		const auto pose = mirror(scene.LindenPose.Current->GetResource(), sizeof(LindenPoseVertex));
+		const LindenDraw::CaptureInputs capture{pose.Resource, material, main, pose.Srv, localLights, mainAddress};
+		vegetation.Linden->Append(remote, remoteBindings, work, slot, target, remoteMaterials, scene.Linden,
+		                          scene.LindenPose, &capture);
 	}
 }
 std::vector<ID3D12Resource*> SceneGeometry::Resources(UINT index) const

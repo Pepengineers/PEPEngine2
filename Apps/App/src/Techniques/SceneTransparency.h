@@ -17,7 +17,7 @@ class SceneTransparency
 	void SetWaterRetirement(std::function<void()> retire) { _water.SetRetirement(std::move(retire)); }
 	SceneParticles& Particles() { return _particles; }
 	GDX12Texture* Append(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, UINT slot, GDX12Texture* hdr,
-	                     GDX12Texture* sun, GDX12Texture* local, SceneEnvironment&);
+	                     GDX12Texture* sun, GDX12Texture* local, SceneEnvironment&, SceneReflections&);
 	using OpaqueContinuation = std::function<GDX12Texture*(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture*,
 	                                                       GDX12Texture*, GDX12Texture*)>;
 	void SetOpaqueContinuation(OpaqueContinuation append, std::function<GDX12Texture*()> depth,
@@ -44,7 +44,8 @@ class SceneTransparency
 		bool Initialized = false;
 	};
 	GDX12Texture* AppendPhase(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, UINT slot, Frame&,
-	                          GDX12Texture* hdr, GDX12Texture* sun, GDX12Texture* local, SceneEnvironment&);
+	                          GDX12Texture* hdr, GDX12Texture* sun, GDX12Texture* local, SceneEnvironment&,
+	                          SceneReflections&);
 	GDX12DeviceResources& _resources;
 	RenderPipelineCommonData& _common;
 	std::vector<Frame> _frames;

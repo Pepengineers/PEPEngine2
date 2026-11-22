@@ -228,6 +228,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	_post->AddPosterExchanges(_schedule, waits, exchanges);
 	particles.AddExchanges(_schedule, waits, exchanges);
 	if (auto ao = _lighting->AOExchange(_schedule)) exchanges.push_back(std::move(*ao));
+	_lighting->AddProbeExchanges(_schedule, waits, exchanges);
 	uint64_t completion;
 	try
 	{
@@ -243,6 +244,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 		grass.WindSubmitted(_frameNumber, _executor->Completions());
 		particles.Submitted(_executor->Completions());
 		_lighting->AOSubmitted(_executor->Completions());
+		_lighting->ProbesSubmitted(_executor->Completions());
 		_post->Reconstruction().CancelRecording();
 		throw;
 	}
@@ -252,6 +254,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	grass.WindSubmitted(_frameNumber, _executor->Completions());
 	particles.Submitted(_executor->Completions());
 	_lighting->AOSubmitted(_executor->Completions());
+	_lighting->ProbesSubmitted(_executor->Completions());
 	_post->PostersSubmitted(_frameNumber, _executor->Completions());
 	_post->Submitted(slot);
 	_environment->Submitted(completion);

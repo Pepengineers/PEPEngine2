@@ -1,4 +1,5 @@
 #include "SceneTransparency.h"
+#include "SceneReflections.h"
 #include "Common/GameTimer.h"
 
 namespace BistroRender
@@ -11,7 +12,6 @@ SceneTransparency::SceneTransparency(GDX12DeviceResources& resources, RenderPipe
 	{
 		frame.Draw.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
 		frame.Draw.SetUnbatchedDraws(true);
-		frame.Draw.SetStaticIBLOnly(true);
 		frame.Draw.SetAtmosphereEnabled(true);
 		frame.Compose.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
 		frame.Compose.SetApplyOpaqueAerialPerspective(true);
@@ -27,7 +27,7 @@ SceneTransparency::~SceneTransparency()
 }
 GDX12Texture* SceneTransparency::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, SceneGeometry& geometry,
                                         UINT slot, GDX12Texture* hdr, GDX12Texture* sun, GDX12Texture* local,
-                                        SceneEnvironment& environment)
+                                        SceneEnvironment& environment, SceneReflections& reflections)
 {
 	_work.Commands.clear();
 	auto& frame = _frames.at(slot);
@@ -36,11 +36,12 @@ GDX12Texture* SceneTransparency::Append(Graph& graph, std::vector<ID3D12Resource
 	{
 		hdr = _opaqueContinuation(graph, bindings, hdr, _water.Depth(), _water.Motion());
 	}
-	return AppendPhase(graph, bindings, geometry, slot, frame, hdr, sun, local, environment);
+	return AppendPhase(graph, bindings, geometry, slot, frame, hdr, sun, local, environment, reflections);
 }
 GDX12Texture* SceneTransparency::AppendPhase(Graph& graph, std::vector<ID3D12Resource*>& bindings,
                                              SceneGeometry& geometry, UINT slot, Frame& phase, GDX12Texture* hdr,
-                                             GDX12Texture* sun, GDX12Texture* local, SceneEnvironment& environment)
+                                             GDX12Texture* sun, GDX12Texture* local, SceneEnvironment& environment,
+                                             SceneReflections& reflections)
 {
 	auto& scene = geometry._slots.at(slot);
 	auto& constants = *_resources.FrameConstants.at(slot);
@@ -89,6 +90,8 @@ GDX12Texture* SceneTransparency::AppendPhase(Graph& graph, std::vector<ID3D12Res
 	    {texture(rasterDepth, Mode::Read, depthRead),
 	     texture(sun, Mode::Read, read),
 	     texture(local, Mode::Read, read),
+	     texture(reflections.Published(), Mode::Read, read),
+	     {resource(constants.ReflectionProbes->GetResource().D3DResource.Get()), Mode::Read, read},
 	     {scene.FrameIds[0], Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ},
 	     {scene.FrameIds[1], Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ},
 	     {resource(constants.ShadowCB->GetResource().D3DResource.Get()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ},
@@ -114,7 +117,7 @@ GDX12Texture* SceneTransparency::AppendPhase(Graph& graph, std::vector<ID3D12Res
 	auto* heap = _resources.SRV_UAV_Heap->GetHeap().Get();
 	const auto main = scene.Main, camera = scene.Camera, shadow = constants.ShadowCB->GetElementAddress(0),
 	           sky = constants.SkyCB->GetElementAddress(0);
-	const std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 9> srvs{scene.Buffers[2].Srv.GPUHandle,
+	const std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 11> srvs{scene.Buffers[2].Srv.GPUHandle,
 	                                                      scene.Buffers[3].Srv.GPUHandle,
 	                                                      scene.Buffers[0].Srv.GPUHandle,
 	                                                      sun->GetSRV()->GPUHandle,
@@ -122,7 +125,9 @@ GDX12Texture* SceneTransparency::AppendPhase(Graph& graph, std::vector<ID3D12Res
 	                                                      environment.Output(1)->GetTexture()->GetSRV()->GPUHandle,
 	                                                      environment.Output(2)->GetTexture()->GetSRV()->GPUHandle,
 	                                                      constants.ShadowLights->GetSRV()->GPUHandle,
-	                                                      local->GetSRV()->GPUHandle};
+	                                                      local->GetSRV()->GPUHandle,
+	                                                      reflections.Radiance(),
+	                                                      constants.ReflectionProbes->GetSRV()->GPUHandle};
 	const std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 3> atmosphere{_resources.SkyTransmittanceSRV.GPUHandle,
 	                                                            _resources.SkyAerialRadianceSRV.GPUHandle,
 	                                                            _resources.SkyAerialTransmittanceSRV.GPUHandle};

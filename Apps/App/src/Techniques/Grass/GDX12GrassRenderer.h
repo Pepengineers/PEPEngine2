@@ -144,6 +144,7 @@ private:
     };
     template<typename T> std::unique_ptr<GDX12UploadBuffer<T>> Buffer(UINT count, bool srv, bool uav);
     void Initialize();
+    void InitializeGraphics(bool captureOnly = false);
     void InitializeWind();
     void EnsureNeutralWind();
     void PlanLocalWind(WindState&, uint64_t independentWind);

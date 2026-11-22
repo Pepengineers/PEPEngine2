@@ -99,6 +99,14 @@ void GDX12GrassRenderer::Initialize()
     _interactionRoot = std::make_unique<GDX12RootSignature>(_resources->Device, interaction);
     _interactionPSO = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _interactionRoot.get(),
         APP_SHADERS_FOLDER "GrassInteraction.hlsl", "CS");
+    _expandPSO = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _computeRoot.get(), APP_SHADERS_FOLDER "GrassExpand.hlsl", "ExpandCS");
+    _clearPSO = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _computeRoot.get(), APP_SHADERS_FOLDER "GrassExpand.hlsl", "ClearCS");
+    InitializeGraphics();
+    _initialized = true;
+}
+
+void GDX12GrassRenderer::InitializeGraphics(bool captureOnly)
+{
     GDX12RootSignatureDesc graphics;
     graphics.VolatileSRVData = true;
     graphics.NumSingleCBVSlots = 4;
@@ -112,11 +120,10 @@ void GDX12GrassRenderer::Initialize()
     graphics.StaticSamplers.push_back(shadowSampler);
     _graphicsRoot = std::make_unique<GDX12RootSignature>(_resources->Device, graphics);
     auto& compiler = GDX12ShaderCompiler::GetInstance();
-    _expandPSO = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _computeRoot.get(), APP_SHADERS_FOLDER "GrassExpand.hlsl", "ExpandCS");
-    _clearPSO = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _computeRoot.get(), APP_SHADERS_FOLDER "GrassExpand.hlsl", "ClearCS");
     for (UINT i = 0; i < _graphicsPSO.size(); ++i)
     {
         const auto stage = static_cast<Stage>(i);
+        if (captureOnly && stage != Stage::Capture) continue;
         const bool depth = stage == Stage::Depth || stage == Stage::Shadow;
         const bool capture = stage == Stage::Capture;
         D3D_SHADER_MACRO captureDefines[] = { { "GRASS_CAPTURE", "1" }, { nullptr, nullptr } };
@@ -165,7 +172,6 @@ void GDX12GrassRenderer::Initialize()
     signature.NumArgumentDescs = 1;
     signature.pArgumentDescs = &argument;
     ThrowIfFailed(_resources->Device->GetDevice()->CreateCommandSignature(&signature, nullptr, IID_PPV_ARGS(&_signature)));
-    _initialized = true;
 }
 
 void GDX12GrassRenderer::RetireWind(WindState& state)

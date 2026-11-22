@@ -12,6 +12,7 @@ struct GDX12ReflectionCaptureSettings
     UINT FacesPerFrame = 0;
     UINT PrefilterSamples = 0;
     UINT UpdateInterval = 1;
+    int Adapter = -1; // DXGI hardware index; -1 uses the primary adapter.
 };
 
 struct GDX12ReflectionProbe : GDX12ReflectionCaptureSettings
@@ -38,6 +39,7 @@ struct GDX12ReflectionSettings
 GDX12ReflectionSettings GetReflectionSettings();
 GDX12ReflectionCaptureSettings ResolveReflectionCaptureSettings(const GDX12ReflectionCaptureSettings& author, int quality);
 bool IsValidReflectionProbe(const GDX12ReflectionProbe& probe);
+bool SameReflectionCapture(const GDX12ReflectionProbe& a, const GDX12ReflectionProbe& b);
 
 // Keep the published box and capture centre together until all faces are ready.
 struct GDX12ReflectionProbeData

@@ -1,7 +1,5 @@
 #include "CBufferStructures.hlsl"
-#if !DEFERRED_OPAQUE_ONLY
 #define LOCAL_REFLECTION_PROBES 1
-#endif
 ConstantBuffer<MainCB> CBMain : register(b0);
 ConstantBuffer<CameraCB> CBCamera : register(b1);
 ConstantBuffer<ShadowCB> CBShadow : register(b2);

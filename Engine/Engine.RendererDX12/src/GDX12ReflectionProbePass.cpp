@@ -14,14 +14,6 @@ namespace
         return device->GetDevice()->GetResourceAllocationInfo(0, 1, &desc).SizeInBytes;
     }
 
-    bool SameCapture(const GDX12ReflectionProbe& a, const GDX12ReflectionProbe& b)
-    {
-        return a.Id == b.Id && a.Position == b.Position && a.BoxMin == b.BoxMin && a.BoxMax == b.BoxMax &&
-            a.NearPlane == b.NearPlane && a.FarPlane == b.FarPlane && a.Revision == b.Revision &&
-            a.Implementation == b.Implementation && a.Resolution == b.Resolution &&
-            a.PrefilterSamples == b.PrefilterSamples;
-    }
-
     GDX12CameraConstants FaceCamera(const GDX12ReflectionProbe& probe, const UINT face, const UINT size)
     {
         const Vector3 directions[] = { Vector3::UnitX, -Vector3::UnitX, Vector3::UnitY,
@@ -408,8 +400,9 @@ void GDX12ReflectionProbePass::Prepare()
     for (size_t i = 0; i < submitted.size(); ++i)
     {
         auto& probe = _probes[i];
-        if (!SameCapture(probe.Source, submitted[i]) || shadowQualityChanged)
+        if (!SameReflectionCapture(probe.Source, submitted[i]) || shadowQualityChanged)
         {
+            if (probe.Source.Adapter != submitted[i].Adapter) probe.Ready = false;
             _commonData->ResetHistory = true;
             ++_commonData->HistoryRevision;
             probe.CapturedFaces = probe.BakedFaces = probe.NextFace = 0;
@@ -455,8 +448,9 @@ void GDX12ReflectionProbePass::Prepare()
         for (size_t visited = 0; visited < _probes.size(); ++visited)
         {
             auto& probe = _probes[_roundRobinProbe];
-            if (!probe.Ready || probe.CapturedFaces || !probe.LastUpdate ||
-                (probe.Source.Implementation != 2 && _frameNumber - probe.LastUpdate >= probe.Source.UpdateInterval))
+            if ((!_captureAllowed || _captureAllowed(_roundRobinProbe)) &&
+                (!probe.Ready || probe.CapturedFaces || !probe.LastUpdate ||
+                 (probe.Source.Implementation != 2 && _frameNumber - probe.LastUpdate >= probe.Source.UpdateInterval)))
             {
                 const auto end = (std::min)(6u, probe.NextFace + probe.Source.FacesPerFrame);
                 for (UINT face = probe.NextFace; face < end; ++face) work[_roundRobinProbe].Faces |= 1u << face;
@@ -468,8 +462,9 @@ void GDX12ReflectionProbePass::Prepare()
     }
     // Scheduled priority may select an already frozen probe; only an explicit invalidation reopens it.
     for (UINT index = 0; index < _probes.size(); ++index)
-        if (_probes[index].Source.Implementation == 2 && _probes[index].Ready &&
-            _probes[index].LastUpdate && !_probes[index].CapturedFaces)
+        if ((_captureAllowed && !_captureAllowed(index)) ||
+            (_probes[index].Source.Implementation == 2 && _probes[index].Ready &&
+             _probes[index].LastUpdate && !_probes[index].CapturedFaces))
             work[index].Faces = 0;
     CreateCaptureTextures(maximumResolution);
     _views.resize(_probes.size() * 14);

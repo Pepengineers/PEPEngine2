@@ -24,6 +24,15 @@ class SceneLighting
 	{
 		_frames.at(_slot).AO->Submitted(completions);
 	}
+	void AddProbeExchanges(const Schedule& schedule, std::vector<PacketWait>& waits,
+	                       std::vector<Executor::PacketExchange>& exchanges)
+	{
+		_reflections->AddExchanges(schedule, waits, exchanges);
+	}
+	void ProbesSubmitted(const std::vector<CompletionToken>& completions)
+	{
+		_reflections->RemoteSubmitted(completions);
+	}
 	void AOPresented(uint64_t frame, const std::vector<CompletionToken>& completions)
 	{
 		_frames.at(_slot).AO->Presented(frame, completions);

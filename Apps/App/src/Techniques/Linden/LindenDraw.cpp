@@ -8,7 +8,7 @@
 
 namespace BistroRender
 {
-LindenDraw::LindenDraw(GDX12DeviceResources& resources) : _resources(resources)
+LindenDraw::LindenDraw(GDX12DeviceResources& resources, bool captureOnly) : _resources(resources)
 {
 	GDX12RootSignatureDesc root;
 	root.Constants = {18}; // view-projection, batch material, first pulled index
@@ -27,6 +27,7 @@ LindenDraw::LindenDraw(GDX12DeviceResources& resources) : _resources(resources)
 	auto& compiler = GDX12ShaderCompiler::GetInstance();
 	for (auto stage : {Stage::Depth, Stage::DepthNormals, Stage::GBuffer, Stage::Shadow, Stage::Capture})
 	{
+		if (captureOnly && stage != Stage::Capture) continue;
 		const bool depth = stage == Stage::Depth || stage == Stage::Shadow;
 		const bool normals = stage == Stage::DepthNormals;
 		const D3D_SHADER_MACRO prepass[] = {{"LINDEN_DEPTH_NORMALS", "1"}, {nullptr, nullptr}};
@@ -77,7 +78,8 @@ LindenDraw::LindenDraw(GDX12DeviceResources& resources) : _resources(resources)
 
 void LindenDraw::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work, UINT slot,
                         const GeometryTarget& target, const GDX12Descriptor& materials,
-                        const std::shared_ptr<const LindenMesh>& mesh, const LindenDisplayedPose& pose)
+                        const std::shared_ptr<const LindenMesh>& mesh, const LindenDisplayedPose& pose,
+                        const CaptureInputs* remote)
 {
 	if (!mesh || !target.View.IncludeApplicationGeometry)
 		return;
@@ -96,6 +98,8 @@ void LindenDraw::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, Na
 	case GDX12GeometryStage::ReflectionCapture: stage = Stage::Capture; break;
 	default: return;
 	}
+	if (remote && stage != Stage::Capture)
+		throw std::invalid_argument("Remote linden inputs require a probe capture view");
 
 	auto id = [&](auto* buffer, const char* name)
 	{ return NativeWork::ResourceFor(graph, bindings, buffer->GetResource().D3DResource.Get(), name); };
@@ -136,22 +140,23 @@ void LindenDraw::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, Na
 			accesses.push_back({resource, Mode::Read, state});
 	};
 	const bool capture = stage == Stage::Capture;
-	auto& frame = *_resources.FrameConstants.at(slot);
+	const auto* frame = remote ? nullptr : _resources.FrameConstants.at(slot).get();
 	const auto buffers = _buffers;
 	read(id(&buffers->Indices, "linden indices"), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 	read(id(&buffers->UVs, "linden UVs"), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-	read(id(pose.Current, "linden displayed vertices"), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+	read(remote ? remote->Pose : id(pose.Current, "linden displayed vertices"), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 	if (stage == Stage::GBuffer)
 		read(id(pose.Previous, "linden previous displayed vertices"), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-	read(SceneMaterials, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
+	read(remote ? remote->Materials : SceneMaterials, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
 	if (target.Camera != Invalid) read(target.Camera, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
-	if (capture) read(id(frame.MainCB.get(), "linden main constants"), D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+	if (capture) read(remote ? remote->Main : id(frame->MainCB.get(), "linden main constants"),
+	                  D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
 	accesses.push_back({target.Depth, stage == Stage::GBuffer ? Mode::Read : Mode::Write,
 	                    State(stage == Stage::GBuffer ? D3D12_RESOURCE_STATE_DEPTH_READ : D3D12_RESOURCE_STATE_DEPTH_WRITE)});
 	for (auto color : target.Colors) accesses.push_back({color, Mode::Write, D3D12_RESOURCE_STATE_RENDER_TARGET});
 
 	std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 12> srvs{};
-	srvs[0] = pose.Current->GetSRV()->GPUHandle;
+	srvs[0] = remote ? remote->PoseSrv : pose.Current->GetSRV()->GPUHandle;
 	srvs[1] = materials.GPUHandle;
 	srvs[8] = buffers->Indices.GetSRV()->GPUHandle;
 	srvs[9] = buffers->UVs.GetSRV()->GPUHandle;
@@ -165,11 +170,11 @@ void LindenDraw::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, Na
 		srvs[3] = lighting.Irradiance->GetSRV()->GPUHandle;
 		srvs[4] = lighting.Prefiltered->GetSRV()->GPUHandle;
 		srvs[5] = lighting.BRDF->GetSRV()->GPUHandle;
-		srvs[6] = frame.ShadowLights->GetSRV()->GPUHandle;
+		srvs[6] = remote ? remote->LocalLights : frame->ShadowLights->GetSRV()->GPUHandle;
 		srvs[7] = lighting.LocalShadows->GetSRV()->GPUHandle;
 		shadowConstants = lighting.ShadowConstants;
 	}
-	const auto main = frame.MainCB->GetElementAddress(0);
+	const auto main = remote ? remote->MainAddress : frame->MainCB->GetElementAddress(0);
 	auto* heap = _resources.SRV_UAV_Heap->GetHeap().Get();
 	auto* root = _root.get();
 	const auto pipeline = _pipelines.at(static_cast<size_t>(stage));

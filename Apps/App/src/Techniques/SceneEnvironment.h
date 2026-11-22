@@ -35,6 +35,10 @@ class SceneEnvironment
     }
 
     std::vector<Access> Reads(Graph&, std::vector<ID3D12Resource*>&) const;
+    GDX12Texture* CaptureTransmittance() const
+    {
+        return _environment._luts[0]->IsInitialized() ? _environment._luts[0].get() : nullptr;
+    }
     void AddAerialReads(Graph&, std::vector<ID3D12Resource*>&, std::vector<Access>&);
     GDX12Texture* VisibleSkyView() const
     {

@@ -58,5 +58,13 @@ bool IsValidReflectionProbe(const GDX12ReflectionProbe& probe)
         std::isfinite(probe.Intensity) && probe.Intensity >= 0 && probe.Intensity <= 16 &&
         std::isfinite(probe.NearPlane) && probe.NearPlane >= 0.01f &&
         std::isfinite(probe.FarPlane) && probe.FarPlane > probe.NearPlane && probe.FarPlane <= 1000000 &&
-        probe.UpdateInterval >= 1 && probe.UpdateInterval <= 3600;
+        probe.UpdateInterval >= 1 && probe.UpdateInterval <= 3600 && probe.Adapter >= -1;
+}
+
+bool SameReflectionCapture(const GDX12ReflectionProbe& a, const GDX12ReflectionProbe& b)
+{
+    return a.Id == b.Id && a.Position == b.Position && a.BoxMin == b.BoxMin && a.BoxMax == b.BoxMax &&
+        a.NearPlane == b.NearPlane && a.FarPlane == b.FarPlane && a.Revision == b.Revision &&
+        a.Implementation == b.Implementation && a.Resolution == b.Resolution &&
+        a.PrefilterSamples == b.PrefilterSamples && a.Adapter == b.Adapter;
 }

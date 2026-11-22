@@ -1,0 +1,215 @@
+#pragma once
+
+#include "Graph/QueueSubmission.h"
+#include "NativeWork.h"
+#include <unordered_map>
+
+namespace BistroRender
+{
+// One cache per owner. Before reusing the shared range, GPU0 must wait for the
+// preceding remote import. Keep the cache alive through both executors' work.
+class ProbeInputMirror
+{
+  public:
+    ProbeInputMirror(QueueSubmission& submit, Id remote) : _submit(submit), _remote(remote) {}
+
+    void Begin()
+    {
+        _pending.clear();
+        _bytes = 0;
+        _sealed = false;
+    }
+
+    // Retire both graphs before resetting the source identities or either endpoint.
+    void Reset()
+    {
+        Begin();
+        _mirrors.clear();
+        _transfer = {};
+        _retainedTransfers.clear();
+        _capacity = 0;
+    }
+
+    ID3D12Resource* Mirror(Graph& primary, std::vector<ID3D12Resource*>& bindings, ID3D12Resource* source,
+                          Id primaryResource, bool refresh)
+    {
+        if (_sealed || !source || primary.Device != 0 || bindings.at(primaryResource) != source)
+            throw std::logic_error("Invalid probe input mirror source");
+        auto [entry, inserted] = _mirrors.try_emplace(source);
+        auto& mirror = entry->second;
+        if (inserted)
+        {
+            try { Initialize(mirror, source); }
+            catch (...) { _mirrors.erase(entry); throw; }
+        }
+        if ((refresh || !mirror.Initialized) && !_pending.count(&mirror))
+        {
+            const UINT64 offset = Align(_bytes);
+            if (offset > UINT64_MAX - mirror.Bytes)
+                throw std::overflow_error("Probe input transfer exceeds buffer size range");
+            _pending.emplace(&mirror, Pending{primaryResource, offset});
+            _bytes = offset + mirror.Bytes;
+        }
+        return mirror.Local.Get();
+    }
+
+    Id AppendExport(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work, Queue queue = Queue::Copy)
+    {
+        return Append(graph, bindings, work, false, queue);
+    }
+
+    // Moving the import before its consumers preserves the graph's access order.
+    // The caller must prepend before storing any operation IDs outside this work.
+    Id AppendImport(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work, bool prepend = false)
+    {
+        const Id id = Append(graph, bindings, work, true, Queue::Copy);
+        if (!prepend || id == Invalid || id == 0) return id;
+        std::rotate(graph.Operations.begin(), graph.Operations.end() - 1, graph.Operations.end());
+        for (auto& op : graph.Operations)
+            for (auto& dependency : op.Dependencies)
+                ++dependency;
+        std::rotate(work.Commands.begin(), work.Commands.end() - 1, work.Commands.end());
+        work.Commands.front().first = 0;
+        for (auto command = work.Commands.begin() + 1; command != work.Commands.end(); ++command)
+            ++command->first;
+        return 0;
+    }
+
+  private:
+    struct Image
+    {
+        ComPtr<ID3D12Resource> Source;
+        GDX12ResourceHandle Local;
+        std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> Footprints;
+        UINT64 Bytes = 0;
+        bool Initialized = false;
+    };
+
+    struct Pending
+    {
+        Id Source;
+        UINT64 Offset;
+    };
+
+    static UINT64 Align(UINT64 bytes)
+    {
+        constexpr UINT64 alignmentMask = D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT - 1;
+        if (bytes > UINT64_MAX - alignmentMask)
+            throw std::overflow_error("Probe input transfer offset overflow");
+        return (bytes + alignmentMask) & ~alignmentMask;
+    }
+
+    void Initialize(Image& mirror, ID3D12Resource* source)
+    {
+        auto shape = source->GetDesc();
+        auto* device = _submit.Device(_remote).GetDevice().Get();
+        if (shape.Dimension == D3D12_RESOURCE_DIMENSION_BUFFER)
+        {
+            mirror.Bytes = shape.Width;
+        }
+        else if (shape.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE2D && shape.SampleDesc.Count == 1)
+        {
+            D3D12_FEATURE_DATA_FORMAT_INFO format{shape.Format};
+            ThrowIfFailed(device->CheckFeatureSupport(D3D12_FEATURE_FORMAT_INFO, &format, sizeof(format)));
+            if (format.PlaneCount != 1)
+                throw std::invalid_argument("Probe capture expects single-plane texture inputs");
+            const UINT count = UINT(shape.MipLevels) * shape.DepthOrArraySize;
+            mirror.Footprints.resize(count);
+            std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> local(count);
+            UINT64 localBytes = 0;
+            _submit.Device(0).GetDevice()->GetCopyableFootprints(&shape, 0, count, 0, mirror.Footprints.data(),
+                                                                nullptr, nullptr, &mirror.Bytes);
+            device->GetCopyableFootprints(&shape, 0, count, 0, local.data(), nullptr, nullptr, &localBytes);
+            if (!mirror.Bytes || mirror.Bytes == UINT64_MAX || localBytes != mirror.Bytes)
+                throw std::runtime_error("Probe input texture has incompatible adapter footprints");
+            for (UINT i = 0; i < count; ++i)
+            {
+                const auto& a = mirror.Footprints[i];
+                const auto& b = local[i];
+                if (a.Offset != b.Offset || a.Footprint.Format != b.Footprint.Format ||
+                    a.Footprint.Width != b.Footprint.Width || a.Footprint.Height != b.Footprint.Height ||
+                    a.Footprint.Depth != b.Footprint.Depth || a.Footprint.RowPitch != b.Footprint.RowPitch)
+                    throw std::runtime_error("Probe input texture has incompatible adapter footprints");
+            }
+        }
+        else
+        {
+            throw std::invalid_argument("Probe capture expects buffer or non-MSAA Texture2D inputs");
+        }
+        mirror.Source = source;
+        shape.Alignment = 0;
+        shape.Flags = D3D12_RESOURCE_FLAG_NONE;
+        mirror.Local = _submit.Device(_remote).CreateResource(D3D12_HEAP_TYPE_DEFAULT, shape,
+                                                               D3D12_RESOURCE_STATE_COMMON, nullptr);
+    }
+
+    Id Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work, bool importing, Queue queue)
+    {
+        if (graph.Device != (importing ? _remote : 0))
+            throw std::logic_error("Probe input transfer uses the wrong graph device");
+        _sealed = true;
+        if (_pending.empty()) return Invalid;
+        if (_bytes > _capacity)
+        {
+            auto transfer = _submit.CreateTransferBuffer(_remote, _bytes);
+            if (_transfer.Resources[0]) _retainedTransfers.push_back(std::move(_transfer));
+            _transfer = std::move(transfer);
+            _capacity = _bytes;
+        }
+        auto* shared = _transfer.Resources[importing ? 1 : 0].Get();
+        constexpr State copySource = D3D12_RESOURCE_STATE_COPY_SOURCE;
+        constexpr State copyDest = D3D12_RESOURCE_STATE_COPY_DEST;
+        std::vector<Access> accesses{{NativeWork::ResourceFor(graph, bindings, shared, "probe shared inputs"),
+                                      importing ? Mode::Read : Mode::Write, importing ? copySource : copyDest}};
+        struct Copy
+        {
+            ID3D12Resource* Resource;
+            const Image* Mirror;
+            UINT64 Offset;
+        };
+        std::vector<Copy> copies;
+        for (const auto& [entry, item] : _pending)
+        {
+            auto& mirror = *entry;
+            auto* resource = importing ? mirror.Local.Get() : mirror.Source.Get();
+            const Id id = importing ? NativeWork::ResourceFor(graph, bindings, resource, "probe owner-local input") : item.Source;
+            const Resource& declaration = graph.Resources.at(id);
+            const State read = declaration.Memory == Heap::Upload ? D3D12_RESOURCE_STATE_GENERIC_READ : copySource;
+            accesses.push_back({id, importing ? Mode::Write : Mode::Read, importing ? copyDest : read});
+            copies.push_back({resource, &mirror, item.Offset});
+            if (importing) mirror.Initialized = true;
+        }
+        return work.Add(graph, importing ? "probe owner import scene inputs" : "GPU0 export probe scene inputs",
+                        std::move(accesses), [shared, importing, copies = std::move(copies)](auto* cmd) {
+            for (const auto& copy : copies)
+            {
+                const auto& footprints = copy.Mirror->Footprints;
+                if (footprints.empty())
+                {
+                    if (importing) cmd->CopyBufferRegion(copy.Resource, 0, shared, copy.Offset, copy.Mirror->Bytes);
+                    else cmd->CopyBufferRegion(shared, copy.Offset, copy.Resource, 0, copy.Mirror->Bytes);
+                    continue;
+                }
+                for (UINT subresource = 0; subresource < footprints.size(); ++subresource)
+                {
+                    auto footprint = footprints[subresource];
+                    footprint.Offset += copy.Offset;
+                    const CD3DX12_TEXTURE_COPY_LOCATION texture(copy.Resource, subresource), buffer(shared, footprint);
+                    cmd->CopyTextureRegion(importing ? &texture : &buffer, 0, 0, 0, importing ? &buffer : &texture,
+                                           nullptr);
+                }
+            }
+        }, {}, queue);
+    }
+
+    QueueSubmission& _submit;
+    Id _remote;
+    std::unordered_map<ID3D12Resource*, Image> _mirrors;
+    std::unordered_map<Image*, Pending> _pending;
+    QueueSubmission::TransferBuffer _transfer;
+    std::vector<QueueSubmission::TransferBuffer> _retainedTransfers;
+    UINT64 _capacity = 0;
+    UINT64 _bytes = 0;
+    bool _sealed = false;
+};
+} // namespace BistroRender

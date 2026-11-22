@@ -12,10 +12,17 @@ struct NativeWork;
 class LindenDraw
 {
   public:
-	explicit LindenDraw(GDX12DeviceResources&);
+	explicit LindenDraw(GDX12DeviceResources&, bool captureOnly = false);
 	void Reset() { _mesh.reset(); _buffers.reset(); }
+	struct CaptureInputs
+	{
+		Id Pose, Materials, Main;
+		D3D12_GPU_DESCRIPTOR_HANDLE PoseSrv, LocalLights;
+		D3D12_GPU_VIRTUAL_ADDRESS MainAddress;
+	};
 	void Append(Graph&, std::vector<ID3D12Resource*>&, NativeWork&, UINT slot, const GeometryTarget&,
-	            const GDX12Descriptor& materials, const std::shared_ptr<const LindenMesh>&, const LindenDisplayedPose&);
+	            const GDX12Descriptor& materials, const std::shared_ptr<const LindenMesh>&, const LindenDisplayedPose&,
+	            const CaptureInputs* remote = nullptr);
 
   private:
 	enum class Stage { Depth, DepthNormals, GBuffer, Shadow, Capture };

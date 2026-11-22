@@ -1,6 +1,6 @@
 # Local reflection probes
 
-`ReflectionProbeComponent` plus `TransformComponent` enables a probe; neither the component nor the renderer creates scene content. The Bistro App installs four frozen static probes through `BistroReflections::Scene`; `App.ReflectionProbes.Count` controls their count (0..32). The renderer supports 32 enabled probes on the primary GPU. Exceeding this limit or supplying invalid author parameters throws before capture.
+`ReflectionProbeComponent` plus `TransformComponent` enables a probe. Bistro table probes are opt-in through `App.ReflectionProbes.Count` (default 0). The renderer supports up to 32 enabled probes across all adapters. Exceeding this limit or supplying invalid author parameters throws before capture.
 
 ## Authoring
 
@@ -25,6 +25,9 @@ Every `ReflectionProbeComponent` owns the capture settings below through `GDX12R
 | `FacesPerFrame` | 0 | 0 inherit quality; 1..6 capture faces when this probe is scheduled |
 | `PrefilterSamples` | 0 | 0 inherit quality; 8..1024 GGX samples per texel |
 | `UpdateInterval` | 1 | 1..3600 frames minimum between generations of this probe |
+| `Adapter` | -1 | -1 for the primary GPU, otherwise the DXGI hardware adapter index. An unavailable owner falls back to the primary GPU. |
+
+`App.ReflectionProbes.FirstAdapter`, `.FirstImplementation` and `.FirstFacesPerFrame` configure the first Bistro table probe. Leave the remaining probes on GPU0 or set their component fields individually. `App.ReflectionProbes.TransferMode` selects the GPU0 transfer budget independently of capture: 0 transfers all ready cubes, 1 one ready cube, and 2 one face with every GGX mip per frame. GPU0 publishes the staged cube with its capture metadata once all six faces arrive. A remote probe waits for completion of the last GPU0 copy before starting its next generation. Remote captures use the same direct lights and global IBL with reflected shadow sampling disabled.
 
 | Quality | Inherited resolution | Inherited faces/frame | Inherited GGX samples |
 | --- | --- | --- | --- |

@@ -8,11 +8,13 @@
 #include "Linden/LindenMesh.h"
 #include "NativeWork.h"
 #include <array>
+#include <map>
 
 namespace BistroRender
 {
 class SceneLighting;
 class SceneReflections;
+class ProbeInputMirror;
 struct CanvasRead;
 // Owner-only Freeze/Resize. Record uses immutable slot data and native commands;
 // no shared resource tracker, heap allocator, ECS or queue access on workers.
@@ -25,6 +27,22 @@ class SceneGeometry
 	SceneGrass& Grass() { return *_grass; }
 	std::vector<GDX12RenderPrimitive> VegetationPrimitives() const;
 	void AppendVegetationView(Graph&, std::vector<ID3D12Resource*>&, UINT slot, const GeometryTarget&);
+	class RemoteProbeVegetation
+	{
+	  public:
+		explicit RemoteProbeVegetation(GDX12DeviceResources& owner) : Grass(owner) {}
+
+	  private:
+		friend class SceneGeometry;
+		SceneGrass::ProbeCapture Grass;
+		std::unique_ptr<LindenDraw> Linden;
+		std::map<std::pair<ID3D12Resource*, UINT>, std::unique_ptr<GDX12Descriptor>> Views;
+	};
+	void AppendVegetationView(Graph& primary, std::vector<ID3D12Resource*>& primaryBindings, ProbeInputMirror&,
+	                          Graph& remote, std::vector<ID3D12Resource*>& remoteBindings, NativeWork&,
+	                          RemoteProbeVegetation&, UINT slot, const GeometryTarget&,
+	                          const GDX12Descriptor& remoteMaterials, Id material, Id main,
+	                          D3D12_GPU_VIRTUAL_ADDRESS mainAddress, D3D12_GPU_DESCRIPTOR_HANDLE localLights);
 	GDX12ParticleInteractionField InteractionField() const { return _grass->InteractionField(); }
 
 	void Resize(UINT width, UINT height); // caller has drained all slots

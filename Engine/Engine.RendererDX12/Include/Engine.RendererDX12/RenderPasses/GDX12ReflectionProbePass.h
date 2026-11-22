@@ -4,6 +4,7 @@
 #include <cstdint>
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include <array>
+#include <functional>
 #include <utility>
 namespace BistroRender { class SceneReflections; }
 
@@ -79,6 +80,7 @@ private:
     GDX12Texture* _externalStaticShadows = nullptr;
     GDX12Texture* _externalDynamicShadows = nullptr;
     const GDX12ReflectionSettings* _externalSettings = nullptr;
+    std::function<bool(UINT)> _captureAllowed;
     GDX12Texture _published, _filtered, _depth, _sunShadow;
     bool _sunShadowNeedsClear = true;
     std::vector<std::unique_ptr<GDX12Descriptor>> _depthDSVs, _sunDSV, _filterUAVs;

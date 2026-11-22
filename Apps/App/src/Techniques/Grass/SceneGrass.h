@@ -12,6 +12,13 @@ namespace BistroRender
 class LindenSimulation;
 struct FragmentPose;
 struct LindenMesh;
+struct ProbeVegetationBuffer
+{
+	Id Resource;
+	ID3D12Resource* Native;
+	D3D12_GPU_DESCRIPTOR_HANDLE Srv;
+};
+using MirrorVegetationBuffer = std::function<ProbeVegetationBuffer(GDX12Resource&, UINT stride)>;
 struct LindenWindSample
 {
 	GDX12UploadBuffer<XMFLOAT4>* Grid = nullptr;
@@ -38,6 +45,20 @@ class SceneGrass
 	            const std::function<void()>& afterInteraction = {}, const std::function<void()>& afterDepth = {},
 	            const std::function<void()>& afterWind = {});
 	bool Record(UINT slot, Id, ID3D12GraphicsCommandList*) const;
+	struct ProbeCapture
+	{
+		explicit ProbeCapture(GDX12DeviceResources& owner) : Owner(owner), GPU(&owner, SceneDescriptorStart) {}
+		GDX12DeviceResources& Owner;
+		GDX12GrassRenderer GPU;
+		std::unique_ptr<GDX12RootSignature> Root;
+		ComPtr<ID3D12PipelineState> Clear, Cull;
+		std::vector<std::unique_ptr<GDX12UploadBuffer<UINT>>> Indices;
+		std::unique_ptr<GDX12UploadBuffer<UINT>> Arguments;
+		std::unique_ptr<GDX12UploadBuffer<float>> HiZ;
+	};
+	void AppendProbeCapture(Graph&, std::vector<ID3D12Resource*>&, NativeWork&, ProbeCapture&, UINT slot,
+	                        const GeometryTarget&, const GDX12Descriptor& materials, D3D12_GPU_VIRTUAL_ADDRESS main,
+	                        D3D12_GPU_DESCRIPTOR_HANDLE localLights, const MirrorVegetationBuffer&);
 
   private:
 	struct RemoteWind;

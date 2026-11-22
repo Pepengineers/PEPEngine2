@@ -76,7 +76,8 @@ struct NativeWork
 			{
 				for (auto access : operation.Accesses)
 				{
-					if (access.Resource == id && (access.Usage != Mode::Read || access.Required != published))
+					if (access.Resource == id && (access.Usage != Mode::Read ||
+					    (access.Required != published && access.Required != D3D12_RESOURCE_STATE_COPY_SOURCE)))
 					{
 						throw std::logic_error("Published texture import conflicts with an earlier writer/state");
 					}
