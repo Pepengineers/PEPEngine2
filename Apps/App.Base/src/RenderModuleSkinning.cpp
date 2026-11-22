@@ -359,14 +359,17 @@ void RenderModule::UpdateSkeletalPose(World& world, Entity entity, SkeletalMeshR
         state.SinceUpdate += std::abs(dt);
     }
     const bool due = animate && !component._frozen && state.SinceUpdate >= 1.0 / rate;
-    auto previousPose = state.Pose;
-    const bool evaluate = state.Pose.empty() || (animate && (edited || due));
+    const bool firstPose = state.Pose.empty();
+    bool changed = false;
+    std::vector<Matrix> oldPose;
+    const bool evaluate = firstPose || (animate && (edited || due));
     if (evaluate)
     {
-        state.Pose = scene.EvaluatePose(component._clip, component._time, component._loop, component._localPose);
+        oldPose = scene.EvaluatePose(component._clip, component._time, component._loop, component._localPose);
+        changed = firstPose || oldPose != state.Pose;
+        state.Pose.swap(oldPose);
         state.SinceUpdate = due ? std::fmod(state.SinceUpdate, 1.0 / rate) : 0;
     }
-    const bool changed = previousPose != state.Pose;
     if (changed || state.DeformationRevision == 0)
     {
         // Pose jobs already own this state; keep the byte-identical signature off the recording thread.
@@ -378,9 +381,9 @@ void RenderModule::UpdateSkeletalPose(World& world, Entity entity, SkeletalMeshR
         }
         state.DeformationRevision = deformation;
     }
-    const bool reset = previousPose.empty() || edited || !animate || component._frozen ||
+    const bool reset = firstPose || edited || !animate || component._frozen ||
         paused || _RPcommonData.ResetHistory;
-    if (reset) previousPose = state.Pose;
+    const auto& previousPose = changed && !reset ? oldPose : state.Pose;
     state.Dispatch = changed || state.NeedsSettle;
     // Only the frame displaying a new pose carries deformation velocity.
     state.NeedsSettle = changed && !reset;
@@ -394,7 +397,8 @@ void RenderModule::UpdateSkeletalPose(World& world, Entity entity, SkeletalMeshR
         for (size_t bone = 0; bone < part.BoneNodes.size(); ++bone)
         {
             part.Palette[bone].Current = part.InverseBinds[bone] * state.Pose.at(part.BoneNodes[bone]);
-            part.Palette[bone].Previous = part.InverseBinds[bone] * previousPose.at(part.BoneNodes[bone]);
+            part.Palette[bone].Previous = changed && !reset
+                ? part.InverseBinds[bone] * previousPose.at(part.BoneNodes[bone]) : part.Palette[bone].Current;
         }
         part.Palette.back() = {state.Pose.at(part.Node), previousPose.at(part.Node)};
         bool hasBounds = false;

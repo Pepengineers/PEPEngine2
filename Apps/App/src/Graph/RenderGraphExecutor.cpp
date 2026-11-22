@@ -184,7 +184,7 @@ void Executor::Reserve(const Schedule& schedule)
 		{
 			throw std::invalid_argument("invalid packet list count");
 		}
-		counts[QueueIndex(packet.Target)] += size_t(packet.Lists) + !packet.Before.empty() + !packet.After.empty();
+		counts[QueueIndex(packet.Target)] += packet.Lists;
 	}
 	Owner();
 	if (!_begun)
@@ -297,7 +297,7 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 		{
 			throw std::invalid_argument("invalid packet list count");
 		}
-		counts[QueueIndex(p.Target)] += size_t(p.Lists) + !p.Before.empty() + !p.After.empty();
+		counts[QueueIndex(p.Target)] += p.Lists;
 		for (auto dep : p.Dependencies)
 		{
 			if (dep >= i)
@@ -332,6 +332,7 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 	}
 	// Freeze list/allocator identity before any recording callback can run.
 	std::vector<List*> lists;
+	lists.reserve(counts[0] + counts[1] + counts[2]);
 	for (size_t q = 0; q < counts.size(); ++q)
 	{
 		for (size_t i = 0; i < counts[q]; ++i)
@@ -341,6 +342,8 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 	}
 	std::vector<std::vector<ID3D12CommandList*>> packets;
 	std::vector<RecordingGroup> groups;
+	packets.reserve(schedule.Packets.size());
+	groups.reserve(schedule.Packets.size());
 	std::vector<std::vector<std::function<void()>>> ownerRecords(schedule.Packets.size());
 	std::vector<uint8_t> closed(lists.size(), 1);
 	std::array<size_t, 3> offsets{0, counts[0], counts[0] + counts[1]}, used{};
@@ -348,15 +351,11 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 	{
 		const auto& p = schedule.Packets[i];
 		RecordingGroup group;
-		RecordingGroup buckets;
 		packets.emplace_back();
 		const auto q = QueueIndex(p.Target);
-		for (uint32_t j = 0; j < p.Lists + 2; ++j)
+		packets.back().reserve(p.Lists);
+		for (uint32_t j = 0; j < p.Lists; ++j)
 		{
-			if ((j == 0 && p.Before.empty()) || (j == p.Lists + 1 && p.After.empty()))
-			{
-				continue;
-			}
 			const auto index = offsets[q] + used[q]++;
 			auto* cmd = lists[index]->Commands.Get();
 			if (cmd->GetType() != ListType(p.Target))
@@ -391,19 +390,15 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 						                    }
 						                    cmd->ResourceBarrier(static_cast<UINT>(native.size()), native.data());
 					                    };
-					                    if (j == 0)
+					                    if (j == 0 && !packet.Before.empty())
+					                        barriers(packet.Before, "before barriers");
+					                    if (packet.Operation != Invalid)
 					                    {
-						                    barriers(packet.Before, "before barriers");
+					                        PIXScopedEvent(cmd, PIX_COLOR(57, 158, 117), "%s", packet.Name.c_str());
+					                        record(packet.Operation, j, cmd);
 					                    }
-					                    else if (j == packet.Lists + 1)
-					                    {
-						                    barriers(packet.After, "after barriers");
-					                    }
-					                    else if (packet.Operation != Invalid)
-					                    {
-						                    PIXScopedEvent(cmd, PIX_COLOR(57, 158, 117), "%s", packet.Name.c_str());
-						                    record(packet.Operation, j - 1, cmd);
-					                    }
+					                    if (j + 1 == packet.Lists && !packet.After.empty())
+					                        barriers(packet.After, "after barriers");
 					                    const auto closeResult = cmd->Close();
 					                    closed[index] = 1;
 					                    ThrowIfFailed(closeResult);
@@ -418,23 +413,15 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 					                    throw;
 				                    }
 			                    }};
-			if (p.OwnerRecording && j > 0 && j <= p.Lists)
+			if (p.OwnerRecording)
 			{
 				ownerRecords[i].push_back(std::move(leaf.Continue));
 				continue;
 			}
-			if (j == 0 || j == p.Lists + 1)
-			{
-				group.Children.push_back(std::move(leaf));
-			}
+			if (p.Lists == 1)
+				group = std::move(leaf);
 			else
-			{
-				buckets.Children.push_back(std::move(leaf));
-			}
-		}
-		if (!buckets.Children.empty())
-		{
-			group.Children.push_back(std::move(buckets));
+				group.Children.push_back(std::move(leaf));
 		}
 		groups.push_back(std::move(group));
 	}
@@ -487,7 +474,8 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 				{
 					throw std::logic_error("dependency has no submitted completion token");
 				}
-				dependencies.push_back(_completions[dep]);
+				if (schedule.Packets[dep].Target != target)
+					dependencies.push_back(_completions[dep]);
 			}
 			for (const auto& wait : waits)
 			{
@@ -521,7 +509,6 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 			slot.Fences[0] = suffix->FenceValue;
 			slot.Poisoned = false;
 		}
-		recorder.Finish();
 		if (schedule.FrameBoundary)
 		{
 			_previousCompletion = slot.Fences[0];

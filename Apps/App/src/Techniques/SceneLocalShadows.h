@@ -66,6 +66,7 @@ class SceneLocalShadows
 	{
 		GDX12LocalLightConstants Light;
 		std::array<FaceCommands, 6> Faces;
+		std::optional<std::array<GDX12LocalShadowFrustum, 6>> Frusta;
 		UINT FirstSlice = UINT_MAX, Needed = 0, ListsValid = 0, MapsValid = 0;
 		Id Owner = 0;
 		bool Latest = false;
@@ -122,6 +123,7 @@ class SceneLocalShadows
 	UINT UpdateLights(Slot&);
 	UINT BuildNode(UINT first, UINT count, UINT parent = UINT_MAX);
 	void Refit(UINT caster);
+	void InvalidateBounds(const BoundingBox&, bool listsChanged);
 	void Invalidate(const Caster&, bool listsChanged);
 	bool InvalidateGrass(const GDX12RenderPrimitive&);
 	void UpdateGrass(const std::vector<GDX12RenderPrimitive>&);

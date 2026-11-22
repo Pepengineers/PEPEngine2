@@ -70,7 +70,7 @@ namespace
 		if (keys.empty()) return bind;
 		if (time <= keys.front().TimeSeconds) return keys.front().Value;
 		if (time >= keys.back().TimeSeconds) return keys.back().Value;
-		const auto right = std::upper_bound(keys.begin(), keys.end(), time,
+		const auto right = std::upper_bound(keys.data(), keys.data() + keys.size(), time,
 			[](double t, const auto& key) { return t < key.TimeSeconds; });
 		const auto& left = *(right - 1);
 		const float alpha = static_cast<float>((time - left.TimeSeconds) /
@@ -91,9 +91,12 @@ namespace Engine::Core
 			throw std::invalid_argument("Invalid animation clip/time");
 		if (!localPose.empty() && localPose.size() != _nodes.size())
 			throw std::invalid_argument("Local pose must contain every hierarchy node");
-		std::vector<Matrix> pose;
-		pose.reserve(_nodes.size());
-		for (const auto& node : _nodes) pose.push_back(node.LocalBindMatrix);
+		auto pose = localPose;
+		if (pose.empty())
+		{
+			pose.resize(_nodes.size());
+			for (size_t i = 0; i < _nodes.size(); ++i) pose[i] = _nodes[i].LocalBindMatrix;
+		}
 		if (clipIndex >= 0 && localPose.empty())
 		{
 			const auto& clip = _clips[clipIndex];
@@ -103,8 +106,9 @@ namespace Engine::Core
 				time = std::fmod(timeSeconds, clip.DurationSeconds);
 				if (time < 0) time += clip.DurationSeconds;
 			}
-			for (const auto& track : clip.Tracks)
+			for (size_t i = 0; i < clip.Tracks.size(); ++i)
 			{
+				const auto& track = clip.Tracks[i];
 				const auto& node = _nodes.at(track.NodeIndex);
 				if (track.Translation.empty() && track.Rotation.empty() && track.Scale.empty()) continue;
 				const auto lerp = [](const Vector3& a, const Vector3& b, float t) { return Vector3::Lerp(a, b, t); };
@@ -116,7 +120,6 @@ namespace Engine::Core
 					Matrix::CreateFromQuaternion(rotation) * Matrix::CreateTranslation(translation);
 			}
 		}
-		if (!localPose.empty()) pose = localPose;
 		for (size_t i = 0; i < pose.size(); ++i)
 		{
 			const auto* values = reinterpret_cast<const float*>(&pose[i]);

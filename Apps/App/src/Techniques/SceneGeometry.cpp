@@ -886,6 +886,7 @@ Schedule SceneGeometry::Plan(UINT index, const AppendTechnique& append, const Ap
 		prelude(g, s.PlannedBindings);
 	}
 	std::vector<Id> order;
+	order.reserve(g.Operations.size());
 	for (Id id = preludeBegin; id < g.Operations.size(); ++id)
 	{
 		order.push_back(id);
@@ -946,6 +947,7 @@ Schedule SceneGeometry::Plan(UINT index, const AppendTechnique& append, const Ap
 		remap[order[i]] = i;
 	}
 	Graph reordered;
+	reordered.Operations.reserve(order.size());
 	reordered.Resources = std::move(g.Resources);
 	for (auto id : order)
 	{

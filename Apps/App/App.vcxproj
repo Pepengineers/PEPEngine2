@@ -176,6 +176,15 @@
       <Project>{2FB10E73-84E6-40F9-BE47-10340341981B}</Project>
     </ProjectReference>
   </ItemGroup>
+  <ItemGroup Condition="'$(Configuration)'=='Debug'">
+    <ClCompile Update="src\Graph\RenderGraphCompiler.cpp;src\Graph\RenderGraphExecutor.cpp;src\Graph\QueueSubmission.cpp;src\Techniques\SceneGeometry.cpp;src\Techniques\SceneLocalShadows.cpp">
+      <Optimization>MaxSpeed</Optimization>
+      <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <SupportJustMyCode>false</SupportJustMyCode>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+    </ClCompile>
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Target Name="CopyRuntimeSDKFiles" AfterTargets="Build">
     <ItemGroup>

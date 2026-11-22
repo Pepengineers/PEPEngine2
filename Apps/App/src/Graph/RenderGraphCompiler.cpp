@@ -1,6 +1,5 @@
 #include "RenderGraph.h"
 #include <algorithm>
-#include <set>
 #include <stdexcept>
 namespace BistroRender {
 namespace {
@@ -24,40 +23,51 @@ void Depend(Packet& p, Id id) {
 Schedule Compile(const Graph& g, bool singleDirect) {
     const auto target = [singleDirect](const Operation& op) { return singleDirect ? Queue::Direct : op.Target; };
     const auto n=g.Operations.size();
-    std::vector<std::set<Id>> deps(n);
-    struct History { Id Writer=Invalid; std::set<Id> Readers; Id Last=Invalid; State Current; };
+    std::vector<Id> dependencies;
+    std::vector<size_t> offsets(n + 1);
+    std::vector<Id> lastConsumer(n, Invalid);
+    struct History { Id Writer=Invalid; std::vector<Id> Readers; Id Last=Invalid; State Current; };
     std::vector<History> history;
+    history.reserve(g.Resources.size());
     for(const auto& r:g.Resources) history.push_back({Invalid,{},Invalid,r.Initial});
     Id effect=Invalid;
     for(Id i=0;i<n;++i) {
+        offsets[i] = dependencies.size();
+        const auto addDependency = [&](Id producer) {
+            if (lastConsumer[producer] != i) {
+                lastConsumer[producer] = i;
+                dependencies.push_back(producer);
+            }
+        };
         const auto& op=g.Operations[i];
         const auto queue=target(op);
         Name(queue);
         if(!op.Lists) throw std::invalid_argument("packet requires at least one list");
-        for(auto d:op.Dependencies) { if(d>=n) throw std::invalid_argument("unknown producer"); deps[i].insert(d); }
-        if(op.SideEffect) { if(effect!=Invalid) deps[i].insert(effect); effect=i; }
-        std::set<Id> seen;
+        for(auto d:op.Dependencies) { if(d>=n) throw std::invalid_argument("unknown producer"); addDependency(d); }
+        if(op.SideEffect) { if(effect!=Invalid) addDependency(effect); effect=i; }
         for(auto a:op.Accesses) {
-            if(a.Resource>=history.size() || !seen.insert(a.Resource).second) throw std::invalid_argument("unknown or duplicate resource access");
+            if(a.Resource>=history.size() || history[a.Resource].Last == i) throw std::invalid_argument("unknown or duplicate resource access");
             const auto& r=g.Resources[a.Resource]; auto& h=history[a.Resource];
             if(!Legal(queue,a.Required) && !(FixedUpload(r) && a.Usage==Mode::Read && a.Required==GenericRead))
                 throw std::invalid_argument("queue cannot use declared resource state");
             if(r.Memory==Heap::Readback && (a.Required!=CopyDest || a.Usage!=Mode::Write))
                 throw std::invalid_argument("readback heap requires write-only COPY_DEST");
             if(FixedUpload(r) && (a.Required!=GenericRead || a.Usage!=Mode::Read)) throw std::invalid_argument("upload heap must remain read-only GENERIC_READ");
-            if(h.Writer!=Invalid) deps[i].insert(h.Writer);
-            if(a.Usage!=Mode::Read) { deps[i].insert(h.Readers.begin(),h.Readers.end()); h.Readers.clear(); h.Writer=i; }
-            else h.Readers.insert(i);
+            if(h.Writer!=Invalid) addDependency(h.Writer);
+            if(a.Usage!=Mode::Read) { for (Id reader : h.Readers) addDependency(reader); h.Readers.clear(); h.Writer=i; }
+            else h.Readers.push_back(i);
             // Whole-subresource state ownership crosses queues only after all readers.
             // Immutable upload heaps never transition and may be read concurrently.
             if(h.Last!=Invalid && !FixedUpload(r) && (h.Current!=a.Required || target(g.Operations[h.Last])!=queue)) {
-                deps[i].insert(h.Last);
-                for(auto reader:h.Readers) if(reader!=i) deps[i].insert(reader);
+                addDependency(h.Last);
+                for(auto reader:h.Readers) if(reader!=i) addDependency(reader);
             }
             h.Last=i; h.Current=a.Required;
         }
     }
+    offsets[n] = dependencies.size();
     Schedule out;
+    out.Packets.reserve(n + 1);
     out.Device=g.Device; out.FrameBoundary=g.FrameBoundary; out.TerminalQueue=g.TerminalQueue;
     Name(g.TerminalQueue);
     if(g.Device==Invalid || (g.FrameBoundary && g.TerminalQueue!=Queue::Direct))
@@ -79,7 +89,7 @@ Schedule Compile(const Graph& g, bool singleDirect) {
         while (remap[firstPending] != Invalid) ++firstPending;
         Id next = Invalid;
         for (Id i = firstPending; i < n; ++i) {
-            if (remap[i] == Invalid && std::all_of(deps[i].begin(), deps[i].end(),
+            if (remap[i] == Invalid && std::all_of(dependencies.begin() + offsets[i], dependencies.begin() + offsets[i + 1],
                     [&](Id dependency) { return remap[dependency] != Invalid; })) {
                 next = i;
                 break;
@@ -89,7 +99,9 @@ Schedule Compile(const Graph& g, bool singleDirect) {
         const auto& op=g.Operations[next];
         const auto queue=target(op);
         Packet p{next,{},op.Accesses,{},{},op.Lists,op.OwnerRecording,queue,op.Name};
-        for(auto d:deps[next]) Depend(p,remap[d]);
+        p.Dependencies.reserve(offsets[next + 1] - offsets[next]);
+        for (size_t edge = offsets[next]; edge < offsets[next + 1]; ++edge)
+            p.Dependencies.push_back(remap[dependencies[edge]]);
         for(auto a:op.Accesses) {
             auto& state=states[a.Resource]; const auto& r=g.Resources[a.Resource]; const Id prev=last[a.Resource];
             if(r.Memory!=Heap::Default) continue;

@@ -259,23 +259,24 @@ void SceneLocalShadows::Invalidate(const Caster& caster, bool listsChanged)
 		return;
 	}
 	_changedCasterBounds.push_back(caster.Bounds);
+	InvalidateBounds(caster.Bounds, listsChanged && caster.Dynamic != _staticOnly);
+}
+
+void SceneLocalShadows::InvalidateBounds(const BoundingBox& bounds, bool listsChanged)
+{
 	for (auto& slot : _slots)
 	{
 		for (auto& cache : slot.Cache)
 		{
-			if (!cache.HasLight || !LocalShadowRangeIntersects(cache.Light, caster.Bounds))
-			{
-				continue;
-			}
+			const UINT valid = cache.MapsValid | (listsChanged ? cache.ListsValid : 0);
+			if (!valid || !LocalShadowRangeIntersects(cache.Light, bounds)) continue;
 			for (UINT face = 0; face < LocalShadowFaceCount(cache.Light); ++face)
 			{
-				if (GDX12LocalShadowFrustum(cache.Light.ShadowViewProj[face]).Intersects(caster.Bounds))
+				const UINT bit = 1u << face;
+				if ((valid & bit) && cache.Frusta.value()[face].Intersects(bounds))
 				{
-					if (listsChanged && caster.Dynamic != _staticOnly)
-					{
-						cache.ListsValid &= ~(1u << face);
-					}
-					cache.MapsValid &= ~(1u << face);
+					if (listsChanged) cache.ListsValid &= ~bit;
+					cache.MapsValid &= ~bit;
 				}
 			}
 		}
@@ -288,23 +289,7 @@ bool SceneLocalShadows::InvalidateGrass(const GDX12RenderPrimitive& grass)
 	{
 		return false;
 	}
-	for (auto& slot : _slots)
-	{
-		for (auto& cache : slot.Cache)
-		{
-			if (!cache.HasLight || !LocalShadowRangeIntersects(cache.Light, grass.Bounds))
-			{
-				continue;
-			}
-			for (UINT face = 0; face < LocalShadowFaceCount(cache.Light); ++face)
-			{
-				if (GDX12LocalShadowFrustum(cache.Light.ShadowViewProj[face]).Intersects(grass.Bounds))
-				{
-					cache.MapsValid &= ~(1u << face);
-				}
-			}
-		}
-	}
+	InvalidateBounds(grass.Bounds, false);
 	return true;
 }
 
@@ -638,10 +623,7 @@ void SceneLocalShadows::CullJob::Execute(size_t index)
 	{
 		return;
 	}
-	const std::array<GDX12LocalShadowFrustum, 6> faces = {
-	    GDX12LocalShadowFrustum(light.ShadowViewProj[0]), GDX12LocalShadowFrustum(light.ShadowViewProj[1]),
-	    GDX12LocalShadowFrustum(light.ShadowViewProj[2]), GDX12LocalShadowFrustum(light.ShadowViewProj[3]),
-	    GDX12LocalShadowFrustum(light.ShadowViewProj[4]), GDX12LocalShadowFrustum(light.ShadowViewProj[5])};
+	const auto& faces = output.Frusta.value();
 	const UINT allFaces = (1u << LocalShadowFaceCount(light)) - 1;
 	if (Frame->AllReceivers)
 	{
@@ -840,6 +822,10 @@ UINT SceneLocalShadows::UpdateLights(Slot& frame)
 		{
 			cached.ListsValid = cached.MapsValid = 0;
 			cached.SelectionDirty = true;
+			cached.Frusta = std::array<GDX12LocalShadowFrustum, 6>{
+			    GDX12LocalShadowFrustum(source.ShadowViewProj[0]), GDX12LocalShadowFrustum(source.ShadowViewProj[1]),
+			    GDX12LocalShadowFrustum(source.ShadowViewProj[2]), GDX12LocalShadowFrustum(source.ShadowViewProj[3]),
+			    GDX12LocalShadowFrustum(source.ShadowViewProj[4]), GDX12LocalShadowFrustum(source.ShadowViewProj[5])};
 		}
 		cached.Light = source;
 		cached.HasLight = true;

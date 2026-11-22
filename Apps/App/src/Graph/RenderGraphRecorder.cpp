@@ -76,6 +76,10 @@ Recorder::Recorder(JobSystem& jobs,std::vector<RecordingGroup> groups,const std:
     :_impl(std::make_unique<Impl>(jobs,cancel)) {
     for(auto& g:groups) _impl->Roots.push_back(_impl->Build(std::move(g),nullptr));
     for(auto* root:_impl->Roots) {
+        if (root->Children.empty() && !root->Group.Continue) {
+            root->Done.store(true, std::memory_order_release);
+            continue;
+        }
         root->Started.store(true,std::memory_order_release);
         jobs.QueueTask(root->Start);
     }

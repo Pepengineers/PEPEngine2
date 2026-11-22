@@ -182,7 +182,12 @@
     <ClCompile Include="src\Registries\SceneRegistry.cpp" />
     <ClCompile Include="src\Registries\TextureRegistry.cpp" />
     <ClCompile Include="src\Types\MeshTypes.cpp" />
-    <ClCompile Include="src\Types\SceneTypes.cpp" />
+    <ClCompile Include="src\Types\SceneTypes.cpp">
+      <Optimization Condition="'$(Configuration)'=='Debug'">MaxSpeed</Optimization>
+      <BasicRuntimeChecks Condition="'$(Configuration)'=='Debug'">Default</BasicRuntimeChecks>
+      <SupportJustMyCode Condition="'$(Configuration)'=='Debug'">false</SupportJustMyCode>
+      <DebugInformationFormat Condition="'$(Configuration)'=='Debug'">ProgramDatabase</DebugInformationFormat>
+    </ClCompile>
     <ClCompile Include="src\Types\TextureTypes.cpp" />
     <ClCompile Include="src\ConsoleModule.cpp" />
   </ItemGroup>
