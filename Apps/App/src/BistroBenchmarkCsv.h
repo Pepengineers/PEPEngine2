@@ -50,12 +50,14 @@ class Csv
 public:
     void Open(const std::filesystem::path& path)
     {
+        _directory = path.parent_path() / path.stem();
+        std::filesystem::create_directories(_directory);
+        _pass = 0;
+        _trialId.clear();
         _file.clear();
         _file.open(path);
         Check();
-        _file << "type,stage,mask,section,frame,route_seconds,frame_ms,frame_interval_ms,"
-                 "window_start,window_end,frames,fps,mspf,min_fps,min_mspf,max_fps,max_mspf,"
-                 "mean_ms,p95_ms,measured_seconds,wall_seconds,status,name,value,round\n";
+        _file << Header;
     }
 
     void Config(std::string_view name, std::string_view value)
@@ -63,6 +65,25 @@ public:
         auto row = Row("config");
         row[Name] = name;
         row[Value] = value;
+        // Placement search names trial records Trial.<id>.<field>.
+        if (name.substr(0, 6) == "Trial.")
+        {
+            const auto dot = name.find('.', 6);
+            const auto id = name.substr(6, dot - 6);
+            if (dot != name.npos && !id.empty() && id.find_first_not_of("0123456789") == id.npos)
+            {
+                if (id != _trialId) OpenTrial(id);
+                Write(_trialRows, row);
+                const auto field = name.substr(dot + 1);
+                if (field == "FPS" || field == "P95ms" || field == "Status" ||
+                    field == "Source" || field == "Scope" || field == "OutputResolution" ||
+                    field == "RenderResolution")
+                    Write(_file, row);
+                if (field == "Status" || field == "EquivalentTrial" ||
+                    field.find("RemovalEvidence") != field.npos) Flush();
+                return;
+            }
+        }
         Write(_file, row);
     }
 
@@ -70,8 +91,15 @@ public:
     void Leg(const char* stage, unsigned mask, const std::vector<Frame>& frames, double begin,
         double end, double elapsed, const char* status, SectionName sectionName, unsigned round, bool fullFlight)
     {
-        // Build the rows in memory, then append them in one write outside frame measurement.
-        std::ostringstream output;
+        const auto filename = "pass-" + std::to_string(++_pass) + ".csv";
+        const auto path = _directory / filename;
+        auto pending = path;
+        pending += ".tmp";
+        std::ofstream output(pending);
+        output << Header;
+        std::vector<double> intervals;
+        intervals.reserve(frames.size());
+        double measuredMs = 0;
         double total = 0, minFps = 0, minMspf = 0, maxFps = 0, maxMspf = 0;
         size_t count = 0;
         const char* section = "";
@@ -103,6 +131,8 @@ public:
         for (size_t i = 0; i < frames.size(); ++i)
         {
             const auto& frame = frames[i];
+            intervals.push_back(frame.IntervalMs);
+            measuredMs += frame.IntervalMs;
             if (frame.RouteSeconds >= intervalEnd())
             {
                 emit();
@@ -126,7 +156,40 @@ public:
         const char* summarySection = frames.empty() ? "" : fullFlight ? "Full route" : sectionName(frames.front().Section);
         Summary(output, stage, mask, summarySection, begin, end,
             elapsed, Measure(frames, begin, end), status, round);
-        _file << output.str();
+        auto entry = Row("pass", stage, mask);
+        entry[Name] = "PassCSV";
+        entry[Value] = (_directory.filename() / filename).generic_string();
+        entry[Begin] = Number(begin);
+        entry[End] = Number(end);
+        entry[Wall] = Number(elapsed);
+        entry[Status] = status;
+        entry[Section] = summarySection;
+        entry[Count] = std::to_string(frames.size());
+        if (round) entry[Round] = std::to_string(round);
+        if (!intervals.empty())
+        {
+            if (measuredMs > 0) entry[Fps] = Number(1000 * frames.size() / measuredMs);
+            const auto rank = intervals.begin() + (intervals.size() * 95 - 1) / 100;
+            std::nth_element(intervals.begin(), rank, intervals.end());
+            entry[P95] = Number(*rank);
+        }
+        auto detail = entry;
+        detail[Name] = "RunCSV";
+        detail[Value] = "../" + _directory.filename().generic_string() + ".csv";
+        Write(output, detail);
+        if (!_trialId.empty())
+        {
+            auto trial = Row("config");
+            trial[Name] = "TrialCSV";
+            trial[Value] = "trial-" + _trialId + ".csv";
+            Write(output, trial);
+        }
+        output.close();
+        if (!output) throw std::runtime_error("Cannot save Bistro benchmark pass");
+        FlushTrial();
+        std::filesystem::rename(pending, path);
+        Write(_file, entry);
+        _file.flush();
         Check();
     }
 
@@ -155,6 +218,7 @@ public:
     bool IsOpen() const { return _file.is_open(); }
     void Flush()
     {
+        FlushTrial();
         _file.flush();
         Check();
     }
@@ -169,6 +233,7 @@ public:
 
     void Close()
     {
+        CloseTrial();
         if (!_file.is_open()) return;
         _file.close();
         Check();
@@ -183,6 +248,10 @@ public:
     }
 
 private:
+    static constexpr const char* Header =
+        "type,stage,mask,section,frame,route_seconds,frame_ms,frame_interval_ms,"
+        "window_start,window_end,frames,fps,mspf,min_fps,min_mspf,max_fps,max_mspf,"
+        "mean_ms,p95_ms,measured_seconds,wall_seconds,status,name,value,round\n";
     enum Column { Type, Stage, Mask, Section, FrameIndex, Route, Ms, Interval, Begin, End, Count,
         Fps, Mspf, MinFps, MinMspf, MaxFps, MaxMspf, Mean, P95, Measured, Wall, Status, Name, Value, Round, Width };
     using Fields = std::array<std::string, Width>;
@@ -242,6 +311,45 @@ private:
         if (!_file) throw std::runtime_error("Cannot write Bistro benchmark CSV");
     }
 
-    std::ofstream _file;
+    void FlushTrial()
+    {
+        if (!_trialFile.is_open()) return;
+        _trialFile << _trialRows.str();
+        _trialRows.str({});
+        _trialFile.flush();
+        if (!_trialFile) throw std::runtime_error("Cannot write Bistro benchmark trial");
+    }
+
+    void CloseTrial()
+    {
+        if (!_trialFile.is_open()) return;
+        FlushTrial();
+        _trialFile.close();
+        if (!_trialFile) throw std::runtime_error("Cannot save Bistro benchmark trial");
+    }
+
+    void OpenTrial(std::string_view id)
+    {
+        CloseTrial();
+        _trialId = id;
+        const auto filename = "trial-" + _trialId + ".csv";
+        const auto path = _directory / filename;
+        const bool existing = std::filesystem::exists(path);
+        _trialFile.open(path, std::ios::app);
+        if (!_trialFile) throw std::runtime_error("Cannot open Bistro benchmark trial");
+        if (existing) return;
+        _trialFile << Header;
+        auto entry = Row("trial");
+        entry[Round] = _trialId;
+        entry[Name] = "TrialCSV";
+        entry[Value] = (_directory.filename() / filename).generic_string();
+        Write(_file, entry);
+    }
+
+    std::filesystem::path _directory;
+    size_t _pass = 0;
+    std::string _trialId;
+    std::ostringstream _trialRows;
+    std::ofstream _file, _trialFile;
 };
 }
