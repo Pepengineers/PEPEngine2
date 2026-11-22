@@ -94,7 +94,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	const auto slot = c.Primary.CurrFrameConstantsIndex;
 	_executorSlot = slot;
 	const auto& submissions = _executor->Submissions();
-	_lighting->SetTransparencyShadowOwner(_lighting->Transparency().Begin(submissions, *_lighting, slot, _frameNumber));
+	const auto transparencyOwner = _lighting->Transparency().Begin(submissions, slot, _frameNumber);
 	auto skin = c.Runtime.FreezeSkeletalMeshes([&](int requested)
 	{
 		const auto owner = submissions->SelectAdapter(requested);
@@ -112,7 +112,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	using ParticleInputs = BistroRender::SceneParticles::Inputs;
 	auto* depth = _geometry->Depth(slot);
 	particles.BeginSimulation(_geometry->InteractionField(), depth, *_executor, submissions->SelectAdapter(BistroRender::SceneParticles::SecondaryAdapter()),
-	    world && !world->IsPaused() ? world->GetTimeScale() : 0.f);
+	    world && !world->IsPaused() ? world->GetTimeScale() : 0.f, transparencyOwner != 0);
 	particles.PrepareOpaque(*_geometry, slot);
 	_post->BeginPlan();
 	auto& textures = _post->Textures();

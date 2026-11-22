@@ -1,5 +1,22 @@
 # Bistro MGPU transparency on MidSpec
 
+## Shared shading and depth-only transfer
+
+The Release x64 app built successfully. Both modes use the same directional light and ambient shader for transparent meshes, sample opaque scene depth, and leave the separate transparent particle motion texture disabled. The local run used `App.WBOIT.Adapter = -1`. The Exact run used `App.WBOIT.Adapter = 1`. Both used `Render.PrimaryAdapter = 0` and `App.Particles.Adapter = -1`. The local run completed ordinary frames on the RTX 5050, including the publication recorded at sequence 61.
+
+The Exact run used the Intel Arc B570 as transparency owner at 752 × 470. Arc built its geometry and draw inputs from CPU data, loaded its textures from the same asset sources, and ran transparent particle simulation and rasterization. Both recorded frames supplied 768 transparent mesh commands, three weighted and four additive emitters. There were no SortedAlpha emitters in this smoke.
+
+| Frame | RTX to Arc, depth footprint (bytes) | Arc to RTX, layer footprint (bytes) | Arc mesh / resolve / export fence | RTX import / apply / frame fence |
+| --- | ---: | ---: | --- | --- |
+| 1 | 1,443,776 | 2,887,552 | 28 / 33 / 36 | 500 / 501 / 511 |
+| 2 | 1,443,776 | 2,887,552 | 38 / 43 / 46 | 698 / 699 / 709 |
+
+The first frame uploaded 46,307,880 bytes of mesh data from CPU into Arc-local buffers. The second frame reused those buffers. No geometry, textures, particle pool data, motion, opaque HDR or shadows went between the GPUs. The log reported no runtime errors on either successful run. The harness stopped both hidden instances after useful evidence was available. The local harness reported incomplete because it waited for a fourth world-canvas log entry and that logger emits only three per device. The publication at sequence 61 independently shows the local run continued rendering. The Exact harness reported completion before `Stop-Process`.
+
+No visual comparison or performance measurement was made. Local evidence under `Build/` is `bistro-wboit-parity-release.log`, `bistro-wboit-parity--1-smoke.log` and `bistro-wboit-parity-1-smoke.log`.
+
+## Initial implementation (5b4e5f5f)
+
 Release x64 built from `Apps/App/App.vcxproj` on November 22, 2026, with 0 errors and 143 warnings. One short Bistro smoke exercised Exact transparency. The runtime identified GPU0 as NVIDIA GeForce RTX 5050 and GPU1 as Intel Arc B570. The runner temporarily appended these settings to the Release startup config and restored both startup and active configs on exit.
 
 ```ini

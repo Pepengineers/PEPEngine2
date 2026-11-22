@@ -227,7 +227,12 @@ namespace
         Engine::Core::Texture texture = CreateSingleColorTexture(red, green, blue, alpha, textureType);
 
         GPUTexture* gpuTexture = renderModule.CreateTexture(textureName, &texture, textureType);
-        if (gpuTexture == nullptr)
+        if (gpuTexture)
+            renderModule.SetTextureReplicaSource(textureName, textureType, [=](auto& temporary) {
+                temporary = std::make_unique<Engine::Core::Texture>(CreateSingleColorTexture(red, green, blue, alpha, textureType));
+                return temporary.get();
+            });
+        else
         {
             gpuTexture = renderModule.GetTextureByName(textureName);
         }
@@ -441,6 +446,15 @@ namespace
         const std::string textureName = sceneName + "_Texture_" + std::to_string(gpuTexturesByPath.size());
         GPUTexture* gpuTexture = renderModule.CreateTexture(textureName, texture, textureType);
         const bool created = gpuTexture != nullptr;
+        if (created)
+        {
+            const auto format = texture->GetFormat();
+            const bool compressed = format == DXGI_FORMAT_BC7_UNORM || format == DXGI_FORMAT_BC7_UNORM_SRGB;
+            renderModule.SetTextureReplicaSource(textureName, textureType, [texturePath, compressed](auto& temporary) {
+                temporary = Engine::Core::TextureLoader::LoadTextureAsset(texturePath, compressed);
+                return temporary.get();
+            });
+        }
         if (!created)
         {
             gpuTexture = renderModule.GetTextureByName(textureName);
@@ -500,6 +514,15 @@ namespace
         const std::string textureName = sceneName + "_Texture_" + std::to_string(gpuTexturesByPath.size());
         GPUTexture* gpuTexture = renderModule.CreateTexture(textureName, mergedTexture.get(), Engine::Core::ETextureType::Color);
         const bool created = gpuTexture != nullptr;
+        if (created)
+            renderModule.SetTextureReplicaSource(textureName, Engine::Core::ETextureType::Color,
+                [diffuseTexturePath, opacityTexturePath](auto& temporary) -> const Engine::Core::Texture* {
+                    auto& assets = Engine::Core::AssetManager::GetInstance();
+                    const auto* diffuse = assets.LoadTexture(diffuseTexturePath);
+                    const auto* opacity = assets.LoadTexture(opacityTexturePath);
+                    if (diffuse && opacity) temporary = TryCreateDiffuseTextureWithOpacityAlpha(*diffuse, *opacity);
+                    return temporary.get();
+                });
         if (!created)
         {
             gpuTexture = renderModule.GetTextureByName(textureName);
@@ -530,7 +553,11 @@ namespace
         const std::string materialName = sceneName + "_FallbackMaterial";
 
         GPUTexture* gpuTexture = renderModule.CreateTexture(textureName, fallbackTexture, fallbackTexture->GetType());
-        if (gpuTexture == nullptr)
+        if (gpuTexture)
+            renderModule.SetTextureReplicaSource(textureName, fallbackTexture->GetType(), [](auto&) {
+                return Engine::Core::AssetManager::GetInstance().LoadTextureOrDefault(L"missing_texture.dds");
+            });
+        else
         {
             gpuTexture = renderModule.GetTextureByName(textureName);
         }
@@ -1319,7 +1346,11 @@ static bool LoadTextures(WorldLoadContext& context, ryml::NodeRef texturesNode)
         }
 
         GPUTexture* gpuTexture = context.Render->CreateTexture(id, cpuTexture, cpuTexture->GetType());
-        if (!gpuTexture)
+        if (gpuTexture)
+            context.Render->SetTextureReplicaSource(id, cpuTexture->GetType(), [texturePath](auto&) {
+                return Engine::Core::AssetManager::GetInstance().LoadTexture(texturePath);
+            });
+        else
         {
             gpuTexture = context.Render->GetTextureByName(id);
         }

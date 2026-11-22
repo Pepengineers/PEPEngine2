@@ -239,6 +239,28 @@ GPUTexture* RenderModule::CreateTexture(const std::string& name, const Texture* 
     return _textures[name].get();
 }
 
+void RenderModule::SetTextureReplicaSource(const std::string& name, ETextureType type, TextureSource source)
+{
+    _primaryResources.TextureReplicaLoaders[name] = [this, name, type, source = std::move(source)](auto& owner) {
+        std::unique_ptr<Texture> temporary;
+        const auto* texture = source(temporary);
+        if (!texture) throw std::runtime_error("Missing CPU source for texture " + name);
+        if (_textureUploadBudget) throw std::logic_error("Cannot replicate a texture during a primary upload batch");
+        try
+        {
+            ThrowIfFailed(owner.Device->GetDevice()->GetDeviceRemovedReason());
+            return CreateDX12Texture(name, &owner, texture, type);
+        }
+        catch (const DxException&)
+        {
+            Log::Error("Renderer", "Texture replica upload failed for ", name, " format=", UINT(texture->GetFormat()),
+                " dimensions=", texture->GetWidth(), "x", texture->GetHeight(), " mips=", texture->GetMipLevels(),
+                " deviceReason=", uint32_t(owner.Device->GetDevice()->GetDeviceRemovedReason()));
+            throw;
+        }
+    };
+}
+
 void RenderModule::WaitForUploads()
 {
     if (_primaryTextureCommands) _primaryDevice->GetCommandQueue()->ExecuteCommandList(_primaryTextureCommands);

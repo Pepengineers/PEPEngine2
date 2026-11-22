@@ -37,11 +37,15 @@ SamplerComparisonState samShadow : register(s6);
 #define SKY_AERIAL_TRANSMITTANCE_REGISTER t13
 #include "SkyRendering.hlsli"
 #endif
-#if !TRANSPARENT_STATIC_IBL_ONLY
+#if !TRANSPARENT_STATIC_IBL_ONLY && !TRANSPARENT_SIMPLE_LIGHTING
 #define LOCAL_REFLECTION_PROBES 1
 #include "ReflectionProbes.hlsli"
 #endif
+#if TRANSPARENT_SIMPLE_LIGHTING
+#include "PBRSurface.hlsli"
+#else
 #include "PBR.hlsli"
+#endif
 
 struct VS_INPUT
 {
@@ -116,7 +120,14 @@ PSOutput ShadeTransparency(VS_OUTPUT_PS_INPUT pin, uint partition)
     clip(alpha - 0.001f);
     
     float weight = max(0.01f, alpha);
+#if TRANSPARENT_SIMPLE_LIGHTING
+    float3 light = -CBMain.LightDirection;
+    light *= rsqrt(max(dot(light, light), 1e-6f));
+    float3 normal = normalize(pin.Normal);
+    float3 litColor = color.rgb * (0.2f + CBMain.LightRadiance * saturate(dot(normal, light)));
+#else
     float3 litColor = ShadePBR(material, color.rgb, pin.PosW, pin.Normal, pin.TexC);
+#endif
 #if TRANSPARENT_ATMOSPHERE
     litColor = ApplySkyAerialPerspective(litColor, pin.PosCS.xy / CBSky.Box.zw,
         length(pin.PosW - CBCamera.CameraLocation));

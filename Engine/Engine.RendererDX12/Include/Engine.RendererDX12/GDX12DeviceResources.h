@@ -10,6 +10,7 @@
 #include "Engine.RendererDX12/GDX12LocalLights.h"
 #include "Engine.RendererDX12/GDX12RenderGeometry.h"
 #include <optional>
+#include <functional>
 
 class GDX12Device;
 class GameTimer;
@@ -41,6 +42,7 @@ public:
     std::unordered_map<std::string, std::unique_ptr<GDX12RootSignature>> RootSignatures;
     std::unordered_map <std::string, ComPtr<ID3D12CommandSignature>> CommandSignatures;
     std::unordered_map<std::string, std::unique_ptr<GDX12Texture>> Textures;
+    std::unordered_map<std::string, std::function<GDX12Texture*(GDX12DeviceResources&)>> TextureReplicaLoaders;
 
     std::vector<IRenderGeometrySource*> GeometrySources; // Borrowed from the pipeline owner.
     GDX12RenderPrimitiveRegistry Primitives;

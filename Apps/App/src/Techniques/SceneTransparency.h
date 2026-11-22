@@ -8,13 +8,12 @@
 
 namespace BistroRender
 {
-class SceneLighting;
 class SceneTransparency
 {
   public:
 	SceneTransparency(GDX12DeviceResources&, RenderPipelineCommonData&);
 	~SceneTransparency();
-	Id Begin(const std::shared_ptr<QueueSubmission>&, SceneLighting&, UINT slot, uint64_t frame);
+	Id Begin(const std::shared_ptr<QueueSubmission>&, UINT slot, uint64_t frame);
 	void ExportPrepassDepth(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture*);
 	void AddExchange(const Schedule&, std::vector<Executor::PacketExchange>&);
 	void Submitted(const std::vector<CompletionToken>&);
@@ -22,17 +21,15 @@ class SceneTransparency
 	SceneWater& Water() { return _water; }
 	void SetWaterRetirement(std::function<void()> retire) { _water.SetRetirement(std::move(retire)); }
 	SceneParticles& Particles() { return _particles; }
-	GDX12Texture* Append(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, UINT slot, GDX12Texture* hdr,
-	                     GDX12Texture* sun, GDX12Texture* local, SceneEnvironment&, SceneReflections&);
+	GDX12Texture* Append(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, UINT slot, GDX12Texture* hdr, SceneEnvironment&);
 	using OpaqueContinuation = std::function<GDX12Texture*(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture*,
 	                                                       GDX12Texture*, GDX12Texture*)>;
 	void SetOpaqueContinuation(OpaqueContinuation append, std::function<GDX12Texture*()> depth,
-	                           std::function<GDX12Texture*()> motion, std::function<D3D12_CPU_DESCRIPTOR_HANDLE()> dsv)
+	                           std::function<GDX12Texture*()> motion)
 	{
 		_opaqueContinuation = std::move(append);
 		_depth = std::move(depth);
 		_motion = std::move(motion);
-		_dsv = std::move(dsv);
 	}
 	bool Record(Id id, ID3D12GraphicsCommandList* cmd) const
 	{
@@ -49,7 +46,6 @@ class SceneTransparency
 	std::shared_ptr<Shared> _shared;
 	std::vector<std::unique_ptr<Remote>> _remoteSlots;
 	Remote* _remote = nullptr;
-	SceneLighting* _lighting = nullptr;
 	uint64_t _frame = 0;
 	struct Frame
 	{
@@ -60,11 +56,9 @@ class SceneTransparency
 		bool Initialized = false;
 	};
 	GDX12Texture* ApplyRemote(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, UINT, Frame&, GDX12Texture*, SceneEnvironment&);
-	void AppendRemote(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, UINT, Frame&, GDX12Texture*,
-	                           GDX12Texture*, GDX12Texture*, SceneEnvironment&, SceneReflections&);
+	void AppendRemote(SceneGeometry&, UINT, Frame&, GDX12Texture*);
 	GDX12Texture* AppendPhase(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, UINT slot, Frame&,
-	                          GDX12Texture* hdr, GDX12Texture* sun, GDX12Texture* local, SceneEnvironment&,
-	                          SceneReflections&);
+	                          GDX12Texture* hdr, SceneEnvironment&);
 	GDX12DeviceResources& _resources;
 	RenderPipelineCommonData& _common;
 	std::vector<Frame> _frames;
@@ -73,6 +67,5 @@ class SceneTransparency
 	SceneWater _water;
 	OpaqueContinuation _opaqueContinuation;
 	std::function<GDX12Texture*()> _depth, _motion;
-	std::function<D3D12_CPU_DESCRIPTOR_HANDLE()> _dsv;
 };
 } // namespace BistroRender

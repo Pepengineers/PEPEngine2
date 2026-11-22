@@ -131,7 +131,7 @@ class SceneLocalShadows
 	                 UINT faceMask, const Slot&) const;
 	void RebuildCasters(UINT slot);
 	Input ReadInput(UINT slot, UINT command) const;
-	void PrepareAtlas(Slot&, UINT slices, bool replace = false);
+	void PrepareAtlas(Slot&, UINT slices);
 	GDX12DeviceResources& _resources;
 	RenderPipelineCommonData& _common;
 	std::unique_ptr<GDX12DescriptorHeap> _dsvHeap;

@@ -960,7 +960,7 @@ void SceneParticles::PauseIndependentClock()
 }
 
 void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, GDX12Texture* depth,
-                                     Executor& primary, Id device, float worldRate)
+                                     Executor& primary, Id device, float worldRate, bool ownerDraw)
 {
 	_work.Commands.clear();
 	for (auto& lane : _remote) lane.Export = lane.Import = lane.ImportPacket = Invalid;
@@ -999,7 +999,7 @@ void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, 
 	if (requested)
 		for (const auto& emitter : _resources.ParticleEmitters)
 		{
-			if (!emitter.SimulateOnSecondary || emitter.InteractionEnabled != (emitter.Blend == ParticleBlend::Opaque) ||
+			if ((ownerDraw && emitter.Blend != ParticleBlend::Opaque) || !emitter.SimulateOnSecondary || emitter.InteractionEnabled != (emitter.Blend == ParticleBlend::Opaque) ||
 			    (emitter.DepthCollision && (emitter.InteractionEnabled || !depth))) continue;
 			const auto group = emitter.DepthCollision ? Inputs::Depth : emitter.InteractionEnabled ? Inputs::Interaction : Inputs::Frame;
 			remoteEmitters[size_t(group)].push_back(emitter);
@@ -1086,6 +1086,9 @@ void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, 
 		for (const auto& item : lane.Layout) remoteIds.push_back(item.Id);
 		lane.Solver->Prepare(emitters, settings, CrossSync.GetValue(), worldRate);
 	}
+	if (ownerDraw)
+		for (const auto& emitter : _resources.ParticleEmitters)
+			if (emitter.Blend != ParticleBlend::Opaque) remoteIds.push_back(emitter.Id);
 	simulation->BeginFrame(&_resources, _common, &remoteIds);
 	_renderFrame = simulation->RenderFrame();
 	_renderFrame.ResetMotion |= _common.ResetHistory;
@@ -1255,9 +1258,6 @@ void SceneParticles::PrepareOpaque(const SceneGeometry& geometry, UINT slot)
 	}
 	_width = depth->GetWidth();
 	_height = depth->GetHeight();
-	_pass.SetMotionOutputEnabled(HasDrawSources(false) &&
-	    (GetMotionBlurSettings().Enabled || GetFrameGenerationProvider() != GDX12FrameGenerationProvider::Off ||
-	     (_common.Upscaler && (_common.Upscaler->GetFlags() & RENDER_PASS_FLAG_USE_JITTER))));
 	_pass.BeginFrame(depth, _renderFrame);
 	_opaqueReady = _opaquePrepared = false;
 	_splitOpaque = geometry.PrepassNormals(slot) != nullptr;
@@ -1443,73 +1443,85 @@ void SceneParticles::AppendComposite(Graph& graph, std::vector<ID3D12Resource*>&
 	       [this, hdr](auto* cmd) { _pass.Composite(cmd, hdr); });
 }
 
-void SceneParticles::AppendRemoteWeighted(Graph& primary, std::vector<ID3D12Resource*>& primaryBindings,
-    Graph& remote, std::vector<ID3D12Resource*>& bindings, NativeWork& work, GDX12DeviceResources& owner,
-    GDX12Texture* accum, GDX12Texture* reveal, GDX12Texture* depth, Id cameraId, D3D12_GPU_VIRTUAL_ADDRESS camera,
-    const std::function<ID3D12Resource*(ID3D12Resource*)>& mirror, RemoteRaster& raster,
-    const std::function<ID3D12Resource*(GDX12Texture&)>& mirrorTexture)
+void SceneParticles::AppendRemoteWeighted(Graph& graph, std::vector<ID3D12Resource*>& bindings,
+    NativeWork& work, GDX12DeviceResources& owner, GDX12DeviceResources& simulationResources,
+    GDX12ParticleSimulation& simulation, GDX12Texture* accum, GDX12Texture* reveal, GDX12Texture* depth,
+    Id cameraId, D3D12_GPU_VIRTUAL_ADDRESS camera, UINT slot, RemoteRaster& raster,
+    const std::function<ID3D12Resource*(GDX12Texture&)>& asset)
 {
-	_drawReads.clear();
 	raster.Reads.clear();
+	simulationResources.CurrFrameConstantsIndex = slot;
+	simulationResources.ParticleEmitters.clear();
+	for (const auto& emitter : _resources.ParticleEmitters)
+		if (emitter.Blend != ParticleBlend::Opaque)
+			simulationResources.ParticleEmitters.push_back(emitter);
+	const auto settings = GetParticleSettings();
+	simulation.BeginFrame(&simulationResources, settings, _common.ResetHistory);
+	raster.Frame = simulation.RenderFrame();
+	if (raster.Frame.Sources.empty()) return;
+
+	auto* simHeap = simulationResources.SRV_UAV_Heap.get();
+	auto* depthResource = depth->GetResource();
+	auto depthView = depth->ShaderViewDescription();
+	auto& descriptor = raster.SimulationDepth;
+	descriptor.InitAsSRV(depthResource->D3DResource.Get(), &depthView, simHeap,
+	    descriptor.HeapIndex == UINT_MAX ? simHeap->GetAvailableIndex() : descriptor.HeapIndex);
+	const GDX12ParticleDepthInput input{depthResource, descriptor.GPUHandle, camera, depth->GetWidth(), depth->GetHeight()};
+	const State cameraState = graph.Resources.at(cameraId).Memory == Heap::Upload ? D3D12_RESOURCE_STATE_GENERIC_READ
+	    : D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
+	const Access cameraAccess{cameraId, Mode::Read, cameraState};
+	const auto depthAccess = ResourceAccess(graph, bindings, depthResource, Mode::Read,
+	    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+	std::vector<Access> pools;
+	AddResources(graph, bindings, pools, simulation.GetPoolResources(), Mode::ReadWrite);
+	Packet(graph, bindings, "owner initialize transparent particle pools", pools,
+	    [&simulation, &simulationResources](auto* cmd) { simulation.InitializePools(cmd, &simulationResources); },
+	    Queue::Direct, &work);
+	AddResources(graph, bindings, pools, simulation.GetConstantResources(slot), Mode::Read);
+	pools.push_back(depthAccess);
+	pools.push_back(cameraAccess);
+	Packet(graph, bindings, "owner simulate transparent particles", std::move(pools),
+	    [&simulation, &simulationResources, input](auto* cmd) { simulation.ExecuteWithDepth(cmd, &simulationResources, input); },
+	    Queue::Direct, &work);
+	if (!settings.DrawEnabled) return;
+
 	raster.Pass.Setup(&owner, &raster.Common);
 	raster.Pass.SetReadOnlyDepthEnabled(false);
-	raster.Pass.SetMotionOutputEnabled(_pass.MotionOutput() != nullptr);
-	if (!HasDrawSources(false) || _pass.NativeRasterAccesses(false).empty())
-	{
-		raster.Pass.BeginFrame(depth, {});
-		return;
-	}
-	AppendSimulationImports(primary, primaryBindings, false);
-	raster.Frame = _renderFrame;
-	raster.Sources.resize(raster.Frame.Sources.size());
-	const State cameraRead = remote.Resources.at(cameraId).Memory == Heap::Upload ? D3D12_RESOURCE_STATE_GENERIC_READ
-	    : D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
-	const Access cameraAccess{cameraId, Mode::Read, cameraRead};
-	raster.Reads = {cameraAccess, ResourceAccess(remote, bindings, depth->GetResource(), Mode::Read)};
+	raster.Pass.SetMotionOutputEnabled(false);
+	raster.Reads = {cameraAccess, ResourceAccess(graph, bindings, depthResource, Mode::Read)};
 	auto* heap = owner.SRV_UAV_Heap.get();
+	raster.SourceViews.resize(raster.Frame.Sources.size());
 	for (size_t i = 0; i < raster.Frame.Sources.size(); ++i)
 	{
 		auto& source = raster.Frame.Sources[i];
-		if (source.Emitter.Blend == ParticleBlend::Opaque) continue;
-		auto& entry = raster.Sources[i];
-		if (!entry) entry = std::make_unique<RemoteRaster::Source>();
-		const auto inputs = SnapshotResources(source);
-		for (size_t field = 0; field < inputs.size(); ++field)
-		{
-			auto* local = mirror(inputs[field]->D3DResource.Get());
-			entry->Buffers[field].D3DResource = ComPtr<ID3D12Resource>(local);
-			if (field < entry->Views.size()) BindSourceSRV(source, field, local, entry->Views[field], heap);
-		}
-		source.Particles = &entry->Buffers[0];
-		source.Alive = &entry->Buffers[1];
-		source.Counters = &entry->Buffers[2];
-		source.Arguments = &entry->Buffers[3];
+		auto& entry = raster.SourceViews[i];
+		if (!entry) entry = std::make_unique<std::array<GDX12Descriptor, 3>>();
+		auto& views = *entry;
+		const auto buffers = SnapshotResources(source);
+		for (size_t field = 0; field < views.size(); ++field)
+			BindSourceSRV(source, field, buffers[field]->D3DResource.Get(), views[field], heap);
 		if (source.Emitter.Texture)
 		{
 			auto* atlas = source.Emitter.Texture->PrimaryDeviceTexture;
 			if (!atlas) throw std::logic_error("Particle atlas has no primary texture");
-			const Id id = NativeWork::ResourceFor(remote, bindings, mirrorTexture(*atlas), "WBOIT particle atlas");
+			const Id id = NativeWork::ResourceFor(graph, bindings, asset(*atlas), "WBOIT particle atlas");
 			raster.Reads.push_back({id, Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
 		}
 	}
 	raster.Pass.SetInputs({depth, accum, reveal});
 	raster.Pass.Initialize();
-	raster.Pass.BeginFrame(depth, raster.Frame, camera, &_pass);
+	raster.Pass.BeginFrame(depth, raster.Frame, camera, true);
 	std::vector<Access> preparation{cameraAccess};
-	AddAccesses(remote, bindings, preparation, raster.Pass.NativePreparationAccesses(raster.Frame, false));
-	auto* readback = VisibilityReadback(_resources.CurrFrameConstantsIndex, false, *owner.Device, remote.Device);
-	if (readback) preparation.push_back(ResourceAccess(remote, bindings, readback, Mode::Write, CopyDest));
-	Packet(remote, bindings, "owner transparent particle cull and global sort", std::move(preparation),
-	       [&raster, readback, firstRemote = _firstRemote](auto* cmd)
-	       { raster.Pass.PrepareRenderData(cmd, raster.Frame, false, readback, firstRemote); }, Queue::Direct, &work);
+	AddAccesses(graph, bindings, preparation, raster.Pass.NativePreparationAccesses(raster.Frame, false));
+	Packet(graph, bindings, "owner transparent particle cull and global sort", std::move(preparation),
+	    [&raster](auto* cmd) { raster.Pass.PrepareRenderData(cmd, raster.Frame, false); }, Queue::Direct, &work);
 	auto weighted = raster.Reads;
-	AddAccesses(remote, bindings, weighted, raster.Pass.NativeRasterAccesses(true));
+	AddAccesses(graph, bindings, weighted, raster.Pass.NativeRasterAccesses(true));
 	for (auto* target : {accum, reveal})
-		weighted.push_back(ResourceAccess(remote, bindings, target->GetResource(), Mode::ReadWrite,
-		                                  D3D12_RESOURCE_STATE_RENDER_TARGET));
-	Packet(remote, bindings, "owner weighted particles and transparent particle motion", std::move(weighted),
-	       [&raster](auto* cmd) { raster.Pass.DrawWeightedAndMotion(cmd); }, Queue::Direct, &work);
-	_resources.ParticleMotion = _pass.MotionOutput();
+		weighted.push_back(ResourceAccess(graph, bindings, target->GetResource(), Mode::ReadWrite,
+		    D3D12_RESOURCE_STATE_RENDER_TARGET));
+	Packet(graph, bindings, "owner weighted particles", std::move(weighted),
+	    [&raster](auto* cmd) { raster.Pass.DrawWeightedAndMotion(cmd); }, Queue::Direct, &work);
 }
 
 void SceneParticles::AppendRemoteComposite(Graph& remote, std::vector<ID3D12Resource*>& bindings,

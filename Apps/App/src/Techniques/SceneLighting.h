@@ -17,20 +17,6 @@ class SceneLighting
 	~SceneLighting();
 	void Freeze(SceneGeometry&, UINT slot, const std::shared_ptr<QueueSubmission>&, Id aoDevice);
 	void RetireShadowSkinInputs(UINT slot);
-	struct ShadowCopy
-	{
-		D3D12_TEXTURE_COPY_LOCATION Source{};
-		UINT X = 0, Y = 0, Slice = 0, Width = 0, Height = 0;
-		std::shared_ptr<const void> Lifetime;
-	};
-	struct OwnerShadowInputs
-	{
-		std::vector<ShadowCopy> Sun, Local;
-		std::vector<Id> PrimaryDependencies;
-	};
-	void SetTransparencyShadowOwner(Id owner) { _transparencyShadowOwner = owner; }
-	OwnerShadowInputs ShadowInputs(Id owner) const;
-	SceneTransparency& Transparency() { return *_transparency; }
 	Id AOExecutionDevice() const { return _frames.at(_slot).AO->ExecutionDevice(); }
 	std::optional<Executor::PacketExchange> AOExchange(const Schedule& schedule)
 	{
@@ -67,6 +53,7 @@ class SceneLighting
 	bool Record(Id, ID3D12GraphicsCommandList*) const;
 	void Submitted(uint64_t fence);
 	void Reset();
+	SceneTransparency& Transparency() { return *_transparency; }
 	SceneParticles& Particles() { return _transparency->Particles(); }
 	SceneWater& Water() { return _transparency->Water(); }
 	GDX12Texture* ParticleMotion() const { return _transparency->ParticleMotion(); }
@@ -102,10 +89,6 @@ class SceneLighting
 		std::vector<std::shared_ptr<ShadowPublication>> ShadowReads;
 		std::map<UINT, std::array<uint64_t, 6>> LocalShadowOrders;
 		std::array<uint64_t, 4> SunShadowOrders{};
-		Id TransparencyShadowOwner = 0;
-		std::array<ShadowCopy, 4> TransparencySun{};
-		std::map<UINT, ShadowCopy> TransparencyLocal;
-		std::vector<Id> TransparencyShadowImports;
 		uint64_t LocalShadowLayout = 0;
 		GDX12ResourceHandle LatestLocalAtlas, LatestSunAtlas;
 		UINT CrossSlotShadows = 0;
@@ -144,7 +127,6 @@ class SceneLighting
 	bool _forceReset = true;
 	UINT _slot = 0;
 	Id _sunOwner = 0;
-	Id _transparencyShadowOwner = 0;
 	UINT _sunRemoteMask = 0;
 	int _sunSync = 1;
 	uint64_t _localPlacementEpoch = 0, _sunPlacementEpoch = 0;

@@ -39,19 +39,6 @@ class SceneEnvironment
     {
         return _environment._luts[0]->IsInitialized() ? _environment._luts[0].get() : nullptr;
     }
-    GDX12Texture* TransparencyLut(UINT index) const
-    {
-        constexpr UINT slots[]{0, 3, 4};
-        return _environment._source == SkySource::SkyAtmosphere ? _environment._luts[slots[index]].get() : nullptr;
-    }
-    bool UpdatesTexture(GDX12Texture& texture) const
-    {
-        for (const auto& work : _work)
-            for (const auto& [resource, access] : work.Accesses)
-                if (resource->D3DResource.Get() == texture.GetResource()->D3DResource.Get() && access.Usage != Mode::Read)
-                    return true;
-        return false;
-    }
     void AddAerialReads(Graph&, std::vector<ID3D12Resource*>&, std::vector<Access>&);
     GDX12Texture* VisibleSkyView() const
     {

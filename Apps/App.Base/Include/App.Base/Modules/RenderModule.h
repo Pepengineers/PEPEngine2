@@ -70,6 +70,8 @@ public:
     GPUTexture* GetTextureByName(const std::string& name);
     //returns a pointer to a fully initialized structure that you can specify in materials
     GPUTexture* CreateTexture(const std::string& name, const Texture* texture, ETextureType type);
+    using TextureSource = std::function<const Texture*(std::unique_ptr<Texture>&)>;
+    void SetTextureReplicaSource(const std::string& name, ETextureType, TextureSource);
     void WaitForUploads();
     void DrainFrameWork();
     void ResetWorldHistory();

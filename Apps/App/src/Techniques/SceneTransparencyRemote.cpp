@@ -1,9 +1,7 @@
 #include "SceneTransparency.h"
-#include "SceneLighting.h"
 #include "ProbeInputMirror.h"
 #include "WboitMeshDraw.h"
 #include "WboitTransfer.h"
-#include "WboitShadowInput.h"
 #include "Common/ConsoleVariables.h"
 #include "Engine.Core/Logging/Logger.h"
 #include "Common/GameTimer.h"
@@ -12,6 +10,25 @@ namespace BistroRender
 {
 namespace
 {
+ID3D12Resource* Upload(GDX12Device& device, GDX12ResourceHandle& buffer, const void* data, UINT64 bytes)
+{
+	if (!buffer || buffer->GetDesc().Width < bytes)
+		buffer = device.CreateResource(D3D12_HEAP_TYPE_UPLOAD, CD3DX12_RESOURCE_DESC::Buffer(bytes),
+		    D3D12_RESOURCE_STATE_GENERIC_READ);
+	void* mapped = nullptr;
+	const D3D12_RANGE noRead{};
+	ThrowIfFailed(buffer->Map(0, &noRead, &mapped));
+	std::memcpy(mapped, data, size_t(bytes));
+	buffer->Unmap(0, nullptr);
+	return buffer.Get();
+}
+
+struct TransparentGeometry
+{
+	GDX12GeometryBuffer::RecordingBinding Binding{};
+	std::map<std::tuple<UINT, UINT, INT>, std::pair<UINT, INT>> Offsets;
+};
+
 AutoConsoleVariable<int> WboitAdapter(L"App.WBOIT.Adapter", -1, L"DXGI adapter for exact Bistro WBOIT accumulation; -1 uses GPU0.",
                                       EConsoleVariableFlags::Default, [](int index) { return index >= -1; });
 Id PacketFor(const Schedule& plan, Id operation)
@@ -24,21 +41,30 @@ Id PacketFor(const Schedule& plan, Id operation)
 
 struct SceneTransparency::Shared
 {
-	std::shared_ptr<ProbeInputMirror::Cache> Cache = std::make_shared<ProbeInputMirror::Cache>();
+	Shared(GDX12Device& device, size_t slots)
+	{
+		SimulationResources.Device = &device;
+		SimulationResources.FrameConstants.resize(slots);
+		SimulationResources.SRV_UAV_Heap = std::make_shared<GDX12DescriptorHeap>(&device,
+		    D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, SceneDescriptorStart + 4096, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
+	}
+	GDX12DeviceResources SimulationResources;
+	GDX12ParticleSimulation Simulation;
 	Id Owner;
-	uint64_t MeshRevision = UINT64_MAX, VertexRevision = 0, TextureRevision = UINT64_MAX;
+	uint64_t MeshRevision = UINT64_MAX;
+	std::shared_ptr<TransparentGeometry> Geometry;
 	bool Scheduled = false, ReportedFirst = false, ReportedRegular = false;
 };
 struct SceneTransparency::Remote
 {
 	Remote(const std::shared_ptr<QueueSubmission>& submit, Id owner, RenderPipelineCommonData& common, const std::shared_ptr<Shared>& shared)
-	    : GPU(submit, owner, 1), Mirror(*submit, owner, shared->Cache), DepthMirror(*submit, owner), SharedInputs(shared), Owner(owner)
+	    : GPU(submit, owner, 1), DepthMirror(*submit, owner), SharedInputs(shared), Owner(owner)
 	{
 		Resources.Initialize(&submit->Device(owner));
 		Draw.Setup(&Resources, &common);
 		Draw.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
 		Draw.SetUnbatchedDraws(true);
-		Draw.SetAtmosphereEnabled(true);
+		Draw.SetSimpleLighting(true);
 		Compose.Setup(&Resources, &common);
 		Compose.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
 	}
@@ -49,7 +75,7 @@ struct SceneTransparency::Remote
 		Draw.ClearDenendencies();
 	}
 	Executor GPU;
-	ProbeInputMirror Mirror, DepthMirror;
+	ProbeInputMirror DepthMirror;
 	NativeWork Early;
 	Id DepthExport = Invalid;
 	ID3D12Resource* DepthResource = nullptr;
@@ -60,22 +86,20 @@ struct SceneTransparency::Remote
 	GDX12WBOITTransparencyPass Draw;
 	GDX12WBOITCompositionPass Compose;
 	GDX12Texture Depth;
-	WboitShadowInput Sun, Local;
-	std::array<GDX12Descriptor, 11> SceneViews;
-	std::array<GDX12Descriptor, 3> SkyViews;
-	SceneLighting::OwnerShadowInputs Shadows;
-	std::shared_ptr<GDX12ResourceHandle> Skin;
+	std::array<GDX12Descriptor, 3> SceneViews;
+	std::shared_ptr<TransparentGeometry> Geometry;
+	std::array<GDX12ResourceHandle, 6> FrameInputs;
+	std::array<GDX12ResourceHandle, 2> GeometryUploads;
 	std::unique_ptr<WboitResultTransfer> Transfer;
-	std::unordered_set<ID3D12Resource*> Live;
 	Graph Plan;
 	NativeWork Work;
 	std::vector<ID3D12Resource*> Bindings;
-	Id Export = Invalid, Import = Invalid, OwnerResolve = Invalid, Mesh = Invalid, Apply = Invalid;
+	Id Import = Invalid, OwnerResolve = Invalid, Mesh = Invalid, Apply = Invalid;
 	CompletionToken MeshDone, Resolved, Produced, Imported, Applied, Consumer;
-	UINT64 Frame = 0, DepthBytes = 0, TextureBytes = 0, Inputs = 0, ShadowBytes = 0, OwnerShadowBytes = 0, GeometryBytes = 0;
+	UINT64 Frame = 0, DepthBytes = 0, GeometryBytes = 0;
 	UINT Width = 0, Height = 0, TransparentDraws = 0;
 	std::array<UINT, 3> EmitterCounts{};
-	bool Motion = false, Bootstrap = false;
+	bool Bootstrap = false;
 
 	void Report()
 	{
@@ -86,21 +110,18 @@ struct SceneTransparency::Remote
 		Log::Info("RenderGraph", "WBOIT Exact completed frame=", Frame, " owner=", GPU.Submissions()->AdapterLabel(Owner),
 		    " display=", GPU.Submissions()->AdapterLabel(0), " raster=mesh+particles resolve=owner sorted/additive=owner",
 		    " primary=layer-application dimensions=", Width, "x", Height, " accum=RGBA16_FLOAT reveal=R16_FLOAT hdr=RGBA16_FLOAT",
-		    " motion=", Motion, " motionFormat=", Motion ? "RGBA32_FLOAT" : "none",
+		    " motion=0",
 		    " weightedEmitters=", EmitterCounts[0], " sortedEmitters=", EmitterCounts[1], " additiveEmitters=", EmitterCounts[2],
-		    " transparentSceneCommands=", TransparentDraws, " inputBytes=", Inputs, " depthSource=opaque-prepass depthBytes=", DepthBytes,
-		    " opaqueHdrBytes=0 bindlessTextureBytes=", TextureBytes, " geometryBytes=", GeometryBytes,
-		    " shadowBytes=", ShadowBytes, " ownerLocalShadowBytes=", OwnerShadowBytes,
-		    " otherInputsAndPaddingBytes=", Inputs - DepthBytes - TextureBytes - GeometryBytes - ShadowBytes,
-		    " layerBytes=", Transfer->LayerBytes, " finalResultBytes=", Transfer->Bytes, " ownerMeshFence=", MeshDone.Value, " ownerResolveFence=", Resolved.Value, " ownerExportFence=", Produced.Value,
+		    " transparentSceneCommands=", TransparentDraws, " inputBytes=", DepthBytes, " depthSource=opaque-prepass depthBytes=", DepthBytes,
+		    " opaqueHdrBytes=0 shadowBytes=0 particlePoolBytes=0 hostGeometryUploadBytes=", GeometryBytes,
+		    " layerBytes=", Transfer->Bytes, " finalResultBytes=", Transfer->Bytes, " ownerMeshFence=", MeshDone.Value, " ownerResolveFence=", Resolved.Value, " ownerExportFence=", Produced.Value,
 		    " primaryImportFence=", Imported.Value, " primaryApplyFence=", Applied.Value, " completedFrameFence=", Consumer.Value);
 	}
 };
 
-Id SceneTransparency::Begin(const std::shared_ptr<QueueSubmission>& submit, SceneLighting& lighting, UINT slot, uint64_t frame)
+Id SceneTransparency::Begin(const std::shared_ptr<QueueSubmission>& submit, UINT slot, uint64_t frame)
 {
 	_frame = frame;
-	_lighting = &lighting;
 	const Id owner = submit->SelectAdapter(WboitAdapter.GetValue());
 	auto& entry = _remoteSlots.at(slot);
 	if (entry)
@@ -111,7 +132,7 @@ Id SceneTransparency::Begin(const std::shared_ptr<QueueSubmission>& submit, Scen
 	if (!owner) _shared.reset();
 	if (owner && (!_shared || _shared->Owner != owner))
 	{
-		_shared = std::make_shared<Shared>();
+		_shared = std::make_shared<Shared>(submit->Device(owner), _remoteSlots.size());
 		_shared->Owner = owner;
 	}
 	if (owner && (!entry || entry->SharedInputs != _shared))
@@ -148,7 +169,7 @@ void SceneTransparency::AddExchange(const Schedule& primary, std::vector<Executo
 	remote.Import = PacketFor(primary, remote.Import);
 	remote.GPU.Begin(0);
 	remote.GPU.Reserve(schedule);
-	exchanges.push_back({PacketFor(primary, remote.Export), remote.Import,
+	exchanges.push_back({PacketFor(primary, remote.DepthExport), remote.Import,
 	    [&remote, schedule = std::move(schedule), input, resolve, mesh](CompletionToken inputs)
 	    {
 		    remote.GPU.Execute(schedule, remote.Bindings, [&remote](Id op, UINT, ID3D12GraphicsCommandList* cmd)
@@ -181,7 +202,7 @@ SceneTransparency::SceneTransparency(GDX12DeviceResources& resources, RenderPipe
 	{
 		frame.Draw.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
 		frame.Draw.SetUnbatchedDraws(true);
-		frame.Draw.SetAtmosphereEnabled(true);
+		frame.Draw.SetSimpleLighting(true);
 		frame.Compose.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
 		frame.Compose.SetApplyOpaqueAerialPerspective(true);
 	}
@@ -196,42 +217,26 @@ SceneTransparency::~SceneTransparency()
 		frame.Draw.ClearDenendencies();
 	}
 }
-void SceneTransparency::AppendRemote(Graph& primary, std::vector<ID3D12Resource*>& primaryBindings,
-    SceneGeometry& geometry, UINT slot, Frame& frame, GDX12Texture* hdr, GDX12Texture* sun, GDX12Texture* local,
-    SceneEnvironment& environment, SceneReflections& reflections)
+void SceneTransparency::AppendRemote(SceneGeometry& geometry, UINT slot, Frame& frame, GDX12Texture* hdr)
 {
 	auto& r = *_remote;
 	auto& submit = *r.GPU.Submissions();
 	auto& plan = r.Plan;
 	auto& work = r.Work;
 	auto& bindings = r.Bindings;
-	auto& scene = geometry._slots.at(slot);
 	auto& constants = *_resources.FrameConstants.at(slot);
 	auto* depth = geometry.Depth(slot);
 	const auto native = [](GDX12Texture* t){ return t->GetResource()->D3DResource.Get(); };
-	const auto primaryId = [&](ID3D12Resource* value){ return NativeWork::ResourceFor(primary, primaryBindings, value, "WBOIT source"); };
 	const auto id = [&](ID3D12Resource* value){ return NativeWork::ResourceFor(plan, bindings, value, "WBOIT owner input"); };
 	plan = {};
 	plan.Device = r.Owner;
 	plan.FrameBoundary = false;
 	bindings.clear();
 	work.Commands.clear();
-	r.Mirror.Begin();
-	std::unordered_set<ID3D12Resource*> live;
-	for (const auto& entry : _remoteSlots)
-		if (entry && entry->SharedInputs == r.SharedInputs) live.insert(entry->Live.begin(), entry->Live.end());
-	r.Mirror.RetireUnused(live, [](auto*){});
-	r.Live.clear();
 	r.Frame = _frame;
 	r.Bootstrap = !r.SharedInputs->Scheduled;
 	r.SharedInputs->Scheduled = true;
 	r.Consumer = r.Applied = r.Imported = r.Produced = r.Resolved = r.MeshDone = {};
-	r.TextureBytes = r.ShadowBytes = r.OwnerShadowBytes = 0;
-	r.Shadows = _lighting->ShadowInputs(r.Owner);
-	const auto mirror = [&](ID3D12Resource* src, bool refresh = true){
-		r.Live.insert(src);
-		return r.Mirror.Mirror(primary, primaryBindings, src, primaryId(src), refresh);
-	};
 	auto* heap = r.Resources.SRV_UAV_Heap.get();
 	const auto view = [&](GDX12Descriptor& d, ID3D12Resource* src, D3D12_SHADER_RESOURCE_VIEW_DESC desc){
 		d.InitAsSRV(src, &desc, heap, d.HeapIndex == UINT_MAX ? heap->GetAvailableIndex(SceneDescriptorStart) : d.HeapIndex);
@@ -248,9 +253,6 @@ void SceneTransparency::AppendRemote(Graph& primary, std::vector<ID3D12Resource*
 		desc.SRVHeapIndex = out.IsInitialized() ? out.GetSRV()->HeapIndex : heap->GetAvailableIndex(SceneDescriptorStart);
 		out.Initialize(desc);
 	};
-	// Append any exact camera-LUT import before freezing its native resources.
-	std::vector<Access> aerial;
-	environment.AddAerialReads(primary, primaryBindings, aerial);
 	auto* ownerDepth = r.DepthResource;
 	if (!ownerDepth || r.DepthExport == Invalid) throw std::logic_error("WBOIT missing opaque prepass snapshot");
 	r.DepthMirror.AppendImport(plan, bindings, work);
@@ -285,7 +287,6 @@ void SceneTransparency::AppendRemote(Graph& primary, std::vector<ID3D12Resource*
 	mesh.Viewport = accum->GetViewport();
 	mesh.Rect = accum->GetScissorRect();
 	mesh.Targets = {accum->GetRTV()->CPUHandle, reveal->GetRTV()->CPUHandle};
-	mesh.Draws = scene.Draws;
 	const State read = D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE;
 	std::vector<Access> accesses{{id(ownerDepth), Mode::Read, read | D3D12_RESOURCE_STATE_DEPTH_READ},
 		{id(native(accum)), Mode::Write, D3D12_RESOURCE_STATE_RENDER_TARGET},
@@ -296,145 +297,148 @@ void SceneTransparency::AppendRemote(Graph& primary, std::vector<ID3D12Resource*
 		if (found == accesses.end()) accesses.push_back({index, Mode::Read, state});
 		else found->Required |= state;
 	};
-	const auto cb = [&](ID3D12Resource* source, D3D12_GPU_VIRTUAL_ADDRESS address){
-		auto* target = mirror(source);
-		addRead(target, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
-		return target->GetGPUVirtualAddress() + (address - source->GetGPUVirtualAddress());
+	auto& device = *r.Resources.Device;
+	const auto cpu = [&](UINT index, const void* data, UINT64 bytes){
+		auto* target = Upload(device, r.FrameInputs[index], data, bytes);
+		addRead(target, D3D12_RESOURCE_STATE_GENERIC_READ);
+		return target;
 	};
-	mesh.Main = cb(primaryBindings[scene.FrameIds[0]], scene.Main);
-	mesh.Camera = cb(primaryBindings[scene.FrameIds[1]], scene.Camera);
-	mesh.Shadow = cb(constants.ShadowCB->GetResource().D3DResource.Get(), constants.ShadowCB->GetElementAddress(0));
-	mesh.Sky = cb(constants.SkyCB->GetResource().D3DResource.Get(), constants.SkyCB->GetElementAddress(0));
-	const auto structured = [&](UINT param, ID3D12Resource* src, UINT elements, UINT stride){
-		auto* target = mirror(src);
+	const auto& main = constants.MainCB->GetCPUData()[0];
+	const auto& camera = constants.CameraCB->GetCPUData()[_common.ActiveCameraCBufferIndex];
+	mesh.Main = cpu(0, &main, sizeof(main))->GetGPUVirtualAddress();
+	auto* ownerCamera = cpu(1, &camera, sizeof(camera));
+	mesh.Camera = ownerCamera->GetGPUVirtualAddress();
+	const auto structured = [&](UINT param, const auto& elements){
+		using Element = typename std::decay_t<decltype(elements)>::value_type;
+		auto* target = cpu(param + 2, elements.data(), UINT64(elements.size()) * sizeof(Element));
 		D3D12_SHADER_RESOURCE_VIEW_DESC desc{};
 		desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
 		desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-		desc.Buffer.NumElements = elements;
-		desc.Buffer.StructureByteStride = stride;
+		desc.Buffer.NumElements = UINT(elements.size());
+		desc.Buffer.StructureByteStride = sizeof(Element);
 		mesh.Views[param] = view(r.SceneViews[param], target, desc);
-		addRead(target);
 	};
-	structured(0, scene.Buffers[2].Data.Get(), UINT(scene.Buffers[2].Bytes / sizeof(GDX12MaterialConstants)), sizeof(GDX12MaterialConstants));
-	structured(1, scene.Buffers[3].Data.Get(), UINT(scene.Buffers[3].Bytes / sizeof(GDX12TransformConstants)), sizeof(GDX12TransformConstants));
-	structured(2, scene.Buffers[0].Data.Get(), UINT(scene.Buffers[0].Bytes / sizeof(GDX12InstanceData)), sizeof(GDX12InstanceData));
-	structured(7, constants.ShadowLights->GetResource().D3DResource.Get(), constants.ShadowLights->GetElementCount(), sizeof(GDX12LocalLightConstants));
-	structured(10, constants.ReflectionProbes->GetResource().D3DResource.Get(), constants.ReflectionProbes->GetElementCount(), sizeof(GDX12ReflectionProbeData));
-	std::vector<Id> shadowExports = r.Shadows.PrimaryDependencies;
-	shadowExports.push_back(r.DepthExport);
-	const auto shadow = [&](UINT param, GDX12Texture* atlas, const auto& copies, WboitShadowInput& stage, bool csm){
-		auto* src = native(atlas);
-		ID3D12Resource* target;
-		if (copies.empty())
-		{
-			target = mirror(src);
-			r.ShadowBytes += r.Mirror.PendingTransferBytes(src);
-		}
-		else
-		{
-			target = stage.Prepare(submit, r.Owner, primary, primaryBindings, _work, plan, bindings, work, src, copies, csm);
-			if (stage.Export != Invalid) shadowExports.push_back(stage.Export);
-			r.ShadowBytes += stage.Bytes;
-			r.OwnerShadowBytes += stage.LocalBytes;
-		}
-		mesh.Views[param] = view(r.SceneViews[param], target, atlas->ShaderViewDescription());
-		addRead(target);
-	};
-	shadow(3, sun, r.Shadows.Sun, r.Sun, true);
-	shadow(8, local, r.Shadows.Local, r.Local, false);
-	for (UINT i = 0; i < 3; ++i)
-	{
-		auto* source = environment.Output(i)->GetTexture();
-		auto* target = mirror(native(source), environment.UpdatesTexture(*source));
-		mesh.Views[i+4] = view(r.SceneViews[i+4], target, source->ShaderViewDescription());
-		addRead(target);
-	}
-	const std::array skyNulls{r.Resources.SkyTransmittanceSRV.GPUHandle, r.Resources.SkyAerialRadianceSRV.GPUHandle,
-		r.Resources.SkyAerialTransmittanceSRV.GPUHandle};
-	for (UINT i = 0; i < mesh.Atmosphere.size(); ++i)
-	{
-		mesh.Atmosphere[i] = skyNulls[i];
-		if (auto* lut = environment.TransparencyLut(i))
-		{
-			auto* target = mirror(native(lut), i != 0 || environment.UpdatesTexture(*lut));
-			mesh.Atmosphere[i] = view(r.SkyViews[i], target, lut->ShaderViewDescription());
-			addRead(target);
-		}
-	}
-	auto* probeSource = native(reflections.Published());
-	const Id probeId = primaryId(probeSource);
-	const bool published = std::any_of(primary.Operations.begin(), primary.Operations.end(), [&](const auto& op){
-		return std::any_of(op.Accesses.begin(), op.Accesses.end(), [=](auto access){
-			return access.Resource == probeId && access.Usage != Mode::Read;
-		});
-	});
-	auto* probes = mirror(probeSource, published);
-	D3D12_SHADER_RESOURCE_VIEW_DESC probeView{};
-	probeView.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-	probeView.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBEARRAY;
-	probeView.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-	probeView.TextureCubeArray.NumCubes = probes->GetDesc().DepthOrArraySize / 6;
-	probeView.TextureCubeArray.MipLevels = probes->GetDesc().MipLevels;
-	mesh.Views[9] = view(r.SceneViews[9], probes, probeView);
-	addRead(probes);
 
-	auto* vertices = scene.Geometry.VertexResource;
-	const auto meshRevision = _resources.GeometryBuffer->GetMeshCacheRevision();
-	const bool newGeometry = r.SharedInputs->MeshRevision != meshRevision || !r.Mirror.Contains(vertices);
-	std::vector<ProbeInputMirror::BufferRange> ranges;
-	if (!newGeometry)
-		for (auto [first, end] : geometry.ChangedVertexRanges(r.SharedInputs->VertexRevision))
-			ranges.push_back({UINT64(first) * sizeof(Vertex), UINT64(end-first) * sizeof(Vertex)});
-	std::vector<ProbeInputMirror::BufferPatch> patches;
-	const auto skin = scene.RemoteSkin.find(r.Owner);
-	r.Skin.reset();
-	if ((newGeometry || !ranges.empty()) && skin != scene.RemoteSkin.end())
-	{
-		r.Skin = skin->second.Output;
-		for (const auto& span : skin->second.Ranges)
-			patches.push_back({r.Skin->Get(), UINT64(span.FirstVertex) * sizeof(Vertex),
-				UINT64(span.Work.OutputVertex) * sizeof(Vertex), span.Work.VertexBytes()});
-	}
-	r.Live.insert(vertices);
-	mesh.Geometry = scene.Geometry;
-	mesh.Geometry.VertexResource = r.Mirror.Mirror(primary, primaryBindings, vertices, primaryId(vertices), newGeometry,
-		std::move(patches), std::move(ranges));
-	mesh.Geometry.IndexResource = mirror(scene.Geometry.IndexResource, newGeometry);
-	mesh.Geometry.Vertices.BufferLocation = mesh.Geometry.VertexResource->GetGPUVirtualAddress();
-	mesh.Geometry.Indices.BufferLocation = mesh.Geometry.IndexResource->GetGPUVirtualAddress();
-	r.GeometryBytes = r.Mirror.PendingTransferBytes(vertices) + r.Mirror.PendingTransferBytes(scene.Geometry.IndexResource);
-	r.SharedInputs->MeshRevision = meshRevision;
-	r.SharedInputs->VertexRevision = geometry._vertexDeformationRevision;
-	addRead(mesh.Geometry.VertexResource, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-	addRead(mesh.Geometry.IndexResource, D3D12_RESOURCE_STATE_INDEX_BUFFER);
-	mesh.Args = mirror(scene.Buffers[6].Data.Get());
-	mesh.Count = mirror(scene.Buffers[7].Data.Get());
-	addRead(mesh.Args, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
-	addRead(mesh.Count, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
-
-	std::unordered_set<UINT> indices;
 	const auto& materials = *constants.MaterialCache;
-	for (UINT i = 0; i < constants.MaterialCache->GetElementCount(); ++i)
+	const auto* sourceInstances = constants.InstanceCache->GetCPUData();
+	const auto* sourceTransforms = constants.TransformCache->GetCPUData();
+	const auto* sourceDraws = _resources.IndirectCommandsCache->GetCPUData();
+	std::vector<GDX12IndirectDrawArgs> draws;
+	std::vector<GDX12InstanceData> instances;
+	std::vector<GDX12TransformConstants> transforms;
+	std::vector<GDX12MaterialConstants> drawMaterials;
+	std::unordered_set<UINT> indices;
+	for (UINT i = 0; i < _resources.IndirectCommandsCache->GetElementCount(); ++i)
 	{
-		const auto& m = materials.GetCPUData()[i];
-		if (m.RenderLayer != UINT(MaterialType::Transparent) || m.ReflectionProbePreview) continue;
-		indices.insert({m.DiffuseIndex, m.NormalIndex, m.DisplacementIndex, m.SpecularIndex, m.RoughnessIndex, m.EmissiveIndex});
+		auto draw = sourceDraws[i];
+		if (!draw.InstanceCount || !draw.IndexCountPerInstance) continue;
+		auto instance = sourceInstances[draw.InstanceID];
+		const auto& material = materials.GetCPUData()[instance.MaterialIndex];
+		if (material.RenderLayer != UINT(MaterialType::Transparent) || material.ReflectionProbePreview) continue;
+		indices.insert(material.DiffuseIndex);
+		draw.InstanceID = UINT(instances.size());
+		transforms.push_back(sourceTransforms[instance.TransformIndex]);
+		drawMaterials.push_back(material);
+		instance.TransformIndex = instance.MaterialIndex = draw.InstanceID;
+		draws.push_back(draw);
+		instances.push_back(instance);
 	}
-	std::unordered_set<Id> restore;
-	const bool refreshAssets = r.SharedInputs->TextureRevision != _resources.TextureRevision;
-	const auto asset = [&](GDX12Texture& texture){
-		auto* src = native(&texture);
-		auto found = std::find(primaryBindings.begin(), primaryBindings.end(), src);
-		if (found == primaryBindings.end())
+	r.TransparentDraws = mesh.Draws = UINT(draws.size());
+	r.GeometryBytes = 0;
+	r.GeometryUploads = {};
+	const auto& geometryBuffer = *_resources.GeometryBuffer;
+	const auto revision = geometryBuffer.GetMeshCacheRevision();
+	auto& resident = r.SharedInputs->Geometry;
+	const auto key = [](const auto& draw) {
+		return std::make_tuple(draw.StartIndexLocation, draw.IndexCountPerInstance, draw.BaseVertexLocation);
+	};
+	if (!draws.empty())
+	{
+		if (!resident || r.SharedInputs->MeshRevision != revision ||
+		    std::any_of(draws.begin(), draws.end(), [&](const auto& draw) { return resident->Offsets.find(key(draw)) == resident->Offsets.end(); }))
 		{
-			const auto published = texture.GetResource()->GetCurrentState();
-			const Id index = primaryId(src);
-			primary.Resources[index].Initial = primary.Resources[index].Final = published;
+			auto updated = std::make_shared<TransparentGeometry>();
+			auto& binding = updated->Binding;
+			const auto& sourceVertices = geometryBuffer.CPUVertices();
+			const auto& sourceIndices = geometryBuffer.CPUIndices();
+			std::vector<Vertex> vertices;
+			std::vector<uint32_t> indexData;
+			for (const auto& draw : draws)
+			{
+				if (!updated->Offsets.try_emplace(key(draw), UINT(indexData.size()), INT(vertices.size())).second) continue;
+				const size_t indexEnd = size_t(draw.StartIndexLocation) + draw.IndexCountPerInstance;
+				if (indexEnd > sourceIndices.size() || draw.BaseVertexLocation < 0)
+					throw std::out_of_range("Invalid transparent mesh indices");
+				const auto first = sourceIndices.begin() + draw.StartIndexLocation;
+				const auto last = sourceIndices.begin() + indexEnd;
+				const size_t vertexEnd = size_t(draw.BaseVertexLocation) + *std::max_element(first, last) + 1;
+				if (vertexEnd > sourceVertices.size())
+					throw std::out_of_range("Invalid transparent mesh vertices");
+				vertices.insert(vertices.end(), sourceVertices.begin() + draw.BaseVertexLocation, sourceVertices.begin() + vertexEnd);
+				indexData.insert(indexData.end(), first, last);
+			}
+			const UINT vertexBytes = UINT(vertices.size() * sizeof(Vertex));
+			const UINT indexBytes = UINT(indexData.size() * sizeof(uint32_t));
+			auto* vertexUpload = Upload(device, r.GeometryUploads[0], vertices.data(), vertexBytes);
+			auto* indexUpload = Upload(device, r.GeometryUploads[1], indexData.data(), indexBytes);
+			const auto residentBuffer = [&](UINT bytes) {
+				return device.CreateResource(D3D12_HEAP_TYPE_DEFAULT, CD3DX12_RESOURCE_DESC::Buffer(bytes),
+				    D3D12_RESOURCE_STATE_COMMON);
+			};
+			binding.VertexAllocation = residentBuffer(vertexBytes);
+			binding.IndexAllocation = residentBuffer(indexBytes);
+			auto* vertexBuffer = binding.VertexResource = binding.VertexAllocation.Get();
+			auto* indexBuffer = binding.IndexResource = binding.IndexAllocation.Get();
+			work.Add(plan, "upload transparent mesh geometry on owner",
+			    {{id(vertexUpload), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ},
+			     {id(indexUpload), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ},
+			     {id(vertexBuffer), Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST},
+			     {id(indexBuffer), Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
+			    [=](auto* cmd) {
+				    cmd->CopyBufferRegion(vertexBuffer, 0, vertexUpload, 0, vertexBytes);
+				    cmd->CopyBufferRegion(indexBuffer, 0, indexUpload, 0, indexBytes);
+			    });
+			binding.Vertices = {binding.VertexResource->GetGPUVirtualAddress(), vertexBytes, sizeof(Vertex)};
+			binding.Indices = {binding.IndexResource->GetGPUVirtualAddress(), indexBytes, DXGI_FORMAT_R32_UINT};
+			r.GeometryBytes = UINT64(vertexBytes) + indexBytes;
+			resident = std::move(updated);
+			r.SharedInputs->MeshRevision = revision;
 		}
-		auto* target = mirror(src, refreshAssets);
-		auto desc = texture.ShaderViewDescription();
-		r.Resources.Device->GetDevice()->CreateShaderResourceView(target, &desc, heap->GetCPUHandle(texture.GetSRV()->HeapIndex));
-		if (r.Mirror.PendingCopy(src) && restore.insert(primaryId(src)).second) r.TextureBytes += r.Mirror.PendingTransferBytes(src);
+		r.Geometry = resident;
+		mesh.Geometry = r.Geometry->Binding;
+		for (auto& draw : draws)
+		{
+			const auto& [index, vertex] = r.Geometry->Offsets.at(key(draw));
+			draw.StartIndexLocation = index;
+			draw.BaseVertexLocation = vertex;
+		}
+		structured(0, drawMaterials);
+		structured(1, transforms);
+		structured(2, instances);
+		mesh.Args = cpu(5, draws.data(), UINT64(draws.size()) * sizeof(draws.front()));
+		addRead(mesh.Geometry.VertexResource, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+		addRead(mesh.Geometry.IndexResource, D3D12_RESOURCE_STATE_INDEX_BUFFER);
+	}
+	else r.Geometry.reset();
+
+	auto& assetResources = r.SharedInputs->SimulationResources;
+	const auto asset = [&](GDX12Texture& texture) {
+		const auto source = std::find_if(_resources.Textures.begin(), _resources.Textures.end(),
+		    [&](const auto& entry) { return entry.second.get() == &texture; });
+		if (source == _resources.Textures.end()) throw std::logic_error("Unregistered WBOIT texture");
+		auto found = assetResources.Textures.find(source->first);
+		const auto loader = _resources.TextureReplicaLoaders.find(source->first);
+		if (loader == _resources.TextureReplicaLoaders.end())
+			throw std::logic_error("Missing replica source for WBOIT texture " + source->first);
+		auto* copy = found == assetResources.Textures.end() ? loader->second(assetResources) : found->second.get();
+		auto* target = native(copy);
+		NativeWork::ImportReadOnlyTexture(plan, bindings, *copy->GetResource(), read, "WBOIT texture replica");
+		const auto desc = copy->ShaderViewDescription();
+		const auto original = texture.ShaderViewDescription();
+		if (desc.Format != original.Format || desc.Texture2D.MipLevels != original.Texture2D.MipLevels ||
+		    copy->GetWidth() != texture.GetWidth() || copy->GetHeight() != texture.GetHeight())
+			throw std::logic_error("WBOIT texture replica differs from the original: " + source->first);
+		device.GetDevice()->CreateShaderResourceView(target, &desc, heap->GetCPUHandle(texture.GetSRV()->HeapIndex));
 		return target;
 	};
 	for (const auto& [_, texture] : _resources.Textures)
@@ -442,11 +446,10 @@ void SceneTransparency::AppendRemote(Graph& primary, std::vector<ID3D12Resource*
 		const UINT index = texture->GetSRV()->HeapIndex;
 		if (index >= Texture2D_StartIndex && indices.count(index - Texture2D_StartIndex)) addRead(asset(*texture));
 	}
-	r.SharedInputs->TextureRevision = _resources.TextureRevision;
 	r.Mesh = work.Add(plan, "WBOIT owner clear and draw transparent mesh", std::move(accesses), mesh);
-	const Id cameraId = id(mirror(primaryBindings[scene.FrameIds[1]]));
-	_particles.AppendRemoteWeighted(primary, primaryBindings, plan, bindings, work, r.Resources, accum, reveal, &r.Depth,
-	    cameraId, mesh.Camera, [&](ID3D12Resource* src){return mirror(src);}, r.Particles, asset);
+	const Id cameraId = id(ownerCamera);
+	_particles.AppendRemoteWeighted(plan, bindings, work, r.Resources, r.SharedInputs->SimulationResources,
+	    r.SharedInputs->Simulation, accum, reveal, &r.Depth, cameraId, mesh.Camera, slot, r.Particles, asset);
 
 	auto* root = r.Compose._compositionRS.get();
 	auto* pipeline = r.Compose._compositionPSO.Get();
@@ -467,35 +470,8 @@ void SceneTransparency::AppendRemote(Graph& primary, std::vector<ID3D12Resource*
 		cmd->DrawInstanced(3, 1, 0, 0);
 	});
 	_particles.AppendRemoteComposite(plan, bindings, work, output, r.Particles);
-	r.Mirror.TrimBootstrapStaging();
-	const Id imported = r.Mirror.AppendImport(plan, bindings, work, true);
-	if (imported != 0) throw std::logic_error("WBOIT inputs must precede all owner work");
-	++r.OwnerResolve;
-	++r.Mesh;
-	// Shadow assembly may have only owner-local inputs. Its version is still gated by GPU0's export fence.
-	for (Id i = 1; i < plan.Operations.size(); ++i) plan.Operations[i].Dependencies.push_back(0);
-	r.Export = r.Mirror.AppendExport(primary, primaryBindings, _work, Queue::Direct);
-	auto& dependencies = primary.Operations.at(r.Export).Dependencies;
-	dependencies.insert(dependencies.end(), shadowExports.begin(), shadowExports.end());
-	if (!restore.empty())
-	{
-		std::vector<Access> reads;
-		for (Id src : restore) reads.push_back({src, Mode::Read, read});
-		_work.Add(primary, "restore GPU0 bindless textures after transparency export", std::move(reads), [](auto*){}, {r.Export});
-	}
-	std::vector<ID3D12Resource*> result{native(output)};
-	auto* motion = r.Particles.Pass.MotionOutput();
-	if (motion)
-	{
-		result.push_back(native(motion));
-	}
-	if (!r.Transfer || resized || r.Motion != bool(motion))
-		r.Transfer = std::make_unique<WboitResultTransfer>(submit, r.Owner, result);
-	r.Motion = bool(motion);
-	r.Inputs = r.Mirror.TransferBytes() + r.DepthBytes;
-	for (const auto* stage : {&r.Sun, &r.Local})
-		if ((stage == &r.Sun && !r.Shadows.Sun.empty()) || (stage == &r.Local && !r.Shadows.Local.empty())) r.Inputs += stage->Bytes;
-	r.Transfer->Append(plan, bindings, work, result, true);
+	if (!r.Transfer || resized) r.Transfer = std::make_unique<WboitResultTransfer>(submit, r.Owner, native(output));
+	r.Transfer->Append(plan, bindings, work, native(output), true);
 	if (r.SharedInputs->ReportedFirst && r.SharedInputs->ReportedRegular) return;
 	r.EmitterCounts.fill(0);
 	if (!r.Particles.Reads.empty())
@@ -505,12 +481,6 @@ void SceneTransparency::AppendRemote(Graph& primary, std::vector<ID3D12Resource*
 			if (source.Emitter.Blend == ParticleBlend::SortedAlpha) ++r.EmitterCounts[1];
 			if (source.Emitter.Blend == ParticleBlend::Additive) ++r.EmitterCounts[2];
 		}
-	r.TransparentDraws = 0;
-	auto* commands = _resources.IndirectCommandsCache->GetCPUData();
-	auto* instances = constants.InstanceCache->GetCPUData();
-	for (UINT i = 0; i < _resources.IndirectCommandsCache->GetElementCount(); ++i)
-		if (commands[i].InstanceCount && materials.GetCPUData()[instances[commands[i].InstanceID].MaterialIndex].RenderLayer == UINT(MaterialType::Transparent))
-			++r.TransparentDraws;
 }
 
 GDX12Texture* SceneTransparency::ApplyRemote(Graph& primary, std::vector<ID3D12Resource*>& primaryBindings, SceneGeometry& geometry,
@@ -523,10 +493,8 @@ GDX12Texture* SceneTransparency::ApplyRemote(Graph& primary, std::vector<ID3D12R
 	auto* depth = Depth();
 	const auto native = [](GDX12Texture* t){ return t->GetResource()->D3DResource.Get(); };
 	const auto primaryId = [&](ID3D12Resource* value){return NativeWork::ResourceFor(primary, primaryBindings, value, "WBOIT layer application");};
-	std::vector<ID3D12Resource*> destination{native(&frame.ImportedLayer)};
-	if (r.Motion) destination.push_back(native(_particles.MotionOutput()));
-	r.Import = r.Transfer->Append(primary, primaryBindings, _work, destination, false);
-	primary.Operations[r.Import].Dependencies.push_back(r.Export);
+	r.Import = r.Transfer->Append(primary, primaryBindings, _work, native(&frame.ImportedLayer), false);
+	primary.Operations[r.Import].Dependencies.push_back(r.DepthExport);
 	auto& apply = frame.Apply;
 	apply.Setup(&_resources, &_common);
 	apply.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);

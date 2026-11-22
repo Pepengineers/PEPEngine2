@@ -1,42 +1,36 @@
 #include "SceneTransparency.h"
-#include "SceneReflections.h"
 #include "WboitMeshDraw.h"
 
 namespace BistroRender
 {
 GDX12Texture* SceneTransparency::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, SceneGeometry& geometry,
-                                        UINT slot, GDX12Texture* hdr, GDX12Texture* sun, GDX12Texture* local,
-                                        SceneEnvironment& environment, SceneReflections& reflections)
+                                        UINT slot, GDX12Texture* hdr, SceneEnvironment& environment)
 {
 	_work.Commands.clear();
 	auto& frame = _frames.at(slot);
-	if (_remote) AppendRemote(graph, bindings, geometry, slot, frame, hdr, sun, local, environment, reflections);
+	if (_remote) AppendRemote(geometry, slot, frame, hdr);
 	_water.AppendDraw(graph, bindings, hdr, geometry._slots.at(slot).Dsv.CPUHandle);
 	if (_opaqueContinuation)
 	{
 		hdr = _opaqueContinuation(graph, bindings, hdr, _water.Depth(), _water.Motion());
 	}
 	if (_remote) return ApplyRemote(graph, bindings, geometry, slot, frame, hdr, environment);
-	return AppendPhase(graph, bindings, geometry, slot, frame, hdr, sun, local, environment, reflections);
+	return AppendPhase(graph, bindings, geometry, slot, frame, hdr, environment);
 }
 GDX12Texture* SceneTransparency::AppendPhase(Graph& graph, std::vector<ID3D12Resource*>& bindings,
                                              SceneGeometry& geometry, UINT slot, Frame& phase, GDX12Texture* hdr,
-                                             GDX12Texture* sun, GDX12Texture* local, SceneEnvironment& environment,
-                                             SceneReflections& reflections)
+                                             SceneEnvironment& environment)
 {
 	auto& scene = geometry._slots.at(slot);
 	auto& constants = *_resources.FrameConstants.at(slot);
 	auto& draw = phase.Draw;
 	auto& compose = phase.Compose;
-	auto* rasterDepth = Depth();
+	auto* rasterDepth = geometry.Depth(slot);
 	compose.SetApplyOpaqueAerialPerspective(!_opaqueContinuation);
 	draw.Setup(&_resources, &_common);
-	std::vector<IRenderPassLink*> inputs{rasterDepth,           sun,  environment.Output(0), environment.Output(1),
-	                                     environment.Output(2), local};
-	draw.SetInputs(std::move(inputs));
 	if (!phase.Initialized)
 	{
-		draw.Initialize();
+		draw.InitializeRaster(rasterDepth);
 	}
 	else if (draw.OUT_Accumulation->GetWidth() != hdr->GetWidth() ||
 	         draw.OUT_Accumulation->GetHeight() != hdr->GetHeight())
@@ -64,22 +58,11 @@ GDX12Texture* SceneTransparency::AppendPhase(Graph& graph, std::vector<ID3D12Res
 	{ return Access{resource(value->GetResource()->D3DResource.Get()), mode, state}; };
 	const State read = D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE;
 	const State depthRead = D3D12_RESOURCE_STATE_DEPTH_READ | read;
-	auto accesses = environment.Reads(graph, bindings);
-	environment.AddAerialReads(graph, bindings, accesses);
-	accesses.insert(
-	    accesses.end(),
-	    {texture(rasterDepth, Mode::Read, depthRead),
-	     texture(sun, Mode::Read, read),
-	     texture(local, Mode::Read, read),
-	     texture(reflections.Published(), Mode::Read, read),
-	     {resource(constants.ReflectionProbes->GetResource().D3DResource.Get()), Mode::Read, read},
+	std::vector<Access> accesses{texture(rasterDepth, Mode::Read, depthRead),
 	     {scene.FrameIds[0], Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ},
 	     {scene.FrameIds[1], Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ},
-	     {resource(constants.ShadowCB->GetResource().D3DResource.Get()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ},
-	     {resource(constants.SkyCB->GetResource().D3DResource.Get()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ},
-	     {resource(constants.ShadowLights->GetResource().D3DResource.Get()), Mode::Read, read},
 	     texture(accum, Mode::Write, D3D12_RESOURCE_STATE_RENDER_TARGET),
-	     texture(reveal, Mode::Write, D3D12_RESOURCE_STATE_RENDER_TARGET)});
+	     texture(reveal, Mode::Write, D3D12_RESOURCE_STATE_RENDER_TARGET)};
 	for (UINT i : {0u, 2u, 3u})
 	{
 		accesses.push_back({resource(scene.Buffers[i].Data.Get()), Mode::Read, read});
@@ -96,32 +79,23 @@ GDX12Texture* SceneTransparency::AppendPhase(Graph& graph, std::vector<ID3D12Res
 	auto* pipeline = draw._transparencyPSO.Get();
 	auto* signature = draw._transparencyCS.Get();
 	auto* heap = _resources.SRV_UAV_Heap->GetHeap().Get();
-	const auto main = scene.Main, camera = scene.Camera, shadow = constants.ShadowCB->GetElementAddress(0),
-	           sky = constants.SkyCB->GetElementAddress(0);
-	const std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 11> srvs{scene.Buffers[2].Srv.GPUHandle,
+	const auto main = scene.Main, camera = scene.Camera, sky = constants.SkyCB->GetElementAddress(0);
+	const std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 3> srvs{scene.Buffers[2].Srv.GPUHandle,
 	                                                      scene.Buffers[3].Srv.GPUHandle,
-	                                                      scene.Buffers[0].Srv.GPUHandle,
-	                                                      sun->GetSRV()->GPUHandle,
-	                                                      environment.Output(0)->GetTexture()->GetSRV()->GPUHandle,
-	                                                      environment.Output(1)->GetTexture()->GetSRV()->GPUHandle,
-	                                                      environment.Output(2)->GetTexture()->GetSRV()->GPUHandle,
-	                                                      constants.ShadowLights->GetSRV()->GPUHandle,
-	                                                      local->GetSRV()->GPUHandle,
-	                                                      reflections.Radiance(),
-	                                                      constants.ReflectionProbes->GetSRV()->GPUHandle};
+	                                                      scene.Buffers[0].Srv.GPUHandle};
 	const std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 3> atmosphere{_resources.SkyTransmittanceSRV.GPUHandle,
 	                                                            _resources.SkyAerialRadianceSRV.GPUHandle,
 	                                                            _resources.SkyAerialTransmittanceSRV.GPUHandle};
 	const auto textures = _resources.SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex);
 	const auto geom = scene.Geometry;
-	const auto depth = _dsv ? _dsv() : scene.ReadDepth.CPUHandle;
+	const auto depth = scene.ReadDepth.CPUHandle;
 	const D3D12_VIEWPORT viewport = accum->GetViewport();
 	const D3D12_RECT rect = accum->GetScissorRect();
 	const std::array<D3D12_CPU_DESCRIPTOR_HANDLE, 2> targets{accum->GetRTV()->CPUHandle, reveal->GetRTV()->CPUHandle};
 	const UINT draws = scene.Draws;
 	auto* args = scene.Buffers[6].Data.Get();
 	auto* count = scene.Buffers[7].Data.Get();
-	WboitMeshDraw mesh{root, pipeline, signature, heap, main, camera, shadow, sky, srvs, atmosphere, textures, geom,
+	WboitMeshDraw mesh{root, pipeline, signature, heap, main, camera, srvs, textures, geom,
 	              depth, viewport, rect, targets, draws, args, count};
 	_work.Add(graph, "mesh transparency All clear/draw", std::move(accesses), mesh);
 	_particles.AppendWeighted(graph, bindings);

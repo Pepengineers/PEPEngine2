@@ -15,7 +15,7 @@ public:
     ~SceneParticles();
     enum class Inputs { Frame, Interaction, Depth };
     static int SecondaryAdapter();
-    void BeginSimulation(GDX12ParticleInteractionField, GDX12Texture* depth, Executor&, Id device, float worldRate);
+    void BeginSimulation(GDX12ParticleInteractionField, GDX12Texture* depth, Executor&, Id device, float worldRate, bool ownerDraw);
     Id ExecutionDevice() const;
     void PauseIndependentClock();
     void AddExchanges(const Schedule&, std::vector<PacketWait>&, std::vector<Executor::PacketExchange>&);
@@ -33,21 +33,15 @@ public:
     {
         RenderPipelineCommonData Common;
         GDX12ParticlesPass Pass;
-        struct Source
-        {
-            std::array<GDX12Resource, 4> Buffers;
-            std::array<GDX12Descriptor, 3> Views;
-        };
-        std::vector<std::unique_ptr<Source>> Sources;
+        GDX12Descriptor SimulationDepth;
+        std::vector<std::unique_ptr<std::array<GDX12Descriptor, 3>>> SourceViews;
         GDX12ParticleRenderFrame Frame;
         std::vector<Access> Reads;
     };
-    void AppendRemoteWeighted(Graph& primary, std::vector<ID3D12Resource*>& primaryBindings, Graph& remote,
-        std::vector<ID3D12Resource*>& remoteBindings, NativeWork& remoteWork, GDX12DeviceResources& owner,
-        GDX12Texture* accum, GDX12Texture* reveal, GDX12Texture* rasterDepth, Id cameraId,
-        D3D12_GPU_VIRTUAL_ADDRESS camera, const std::function<ID3D12Resource*(ID3D12Resource*)>& mirror,
-        RemoteRaster& particleRaster,
-        const std::function<ID3D12Resource*(GDX12Texture&)>& mirrorTexture);
+    void AppendRemoteWeighted(Graph&, std::vector<ID3D12Resource*>&, NativeWork&, GDX12DeviceResources& owner,
+        GDX12DeviceResources& simulationResources, GDX12ParticleSimulation&, GDX12Texture* accum, GDX12Texture* reveal,
+        GDX12Texture* depth, Id cameraId, D3D12_GPU_VIRTUAL_ADDRESS camera, UINT slot, RemoteRaster&,
+        const std::function<ID3D12Resource*(GDX12Texture&)>& asset);
     void AppendRemoteComposite(Graph&, std::vector<ID3D12Resource*>&, NativeWork&, GDX12Texture* hdr, RemoteRaster&);
     void AppendComposite(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* hdr);
     GDX12Texture* MotionOutput() const { return _pass.MotionOutput(); }

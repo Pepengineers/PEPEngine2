@@ -60,6 +60,8 @@ public:
 	ID3D12Resource* BeginSkinning(GDX12CommandList* commands);
 	void EndSkinning(GDX12CommandList* commands);
 	const GPUMesh* GetGPUMeshByHandle(MeshHandle handle);
+    const std::vector<Vertex>& CPUVertices() const { return _vertexDataCPU; }
+    const std::vector<uint32_t>& CPUIndices() const { return _indexDataCPU; }
     uint64_t GetMeshCacheRevision() const { return _meshCacheRevision; }
     D3D12_GPU_VIRTUAL_ADDRESS GetVertexAddress() const
     { return _vertexBuffer ? _vertexBuffer->D3DResource->GetGPUVirtualAddress() : 0; }

@@ -958,11 +958,11 @@ void SceneLocalShadows::Submitted(UINT slot)
 			frame.Cache[view.Light].MapsValid |= 1u << view.Face;
 }
 
-void SceneLocalShadows::PrepareAtlas(Slot& frame, UINT requestedSlices, bool replace)
+void SceneLocalShadows::PrepareAtlas(Slot& frame, UINT requestedSlices)
 {
 	const UINT resolution = (std::max)(1u, _resources.ShadowQuality.LocalResolution);
 	const UINT slices = (std::max)(1u, requestedSlices);
-	if (!replace && frame.Resolution == resolution && frame.Slices >= slices)
+	if (frame.Resolution == resolution && frame.Slices >= slices)
 	{
 		return;
 	}

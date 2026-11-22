@@ -26,38 +26,31 @@ inline D3D12_PLACED_SUBRESOURCE_FOOTPRINT WboitFootprint(const QueueSubmission& 
 class WboitResultTransfer
 {
   public:
-    WboitResultTransfer(const QueueSubmission& submit, Id owner, const std::vector<ID3D12Resource*>& result)
+    WboitResultTransfer(const QueueSubmission& submit, Id owner, ID3D12Resource* layer)
     {
-        _layout.resize(result.size());
-        for (UINT i = 0; i < result.size(); ++i)
-        {
-            _layout[i] = WboitFootprint(submit, owner, result[i]->GetDesc(), Bytes);
-            if (i == 0) LayerBytes = Bytes;
-        }
+        _layout = WboitFootprint(submit, owner, layer->GetDesc(), Bytes);
         _shared = submit.CreateTransferBuffer(owner, Bytes);
     }
+
     Id Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work,
-              const std::vector<ID3D12Resource*>& result, bool exporting)
+              ID3D12Resource* layer, bool exporting)
     {
         auto* shared = _shared.Resources[exporting ? 1 : 0].Get();
         const auto bind = [&](auto* image){ return NativeWork::ResourceFor(graph, bindings, image, "WBOIT result"); };
-        const auto usage = exporting ? Mode::Read : Mode::Write;
-        const State state = exporting ? D3D12_RESOURCE_STATE_COPY_SOURCE : D3D12_RESOURCE_STATE_COPY_DEST;
-        std::vector<Access> access{{bind(shared), exporting ? Mode::Write : Mode::Read,
-            State(exporting ? D3D12_RESOURCE_STATE_COPY_DEST : D3D12_RESOURCE_STATE_COPY_SOURCE)}};
-        for (auto* image : result) access.push_back({bind(image), usage, state});
-        return work.Add(graph, exporting ? "owner export transparent RGB/transmittance and motion" : "GPU0 import transparent RGB/transmittance and motion",
-            std::move(access), [=, layout = _layout](auto* cmd){
-                for (UINT i = 0; i < result.size(); ++i)
-                {
-                    CD3DX12_TEXTURE_COPY_LOCATION image(result[i], 0), buffer(shared, layout[i]);
-                    cmd->CopyTextureRegion(exporting ? &buffer : &image, 0, 0, 0, exporting ? &image : &buffer, nullptr);
-                }
+        const State read = D3D12_RESOURCE_STATE_COPY_SOURCE;
+        const State write = D3D12_RESOURCE_STATE_COPY_DEST;
+        return work.Add(graph, exporting ? "owner export transparent RGB/transmittance" : "GPU0 import transparent RGB/transmittance",
+            {{bind(shared), exporting ? Mode::Write : Mode::Read, exporting ? write : read},
+             {bind(layer), exporting ? Mode::Read : Mode::Write, exporting ? read : write}},
+            [=, layout = _layout](auto* cmd) {
+                const CD3DX12_TEXTURE_COPY_LOCATION image(layer, 0), buffer(shared, layout);
+                cmd->CopyTextureRegion(exporting ? &buffer : &image, 0, 0, 0, exporting ? &image : &buffer, nullptr);
             });
     }
-    UINT64 Bytes = 0, LayerBytes = 0;
+
+    UINT64 Bytes = 0;
   private:
-    std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> _layout;
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT _layout{};
     QueueSubmission::TransferBuffer _shared;
 };
 }

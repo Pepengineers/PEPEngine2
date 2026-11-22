@@ -282,7 +282,7 @@ void GDX12ParticlesPass::Initialize()
 }
 
 void GDX12ParticlesPass::BeginFrame(GDX12Texture* depth, const GDX12ParticleRenderFrame& frame,
-    D3D12_GPU_VIRTUAL_ADDRESS camera, const GDX12ParticlesPass* display)
+    D3D12_GPU_VIRTUAL_ADDRESS camera, bool transmittanceTarget)
 {
     _resources->ParticleMotion = nullptr;
     const auto global = GetParticleSettings();
@@ -310,13 +310,12 @@ void GDX12ParticlesPass::BeginFrame(GDX12Texture* depth, const GDX12ParticleRend
     {
         _state = std::make_unique<State>();
         _state->ReadOnlyDepth = _readOnlyDepth;
-        _state->TransmittanceTarget = display != nullptr;
+        _state->TransmittanceTarget = transmittanceTarget;
         _state->Initialize(_resources);
     }
     auto& state = *_state;
     state.Active = true;
-    state.ResetMotion = display ? display->_state->ResetMotion :
-        frame.ResetMotion || !state.WasEnabled || state.MotionEnabled != _motionOutputEnabled;
+    state.ResetMotion = frame.ResetMotion || !state.WasEnabled || state.MotionEnabled != _motionOutputEnabled;
     state.Camera = camera ? camera : _resources->FrameConstants.at(_resources->CurrFrameConstantsIndex)
         ->CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex);
     state.MotionEnabled = _motionOutputEnabled;
@@ -350,7 +349,7 @@ void GDX12ParticlesPass::BeginFrame(GDX12Texture* depth, const GDX12ParticleRend
     }
     const UINT width = depth->GetWidth();
     const UINT height = depth->GetHeight();
-    if (display && state.MotionTexture && (state.MotionTexture->GetWidth() != width ||
+    if (transmittanceTarget && state.MotionTexture && (state.MotionTexture->GetWidth() != width ||
         state.MotionTexture->GetHeight() != height))
         state.MotionTexture.reset(); // The caller has retired this owner slot.
     const UINT slot = _resources->CurrFrameConstantsIndex;
