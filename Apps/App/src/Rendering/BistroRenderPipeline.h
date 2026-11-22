@@ -14,6 +14,7 @@ class BistroRenderPipeline final : public IRenderPipeline
 	void PrepareMaterialBindings(RenderPipelineContext&) override;
 	void DrainExecution() override
 	{
+		if (_post) _post->DrainHud();
 		if (_executor)
 		{
 			_executor->Drain();
@@ -58,7 +59,7 @@ class BistroRenderPipeline final : public IRenderPipeline
 	void RebuildExecution(RenderPipelineContext&) override;
 	void Resize(RenderPipelineContext&) override
 	{
-		_executor->Drain();
+		DrainExecution();
 		_post->Resize();
 	}
 	const RenderPipelineBindings& GetBindings() const override { return _bindings; }

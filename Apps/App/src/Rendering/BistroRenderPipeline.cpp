@@ -251,6 +251,8 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	}
 	catch (...)
 	{
+		try { _post->DrainHud(); }
+		catch (...) { OutputDebugStringA("Bistro HUD retirement failed; preserving the original exception.\n"); }
 		_post->Reconstruction().CancelRecording();
 		const auto& completions = _executor->Completions();
 		try

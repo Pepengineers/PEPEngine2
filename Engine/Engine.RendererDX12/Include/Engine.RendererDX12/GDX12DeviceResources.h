@@ -42,7 +42,12 @@ public:
     std::unordered_map<std::string, std::unique_ptr<GDX12RootSignature>> RootSignatures;
     std::unordered_map <std::string, ComPtr<ID3D12CommandSignature>> CommandSignatures;
     std::unordered_map<std::string, std::unique_ptr<GDX12Texture>> Textures;
-    std::unordered_map<std::string, std::function<GDX12Texture*(GDX12DeviceResources&)>> TextureReplicaLoaders;
+    struct TextureReplicaLoader
+    {
+        uint64_t Revision = 0;
+        std::function<GDX12Texture*(GDX12DeviceResources&)> Load;
+    };
+    std::unordered_map<std::string, TextureReplicaLoader> TextureReplicaLoaders;
 
     std::vector<IRenderGeometrySource*> GeometrySources; // Borrowed from the pipeline owner.
     GDX12RenderPrimitiveRegistry Primitives;

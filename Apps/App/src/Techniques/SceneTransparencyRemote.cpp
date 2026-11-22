@@ -529,7 +529,7 @@ void SceneTransparency::AppendRemote(SceneGeometry& geometry, UINT slot, Frame& 
 		const auto loader = _resources.TextureReplicaLoaders.find(source->first);
 		if (loader == _resources.TextureReplicaLoaders.end())
 			throw std::logic_error("Missing replica source for WBOIT texture " + source->first);
-		auto* copy = found == assetResources.Textures.end() ? loader->second(assetResources) : found->second.get();
+		auto* copy = found == assetResources.Textures.end() ? loader->second.Load(assetResources) : found->second.get();
 		auto* target = native(copy);
 		NativeWork::ImportReadOnlyTexture(plan, bindings, *copy->GetResource(), read, "WBOIT texture replica");
 		const auto desc = copy->ShaderViewDescription();

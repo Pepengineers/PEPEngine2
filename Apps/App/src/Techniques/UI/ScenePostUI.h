@@ -23,6 +23,7 @@ class ScenePostUI
 	bool NeedsResize() const;
 	void BeginPlan(Executor&, uint64_t frame);
 	void SubmitHud(const Schedule&, std::vector<PacketWait>&);
+	void DrainHud();
 	void HudSubmitted(const std::vector<CompletionToken>&);
 	void HudPresented();
 	struct HudLayer
@@ -31,7 +32,7 @@ class ScenePostUI
 		GDX12ResourceHandle Texture;
 		CompletionToken Ready;
 	};
-	// Finished pure game HUD, in COMMON after Ready. Available through this primary frame slot.
+	// Pure game HUD for a secondary owner, in COMMON after Ready, valid through this primary frame slot.
 	std::optional<HudLayer> OwnerHudLayer() const;
 	void Submitted(UINT slot)
 	{

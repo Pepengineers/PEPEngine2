@@ -17,6 +17,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12TAAPass.h"
 #include "Common/GameTimer.h"
 #include <filesystem>
+#include <unordered_set>
 
 namespace BistroRender
 {
@@ -68,7 +69,7 @@ ComPtr<ID3D12PipelineState> CreateHealthBarPipeline(GDX12Device& device, GDX12Ro
 
 struct ScenePostUI::HudRaster
 {
-	explicit HudRaster(GDX12DeviceResources& resources, GDX12Texture& atlas) : Resources(resources), Atlas(atlas) {}
+	explicit HudRaster(GDX12DeviceResources& resources, GDX12Texture& atlas) : Resources(resources), Atlas(&atlas) {}
 
 	Id Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work, HudFrame& frame,
 	          GDX12Texture& target, Engine::UI::OffscreenRenderer& renderer, const GameHUD::Bar& bar,
@@ -79,11 +80,11 @@ struct ScenePostUI::HudRaster
 		};
 		const State read = D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE;
 		const State renderTarget = D3D12_RESOURCE_STATE_RENDER_TARGET;
-		auto* atlas = Atlas.GetResource();
+		auto* atlas = Atlas->GetResource();
 		const Id atlasId = NativeWork::ImportReadOnlyTexture(graph, bindings, *atlas, read, "game HUD atlas");
 		std::vector<Access> accesses{{id(target, "game HUD target"), Mode::Write, renderTarget},
 		                            {atlasId, Mode::Read, read}};
-		std::vector<Engine::UI::TextureBinding> textures{{GameHUD::Atlas, atlas->D3DResource, Atlas.GetFormat()}};
+		std::vector<Engine::UI::TextureBinding> textures{{GameHUD::Atlas, atlas->D3DResource, Atlas->GetFormat()}};
 		if (bar.Sparks)
 		{
 			if (!Pipeline)
@@ -130,7 +131,7 @@ struct ScenePostUI::HudRaster
 	}
 
 	GDX12DeviceResources& Resources;
-	GDX12Texture& Atlas;
+	GDX12Texture* Atlas;
 	std::unique_ptr<GDX12RootSignature> Root;
 	ComPtr<ID3D12PipelineState> Pipeline;
 };
@@ -159,14 +160,30 @@ struct ScenePostUI::RemoteHud
 		auto& device = submit->Device(owner);
 		Resources.Device = &device;
 		Resources.SRV_UAV_Heap = std::make_shared<GDX12DescriptorHeap>(&device,
-		    D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Texture2D_StartIndex + 1, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
+		    D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Texture2D_StartIndex + 2, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
 		Resources.RTVHeap = std::make_unique<GDX12DescriptorHeap>(&device,
 		    D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 2 * slots, D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
 	}
 
-	~RemoteHud()
+	static void Retire(RemoteHud* owner) noexcept
 	{
-		try { GPU.Drain(); } catch (...) {}
+		try { owner->GPU.Drain(); }
+		catch (...)
+		{
+			// A quarantined queue can still reference frame uploads, textures and ImGui descriptors.
+			return;
+		}
+		delete owner;
+	}
+
+	void RefreshAtlas(const GDX12DeviceResources::TextureReplicaLoader& source)
+	{
+		if (Raster && AtlasRevision == source.Revision) return;
+		auto* atlas = source.Load(Resources);
+		// Each recorded draw retains its own native texture handle through slot retirement.
+		if (Raster) Raster->Atlas = atlas;
+		else Raster = std::make_unique<HudRaster>(Resources, *atlas);
+		AtlasRevision = source.Revision;
 	}
 
 	void PrepareLayer(Frame& frame, UINT width, UINT height)
@@ -227,6 +244,7 @@ struct ScenePostUI::RemoteHud
 	std::vector<Frame> Frames;
 	Engine::UI::OffscreenRenderer Renderer;
 	std::unique_ptr<HudRaster> Raster;
+	uint64_t AtlasRevision = 0;
 	bool Reported = false;
 	UINT Width = 0, Height = 0;
 };
@@ -253,7 +271,6 @@ void ScenePostUI::SubmitHud(const Schedule& primary, std::vector<PacketWait>& wa
 	const Id raster = HudPacket(schedule, frame.Raster);
 	screen.HudImport = HudPacket(primary, screen.HudImport);
 	screen.HudComposite = HudPacket(primary, screen.HudComposite);
-	owner.GPU.Begin(slot);
 	owner.GPU.Reserve(schedule);
 	owner.GPU.Execute(schedule, frame.Bindings, [&](Id op, UINT, auto* cmd) {
 		if (!frame.Work.Record(op, cmd)) throw std::logic_error("Missing owner game HUD work");
@@ -261,6 +278,15 @@ void ScenePostUI::SubmitHud(const Schedule& primary, std::vector<PacketWait>& wa
 	frame.RasterReady = owner.GPU.Completions().at(raster);
 	frame.Ready = owner.GPU.Completions().back();
 	waits.push_back({screen.HudImport, frame.Ready});
+}
+
+void ScenePostUI::DrainHud()
+{
+	std::unordered_set<RemoteHud*> owners;
+	if (_remoteHud) owners.insert(_remoteHud.get());
+	for (const auto& screen : _slots)
+		if (screen.HudOwner) owners.insert(screen.HudOwner.get());
+	for (auto* owner : owners) owner->GPU.Drain();
 }
 
 void ScenePostUI::HudSubmitted(const std::vector<CompletionToken>& completions)
@@ -573,15 +599,16 @@ void ScenePostUI::AppendScreen(Graph& graph, std::vector<ID3D12Resource*>& bindi
 					_render.SetTextureReplicaSource(HudAtlasName, Engine::Core::ETextureType::Color, [path](auto&) {
 						return Engine::Core::AssetManager::GetInstance().LoadTexture(path);
 					});
-				auto remote = std::make_shared<RemoteHud>(_hudSubmissions, owner, UINT(_slots.size()));
-				auto* atlas = _resources.TextureReplicaLoaders.at(HudAtlasName)(remote->Resources);
-				remote->Raster = std::make_unique<HudRaster>(remote->Resources, *atlas);
-				_remoteHud = std::move(remote);
+				_remoteHud = std::shared_ptr<RemoteHud>(
+				    new RemoteHud(_hudSubmissions, owner, UINT(_slots.size())), RemoteHud::Retire);
 			}
 			screen.HudOwner = _remoteHud;
 			auto& remote = *screen.HudOwner;
+			// A successful primary frame has already joined this work at the HUD import.
+			if (!remote.GPU.TryBegin(slot)) remote.GPU.Begin(slot);
 			auto& frame = remote.Frames.at(slot);
 			frame.Game.RasterOwner.reset();
+			remote.RefreshAtlas(_resources.TextureReplicaLoaders.at(HudAtlasName));
 			frame.Game.Draw = screen.Game.Draw;
 			frame.Plan = {};
 			frame.Plan.Device = owner;

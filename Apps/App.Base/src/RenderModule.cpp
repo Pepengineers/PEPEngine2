@@ -241,7 +241,8 @@ GPUTexture* RenderModule::CreateTexture(const std::string& name, const Texture* 
 
 void RenderModule::SetTextureReplicaSource(const std::string& name, ETextureType type, TextureSource source)
 {
-    _primaryResources.TextureReplicaLoaders[name] = [this, name, type, source = std::move(source)](auto& owner) {
+    auto& loader = _primaryResources.TextureReplicaLoaders[name];
+    loader.Load = [this, name, type, source = std::move(source)](auto& owner) {
         std::unique_ptr<Texture> temporary;
         const auto* texture = source(temporary);
         if (!texture) throw std::runtime_error("Missing CPU source for texture " + name);
@@ -259,6 +260,7 @@ void RenderModule::SetTextureReplicaSource(const std::string& name, ETextureType
             throw;
         }
     };
+    ++loader.Revision;
 }
 
 void RenderModule::WaitForUploads()
