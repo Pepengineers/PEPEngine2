@@ -19,6 +19,9 @@ namespace
 AutoConsoleVariable<bool> AsyncLightGrid(L"App.Async.LightGrid", false,
                                         L"Build the light grid on the local COMPUTE queue.",
                                         EConsoleVariableFlags::Default);
+AutoConsoleVariable<int> LightGridAdapter(L"App.LightGrid.Adapter", -1,
+    L"DXGI hardware index for Exact Bistro light grid construction; -1 uses GPU0",
+    EConsoleVariableFlags::Default, [](int index) { return index >= -1; });
 AutoConsoleVariable<int> SunShadowAdapter(L"App.Shadows.Sun.Adapter", -1,
     L"DXGI hardware index for far CSM cascades; -1 uses GPU0", EConsoleVariableFlags::Default,
     [](int index) { return index >= -1; });
@@ -59,6 +62,35 @@ Id CopyShadowSlices(Graph& graph, std::vector<ID3D12Resource*>& bindings, Native
 constexpr UINT LightGridThreads = 64;
 constexpr UINT LightingTileSize = 8;
 constexpr UINT MaxDispatchGroups = D3D12_CS_DISPATCH_MAX_THREAD_GROUPS_PER_DIMENSION;
+struct LightGridBuildParameters
+{
+	UINT Width, Height, LightCount, Groups;
+	XMFLOAT4 Projection;
+	float FarPlane, Padding[3]{};
+	XMFLOAT4X4 View;
+	GDX12LightGridConstants Layout;
+};
+static_assert(sizeof(LightGridBuildParameters) == 36 * sizeof(UINT));
+static_assert(offsetof(LightGridBuildParameters, View) == 48 && offsetof(LightGridBuildParameters, Layout) == 112);
+
+LightGridBuildParameters GridParameters(UINT width, UINT height, UINT count, const GDX12LightGridConstants& layout,
+    const RenderPipelineCommonData& common, const GDX12CameraConstants& camera)
+{
+	const auto size = layout.Size;
+	const UINT groups = size.w ? ((size.x * size.y + LightGridThreads - 1) / LightGridThreads) * size.z * size.w : 1;
+	const auto& projection = common.CameraProjection;
+	return {width, height, count, groups, {projection._11, projection._22, projection._31, projection._32},
+	        common.ActiveCameraFarPlane, {}, camera.View, layout};
+}
+
+Id LightGridPacket(const Schedule& schedule, Id operation)
+{
+	const auto found = std::find_if(schedule.Packets.begin(), schedule.Packets.end(),
+	    [operation](const auto& packet) { return packet.Operation == operation; });
+	if (operation == Invalid || found == schedule.Packets.end())
+		throw std::logic_error("Exact light grid operation missing from schedule");
+	return Id(found - schedule.Packets.begin());
+}
 FfxResource Import(GDX12Texture* texture, FfxResourceStates state = FFX_RESOURCE_STATE_PIXEL_COMPUTE_READ)
 {
 	auto* resource = texture->GetResource()->D3DResource.Get();
@@ -166,6 +198,103 @@ struct SceneLighting::RemoteShadows
 	bool Reported = false;
 };
 
+struct SceneLighting::LightGridKernel
+{
+	LightGridKernel(GDX12Device& device, bool compact)
+	{
+		GDX12RootSignatureDesc root;
+		root.Constants = {sizeof(LightGridBuildParameters) / sizeof(UINT)};
+		root.NumSingleSRVSlots = 1;
+		root.NumSingleUAVSlots = 1;
+		Root = std::make_unique<GDX12RootSignature>(&device, root);
+		D3D12_FEATURE_DATA_D3D12_OPTIONS1 options{};
+		const bool waves = SUCCEEDED(device.GetDevice()->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS1, &options,
+		                                                                    sizeof(options))) &&
+		                   options.WaveOps;
+		const D3D_SHADER_MACRO defines[] = {
+		    {"LIGHT_GRID_WAVE_OPS", waves ? "1" : "0"}, {"LIGHT_GRID_COMPACT_INPUT", compact ? "1" : "0"}, {nullptr, nullptr}};
+		Build = GDX12RenderHelpers::CreateComputePipeline(&device, Root.get(), SHADERS_FOLDER "LightGrid.hlsl", "BuildCS", defines);
+	}
+
+	auto Record(LightGridBuildParameters parameters, GDX12DescriptorHeap& descriptors,
+	            D3D12_GPU_DESCRIPTOR_HANDLE lights, D3D12_GPU_DESCRIPTOR_HANDLE masks) const
+	{
+		auto* heap = descriptors.GetHeap().Get();
+		return [this, heap, parameters, lights, masks](auto* cmd)
+		{
+			cmd->SetDescriptorHeaps(1, &heap);
+			cmd->SetComputeRootSignature(Root->GetRootSignature().Get());
+			cmd->SetPipelineState(Build.Get());
+			cmd->SetComputeRoot32BitConstants(0, sizeof(parameters) / sizeof(UINT), &parameters, 0);
+			cmd->SetComputeRootDescriptorTable(Root->GetTRootParamIndex(0), lights);
+			cmd->SetComputeRootDescriptorTable(Root->GetURootParamIndex(0), masks);
+			cmd->Dispatch((std::min)(parameters.Groups, MaxDispatchGroups),
+			              (parameters.Groups + MaxDispatchGroups - 1) / MaxDispatchGroups, 1);
+		};
+	}
+
+	std::unique_ptr<GDX12RootSignature> Root;
+	ComPtr<ID3D12PipelineState> Build;
+};
+
+struct SceneLighting::RemoteLightGrid
+{
+	struct Slot
+	{
+		Slot(GDX12Device& device, GDX12DescriptorHeap& descriptors)
+		    : Upload(&device, 1, EBufferType::Upload, false), Spheres(&device, 1, EBufferType::Default, false),
+		      Masks(&device, 1, EBufferType::Default, false)
+		{
+			Spheres.CreateSRV(&descriptors, descriptors.GetAvailableIndex());
+			Masks.CreateUAV(&descriptors, descriptors.GetAvailableIndex());
+		}
+		GDX12UploadBuffer<XMFLOAT4> Upload, Spheres;
+		GDX12UploadBuffer<UINT> Masks;
+		QueueSubmission::TransferBuffer Transfer;
+		UINT64 Capacity = 0, Bytes = 0, PresentedFrame = 0;
+		UINT LightCount = 0;
+		XMUINT4 Layout{};
+		Id Import = Invalid, Lighting = Invalid;
+		CompletionToken Build, Export, Imported, Used, FrameDone;
+	};
+
+	RemoteLightGrid(const std::shared_ptr<QueueSubmission>& submit, Id owner, UINT slots)
+	    : Owner(owner), Device(submit->Device(owner)), GPU(submit, owner, slots, 1),
+	      Descriptors(&Device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 2 * slots, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE),
+	      Kernel(Device, true), Slots(slots)
+	{
+	}
+
+	void Report()
+	{
+		if (Reported) return;
+		const auto& submit = *GPU.Submissions();
+		for (const auto& slot : Slots)
+		{
+			if (!slot || !slot->PresentedFrame || !submit.Complete(slot->FrameDone)) continue;
+			Log::Info("RenderGraph", "Bistro Exact light grid Present S_OK frame=", slot->PresentedFrame,
+			    " build=", submit.AdapterLabel(Owner), " deferred=", submit.AdapterLabel(0),
+			    " lights=", slot->LightCount, " layout=", slot->Layout.x, "x", slot->Layout.y, "x", slot->Layout.z,
+			    " wordsPerCell=", slot->Layout.w,
+			    " cpuLightBytes=", UINT64(slot->LightCount) * sizeof(XMFLOAT4),
+			    " cpuRootBytes=", sizeof(LightGridBuildParameters), " gpu0ToOwnerBytes=0 maskBytes=", slot->Bytes,
+			    " buildFence=", slot->Build.Value, " exportFence=", slot->Export.Value,
+			    " importFence=", slot->Imported.Value, " deferredFence=", slot->Used.Value,
+			    " frameFence=", slot->FrameDone.Value);
+			Reported = true;
+			break;
+		}
+	}
+
+	Id Owner;
+	GDX12Device& Device;
+	Executor GPU;
+	GDX12DescriptorHeap Descriptors;
+	LightGridKernel Kernel;
+	std::vector<std::unique_ptr<Slot>> Slots;
+	bool Reported = false;
+};
+
 SceneLighting::SceneLighting(GDX12DeviceResources& r, RenderPipelineCommonData& c)
     : _resources(r), _common(c), _aoPipelines(r.Device), _frames(r.FrameConstants.size())
 {
@@ -180,19 +309,7 @@ SceneLighting::SceneLighting(GDX12DeviceResources& r, RenderPipelineCommonData& 
 		_probeStaticShadows = std::make_unique<SceneLocalShadows>(r, c, true);
 		_probePreview = std::make_unique<SceneProbePreview>(r, c);
 		_transparency = std::make_unique<SceneTransparency>(r, c);
-		GDX12RootSignatureDesc root;
-		root.Constants = {9};
-		root.NumSingleCBVSlots = 2;
-		root.NumSingleSRVSlots = 1;
-		root.NumSingleUAVSlots = 1;
-		_gridRoot = std::make_unique<GDX12RootSignature>(r.Device, root);
-		D3D12_FEATURE_DATA_D3D12_OPTIONS1 options{};
-		const bool waves = SUCCEEDED(r.Device->GetDevice()->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS1, &options,
-		                                                                        sizeof(options))) &&
-		                   options.WaveOps;
-		const D3D_SHADER_MACRO defines[] = {{"LIGHT_GRID_WAVE_OPS", waves ? "1" : "0"}, {nullptr, nullptr}};
-		_gridBuild = GDX12RenderHelpers::CreateComputePipeline(r.Device, _gridRoot.get(),
-		                                                       SHADERS_FOLDER "LightGrid.hlsl", "BuildCS", defines);
+		_gridKernel = std::make_unique<LightGridKernel>(*r.Device, false);
 	}
 	_deferred._opaqueOnly = true;
 	_deferred.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
@@ -295,6 +412,7 @@ void SceneLighting::Freeze(SceneGeometry& geometry, UINT slot, const std::shared
 		staticLights.CreateSRV(_resources.SRV_UAV_Heap.get(), _resources.SRV_UAV_Heap->GetAvailableIndex(SceneDescriptorStart));
 	_localShadows->Complete(slot);
 	auto& lightSource = _localShadows->LightSource(slot);
+	frame.LightCount = UINT(_localShadows->_slots.at(slot).Lights.size());
 	const UINT count = lightSource.GetElementCount();
 	if (!constants.ShadowLights)
 	{
@@ -319,18 +437,34 @@ void SceneLighting::Freeze(SceneGeometry& geometry, UINT slot, const std::shared
 	}
 }
 
-void SceneLighting::AppendGpuLightGrid(Graph& graph, std::vector<ID3D12Resource*>& bindings,
-                                       const SceneGeometry& geometry)
+void SceneLighting::UpdateLightGridOwner(Executor& primary)
 {
-	auto& scene = geometry._slots.at(_slot);
+	const auto& submit = primary.Submissions();
+	const Id owner = submit->SelectAdapter(LightGridAdapter.GetValue());
+	if (owner == (_remoteGrid ? _remoteGrid->Owner : 0)) return;
+	if (_remoteGrid)
+	{
+		primary.Drain();
+		DrainLightGrid();
+		_remoteGrid.reset();
+	}
+	if (owner)
+		_remoteGrid = std::make_unique<RemoteLightGrid>(submit, owner, UINT(_frames.size()));
+	Log::Info("RenderGraph", "Bistro light grid execution GPU ", submit->AdapterLabel(owner));
+}
+
+void SceneLighting::DrainLightGrid()
+{
+	if (_remoteGrid) _remoteGrid->GPU.Drain();
+}
+
+void SceneLighting::AppendGpuLightGrid(Graph& graph, std::vector<ID3D12Resource*>& bindings)
+{
 	const auto& frame = _frames.at(_slot);
-	auto& grid = _deferred._grids.at(_slot);
-	const auto& layout = frame.GridLayout;
 	const auto resource = [&](GDX12Resource& value)
 	{ return NativeWork::ResourceFor(graph, bindings, value.D3DResource.Get(), "GPU light grid resource"); };
-	const Id masks = resource(grid.Masks->GetResource());
-	const Id constants = resource(grid.Constants->GetResource());
-	auto& lights = *_resources.FrameConstants.at(_slot)->ShadowLights;
+	auto& constants = *_resources.FrameConstants.at(_slot);
+	auto& lights = *constants.ShadowLights;
 	const Id sources = resource(lights.GetResource());
 	if (frame.UploadLights)
 	{
@@ -343,42 +477,82 @@ void SceneLighting::AppendGpuLightGrid(Graph& graph, std::vector<ID3D12Resource*
 		           {sources, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
 		          [=](auto* cmd) { cmd->CopyBufferRegion(to, 0, from, 0, bytes); });
 	}
-	const UINT groups = layout.Size.w ? ((layout.Size.x * layout.Size.y + LightGridThreads - 1) / LightGridThreads) *
-	                                        layout.Size.z * layout.Size.w
-	                                  : 1;
-	std::array<UINT, 9> parameters{frame.Width, frame.Height, UINT(_resources.LocalLights.size()), groups};
-	const float projection[] = {_common.CameraProjection._11, _common.CameraProjection._22,
-	                            _common.CameraProjection._31, _common.CameraProjection._32,
-	                            _common.ActiveCameraFarPlane};
-	std::memcpy(parameters.data() + 4, projection, sizeof(projection));
-	auto* root = _gridRoot.get();
-	auto* heap = _resources.SRV_UAV_Heap->GetHeap().Get();
-	auto* build = _gridBuild.Get();
-	const auto camera = scene.Camera;
-	const auto gridCB = grid.Constants->GetElementAddress(0);
-	const auto srv = lights.GetSRV()->GPUHandle;
-	const auto uav = grid.Masks->GetUAV()->GPUHandle;
+	if (_remoteGrid) return;
+	auto& grid = _deferred._grids.at(_slot);
+	const auto& camera = constants.CameraCB->GetCPUData()[_common.ActiveCameraCBufferIndex];
+	const auto parameters = GridParameters(frame.Width, frame.Height, frame.LightCount, frame.GridLayout, _common, camera);
 	const bool async = AsyncLightGrid.GetValue();
 	const State lightRead = async ? State(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)
 	                              : State(D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
 	_work.Add(graph, "GPU light grid masks",
-	          {{masks, Mode::Write, UnorderedAccess},
-	           {sources, Mode::Read, lightRead},
-	           {scene.FrameIds[1], Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ},
-	           {constants, Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ}},
-	          [=](auto* cmd)
-	          {
-		          cmd->SetDescriptorHeaps(1, &heap);
-		          cmd->SetComputeRootSignature(root->GetRootSignature().Get());
-		          cmd->SetPipelineState(build);
-		          cmd->SetComputeRoot32BitConstants(0, UINT(parameters.size()), parameters.data(), 0);
-		          cmd->SetComputeRootConstantBufferView(root->GetBRootParamIndex(1), camera);
-		          cmd->SetComputeRootConstantBufferView(root->GetBRootParamIndex(2), gridCB);
-		          cmd->SetComputeRootDescriptorTable(root->GetTRootParamIndex(0), srv);
-		          cmd->SetComputeRootDescriptorTable(root->GetURootParamIndex(0), uav);
-		          cmd->Dispatch((std::min)(groups, MaxDispatchGroups),
-		                        (groups + MaxDispatchGroups - 1) / MaxDispatchGroups, 1);
-	          }, {}, async ? Queue::Compute : Queue::Direct);
+	    {{resource(grid.Masks->GetResource()), Mode::Write, UnorderedAccess}, {sources, Mode::Read, lightRead}},
+	    _gridKernel->Record(parameters, *_resources.SRV_UAV_Heap, lights.GetSRV()->GPUHandle, grid.Masks->GetUAV()->GPUHandle),
+	    {}, async ? Queue::Compute : Queue::Direct);
+}
+
+void SceneLighting::SubmitLightGrid(const Schedule& primary, std::vector<PacketWait>& waits)
+{
+	if (!_remoteGrid) return;
+	auto& owner = *_remoteGrid;
+	auto& slot = *owner.Slots.at(_slot);
+	const auto& frame = _frames.at(_slot);
+	const Id import = LightGridPacket(primary, slot.Import);
+	Graph plan;
+	plan.Device = owner.Owner;
+	std::vector<ID3D12Resource*> bindings;
+	NativeWork work;
+	const auto resource = [&](ID3D12Resource* value, const char* name)
+	{ return NativeWork::ResourceFor(plan, bindings, value, name); };
+	auto* spheres = slot.Spheres.GetResource().D3DResource.Get();
+	const Id lights = resource(spheres, "owner local-light spheres");
+	if (frame.LightCount)
+	{
+		const auto* snapshot = _localShadows->LightSource(_slot).GetCPUData();
+		for (UINT i = 0; i < frame.LightCount; ++i)
+		{
+			const auto& light = snapshot[i];
+			slot.Upload.CopyData(i, {light.Position.x, light.Position.y, light.Position.z, light.Range});
+		}
+		auto* upload = slot.Upload.GetResource().D3DResource.Get();
+		const UINT64 lightBytes = UINT64(frame.LightCount) * sizeof(XMFLOAT4);
+		work.Add(plan, "upload current local-light spheres on owner",
+		    {{resource(upload, "local-light sphere upload"), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ},
+		     {lights, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
+		    [=](auto* cmd) { cmd->CopyBufferRegion(spheres, 0, upload, 0, lightBytes); });
+	}
+	auto* masks = slot.Masks.GetResource().D3DResource.Get();
+	const Id maskResource = resource(masks, "owner local-light masks");
+	const auto& camera = _resources.FrameConstants.at(_slot)->CameraCB->GetCPUData()[_common.ActiveCameraCBufferIndex];
+	const auto parameters = GridParameters(frame.Width, frame.Height, frame.LightCount, frame.GridLayout, _common, camera);
+	const Id build = work.Add(plan, "owner build Exact light grid",
+	    {{lights, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE}, {maskResource, Mode::Write, UnorderedAccess}},
+	    owner.Kernel.Record(parameters, owner.Descriptors, slot.Spheres.GetSRV()->GPUHandle, slot.Masks.GetUAV()->GPUHandle));
+	auto* shared = slot.Transfer.Resources[1].Get();
+	const UINT64 bytes = slot.Bytes;
+	const Id publish = work.Add(plan, "owner export Exact light grid masks",
+	    {{maskResource, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE},
+	     {resource(shared, "shared light grid masks"), Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
+	    [=](auto* cmd) { cmd->CopyBufferRegion(shared, 0, masks, 0, bytes); });
+	const auto schedule = Compile(plan);
+	owner.GPU.Reserve(schedule);
+	owner.GPU.Execute(schedule, bindings, [&work](Id id, UINT, auto* cmd) {
+		if (!work.Record(id, cmd)) throw std::logic_error("Missing Exact light grid work");
+	});
+	const auto& completions = owner.GPU.Completions();
+	slot.Build = completions.at(LightGridPacket(schedule, build));
+	slot.Export = completions.at(LightGridPacket(schedule, publish));
+	waits.push_back({import, slot.Export});
+}
+
+void SceneLighting::LightGridPresented(uint64_t frame, const Schedule& schedule, const std::vector<CompletionToken>& completions)
+{
+	if (!_remoteGrid || _remoteGrid->Reported) return;
+	auto& slot = *_remoteGrid->Slots.at(_slot);
+	slot.PresentedFrame = frame;
+	slot.Imported = completions.at(LightGridPacket(schedule, slot.Import));
+	slot.Used = completions.at(LightGridPacket(schedule, slot.Lighting));
+	slot.FrameDone = completions.back();
+	_remoteGrid->Report();
 }
 void SceneLighting::AppendAO(Graph& graph, std::vector<ID3D12Resource*>& bindings)
 {
@@ -1151,10 +1325,10 @@ void SceneLighting::PrepareDeferred(SceneGeometry& geometry, SceneEnvironment& e
 	auto& grid = _deferred._grids.at(_slot);
 	frame.GridLayout = BuildLightGridConstants(
 	    _common.CameraProjection, _common.CameraView, _common.ActiveCameraNearPlane, _common.ActiveCameraFarPlane,
-	    frame.Width, frame.Height, _resources.LocalLights.size(), _gridSettings);
+	    frame.Width, frame.Height, frame.LightCount, _gridSettings);
 	const auto& size = frame.GridLayout.Size;
-	const UINT words = UINT((std::max)(size_t(1), size_t(size.x) * size.y * size.z * size.w));
-	grid.Masks->Resize(words);
+	frame.GridWords = UINT((std::max)(size_t(1), size_t(size.x) * size.y * size.z * size.w));
+	grid.Masks->Resize(frame.GridWords);
 	grid.Constants->CopyData(0, frame.GridLayout);
 }
 void SceneLighting::AppendDeferred(Graph& graph, std::vector<ID3D12Resource*>& bindings, SceneGeometry& geometry,
@@ -1218,7 +1392,40 @@ void SceneLighting::AppendDeferred(Graph& graph, std::vector<ID3D12Resource*>& b
 	const auto output = _deferred._color->GetUAV()->GPUHandle;
 	const UINT width = frame.Width, height = frame.Height;
 
-	work.Add(graph, "clustered deferred lighting", UniqueLightingAccesses(lighting),
+	RemoteLightGrid::Slot* remoteSlot = nullptr;
+	if (_remoteGrid)
+	{
+		auto& owner = *_remoteGrid;
+		owner.GPU.Begin(_slot);
+		owner.Report();
+		auto& slot = owner.Slots.at(_slot);
+		if (!slot) slot = std::make_unique<RemoteLightGrid::Slot>(owner.Device, owner.Descriptors);
+		remoteSlot = slot.get();
+		const UINT lightCapacity = (std::max)(1u, frame.LightCount);
+		slot->Upload.Resize(lightCapacity);
+		slot->Spheres.Resize(lightCapacity);
+		slot->Masks.Resize(frame.GridWords);
+		const UINT64 bytes = UINT64(frame.GridWords) * sizeof(UINT);
+		if (slot->Capacity < bytes)
+		{
+			slot->Transfer = _submissions->CreateTransferBuffer(owner.Owner, bytes);
+			slot->Capacity = bytes;
+		}
+		slot->PresentedFrame = 0;
+		slot->Bytes = bytes;
+		slot->LightCount = frame.LightCount;
+		slot->Layout = frame.GridLayout.Size;
+		auto* shared = slot->Transfer.Resources[0].Get();
+		auto* destination = masks->GetResource().D3DResource.Get();
+		const Id input = NativeWork::ResourceFor(graph, bindings, shared, "shared light grid masks");
+		// The copy waits for the owner export. The first mask read depends on this write.
+		slot->Import = work.Add(graph, "GPU0 import Exact light grid masks",
+		    {{input, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE},
+		     {resource(&masks->GetResource()), Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
+		    [=](auto* cmd) { cmd->CopyBufferRegion(destination, 0, shared, 0, bytes); }, {}, Queue::Copy);
+	}
+
+	const Id deferred = work.Add(graph, "clustered deferred lighting", UniqueLightingAccesses(lighting),
 	         [=](auto* cmd)
 	         {
 		         cmd->SetDescriptorHeaps(1, &heap);
@@ -1236,6 +1443,7 @@ void SceneLighting::AppendDeferred(Graph& graph, std::vector<ID3D12Resource*>& b
 		         cmd->Dispatch((width + LightingTileSize - 1) / LightingTileSize,
 		                       (height + LightingTileSize - 1) / LightingTileSize, 1);
 	         });
+	if (remoteSlot) remoteSlot->Lighting = deferred;
 }
 GDX12Texture* SceneLighting::AppendSSR(Graph& graph, std::vector<ID3D12Resource*>& bindings, SceneGeometry& geometry,
                                        SceneEnvironment& environment)

@@ -14,6 +14,7 @@ class BistroRenderPipeline final : public IRenderPipeline
 	void PrepareMaterialBindings(RenderPipelineContext&) override;
 	void DrainExecution() override
 	{
+		if (_lighting) _lighting->DrainLightGrid();
 		if (_post) { _post->DrainHud(); _post->DrainPost(); }
 		if (_executor)
 		{

@@ -45,7 +45,11 @@ class SceneLighting
 	{
 		_frames.at(_slot).AO->AppendEarlyInputs(graph, bindings, ready);
 	}
-	void AppendGpuLightGrid(Graph&, std::vector<ID3D12Resource*>&, const SceneGeometry&);
+	void UpdateLightGridOwner(Executor& primary);
+	void DrainLightGrid();
+	void AppendGpuLightGrid(Graph&, std::vector<ID3D12Resource*>&);
+	void SubmitLightGrid(const Schedule&, std::vector<PacketWait>&);
+	void LightGridPresented(uint64_t frame, const Schedule&, const std::vector<CompletionToken>&);
 	void AppendAO(Graph&, std::vector<ID3D12Resource*>&);
 	void Append(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, SceneEnvironment&);
 	using HDRContinuation = std::function<void(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture*)>;
@@ -77,6 +81,8 @@ class SceneLighting
 	struct RemoteShadows;
 	struct ShadowPublication;
 	struct ShadowVertexBaseline;
+	struct LightGridKernel;
+	struct RemoteLightGrid;
 	struct Frame
 	{
 		std::unique_ptr<SceneAO> AO;
@@ -84,6 +90,7 @@ class SceneLighting
 		uint64_t LightRevision = 0;
 		GDX12ResourceHandle LightSource;
 		bool UploadLights = false;
+		UINT LightCount = 0, GridWords = 0;
 		GDX12LightGridConstants GridLayout{};
 		std::map<std::pair<Id, bool>, std::unique_ptr<RemoteShadows>> ShadowOwners;
 		std::vector<std::shared_ptr<ShadowPublication>> ShadowReads;
@@ -123,8 +130,8 @@ class SceneLighting
 	GDX12DeferredLightingPass _deferred;
 	std::unique_ptr<GDX12SSSRPass> _ssr;
 	NativeWork _work;
-	std::unique_ptr<GDX12RootSignature> _gridRoot;
-	ComPtr<ID3D12PipelineState> _gridBuild;
+	std::unique_ptr<LightGridKernel> _gridKernel;
+	std::unique_ptr<RemoteLightGrid> _remoteGrid;
 	bool _forceReset = true;
 	UINT _slot = 0;
 	Id _sunOwner = 0;

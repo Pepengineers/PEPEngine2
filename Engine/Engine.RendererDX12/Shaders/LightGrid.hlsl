@@ -5,14 +5,15 @@ cbuffer BuildParameters : register(b0)
     uint Width, Height, LightCount, BuildGroups;
     float4 ProjectionScaleOffset;
     float FarPlane;
-};
-ConstantBuffer<CameraCB> CBCamera : register(b1);
-cbuffer LightGrid : register(b2)
-{
+    float4x4 View;
     uint4 GridSize;
     float4 GridDepth;
 };
+#if LIGHT_GRID_COMPACT_INPUT
+StructuredBuffer<float4> LightSpheres : register(t0);
+#else
 StructuredBuffer<LocalLight> LocalLights : register(t0);
+#endif
 RWStructuredBuffer<uint> LightMasks : register(u0);
 
 float2 ProjectInterval(float center, float radial, float front, float back, float scale, float offset)
@@ -62,9 +63,14 @@ void BuildCS(uint3 group : SV_GroupID, uint lane : SV_GroupIndex)
 #if LIGHT_GRID_WAVE_OPS
         lightIndex = WaveReadLaneFirst(lightIndex);
 #endif
+#if LIGHT_GRID_COMPACT_INPUT
+        float4 sphere = LightSpheres[lightIndex];
+#else
         LocalLight light = LocalLights[lightIndex];
-        float3 center = mul(float4(light.Position, 1), CBCamera.View).xyz;
-        float z = -center.z, radius = light.Range;
+        float4 sphere = float4(light.Position, light.Range);
+#endif
+        float3 center = mul(float4(sphere.xyz, 1), View).xyz;
+        float z = -center.z, radius = sphere.w;
         if (!all(isfinite(center)) || !isfinite(radius) || radius <= 0) continue;
         float margin = max(abs(z), radius) * 1e-5f;
         float lo = max(GridDepth.w, z - radius - margin);

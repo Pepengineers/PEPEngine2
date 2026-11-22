@@ -50,6 +50,7 @@ void BistroRenderPipeline::Initialize(RenderPipelineContext& c, const std::vecto
 
 void BistroRenderPipeline::UpdateFrameSettings(RenderPipelineContext& c)
 {
+	_lighting->UpdateLightGridOwner(*_executor);
 	const auto& submit = _executor->Submissions();
 	const auto owner = submit->SelectAdapter(PostAdapter.GetValue());
 	if (!_post->UpdatePostOwner(c, submit, owner))
@@ -212,7 +213,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 		if (!_cloudPicture->IsRemote()) _cloudPicture->Append(graph, resources);
 		particles.AppendSimulation(graph, resources, ParticleInputs::Frame, depth);
 		water.AppendSimulation(graph, resources);
-		_lighting->AppendGpuLightGrid(graph, resources, *_geometry);
+		_lighting->AppendGpuLightGrid(graph, resources);
 		if (earlyEnvironment)
 		{
 			_environment->Append(graph, resources);
@@ -263,6 +264,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	uint64_t completion;
 	try
 	{
+		_lighting->SubmitLightGrid(_schedule, waits);
 		_post->SubmitHud(_schedule, waits);
 		_geometry->SubmitSkinning(slot, _schedule, waits);
 		completion = _executor->Execute(_schedule, _geometry->PlannedResources(slot), record, prefix, nullptr, nullptr, waits,
@@ -271,6 +273,8 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	}
 	catch (...)
 	{
+		try { _lighting->DrainLightGrid(); }
+		catch (...) { OutputDebugStringA("Bistro light grid retirement failed; preserving the original exception.\n"); }
 		try { _post->DrainHud(); _post->DrainPost(); }
 		catch (...) { OutputDebugStringA("Bistro HUD retirement failed; preserving the original exception.\n"); }
 		_post->Reconstruction().CancelRecording();
@@ -328,6 +332,7 @@ void BistroRenderPipeline::FramePresented()
 	_lighting->Water().Presented(_frameNumber, _executor->Completions());
 	_lighting->Particles().Presented(_frameNumber);
 	_lighting->AOPresented(_frameNumber, _executor->Completions());
+	_lighting->LightGridPresented(_frameNumber, _schedule, _executor->Completions());
 	if (_reportedDepthNormals || !_geometry->PrepassNormals(_executorSlot)) return;
 	_reportedDepthNormals = true;
 	for (size_t i = 0; i < _schedule.Packets.size(); ++i)
