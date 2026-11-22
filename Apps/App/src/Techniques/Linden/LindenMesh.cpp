@@ -89,20 +89,8 @@ void AttachLeaves(LindenMesh& mesh, UINT firstVertex, UINT firstIndex, const Vec
     }
 }
 
-// The canopy can be asymmetric. Anchor the replacement at the foot of the trunk.
-Vector3 TrunkFoot(const Engine::Core::SubMesh& wood)
-{
-    const float floor = wood.Bounds.Center.y - wood.Bounds.Extents.y;
-    const float band = wood.Bounds.Extents.y * 0.02f;
-    Vector3 lo(FLT_MAX), hi(-FLT_MAX);
-    for (const auto& v : wood.Vertices)
-        if (v.Position.y <= floor + band)
-        {
-            lo = Vector3::Min(lo, v.Position);
-            hi = Vector3::Max(hi, v.Position);
-        }
-    return {(lo.x + hi.x) * .5f, floor, (lo.z + hi.z) * .5f};
-}
+// Center of Paris_Street_9, with the root collar slightly below its pavement.
+const Vector3 PlazaTreePosition{4458.f, 44.f, 2478.f};
 
 UINT TreeMaterial(RenderModule& render, const std::filesystem::path& folder, const std::string& diffuse,
                   const char* normal, bool leaves)
@@ -160,7 +148,6 @@ std::shared_ptr<LindenMesh> BuildLod(const Engine::Core::Mesh& source, const Vec
 
 void ExtractLinden(World& world, const Engine::Core::Mesh& exterior, RenderModule& render, std::vector<UINT>& staticParts)
 {
-    const Engine::Core::SubMesh* wood = nullptr;
     DirectX::BoundingBox oldBounds;
     bool found = false;
     for (UINT i : staticParts)
@@ -170,12 +157,8 @@ void ExtractLinden(World& world, const Engine::Core::Mesh& exterior, RenderModul
         if (!found) oldBounds = part.Bounds;
         else DirectX::BoundingBox::CreateMerged(oldBounds, oldBounds, part.Bounds);
         found = true;
-        // Bistro splits the bark into the trunk and many small branches.
-        if (exterior.GetMaterial(part.MaterialIndex).Name == "Foliage_Linde_Tree_Large_Trunk" &&
-            (!wood || part.Bounds.Center.y - part.Bounds.Extents.y < wood->Bounds.Center.y - wood->Bounds.Extents.y))
-            wood = &part;
     }
-    if (!wood) return;
+    if (!found) return;
 
     const auto models = std::filesystem::path(ASSETS_FOLDER) / "Models";
     LindenComponent tree;
@@ -183,7 +166,6 @@ void ExtractLinden(World& world, const Engine::Core::Mesh& exterior, RenderModul
                               const std::array<const char*, 2>& slots, const std::array<const char*, 2>& files,
                               const std::array<const char*, 2>& labels, TreeQuality fullQuality)
     {
-        Vector3 offset;
         float scale = 1.f;
         for (size_t i = 0; i < files.size(); ++i)
         {
@@ -191,15 +173,11 @@ void ExtractLinden(World& world, const Engine::Core::Mesh& exterior, RenderModul
             if (!model || model->IsEmpty()) throw std::runtime_error(std::string("Cannot load ") + files[i]);
             if (i == 0)
             {
-                const auto& parts = model->GetSubMeshes();
-                const auto trunk = std::find_if(parts.begin(), parts.end(), [&](const auto& p)
-                    { return model->GetMaterial(p.MaterialIndex).Name == slots[0]; });
-                if (trunk == parts.end() || model->GetBounds().Extents.y <= 0)
+                if (model->GetBounds().Extents.y <= 0)
                     throw std::runtime_error(std::string("Invalid tree geometry in ") + files[i]);
                 scale = oldBounds.Extents.y / model->GetBounds().Extents.y;
-                offset = TrunkFoot(*wood) - TrunkFoot(*trunk) * scale;
             }
-            tree.Lods[static_cast<size_t>(fullQuality) - i] = BuildLod(*model, offset, scale, materials, slots, labels[i]);
+            tree.Lods[static_cast<size_t>(fullQuality) - i] = BuildLod(*model, PlazaTreePosition, scale, materials, slots, labels[i]);
         }
     };
     const auto linden = models / "GeorgeousLinden";

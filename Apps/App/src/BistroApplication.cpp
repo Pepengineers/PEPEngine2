@@ -81,6 +81,7 @@ void UpdateLocalShadowSettings(World& world)
 }
 
 constexpr float SunDiskScale = 2.5f;
+constexpr float DaylightSunElevation = 70.f;
 constexpr float MouseDegreesPerPixel = 0.15f;
 constexpr float CameraPitchLimit = 89.0f;
 constexpr float CameraSpeedStep = 1.25f;
@@ -96,9 +97,9 @@ AutoConsoleVariable<int> BistroSkySource(L"App.Sky.Source", 2,
                                          [](int value) { return value >= 0 && value <= 2; });
 AutoConsoleVariable<bool> BistroSunCycle(
     L"App.Sky.SunCycle.Enabled", true,
-    L"Move the original Sun through a repeating daylight arc; disable for manual rotation");
+    L"Cycle between the horizon and high daylight");
 AutoConsoleVariable<float> BistroSunCyclePeriod(L"App.Sky.SunCycle.PeriodSeconds", 120.f,
-                                                L"Seconds from sunrise through zenith to sunset; repeats without night",
+                                                L"Seconds for a full horizon to daylight and back cycle",
                                                 EConsoleVariableFlags::Default,
                                                 [](float value) { return std::isfinite(value) && value > 0; });
 void Require(bool value, const char* message)
@@ -301,6 +302,7 @@ class BistroApplication final : public App
 	float _cameraSpeed = 500.f;
 	void InitializeSky(World& world)
 	{
+		_sunCyclePhase = 0;
 		_skyEntity = world.GetSkyEntity();
 		Require(world.GetECS().Has<SkyBoxComponent>(_skyEntity) && world.GetECS().Has<LightComponent>(_skyEntity),
 		        "Bistro sky must use the existing Sun");
@@ -328,34 +330,21 @@ class BistroApplication final : public App
 		const auto source = static_cast<SkySource>(BistroSkySource.GetValue());
 		if (source == SkySource::SkyAtmosphere)
 		{
-			auto& transform = world.GetECS().Get<TransformComponent>(_skyEntity);
-			bool wrapped = false;
+			auto angles = world.GetECS().Get<TransformComponent>(_skyEntity).Rotation;
 			if (BistroSunCycle.GetValue())
 			{
-				const double nextPhase = _sunCyclePhase + double(deltaTime) / BistroSunCyclePeriod.GetValue();
-				wrapped = nextPhase >= 1.0;
-				_sunCyclePhase = std::fmod(nextPhase, 1.0);
-				transform.Rotation.x = float(_sunCyclePhase * 180.0);
-				transform.Rotation.z = 0;
+				_sunCyclePhase = std::fmod(_sunCyclePhase + double(deltaTime) / BistroSunCyclePeriod.GetValue(), 1.0);
+				const double daylight = 0.5 * (1.0 - std::cos(_sunCyclePhase * XM_2PI));
+				angles.x = DaylightSunElevation * float(daylight);
+				angles.z = 0;
 			}
-			const auto rotation = Matrix::CreateFromYawPitchRoll(XMConvertToRadians(transform.Rotation.y),
-			                                                     XMConvertToRadians(transform.Rotation.x),
-			                                                     XMConvertToRadians(transform.Rotation.z));
+			const auto rotation = Matrix::CreateFromYawPitchRoll(XMConvertToRadians(angles.y),
+			                                                     XMConvertToRadians(angles.x),
+			                                                     XMConvertToRadians(angles.z));
 			auto& atmosphere = world.GetECS().Get<SkyAtmosphereComponent>(_skyEntity);
-			auto settings = atmosphere.GetSettings();
 			const Vector3 directionToSun = rotation.Forward();
-			if (settings.DirectionToSun != directionToSun)
-			{
-				settings.DirectionToSun = directionToSun;
-				if (wrapped)
-				{
-					atmosphere.SetSettings(settings);
-				}
-				else
-				{
-					atmosphere.UpdateSunDirection(directionToSun);
-				}
-			}
+			if (atmosphere.GetSettings().DirectionToSun != directionToSun)
+				atmosphere.UpdateSunDirection(directionToSun);
 		}
 		if (world.GetSkySource() == source && (source == SkySource::Off || world.GetSkyEntity() == _skyEntity))
 		{
