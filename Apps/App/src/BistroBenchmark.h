@@ -166,7 +166,7 @@ class BistroBenchmark
         EConsoleVariableFlags::Default,
         [](float seconds) { return std::isfinite(seconds) && seconds >= BistroBenchmarkRoute::TotalPaintingHoldSeconds + 1; }};
     enum class Action { None, Automatic, Search, Exhaustive, SingleGPU, MultiGPU, PlacementRun, Cancel };
-    enum class Stage { Baseline, Control, Repeat, Singles, Pairs, Neighbors, Elimination, Tiebreak, Final, Exhaustive, Placement };
+    enum class Stage { Baseline, Control, Repeat, Singles, Pairs, Neighbors, Elimination, Tiebreak, FinalControl, Final, Exhaustive, Placement };
     using Stats = BistroBenchmarkData::Stats;
     using Csv = BistroBenchmarkData::Csv;
     using Config = std::vector<std::pair<std::string, std::string>>;
@@ -331,7 +331,7 @@ public:
             {
                 if (ImGui::Button("Async Quick")) Request(Action::Search);
                 if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("Tune DIRECT/COMPUTE using short samples and a full finalist run, up to 10 minutes.");
+                    ImGui::SetTooltip("Tune DIRECT/COMPUTE using short samples and full control and finalist runs, up to 10 minutes.");
                 ImGui::SameLine();
                 if (ImGui::Button("Async Full")) Request(Action::Exhaustive);
                 if (ImGui::IsItemHovered())
@@ -382,7 +382,7 @@ public:
             if (!_active) return;
             if (TimedSearch() && Remaining() <= FinishReserve)
             {
-                Finish(world, console, pipeline, "deadline", 0);
+                Finish(world, console, pipeline, "gain unconfirmed: deadline", 0);
                 return;
             }
             if (_stage == Stage::Placement && !_manualPlacement && Clock::now() >= _placementDeadline)
@@ -480,7 +480,7 @@ public:
             _elapsed = Seconds(_legStarted, now);
             _legDone = _elapsed >= LegWarmup() + _window.End - _preroll;
             if (TimedSearch() && Remaining() <= FinishReserve)
-                Finish(world, console, pipeline, "deadline", 0);
+                Finish(world, console, pipeline, "gain unconfirmed: deadline", 0);
         }
         catch (const std::exception& error) { Fail(world, console, pipeline, error.what()); }
     }
@@ -663,7 +663,7 @@ private:
         if (_stage == Stage::Placement) return _manualPlacement ? "Manual route" : _trial.Full ? "Full route" : "Placement window";
         if (_roundNeedsControl && (_stage == Stage::Tiebreak || _stage == Stage::Elimination)) return "Short window control";
         constexpr std::array names{"Baseline", "Short window controls", "Control repeat", "Single transfers", "Combinations",
-            "Neighbor masks", "Elimination expansion", "Boundary recheck", "Finalist", "Full sweep"};
+            "Neighbor masks", "Elimination expansion", "Boundary recheck", "Full route control repeat", "Finalist", "Full sweep"};
         return names.at(size_t(_stage));
     }
 
@@ -1403,7 +1403,7 @@ private:
                     _placementPhysics[_placementWindowIndex];
                 restore();
             }
-            else if (_stage == Stage::Final || _stage == Stage::Exhaustive) _initialScene();
+            else if (_stage == Stage::FinalControl || _stage == Stage::Final || _stage == Stage::Exhaustive) _initialScene();
             else if (_stage != Stage::Baseline)
             {
                 const auto& restore = _roundProbe ? _roundProbe->Restore : _windowPhysics[_windowIndex];
@@ -1672,11 +1672,12 @@ private:
         const bool gain = !_ranked.empty() && _scores[_ranked.front()].value_or(0) > 0;
         if (!gain || Remaining() < _finalReserve)
         {
-            Finish(world, console, pipeline, gain ? "no time for finalist" : "no advantage in short comparisons", 0);
+            Finish(world, console, pipeline,
+                gain ? "gain unconfirmed: no time for full control and finalist" : "no advantage in short comparisons", 0);
             return;
         }
-        _stage = Stage::Final;
-        _mask = _ranked.front();
+        _stage = Stage::FinalControl;
+        _mask = 0;
         Apply(console, Placement(_mask));
         BeginLeg(world, pipeline, {0, Duration(), 0});
     }
@@ -1929,7 +1930,7 @@ private:
             ReportBaselineWindows(_windows);
             ReportBaselineWindows(_extraWindows);
             PrepareEliminationWindows();
-            _finalReserve = SecondsSince(_started) + FinishReserve;
+            _finalReserve = 2 * SecondsSince(_started) + FinishReserve;
             _activeGroups = 0;
             for (size_t i = 0; i < _activity.size(); ++i)
             {
@@ -1944,7 +1945,7 @@ private:
             }
             if (!Fits(2 * NominalCost(_windows)))
             {
-                Finish(world, console, pipeline, "no time for comparable windows and finalist", 0);
+                Finish(world, console, pipeline, "gain unconfirmed: no time for short comparisons and full confirmation", 0);
                 return;
             }
             _stage = Stage::Control;
@@ -1956,6 +1957,36 @@ private:
         if (_stage == Stage::Elimination || _stage == Stage::Tiebreak)
         {
             CompleteRoundLeg(world, console, pipeline, stats);
+            return;
+        }
+        if (_stage == Stage::FinalControl)
+        {
+            if (!Comparable(stats))
+            {
+                Finish(world, console, pipeline, "gain unconfirmed: full control data insufficient", 0);
+                return;
+            }
+            Report("BaselineFirstMeanMs", _baseline.Mean);
+            Report("BaselineFirstP95Ms", _baseline.P95);
+            Report("BaselineRepeatMeanMs", stats.Mean);
+            Report("BaselineRepeatP95Ms", stats.P95);
+            const double meanNoise = std::abs(stats.Mean / _baseline.Mean - 1);
+            const double p95Noise = std::abs(stats.P95 / _baseline.P95 - 1);
+            Report("ObservedFullMeanNoise", meanNoise);
+            Report("ObservedFullP95Noise", p95Noise);
+            _meanThreshold = std::max(_meanThreshold, meanNoise);
+            _p95Threshold = std::max(_p95Threshold, p95Noise);
+            _baseline.Mean = (_baseline.Mean + stats.Mean) / 2;
+            _baseline.P95 = (_baseline.P95 + stats.P95) / 2;
+            if (Remaining() <= SecondsSince(_legStarted) + FinishReserve)
+            {
+                Finish(world, console, pipeline, "gain unconfirmed: no time for finalist after full control", 0);
+                return;
+            }
+            _stage = Stage::Final;
+            _mask = _ranked.front();
+            Apply(console, Placement(_mask));
+            BeginLeg(world, pipeline, {0, Duration(), 0});
             return;
         }
         if (_stage == Stage::Final)
@@ -2006,8 +2037,6 @@ private:
                     break;
                 }
                 _observedMeanNoise = std::max(_observedMeanNoise, std::abs(second.Mean / first.Mean - 1));
-                _meanThreshold = std::max(_meanThreshold, _observedMeanNoise);
-                _p95Threshold = std::max(_p95Threshold, std::abs(second.P95 / first.P95 - 1));
             }
         }
         else
