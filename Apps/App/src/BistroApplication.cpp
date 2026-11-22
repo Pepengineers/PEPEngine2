@@ -97,9 +97,9 @@ AutoConsoleVariable<int> BistroSkySource(L"App.Sky.Source", 2,
                                          [](int value) { return value >= 0 && value <= 2; });
 AutoConsoleVariable<bool> BistroSunCycle(
     L"App.Sky.SunCycle.Enabled", true,
-    L"Cycle between the horizon and high daylight");
+    L"Start in daylight, fade to dusk, and return to daylight");
 AutoConsoleVariable<float> BistroSunCyclePeriod(L"App.Sky.SunCycle.PeriodSeconds", 120.f,
-                                                L"Seconds for a full horizon to daylight and back cycle",
+                                                L"Seconds for a full daylight to dusk and back cycle",
                                                 EConsoleVariableFlags::Default,
                                                 [](float value) { return std::isfinite(value) && value > 0; });
 void Require(bool value, const char* message)
@@ -334,8 +334,8 @@ class BistroApplication final : public App
 			if (BistroSunCycle.GetValue())
 			{
 				_sunCyclePhase = std::fmod(_sunCyclePhase + double(deltaTime) / BistroSunCyclePeriod.GetValue(), 1.0);
-				const double daylight = 0.5 * (1.0 - std::cos(_sunCyclePhase * XM_2PI));
-				angles.x = DaylightSunElevation * float(daylight);
+				const double dusk = 0.5 * (1.0 - std::cos(_sunCyclePhase * XM_2PI));
+				angles.x = DaylightSunElevation * float(1.0 - dusk * dusk);
 				angles.z = 0;
 			}
 			const auto rotation = Matrix::CreateFromYawPitchRoll(XMConvertToRadians(angles.y),
