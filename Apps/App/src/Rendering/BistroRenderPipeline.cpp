@@ -139,7 +139,9 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	const bool inspect = Engine::UI::DebugUIVisible();
 	if ((inspect || textures.NeedsReadback()) && _geometry->PrepassNormals(slot))
 	{
-		textures.Name("Scene.DepthNormals.Depth", depth, View::Depth);
+		textures.Name("Scene.Depth", depth, View::Depth);
+		if (textures.NeedsReadback("Scene.DepthNormals.Depth"))
+			textures.Name("Scene.DepthNormals.Depth", depth, View::Depth);
 		textures.Name("Scene.DepthNormals.Normals", _geometry->PrepassNormals(slot), View::Normals);
 	}
 	water.Prepare(float(delta), *_executor, submissions->SelectAdapter(BistroRender::SceneWater::SecondaryAdapter()));
@@ -161,7 +163,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	{
 		if (inspect || textures.NeedsReadback())
 		{
-			textures.Name("Scene.Depth", depth, View::Depth);
+			if (!_geometry->PrepassNormals(slot)) textures.Name("Scene.Depth", depth, View::Depth);
 			textures.Name("Scene.AO", _lighting->AOTexture(slot), View::Scalar);
 			textures.Name("Scene.AO.Reprojected", _lighting->ReprojectedAOTexture(slot), View::Scalar);
 			textures.Name("GBuffer.AlbedoMetallic", _geometry->GBuffer(slot, 0));

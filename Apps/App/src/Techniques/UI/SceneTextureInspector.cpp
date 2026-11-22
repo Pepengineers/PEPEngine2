@@ -13,6 +13,7 @@
 #include <fstream>
 #include <shellapi.h>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace BistroRender
 {
@@ -270,85 +271,103 @@ SceneTextureInspector::Atlases SceneTextureInspector::Append(const Input& scene,
 	}
 	bool open = true;
 	std::array<std::vector<Source>, 2> previews;
-	ImGui::SetNextWindowSize({730, 610}, ImGuiCond_FirstUseEver);
-	ImGui::SetNextWindowPos({345, 86}, ImGuiCond_FirstUseEver);
+	const auto* viewport = ImGui::GetMainViewport();
+	ImGui::SetNextWindowSize({viewport->WorkSize.x * .88f, viewport->WorkSize.y * .85f}, ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowPos(viewport->GetWorkCenter(), ImGuiCond_FirstUseEver, {.5f, .5f});
 	if (ImGui::Begin("Scene Textures", &open))
 	{
-		if (ImGui::Button("Depth")) _selected = {"Scene.Depth"};
-		ImGui::SameLine();
-		if (ImGui::Button("AO")) _selected = {"Scene.AO"};
-		ImGui::SameLine();
-		if (ImGui::Button("G-buffer"))
-			_selected = {"GBuffer.AlbedoMetallic", "GBuffer.NormalRoughness", "GBuffer.Motion",
-			             "GBuffer.F0Baked", "GBuffer.Emissive", "Scene.Depth"};
-		ImGui::SameLine();
-		if (ImGui::Button("Clear")) _selected.clear();
+		std::unordered_set<ID3D12Resource*> listed;
+		catalog.erase(std::remove_if(catalog.begin(), catalog.end(),
+		    [&](const Source& source) { return !listed.insert(source.Resource).second; }), catalog.end());
 
-		ImGui::SetNextItemWidth(90);
-		ImGui::SliderInt("Columns", &_columns, 1, 3);
-		ImGui::SameLine();
-		ImGui::SetNextItemWidth(95);
-		ImGui::SliderFloat("Padding", &_padding, 0, 32, "%.0f px");
-		ImGui::SameLine();
-		ImGui::SetNextItemWidth(115);
-		ImGui::SliderFloat("Depth range", &_depthRange, 100, 20000, "%.0f cm", ImGuiSliderFlags_Logarithmic);
-		ImGui::SetNextItemWidth(120);
-		ImGui::Combo("Channel", &_channel, "Default\0RGB\0Red\0Green\0Blue\0Alpha\0");
-		ImGui::SameLine();
-		ImGui::SetNextItemWidth(-1);
-		ImGui::InputTextWithHint("##filter", "Find a texture by name", _filter.data(), _filter.size());
-
-		ImGui::BeginChild("catalog", {0, 104}, ImGuiChildFlags_Borders);
-		const std::string_view filter(_filter.data());
-		for (const auto& source : catalog)
+		if (ImGui::BeginTable("inspector", 2, ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersInnerV))
 		{
-			const auto match = std::search(source.Name.begin(), source.Name.end(), filter.begin(), filter.end(),
-			    [](unsigned char a, unsigned char b) { return std::tolower(a) == std::tolower(b); });
-			if (!filter.empty() && match == source.Name.end())
-				continue;
-			const auto selected = std::find(_selected.begin(), _selected.end(), source.Name);
-			bool checked = selected != _selected.end();
-			ImGui::BeginDisabled(!checked && _selected.size() == Capacity);
-			if (ImGui::Checkbox(source.Name.c_str(), &checked))
-			{
-				if (checked) _selected.push_back(source.Name);
-				else _selected.erase(selected);
-			}
-			ImGui::EndDisabled();
-		}
-		ImGui::EndChild();
+			ImGui::TableSetupColumn("Textures", ImGuiTableColumnFlags_WidthFixed, viewport->WorkSize.x * .22f);
+			ImGui::TableSetupColumn("Preview", ImGuiTableColumnFlags_WidthStretch);
+			ImGui::TableNextColumn();
+			ImGui::BeginChild("browser");
+			ImGui::SetNextItemWidth(-1);
+			ImGui::InputTextWithHint("##filter", "Find a texture by name", _filter.data(), _filter.size());
+			if (ImGui::Button("Depth")) _selected = {"Scene.Depth"};
+			ImGui::SameLine();
+			if (ImGui::Button("AO")) _selected = {"Scene.AO"};
+			ImGui::SameLine();
+			if (ImGui::Button("G-buffer"))
+				_selected = {"GBuffer.AlbedoMetallic", "GBuffer.NormalRoughness", "GBuffer.Motion",
+				             "GBuffer.F0Baked", "GBuffer.Emissive", "Scene.Depth"};
+			ImGui::SameLine();
+			if (ImGui::Button("Clear")) _selected.clear();
 
-		ImGui::Text("%zu / %u selected", _selected.size(), Capacity);
-		ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, {_padding, _padding});
-		if (ImGui::BeginTable("previews", _columns, ImGuiTableFlags_SizingStretchSame))
-		{
-			for (const auto& name : _selected)
+			ImGui::TextDisabled("%zu / %u selected", _selected.size(), Capacity);
+			ImGui::BeginChild("catalog", {}, 0, ImGuiWindowFlags_HorizontalScrollbar);
+			const std::string_view filter(_filter.data());
+			for (const auto& source : catalog)
 			{
-				ImGui::TableNextColumn();
-				ImGui::TextUnformatted(name.c_str());
-				const auto source = std::find_if(catalog.begin(), catalog.end(),
-				                                 [&name](const auto& item) { return item.Name == name; });
-				if (source == catalog.end())
-				{
-					ImGui::TextDisabled("Unavailable this frame");
+				const auto match = std::search(source.Name.begin(), source.Name.end(), filter.begin(), filter.end(),
+				    [](unsigned char a, unsigned char b) { return std::tolower(a) == std::tolower(b); });
+				if (!filter.empty() && match == source.Name.end())
 					continue;
+				const auto selected = std::find(_selected.begin(), _selected.end(), source.Name);
+				bool checked = selected != _selected.end();
+				ImGui::BeginDisabled(!checked && _selected.size() == Capacity);
+				if (ImGui::Checkbox(source.Name.c_str(), &checked))
+				{
+					if (checked) _selected.push_back(source.Name);
+					else _selected.erase(selected);
 				}
-				const auto desc = source->Resource->GetDesc();
-				ImGui::TextDisabled("%llu x %u", static_cast<unsigned long long>(desc.Width), desc.Height);
-				const float width = (std::max)(1.f, ImGui::GetContentRegionAvail().x);
-				const float height = width * float(desc.Height) / float(desc.Width);
-				auto& atlas = previews[source->Atlas];
-				const UINT tile = static_cast<UINT>(atlas.size());
-				const float x = float(tile % TilesAcross);
-				const float y = float(tile / TilesAcross);
-				ImGui::Image(static_cast<ImTextureID>(AtlasId(source->Atlas)), {width, height},
-				             {(x + 0.5f / Tile) / TilesAcross, (y + 0.5f / Tile) / 2},
-				             {(x + 1 - 0.5f / Tile) / TilesAcross, (y + 1 - 0.5f / Tile) / 2});
-				atlas.push_back(*source);
+				ImGui::EndDisabled();
 			}
+			ImGui::EndChild();
+
+			ImGui::EndChild();
+			ImGui::TableNextColumn();
+			ImGui::BeginChild("viewer");
+			ImGui::SetNextItemWidth(100);
+			ImGui::Combo("Channel", &_channel, "Default\0RGB\0Red\0Green\0Blue\0Alpha\0");
+			ImGui::SameLine();
+			ImGui::SetNextItemWidth(110);
+			ImGui::SliderFloat("Depth range", &_depthRange, 100, 20000, "%.0f cm", ImGuiSliderFlags_Logarithmic);
+			const int count = static_cast<int>(_selected.size());
+			if (count > 1)
+			{
+				ImGui::SetNextItemWidth(100);
+				ImGui::SliderInt("Columns", &_columns, 1, 3);
+			}
+			if (!count) ImGui::TextDisabled("Select a texture to preview.");
+			const float availableHeight = ImGui::GetContentRegionAvail().y;
+			if (count && ImGui::BeginTable("previews", (std::min)(_columns, count), ImGuiTableFlags_SizingStretchSame))
+			{
+				for (const auto& name : _selected)
+				{
+					ImGui::TableNextColumn();
+					ImGui::TextUnformatted(name.c_str());
+					const auto source = std::find_if(catalog.begin(), catalog.end(),
+					                                 [&name](const auto& item) { return item.Name == name; });
+					if (source == catalog.end())
+					{
+						ImGui::TextDisabled("Unavailable this frame");
+						continue;
+					}
+					const auto desc = source->Resource->GetDesc();
+					ImGui::TextDisabled("%llu x %u", static_cast<unsigned long long>(desc.Width), desc.Height);
+					float width = (std::max)(1.f, ImGui::GetContentRegionAvail().x);
+					if (count == 1)
+						width = (std::min)(width, (std::max)(1.f, availableHeight - 2 * ImGui::GetTextLineHeightWithSpacing() - 8) * float(desc.Width) / float(desc.Height));
+					const float height = width * float(desc.Height) / float(desc.Width);
+					auto& atlas = previews[source->Atlas];
+					const UINT tile = static_cast<UINT>(atlas.size());
+					const float x = float(tile % TilesAcross);
+					const float y = float(tile / TilesAcross);
+					ImGui::Image(static_cast<ImTextureID>(AtlasId(source->Atlas)), {width, height},
+					             {(x + 0.5f / Tile) / TilesAcross, (y + 0.5f / Tile) / 2},
+					             {(x + 1 - 0.5f / Tile) / TilesAcross, (y + 1 - 0.5f / Tile) / 2});
+					atlas.push_back(*source);
+				}
+				ImGui::EndTable();
+			}
+			ImGui::EndChild();
 			ImGui::EndTable();
 		}
-		ImGui::PopStyleVar();
 	}
 	ImGui::End();
 	if (!open) Enabled.SetValue(false);

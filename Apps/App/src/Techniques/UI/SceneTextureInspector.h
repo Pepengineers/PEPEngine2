@@ -70,6 +70,6 @@ private:
 	std::array<char, 160> _filter{};
 	int _columns = 2;
 	int _channel = 0;
-	float _padding = 12, _depthRange = 1000;
+	float _depthRange = 1000;
 };
 }
