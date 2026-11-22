@@ -57,6 +57,7 @@ public:
     IConsoleVariable(IConsoleVariable&&) = delete;
     IConsoleVariable& operator=(IConsoleVariable&&) = delete;
 
+    static uint64_t ValueRevision();
     std::wstring_view GetName() const;
 
     std::wstring_view GetDescription() const;
@@ -78,6 +79,7 @@ public:
     virtual uint32_t GetUInt() const = 0;
 
 protected:
+    static void NoteValueChange();
     bool CanSetValue() const;
     bool SaveConfigValue(std::string_view Value) const;
 

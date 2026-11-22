@@ -25,6 +25,7 @@ class SceneReflections
     void AddExchanges(const Schedule&, std::vector<PacketWait>&, std::vector<Executor::PacketExchange>&);
     void RemoteSubmitted(const std::vector<CompletionToken>&);
     void Reset();
+    const auto& Owners() const { return _owners; }
     std::pair<size_t, size_t> Readiness() const;
     GDX12Texture* Published()
     {

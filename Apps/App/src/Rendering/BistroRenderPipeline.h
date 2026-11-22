@@ -65,7 +65,14 @@ class BistroRenderPipeline final : public IRenderPipeline
 	auto PresentTime() const { return _beforePresent; }
 	void WriteExecution(std::ostream& output) const override { _schedule->Write(output); }
 	const BistroRender::Schedule& LastSchedule() const { return *_schedule; }
-	bool HasRemoteCloudPicture() const { return _cloudPicture->IsRemote(); }
+	struct FrameLink { BistroRender::Id Export, Owner, Import; };
+	void CheckPanelPlacement(uint64_t revision) { _checkPanelPlacement = true; _panelSettings = revision; }
+	const auto& PanelSchedule() const { return _panelSchedule; }
+	const auto& PanelConsumers() const { return _panelConsumers; }
+	const auto& PanelOwners() const { return _panelOwners; }
+	uint64_t PanelRevision() const { return _panelRevision; }
+	const auto& FrameLinks() const { return _frameLinks; }
+	std::vector<std::pair<std::string, std::string>> PanelAdapters() const;
 	uint64_t PresentedFrames() const { return _presentedFrames; }
 	void SetBenchmarkTime(std::optional<double> seconds, bool localSkinning = true)
 	{
@@ -82,6 +89,13 @@ class BistroRenderPipeline final : public IRenderPipeline
 	void PauseIndependentClocks();
 
   private:
+	bool _checkPanelPlacement = false;
+	uint64_t _panelSettings = 0, _capturedSettings = 0;
+	uint64_t _panelRevision = 0;
+	std::shared_ptr<const BistroRender::Schedule> _panelSchedule;
+	std::vector<std::vector<BistroRender::Id>> _panelConsumers;
+	std::vector<std::pair<std::string, std::string>> _panelOwners;
+	std::vector<FrameLink> _frameLinks;
 	RenderPipelineBindings _bindings;
 	std::unique_ptr<BistroRender::SceneGeometry> _geometry;
 	std::unique_ptr<BistroRender::SceneEnvironment> _environment;

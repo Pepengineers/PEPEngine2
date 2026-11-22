@@ -16,51 +16,118 @@ void Heading(const char* text)
     ImGui::TextColored(Accent, "%s", text);
 }
 
-bool Starts(std::string_view name, std::string_view prefix)
+constexpr ImVec4 Primary{.44f, .79f, .91f, 1.f};
+constexpr ImVec4 Peer{.65f, .85f, .54f, 1.f};
+
+const char* QueueName(BistroRender::Queue queue)
 {
-    return name.substr(0, prefix.size()) == prefix;
+    using BistroRender::Queue;
+    return queue == Queue::Direct ? "DIRECT" : queue == Queue::Compute ? "COMPUTE" : "COPY";
 }
 
-void DrawQueues(const BistroRenderPipeline& pipeline)
+void DrawOwners(const std::map<std::string, std::string>& groups, const std::string& primary, bool compact)
 {
-    constexpr const char* labels[] = {"AO", "Env", "Grid", "Particles", "Water", "Clouds", "HUD", "Posters"};
-    constexpr size_t Cloud = 5;
-    constexpr unsigned Direct = 1, Compute = 2, Copy = 4;
-    std::array<unsigned, std::size(labels)> queues{};
-    for (const auto& packet : pipeline.LastSchedule().Packets)
+    for (const auto& [adapter, techniques] : groups)
     {
-        const std::string_view name = packet.Name;
-        int i = BistroBenchmark::QueueGroup(name);
-        if (name == "Game HUD raster")
-            i = 6;
-        else if (Starts(name, "world-space canvases"))
-            i = 7;
-        if (i < 0) continue;
-        using BistroRender::Queue;
-        queues[i] |= packet.Target == Queue::Compute ? Compute : packet.Target == Queue::Copy ? Copy : Direct;
+        if (adapter == "inactive" && compact) continue;
+        ImGui::TextColored(adapter == primary ? Primary : adapter == "inactive" ? Accent : Peer, "%s", adapter.c_str());
+        ImGui::TextWrapped("%s", techniques.c_str());
     }
-    const bool remote = pipeline.HasRemoteCloudPicture();
-    for (const auto& [flag, queue] : {std::pair{Direct, "DIRECT"}, {Compute, "COMPUTE"}, {Copy, "COPY"}})
+}
+
+void DrawGraph(const BistroRenderPipeline& pipeline, int& selected)
+{
+    const auto& snapshot = pipeline.PanelSchedule();
+    if (!snapshot) { ImGui::TextDisabled("Waiting for placement snapshot"); return; }
+    const auto& packets = snapshot->Packets;
+    if (packets.empty()) { ImGui::TextDisabled("Waiting for first frame"); return; }
+    const auto& devices = pipeline.BenchmarkSubmissions();
+    const auto& links = pipeline.FrameLinks();
+    Heading("Cross-GPU dependencies");
+    if (links.empty()) ImGui::TextDisabled("No cross-adapter waits or exchanges in this placement snapshot");
+    else if (ImGui::BeginTable("Frame exchanges", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV))
     {
-        std::string row;
-        for (size_t i = 0; i < queues.size(); ++i)
-            if (queues[i] & flag)
-            {
-                if (!row.empty()) row += "  ";
-                row += remote && i == Cloud ? "Cloud import" : labels[i];
-            }
-        if (remote && flag == Compute)
+        ImGui::TableSetupColumn("Scene producer");
+        ImGui::TableSetupColumn("Peer GPU");
+        ImGui::TableSetupColumn("Scene consumer");
+        ImGui::TableHeadersRow();
+        for (const auto& link : links)
         {
-            if (!row.empty()) row += "  ";
-            row += "Clouds (GPU1)";
+            ImGui::TableNextColumn();
+            ImGui::TextWrapped("%s", link.Export == BistroRender::Invalid ? "External producer" : packets[link.Export].Name.c_str());
+            ImGui::TableNextColumn();
+            ImGui::PushStyleColor(ImGuiCol_Text, Peer);
+            ImGui::TextWrapped("-> %s", devices.AdapterLabel(link.Owner).c_str());
+            ImGui::PopStyleColor();
+            ImGui::TableNextColumn();
+            ImGui::TextWrapped("-> %s", link.Import == BistroRender::Invalid ? "Later frame" : packets[link.Import].Name.c_str());
         }
-        if (flag == Copy && row.empty()) continue;
-        ImGui::TextDisabled("%s", queue);
-        ImGui::SameLine(70);
-        ImGui::TextUnformatted(row.empty() ? "-" : row.c_str());
-        if (!row.empty() && ImGui::IsItemHovered())
-            ImGui::SetTooltip("%s: %s", queue, row.c_str());
+        ImGui::EndTable();
     }
+
+    ImGui::Spacing();
+    Heading("Scene GPU pass dependencies");
+    selected = std::clamp(selected, 0, int(packets.size()) - 1);
+    ImGui::SetNextItemWidth(-1);
+    if (ImGui::BeginCombo("##pass", packets[selected].Name.c_str()))
+    {
+        for (int i = 0; i < int(packets.size()); ++i)
+        {
+            ImGui::PushID(i);
+            if (ImGui::Selectable(packets[i].Name.c_str(), selected == i)) selected = i;
+            if (selected == i) ImGui::SetItemDefaultFocus();
+            ImGui::PopID();
+        }
+        ImGui::EndCombo();
+    }
+    const auto origin = ImGui::GetCursorScreenPos();
+    const float gap = 18.f;
+    const float width = std::max(30.f, (ImGui::GetContentRegionAvail().x - 2 * gap) / 3);
+    auto* draw = ImGui::GetWindowDrawList();
+    const auto node = [&](int index, int column, float y)
+    {
+        const ImVec2 pos{origin.x + column * (width + gap), y};
+        const auto& packet = packets[index];
+        const float wrap = width - 12;
+        const float h = ImGui::GetTextLineHeight() + ImGui::CalcTextSize(packet.Name.c_str(), nullptr, false, wrap).y + 12;
+        const ImVec2 end{pos.x + width, pos.y + h};
+        const auto tint = ImGui::GetColorU32(column == 1 ? Accent : Primary);
+        draw->AddRectFilled(pos, end, IM_COL32(29, 43, 54, 255), 5);
+        draw->AddRect(pos, end, tint, 5);
+        draw->AddText({pos.x + 6, pos.y + 4}, tint, QueueName(packet.Target));
+        draw->AddText(ImGui::GetFont(), ImGui::GetFontSize(), {pos.x + 6, pos.y + 6 + ImGui::GetTextLineHeight()},
+            ImGui::GetColorU32(ImGuiCol_Text), packet.Name.c_str(), nullptr, wrap);
+        if (column != 1 && ImGui::IsWindowHovered() && ImGui::IsMouseHoveringRect(pos, end))
+        {
+            ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+            if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) selected = index;
+        }
+        return h;
+    };
+    const auto edge = [&](float x, float y, float targetY)
+    {
+        const float end = x + gap;
+        const auto color = ImGui::GetColorU32(Primary);
+        draw->AddBezierCubic({x, y}, {x + gap / 2, y}, {end - gap / 2, targetY}, {end - 3, targetY}, color, 1.5f);
+        draw->AddTriangleFilled({end, targetY}, {end - 5, targetY - 3}, {end - 5, targetY + 3}, color);
+    };
+    const int focus = selected;
+    const float h = node(focus, 1, origin.y);
+    const float center = origin.y + h / 2;
+    float left = origin.y, right = origin.y;
+    for (auto dep : packets[focus].Dependencies)
+    {
+        const float size = node(dep, 0, left);
+        edge(origin.x + width, left + size / 2, center);
+        left += size + 6;
+    }
+    for (auto i : pipeline.PanelConsumers()[focus])
+    {
+        const float size = node(i, 2, right);
+        edge(origin.x + 2 * width + gap, center, right + size / 2);
+        right += size + 6;
+    }
+    ImGui::Dummy({0, std::max({origin.y + h, left, right}) - origin.y});
 }
 
 void DrawReconstruction(RenderModule& render)
@@ -86,15 +153,22 @@ void DrawReconstruction(RenderModule& render)
 }
 }
 
-void BistroInfoPanel::Draw(RenderModule& render, const BistroRenderPipeline& pipeline,
+void BistroInfoPanel::Draw(RenderModule& render, BistroRenderPipeline& pipeline,
     BistroBenchmark& benchmark, float frameSeconds)
 {
-    if (!ImGui::GetCurrentContext()) return;
+    if (_hidden || !ImGui::GetCurrentContext()) return;
+    const auto settings = IConsoleVariable::ValueRevision();
+    if (_checkPlacement || settings != _settingsRevision)
+    {
+        pipeline.CheckPanelPlacement(settings);
+        _checkPlacement = false;
+        _settingsRevision = settings;
+    }
     if (std::isfinite(frameSeconds) && frameSeconds > 0)
     {
-        _fps[_next] = 1.f / frameSeconds;
-        _next = (_next + 1) % _fps.size();
-        _count = std::min(_count + 1, _fps.size());
+        _frameMs[_next] = frameSeconds * 1000.f;
+        _next = (_next + 1) % _frameMs.size();
+        _count = std::min(_count + 1, _frameMs.size());
         _elapsed += frameSeconds;
         ++_frames;
         if (_elapsed >= .25f)
@@ -106,81 +180,75 @@ void BistroInfoPanel::Draw(RenderModule& render, const BistroRenderPipeline& pip
     }
 
     const auto* vp = ImGui::GetMainViewport();
-    const float height = std::min(Height(vp->Size.x), vp->Size.y);
-    const bool wide = vp->Size.x >= 1050;
-    ImGuiWindowClass windowClass;
-    windowClass.ClassId = ImGui::GetID("Bistro information class");
-    windowClass.DockingAllowUnclassed = false;
-    ImGui::SetNextWindowClass(&windowClass);
-    ImGui::SetNextWindowPos({vp->Pos.x, vp->Pos.y + vp->Size.y - height});
-    ImGui::SetNextWindowSize({vp->Size.x, height});
+    const float margin = std::min(12.f, std::min(vp->Size.x, vp->Size.y) * .03f);
+    const float width = std::min(_compact ? 410.f : 980.f, vp->Size.x - 2 * margin);
+    const float height = vp->Size.y - 2 * margin;
+    ImGui::SetNextWindowPos({vp->Pos.x + vp->Size.x - margin, vp->Pos.y + margin}, ImGuiCond_Always, {1, 0});
+    ImGui::SetNextWindowSizeConstraints({width, 0}, {width, height});
+    ImGui::SetNextWindowSize({width, _compact ? 0.f : std::min(680.f, height)});
     ImGui::SetNextWindowViewport(vp->ID);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {0, 0});
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
-    ImGui::Begin("##BistroInformationDock", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
-        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoBackground |
-        ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoBringToFrontOnFocus);
-    const auto dock = ImGui::GetID("Bistro information");
-    ImGui::DockSpace(dock, {0, 0}, ImGuiDockNodeFlags_AutoHideTabBar | ImGuiDockNodeFlags_NoResize |
-        ImGuiDockNodeFlags_NoDockingSplit | ImGuiDockNodeFlags_NoUndocking, &windowClass);
-    ImGui::End();
-    ImGui::PopStyleVar(2);
-
-    ImGui::SetNextWindowClass(&windowClass);
-    ImGui::SetNextWindowDockID(dock, ImGuiCond_Always);
-    ImGui::SetNextWindowBgAlpha(.93f);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {12, 8});
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {8, 3});
-    ImGui::PushStyleColor(ImGuiCol_WindowBg, {.064f, .072f, .084f, 1.f});
-    ImGui::PushStyleColor(ImGuiCol_ChildBg, {.064f, .072f, .084f, 1.f});
-    ImGui::PushStyleColor(ImGuiCol_FrameBg, {.11f, .13f, .16f, 1.f});
+    ImGui::SetNextWindowBgAlpha(.95f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {14, 12});
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 7.f);
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, {.055f, .073f, .09f, 1.f});
     ImGui::PushStyleColor(ImGuiCol_PlotLines, Accent);
-    if (ImGui::Begin("Bistro information", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoSavedSettings |
-        ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse))
+    if (ImGui::Begin("##BistroBenchmark", nullptr, ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoTitleBar |
+        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings))
     {
-        const auto timing = [&]
+        Heading("BISTRO  /  BENCHMARK");
+        ImGui::SameLine();
+        if (ImGui::SmallButton(_compact ? "Expand" : "Minimize")) _compact = !_compact;
+        ImGui::Separator();
+        ImGui::Text("%.1f ms/frame    %.0f FPS", _displayFps > 0 ? 1000 / _displayFps : 0, _displayFps);
+        ImGui::PlotLines("##frame time", _frameMs.data(), int(_count),
+            _count == _frameMs.size() ? int(_next) : 0, nullptr, 0.f, FLT_MAX, {-1, _compact ? 28.f : 48.f});
+        benchmark.DrawRouteStatus(!_compact);
+
+        if (_snapshotRevision != pipeline.PanelRevision())
         {
-            Heading("FRAME");
-            ImGui::SameLine();
-            ImGui::Text("%.0f FPS  /  %.1f ms", _displayFps, _displayFps > 0 ? 1000 / _displayFps : 0);
-            const float width = wide ? ImGui::GetContentRegionAvail().x : std::min(240.f, ImGui::GetContentRegionAvail().x);
-            ImGui::PlotLines("##fps", _fps.data(), static_cast<int>(_count),
-                _count == _fps.size() ? static_cast<int>(_next) : 0, nullptr, 0.f, FLT_MAX, {width, 18});
-        };
-        const auto benchmarks = [&]
-        {
-            Heading("SINGLE GPU");
-            benchmark.DrawControls(false);
-            ImGui::Separator();
-            Heading("MULTI-GPU");
-            benchmark.DrawControls(true);
-        };
-        if (wide && ImGui::BeginTable("Telemetry columns", 3, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_BordersInnerV))
-        {
-            ImGui::TableSetupColumn("Frame", ImGuiTableColumnFlags_WidthStretch, .9f);
-            ImGui::TableSetupColumn("Queues", ImGuiTableColumnFlags_WidthStretch, 1.3f);
-            ImGui::TableSetupColumn("Benchmark", ImGuiTableColumnFlags_WidthStretch, 1.05f);
-            ImGui::TableNextColumn();
-            timing();
-            DrawReconstruction(render);
-            ImGui::TableNextColumn();
-            Heading("GPU QUEUES");
-            DrawQueues(pipeline);
-            ImGui::TableNextColumn();
-            benchmarks();
-            ImGui::EndTable();
+            _snapshotRevision = pipeline.PanelRevision();
+            _owners.clear();
+            for (auto [name, adapter] : pipeline.PanelOwners())
+            {
+                if (name == "SceneAdapter") _primary = adapter;
+                constexpr std::string_view suffix = "Adapter";
+                if (name.size() >= suffix.size() && name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0)
+                    name.resize(name.size() - suffix.size());
+                auto& list = _owners[adapter];
+                if (!list.empty()) list += ", ";
+                list += name;
+            }
         }
-        else if (!wide)
+        if (_compact) DrawOwners(_owners, _primary, true);
+        else
         {
-            timing();
-            DrawReconstruction(render);
-            ImGui::Separator();
-            DrawQueues(pipeline);
-            ImGui::Separator();
-            benchmarks();
+            ImGui::Spacing();
+            if (ImGui::BeginTabBar("Benchmark views"))
+            {
+                if (ImGui::BeginTabItem("Overview"))
+                {
+                    Heading("Single GPU runs");
+                    benchmark.DrawControls(false);
+                    Heading("Multi-GPU runs");
+                    benchmark.DrawControls(true);
+                    ImGui::Separator();
+                    Heading("Reconstruction");
+                    DrawReconstruction(render);
+                    ImGui::Separator();
+                    Heading("Technique placement");
+                    DrawOwners(_owners, _primary, false);
+                    ImGui::EndTabItem();
+                }
+                if (ImGui::BeginTabItem("Render graph"))
+                {
+                    DrawGraph(pipeline, _selectedPass);
+                    ImGui::EndTabItem();
+                }
+                ImGui::EndTabBar();
+            }
         }
     }
     ImGui::End();
-    ImGui::PopStyleColor(4);
+    ImGui::PopStyleColor(2);
     ImGui::PopStyleVar(2);
 }

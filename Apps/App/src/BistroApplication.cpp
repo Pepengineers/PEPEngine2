@@ -241,7 +241,19 @@ class BistroApplication final : public App
 			_benchmark.RequestAutomatic();
 		}
 		_benchmark.Update(world, *Locator.GetModule<ConsoleModule>(), *render, *_bistroPipeline, *GetWindow());
-		Engine::UI::SetSettingsEditingEnabled(!_benchmark.Active());
+		if (_benchmark.Active() && (!_runActive || _legNumber != _benchmark.LegNumber()))
+		{
+			_info.Hide();
+			_legNumber = _benchmark.LegNumber();
+			SetWindowTextW(GetWindow()->GetWindowHandle(), StatusCaption().c_str());
+		}
+		if (!_benchmark.Active() && _runActive)
+		{
+			_info.ShowFull();
+			SetWindowTextW(GetWindow()->GetWindowHandle(), GetWindow()->GetWindowTitle().c_str());
+		}
+		_runActive = _benchmark.Active();
+		Engine::UI::SetSettingsEditingEnabled(!_runActive);
 		UpdateLocalShadowSettings(world);
 		_bistroReflections.Update(world, timer.DeltaTime());
 		const float sceneDelta = world.IsPaused() ? 0.f : timer.DeltaTime() * world.GetTimeScale();
@@ -279,6 +291,18 @@ class BistroApplication final : public App
 	}
 
   private:
+	std::wstring StatusCaption() const override
+	{
+		return _benchmark.Active() ? _benchmark.Caption() : std::wstring{};
+	}
+	bool OnKeyReleased(WPARAM key) override
+	{
+		if (key == VK_ESCAPE && _benchmark.Active()) { _benchmark.RequestCancel(); return true; }
+		if (key == VK_F6 || key == VK_F7) { _info.Toggle(key == VK_F6); return true; }
+		return false;
+	}
+	bool _runActive = false;
+	uint64_t _legNumber = 0;
 	void StopBenchmark(const char* status = "cancelled")
 	{
 		if (_benchmark.Active())

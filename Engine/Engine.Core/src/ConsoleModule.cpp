@@ -22,6 +22,7 @@
 
 namespace
 {
+    std::atomic<uint64_t> ValueChanges{0};
     std::atomic<bool> StartupComplete{ false };
     std::mutex ConfigMutex;
 
@@ -235,6 +236,9 @@ IConsoleVariable::IConsoleVariable(const std::wstring_view Name, const std::wstr
     if (!ConsoleVariableStorage::Get().RegisterConsoleVariable(this))
         throw std::invalid_argument("Invalid or duplicate CVar name: " + std::filesystem::path(std::wstring(Name)).u8string());
 }
+
+uint64_t IConsoleVariable::ValueRevision() { return ValueChanges.load(std::memory_order_relaxed); }
+void IConsoleVariable::NoteValueChange() { ValueChanges.fetch_add(1, std::memory_order_relaxed); }
 
 bool IConsoleVariable::CanSetValue() const
 {

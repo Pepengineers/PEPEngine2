@@ -55,6 +55,13 @@ class SceneGeometry
 	void SkinningSubmitted(UINT slot, uint64_t order, CompletionToken);
 	void RetireSkinning(UINT slot, const QueueSubmission&);
 	void DrainSkinning();
+	void AppendSkinningOwners(UINT slot, std::vector<std::pair<std::string, Id>>& owners) const
+	{
+		const auto& frame = _slots.at(slot);
+		if (!frame.Skin.empty()) owners.emplace_back("Skinning", 0);
+		for (const auto& [id, remote] : frame.RemoteSkin)
+			if (!remote.Ranges.empty()) owners.emplace_back("Skinning", id);
+	}
 	using AppendTechnique = std::function<void(Graph&, std::vector<ID3D12Resource*>&)>;
 	using AppendDepthNormals = std::function<void(Graph&, std::vector<ID3D12Resource*>&, Id ready)>;
 	void AppendWorldCanvases(Graph&, UINT slot, const std::vector<CanvasRead>&);

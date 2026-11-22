@@ -744,7 +744,7 @@ namespace Engine::UI
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
         FrameBegun = true;
-        if (DebugEnabled)
+        if (DebugEnabled && SettingsEditingEnabled)
         {
             auto dockFlags = ImGuiDockNodeFlags_PassthruCentralNode | ImGuiDockNodeFlags_NoDockingOverCentralNode;
             if (!Visible) dockFlags |= ImGuiDockNodeFlags_KeepAliveOnly;
@@ -891,7 +891,7 @@ namespace Engine::UI
     {
         if ((!DebugEnabled && !ApplicationUIInput) || !ImGui::GetCurrentContext()) return false;
         const bool handled = ImGui_ImplWin32_WndProcHandler(window, message, wParam, lParam) != 0;
-        if (DebugEnabled && message == WM_KEYUP && wParam == VK_F1) { Visible = !Visible; return true; }
+        if (SettingsEditingEnabled && DebugEnabled && message == WM_KEYUP && wParam == VK_F1) { Visible = !Visible; return true; }
         return handled || (message >= WM_MOUSEFIRST && message <= WM_MOUSELAST && WantsMouseInput()) ||
             (message >= WM_KEYFIRST && message <= WM_KEYLAST && WantsKeyboardInput());
     }
@@ -910,5 +910,5 @@ namespace Engine::UI
     void SetDebugReconstructionStatusVisible(bool visible) { DebugReconstructionStatusVisible = visible; }
     void SetSettingsEditingEnabled(bool enabled) { SettingsEditingEnabled = enabled; }
     void EnableDebugUI() { DebugEnabled = true; }
-    bool DebugUIVisible() { return DebugEnabled && FrameBegun && Visible; }
+    bool DebugUIVisible() { return SettingsEditingEnabled && DebugEnabled && FrameBegun && Visible; }
 }

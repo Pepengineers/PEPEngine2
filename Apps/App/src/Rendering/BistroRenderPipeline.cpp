@@ -273,6 +273,30 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 		_geometry->SubmitSkinning(slot, schedule, waits);
 		completion = _executor->Execute(schedule, _geometry->PlannedResources(slot), record, prefix, nullptr, nullptr, waits,
 		                                exchanges);
+		if (std::exchange(_checkPanelPlacement, false))
+		{
+			auto owners = PanelAdapters();
+			if (!_panelSchedule || owners != _panelOwners || _panelSettings != _capturedSettings)
+			{
+				_panelSchedule = _schedule;
+				_panelOwners = std::move(owners);
+				_capturedSettings = _panelSettings;
+				++_panelRevision;
+				_panelConsumers.assign(schedule.Packets.size(), {});
+				for (BistroRender::Id i = 0; i < schedule.Packets.size(); ++i)
+					for (auto dep : schedule.Packets[i].Dependencies) _panelConsumers[dep].push_back(i);
+				_frameLinks.clear();
+				for (const auto& wait : waits)
+					if (wait.Token && wait.Token.Device != 0)
+						_frameLinks.push_back({BistroRender::Invalid, wait.Token.Device, wait.Packet});
+				for (size_t i = 0; i < exchanges.size(); ++i)
+				{
+					const auto token = _executor->ExchangeCompletions()[i];
+					if (token && token.Device != 0)
+						_frameLinks.push_back({exchanges[i].Export, token.Device, exchanges[i].Import});
+				}
+			}
+		}
 		_post->Textures().ReadbackSubmitted(0, slot);
 	}
 	catch (...)
@@ -373,6 +397,20 @@ std::vector<std::pair<std::string, std::string>> BistroRenderPipeline::Benchmark
 	};
 	for (const auto& [name, id] : _post->ExecutionDevices())
 		adapters.emplace_back(name, id == BistroRender::Invalid ? "inactive" : devices.AdapterLabel(id));
+	return adapters;
+}
+
+std::vector<std::pair<std::string, std::string>> BistroRenderPipeline::PanelAdapters() const
+{
+	auto adapters = BenchmarkAdapters();
+	adapters.erase(std::remove_if(adapters.begin(), adapters.end(), [](const auto& entry) {
+		return entry.first == "SunShadowAdapter";
+	}), adapters.end());
+	std::vector<std::pair<std::string, BistroRender::Id>> owners;
+	_lighting->AppendPanelOwners(owners);
+	_geometry->AppendSkinningOwners(_executorSlot, owners);
+	for (const auto& [name, id] : owners)
+		adapters.emplace_back(name, _executor->Submissions()->AdapterLabel(id));
 	return adapters;
 }
 

@@ -227,7 +227,7 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 		if (exchange.Export >= schedule.Packets.size() || !exchange.SubmitRemote ||
 		    (exchange.Import != Invalid && (exchange.Export >= exchange.Import || exchange.Import >= schedule.Packets.size())))
 			throw std::invalid_argument("invalid cross-device packet exchange");
-	std::vector<CompletionToken> remoteCompletions(exchanges.size());
+	_exchangeCompletions.assign(exchanges.size(), {});
 	for (const auto& wait : waits)
 	{
 		if (wait.Packet >= schedule.Packets.size())
@@ -500,8 +500,8 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 			for (size_t j = 0; j < exchanges.size(); ++j)
 				if (i == exchanges[j].Import)
 				{
-					if (!remoteCompletions[j]) throw std::logic_error("cross-device packet did not return a completion");
-					dependencies.push_back(remoteCompletions[j]);
+					if (!_exchangeCompletions[j]) throw std::logic_error("cross-device packet did not return a completion");
+					dependencies.push_back(_exchangeCompletions[j]);
 				}
 			// Cap recording latency before the first execute on long runs of ready work.
 			const auto count = i - batchBegin + 1;
@@ -521,7 +521,7 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 			slot.Poisoned = false;
 			for (size_t j = 0; j < exchanges.size(); ++j)
 				if (i == exchanges[j].Export)
-					remoteCompletions[j] = exchanges[j].SubmitRemote(token);
+					_exchangeCompletions[j] = exchanges[j].SubmitRemote(token);
 		}
 		if (suffix)
 		{

@@ -1,5 +1,4 @@
 #include "ScenePostUI.h"
-#include "BistroInfoPanel.h"
 #include "BistroGameHUD.h"
 #include "Techniques/ProbeInputMirror.h"
 #include "App.Base/Modules/RenderModule.h"
@@ -752,8 +751,7 @@ ScenePostUI::CapturedScreen ScenePostUI::CaptureScreen(Graph& graph, std::vector
 	{
 		if (!_gameOverlay)
 			_gameOverlay = std::make_unique<ImDrawList>(ImGui::GetDrawListSharedData());
-		bar = GameHUD::Draw(*_gameOverlay, _common.GameTimer ? _common.GameTimer->TotalTime() : 0.f,
-		                   BistroInfoPanel::Height(ImGui::GetIO().DisplaySize.x));
+		bar = GameHUD::Draw(*_gameOverlay, _common.GameTimer ? _common.GameTimer->TotalTime() : 0.f);
 	}
 	const auto previews = _inspector.Append({_inspector, graph, bindings, _work, *_resources.Device, backBuffer},
 	    post, _resources.CurrFrameConstantsIndex, _common.ActiveCameraNearPlane, _common.ActiveCameraFarPlane);

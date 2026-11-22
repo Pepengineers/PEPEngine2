@@ -70,6 +70,8 @@ protected:
     App& operator =(const App& rhs) = delete;
     virtual ~App() override;
 
+    virtual bool OnKeyReleased(WPARAM) { return false; }
+    virtual std::wstring StatusCaption() const { return {}; }
     virtual void OnResize();
     virtual void OnPauseChanged(bool) {}
 

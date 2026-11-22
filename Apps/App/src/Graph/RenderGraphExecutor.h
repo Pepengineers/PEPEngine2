@@ -40,6 +40,7 @@ class Executor
 	                 const std::atomic<bool>* cancellation = nullptr, const std::vector<PacketWait>& waits = {},
 	                 const std::vector<PacketExchange>& exchanges = {});
 	void Drain();
+	const auto& ExchangeCompletions() const { return _exchangeCompletions; }
 	// Each value belongs to the queue selected by its packet, not one timeline.
 	const std::vector<uint64_t>& Tokens() const { return _tokens; }
 	const std::vector<CompletionToken>& Completions() const { return _completions; }
@@ -67,7 +68,7 @@ class Executor
 	std::thread::id _owner = std::this_thread::get_id();
 	std::vector<Slot> _slots;
 	std::vector<uint64_t> _tokens;
-	std::vector<CompletionToken> _completions;
+	std::vector<CompletionToken> _completions, _exchangeCompletions;
 	uint64_t _previousCompletion = 0; // DIRECT terminal protects cross-frame persistent resources
 	uint32_t _slot = 0;
 	bool _begun = false;

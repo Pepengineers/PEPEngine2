@@ -245,6 +245,35 @@ public:
         });
     }
 
+    uint64_t LegNumber() const { return _legNumber; }
+    void RequestCancel() { if (_active) _action = Action::Cancel; }
+    std::wstring Caption() const
+    {
+        const double pass = LegWarmup() + _window.End - _preroll;
+        const auto widen = [](std::string_view s) { return std::wstring(s.begin(), s.end()); };
+        return widen(StageName()) + L" | " + widen(Measuring() ? SectionName(Section(_routeTime)) : "Warmup") +
+            L" | " + std::to_wstring(int(std::clamp(_elapsed / pass, 0., 1.) * 100)) + L"% | " +
+            std::to_wstring(int(std::ceil(std::max(0., pass - _elapsed)))) +
+            L"s left in pass | Esc: cancel | F6: compact | F7: full";
+    }
+
+    void DrawRouteStatus(bool detailed) const
+    {
+        if (!_active)
+        {
+            ImGui::TextDisabled("Route idle  /  %.0f s flight", FlightSeconds.GetValue());
+            return;
+        }
+        const double pass = LegWarmup() + _window.End - _preroll;
+        const int left = int(std::ceil(std::max(0., pass - _elapsed)));
+        ImGui::TextWrapped("%s  /  %s  /  %d:%02d left in pass", StageName(),
+            Measuring() ? SectionName(Section(_routeTime)) : "Warmup", left / 60, left % 60);
+        ImGui::ProgressBar(float(std::clamp(_elapsed / pass, 0., 1.)), {-1, 4}, "");
+        if (detailed && !_frames.empty())
+            ImGui::Text("Pass samples: %zu    Last measured frame: %.1f ms    Present interval: %.1f ms",
+                _frames.size(), _frames.back().Milliseconds, _frames.back().IntervalMs);
+    }
+
     void DrawControls(bool multiGPU)
     {
         if (!_active || _multiGPU != multiGPU)
@@ -1153,8 +1182,10 @@ private:
         BeginLeg(world, pipeline, {0, Duration(), 0});
     }
 
+    uint64_t _legNumber = 0;
     void BeginLeg(World& world, BistroRenderPipeline& pipeline, Window window)
     {
+        ++_legNumber;
         _window = window;
         _preroll = std::max(0., window.Begin - 1.);
         _elapsed = 0;

@@ -152,7 +152,11 @@ private:
         if (!ConsoleVariableDetail::ParseValue(text, value) || !IsValidValue(value)) return false;
         std::scoped_lock lock(ValueMutex);
         if (!CanSetValue()) return false;
-        SetTypedValue(value);
+        if (GetTypedValue() != value)
+        {
+            SetTypedValue(value);
+            NoteValueChange();
+        }
         return true;
     }
 
@@ -164,7 +168,11 @@ private:
         if (value == PendingValue.value_or(GetTypedValue())) return true;
         if (!SaveConfigValue(FormatValue(value))) return false;
         if (readOnly) PendingValue = value;
-        else SetTypedValue(value);
+        else
+        {
+            SetTypedValue(value);
+            NoteValueChange();
+        }
         return true;
     }
 

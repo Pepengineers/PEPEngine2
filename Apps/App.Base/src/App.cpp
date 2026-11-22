@@ -60,9 +60,10 @@ void App::CalculateFrameStats() const
         std::wstring FpsString = std::to_wstring(Fps);
         std::wstring MsPerFrameString = std::to_wstring(MsPerFrame);
 
-        std::wstring WindowText = _window->GetWindowTitle() +
+        const auto status = StatusCaption();
+        std::wstring WindowText = status.empty() ? _window->GetWindowTitle() +
             L"    fps: " + FpsString +
-            L"   mspf: " + MsPerFrameString;
+            L"   mspf: " + MsPerFrameString : status;
 
         SetWindowText(_window->GetWindowHandle(), WindowText.c_str());
 
@@ -310,6 +311,7 @@ LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         if (msg == WM_ACTIVATE || msg == WM_ENTERSIZEMOVE || msg == WM_EXITSIZEMOVE ||
             (msg >= WM_MOUSEFIRST && msg <= WM_MOUSELAST)) return 0;
     }
+    if (!_initializing && msg == WM_KEYUP && OnKeyReleased(wParam)) return 0;
     if (!_initializing && Engine::UI::HandleMessage(hwnd, msg, wParam, lParam)) return 1;
     switch (msg)
     {

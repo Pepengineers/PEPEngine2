@@ -616,6 +616,20 @@ void SceneLighting::AppendShadows(Graph& graph, std::vector<ID3D12Resource*>& bi
 	                     &statics.Atlas, _probeStaticShadows->LightSource(_slot));
 }
 
+void SceneLighting::AppendPanelOwners(std::vector<std::pair<std::string, Id>>& owners) const
+{
+	if (_resources.Lighting.SunShadowFlags & ShadowEnabled)
+		for (UINT i = 0; i < _resources.ShadowSettings.CascadeCount; ++i)
+			owners.emplace_back("CSM " + std::to_string(i), (_sunRemoteMask & (1u << i)) ? _sunOwner : 0);
+	const auto& local = _localShadows->_slots.at(_slot);
+	std::set<Id> localOwners;
+	for (size_t i = 0; i < local.Lights.size(); ++i)
+		if (local.Lights[i].ShadowFirstSlice != UINT_MAX) localOwners.insert(local.Cache.at(i).Owner);
+	for (Id owner : localOwners) owners.emplace_back("Local shadows", owner);
+	const auto& probes = _reflections->Owners();
+	for (size_t i = 0; i < probes.size(); ++i) owners.emplace_back("Probe " + std::to_string(i), probes[i]);
+}
+
 void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12Resource*>& primaryBindings,
                                             SceneGeometry& geometry)
 {

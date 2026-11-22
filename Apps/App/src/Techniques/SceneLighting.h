@@ -47,6 +47,7 @@ class SceneLighting
 	}
 	void UpdateLightGridOwner(Executor& primary);
 	Id LightGridDevice() const;
+	void AppendPanelOwners(std::vector<std::pair<std::string, Id>>&) const;
 	Id SunShadowDevice() const { return _sunOwner; }
 	void DrainLightGrid();
 	void AppendGpuLightGrid(Graph&, std::vector<ID3D12Resource*>&);
