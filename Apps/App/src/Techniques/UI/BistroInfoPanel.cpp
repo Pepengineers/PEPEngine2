@@ -19,12 +19,6 @@ void Heading(const char* text)
 constexpr ImVec4 Primary{.44f, .79f, .91f, 1.f};
 constexpr ImVec4 Peer{.65f, .85f, .54f, 1.f};
 
-const char* QueueName(BistroRender::Queue queue)
-{
-    using BistroRender::Queue;
-    return queue == Queue::Direct ? "DIRECT" : queue == Queue::Compute ? "COMPUTE" : "COPY";
-}
-
 void DrawOwners(const std::map<std::string, std::string>& groups, const std::string& primary, bool compact)
 {
     for (const auto& [adapter, techniques] : groups)
@@ -33,101 +27,6 @@ void DrawOwners(const std::map<std::string, std::string>& groups, const std::str
         ImGui::TextColored(adapter == primary ? Primary : adapter == "inactive" ? Accent : Peer, "%s", adapter.c_str());
         ImGui::TextWrapped("%s", techniques.c_str());
     }
-}
-
-void DrawGraph(const BistroRenderPipeline& pipeline, int& selected)
-{
-    const auto& snapshot = pipeline.PanelSchedule();
-    if (!snapshot) { ImGui::TextDisabled("Waiting for placement snapshot"); return; }
-    const auto& packets = snapshot->Packets;
-    if (packets.empty()) { ImGui::TextDisabled("Waiting for first frame"); return; }
-    const auto& devices = pipeline.BenchmarkSubmissions();
-    const auto& links = pipeline.FrameLinks();
-    Heading("Cross-GPU dependencies");
-    if (links.empty()) ImGui::TextDisabled("No cross-adapter waits or exchanges in this placement snapshot");
-    else if (ImGui::BeginTable("Frame exchanges", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV))
-    {
-        ImGui::TableSetupColumn("Scene producer");
-        ImGui::TableSetupColumn("Peer GPU");
-        ImGui::TableSetupColumn("Scene consumer");
-        ImGui::TableHeadersRow();
-        for (const auto& link : links)
-        {
-            ImGui::TableNextColumn();
-            ImGui::TextWrapped("%s", link.Export == BistroRender::Invalid ? "External producer" : packets[link.Export].Name.c_str());
-            ImGui::TableNextColumn();
-            ImGui::PushStyleColor(ImGuiCol_Text, Peer);
-            ImGui::TextWrapped("-> %s", devices.AdapterLabel(link.Owner).c_str());
-            ImGui::PopStyleColor();
-            ImGui::TableNextColumn();
-            ImGui::TextWrapped("-> %s", link.Import == BistroRender::Invalid ? "Later frame" : packets[link.Import].Name.c_str());
-        }
-        ImGui::EndTable();
-    }
-
-    ImGui::Spacing();
-    Heading("Scene GPU pass dependencies");
-    selected = std::clamp(selected, 0, int(packets.size()) - 1);
-    ImGui::SetNextItemWidth(-1);
-    if (ImGui::BeginCombo("##pass", packets[selected].Name.c_str()))
-    {
-        for (int i = 0; i < int(packets.size()); ++i)
-        {
-            ImGui::PushID(i);
-            if (ImGui::Selectable(packets[i].Name.c_str(), selected == i)) selected = i;
-            if (selected == i) ImGui::SetItemDefaultFocus();
-            ImGui::PopID();
-        }
-        ImGui::EndCombo();
-    }
-    const auto origin = ImGui::GetCursorScreenPos();
-    const float gap = 18.f;
-    const float width = std::max(30.f, (ImGui::GetContentRegionAvail().x - 2 * gap) / 3);
-    auto* draw = ImGui::GetWindowDrawList();
-    const auto node = [&](int index, int column, float y)
-    {
-        const ImVec2 pos{origin.x + column * (width + gap), y};
-        const auto& packet = packets[index];
-        const float wrap = width - 12;
-        const float h = ImGui::GetTextLineHeight() + ImGui::CalcTextSize(packet.Name.c_str(), nullptr, false, wrap).y + 12;
-        const ImVec2 end{pos.x + width, pos.y + h};
-        const auto tint = ImGui::GetColorU32(column == 1 ? Accent : Primary);
-        draw->AddRectFilled(pos, end, IM_COL32(29, 43, 54, 255), 5);
-        draw->AddRect(pos, end, tint, 5);
-        draw->AddText({pos.x + 6, pos.y + 4}, tint, QueueName(packet.Target));
-        draw->AddText(ImGui::GetFont(), ImGui::GetFontSize(), {pos.x + 6, pos.y + 6 + ImGui::GetTextLineHeight()},
-            ImGui::GetColorU32(ImGuiCol_Text), packet.Name.c_str(), nullptr, wrap);
-        if (column != 1 && ImGui::IsWindowHovered() && ImGui::IsMouseHoveringRect(pos, end))
-        {
-            ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
-            if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) selected = index;
-        }
-        return h;
-    };
-    const auto edge = [&](float x, float y, float targetY)
-    {
-        const float end = x + gap;
-        const auto color = ImGui::GetColorU32(Primary);
-        draw->AddBezierCubic({x, y}, {x + gap / 2, y}, {end - gap / 2, targetY}, {end - 3, targetY}, color, 1.5f);
-        draw->AddTriangleFilled({end, targetY}, {end - 5, targetY - 3}, {end - 5, targetY + 3}, color);
-    };
-    const int focus = selected;
-    const float h = node(focus, 1, origin.y);
-    const float center = origin.y + h / 2;
-    float left = origin.y, right = origin.y;
-    for (auto dep : packets[focus].Dependencies)
-    {
-        const float size = node(dep, 0, left);
-        edge(origin.x + width, left + size / 2, center);
-        left += size + 6;
-    }
-    for (auto i : pipeline.PanelConsumers()[focus])
-    {
-        const float size = node(i, 2, right);
-        edge(origin.x + 2 * width + gap, center, right + size / 2);
-        right += size + 6;
-    }
-    ImGui::Dummy({0, std::max({origin.y + h, left, right}) - origin.y});
 }
 
 void DrawReconstruction(RenderModule& render)
@@ -160,7 +59,7 @@ void BistroInfoPanel::Draw(RenderModule& render, BistroRenderPipeline& pipeline,
     const auto settings = IConsoleVariable::ValueRevision();
     if (_checkPlacement || settings != _settingsRevision)
     {
-        pipeline.CheckPanelPlacement(settings);
+        pipeline.CheckPanelPlacement();
         _checkPlacement = false;
         _settingsRevision = settings;
     }
@@ -226,29 +125,16 @@ void BistroInfoPanel::Draw(RenderModule& render, BistroRenderPipeline& pipeline,
         else
         {
             ImGui::Spacing();
-            if (ImGui::BeginTabBar("Benchmark views"))
-            {
-                if (ImGui::BeginTabItem("Overview"))
-                {
-                    Heading("Single GPU runs");
-                    benchmark.DrawControls(false);
-                    Heading("Multi-GPU runs");
-                    benchmark.DrawControls(true);
-                    ImGui::Separator();
-                    Heading("Reconstruction");
-                    DrawReconstruction(render);
-                    ImGui::Separator();
-                    Heading("Technique placement");
-                    DrawOwners(_owners, _primary, false);
-                    ImGui::EndTabItem();
-                }
-                if (ImGui::BeginTabItem("Render graph"))
-                {
-                    DrawGraph(pipeline, _selectedPass);
-                    ImGui::EndTabItem();
-                }
-                ImGui::EndTabBar();
-            }
+            Heading("Single GPU runs");
+            benchmark.DrawControls(false);
+            Heading("Multi-GPU runs");
+            benchmark.DrawControls(true);
+            ImGui::Separator();
+            Heading("Reconstruction");
+            DrawReconstruction(render);
+            ImGui::Separator();
+            Heading("Technique placement");
+            DrawOwners(_owners, _primary, false);
         }
     }
     ImGui::End();

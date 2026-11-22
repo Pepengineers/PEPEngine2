@@ -66,12 +66,9 @@ class BistroRenderPipeline final : public IRenderPipeline
 	void WriteExecution(std::ostream& output) const override { _schedule->Write(output); }
 	const BistroRender::Schedule& LastSchedule() const { return *_schedule; }
 	struct FrameLink { BistroRender::Id Export, Owner, Import; };
-	void CheckPanelPlacement(uint64_t revision) { _checkPanelPlacement = true; _panelSettings = revision; }
-	const auto& PanelSchedule() const { return _panelSchedule; }
-	const auto& PanelConsumers() const { return _panelConsumers; }
+	void CheckPanelPlacement() { _checkPanelPlacement = true; }
 	const auto& PanelOwners() const { return _panelOwners; }
 	uint64_t PanelRevision() const { return _panelRevision; }
-	const auto& FrameLinks() const { return _frameLinks; }
 	const auto& BenchmarkLinks() const { return _benchmarkLinks; }
 	const auto& BenchmarkSchedule() const { return _schedule; }
 	SkySource BenchmarkSkySource() const { return _benchmarkSky; }
@@ -103,12 +100,8 @@ class BistroRenderPipeline final : public IRenderPipeline
 
   private:
 	bool _checkPanelPlacement = false;
-	uint64_t _panelSettings = 0, _capturedSettings = 0;
 	uint64_t _panelRevision = 0;
-	std::shared_ptr<const BistroRender::Schedule> _panelSchedule;
-	std::vector<std::vector<BistroRender::Id>> _panelConsumers;
 	std::vector<std::pair<std::string, std::string>> _panelOwners;
-	std::vector<FrameLink> _frameLinks;
 	std::vector<FrameLink> _benchmarkLinks;
 	SkySource _benchmarkSky = SkySource::Off;
 	RenderPipelineBindings _bindings;

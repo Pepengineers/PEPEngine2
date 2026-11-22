@@ -29,7 +29,6 @@ private:
     bool _compact = false, _hidden = false, _checkPlacement = true;
     uint64_t _settingsRevision = 0;
     uint64_t _snapshotRevision = 0;
-    int _selectedPass = -1;
     std::array<float, 180> _frameMs{};
     size_t _next = 0, _count = 0;
     float _elapsed = 0, _displayFps = 0;
