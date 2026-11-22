@@ -13,9 +13,12 @@ public:
     void ResolveResourceRequirements(PassResourceRequirementsContext& context) override;
     void Initialize(PassInitContext& context) override;
     void Execute(PassExecutionContext& context) override;
+    // Matches ShadowMapPass's cache reset: the next culling dispatch includes every point/spot view.
+    void OnResourcesRecreated(PassInitContext& context) override;
 
 private:
     std::unique_ptr<GDX12RootSignature> _root;
     ComPtr<ID3D12PipelineState> _cullingPipeline;
     ComPtr<ID3D12PipelineState> _clearPipeline;
+    bool _resetCache = true;
 };

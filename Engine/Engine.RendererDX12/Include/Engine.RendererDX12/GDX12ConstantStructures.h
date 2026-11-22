@@ -49,6 +49,18 @@ struct GDX12LightConstants
 };
 static_assert(sizeof(GDX12LightConstants) == 60);
 
+// Selects which point/spot shadow caches need updating this frame. Flags can be combined.
+// Zero reuses both caches.
+// Static-cache changes also require FINAL. Directional shadows update every frame.
+// Keep these values in sync with CBufferStructures.hlsli.
+enum ShadowUpdateFlags : UINT
+{
+    // Clear and redraw static casters in the static cache of each affected light.
+    SHADOW_UPDATE_STATIC = 1,
+    // Restore the final map from the static cache, then draw current dynamic casters into it.
+    SHADOW_UPDATE_FINAL = 2
+};
+
 struct ShadowView
 {
     XMFLOAT4X4 ViewProj;
@@ -56,8 +68,9 @@ struct ShadowView
     LightType Type;
     float SplitDepth;
     float NormalBias;
+    UINT LightIndex = UINT_MAX; // Index in LightsCache and ShadowCacheUpdateFlags; shared by this light's views.
 };
-static_assert(sizeof(ShadowView) == 80);
+static_assert(sizeof(ShadowView) == 84);
 
 struct GDX12LightGridConstants
 {

@@ -1,5 +1,6 @@
 #include "CBufferStructures.hlsli"
 #include "PBRMath.hlsli"
+#include "ShadowSampling.hlsli"
 
 ConstantBuffer<LightGridCB> Grid : register(b0);
 ConstantBuffer<CameraCB> Camera : register(b1);
@@ -13,8 +14,12 @@ TextureCube<float4> PrefilteredEnvironment : register(t6);
 Texture2D<float4> EnvironmentBRDF : register(t7);
 StructuredBuffer<GDX12LightConstants> LightsCache : register(t8);
 StructuredBuffer<uint> ClusterLightMasks : register(t9);
+Texture2DArray<float> DirectionalShadowMaps : register(t10);
+Texture2DArray<float> PointSpotShadowMaps : register(t11);
+StructuredBuffer<ShadowView> ShadowViews : register(t12);
 RWTexture2D<unorm float4> SceneColor : register(u0);
 SamplerState samLinearClamp : register(s3);
+SamplerComparisonState samShadow : register(s6);
 
 float3 EvaluateBRDF(PBRSurface s, float3 v, float3 l)
 {
@@ -44,13 +49,14 @@ float3 EnvironmentLighting(PBRSurface s, float3 v)
     return diffuseIBL + specularIBL;
 }
 
-float3 ShadeLight(PBRSurface s, float3 position, float3 v, GDX12LightConstants light)
+float3 ShadeLight(PBRSurface s, float3 position, float3 v, GDX12LightConstants light, float viewDepth)
 {
     float3 radiance = light.Color * light.Intensity;
     float3 result = 0;
+    float3 l = -light.Direction;
     if (light.Type == LIGHT_TYPE_DIRECTIONAL)
     {
-        result = EvaluateBRDF(s, v, -light.Direction) * radiance;
+        result = EvaluateBRDF(s, v, l) * radiance;
     }
     else
     {
@@ -58,7 +64,7 @@ float3 ShadeLight(PBRSurface s, float3 position, float3 v, GDX12LightConstants l
         float distanceSquared = dot(delta, delta);
         if (distanceSquared < light.Range * light.Range)
         {
-            float3 l = delta * rsqrt(max(distanceSquared, 1e-6f));
+            l = delta * rsqrt(max(distanceSquared, 1e-6f));
             float cone = light.Type == LIGHT_TYPE_SPOT ? saturate((dot(-l, light.Direction) - light.OuterConeCos) / max(light.InnerConeCos - light.OuterConeCos, 1e-4f)) : 1;
             float rangeFade = saturate(1 - pow(distanceSquared / (light.Range * light.Range), 2));
             // Bistro units are centimetres; intensity is expressed per square metre.
@@ -66,6 +72,9 @@ float3 ShadeLight(PBRSurface s, float3 position, float3 v, GDX12LightConstants l
             result = EvaluateBRDF(s, v, l) * radiance * attenuation;
         }
     }
+    if (any(result > 0))
+        result *= ShadowVisibility(DirectionalShadowMaps, PointSpotShadowMaps, ShadowViews, samShadow,
+            light, position, s.Normal, saturate(dot(s.Normal, l)), viewDepth, Camera.NearPlane);
     return result;
 }
 
@@ -85,7 +94,7 @@ float3 ShadeSurface(PBRSurface s, float3 emissive, float3 position, uint2 pixel,
             {
                 uint bit = firstbitlow(mask);
                 mask &= mask - 1;
-                result += ShadeLight(s, position, v, LightsCache[word * 32 + bit]);
+                result += ShadeLight(s, position, v, LightsCache[word * 32 + bit], viewDepth);
             }
         }
     }

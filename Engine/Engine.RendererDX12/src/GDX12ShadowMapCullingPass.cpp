@@ -45,8 +45,8 @@ void GDX12ShadowMapCullingPass::ResolveResourceRequirements(PassResourceRequirem
 void GDX12ShadowMapCullingPass::Initialize(PassInitContext& context)
 {
     GDX12RootSignatureDesc description;
-    description.Constants = {2};
-    description.NumSingleSRVSlots = 4;
+    description.Constants = {3};
+    description.NumSingleSRVSlots = 5;
     description.NumSingleUAVSlots = 6;
     _root = std::make_unique<GDX12RootSignature>(context.GetDevice(), description);
 
@@ -77,6 +77,7 @@ void GDX12ShadowMapCullingPass::Execute(PassExecutionContext& context)
     commands->SetComputeSRV(1, resources->IndirectCommandsCache->GetSRV()->GPUHandle);
     commands->SetComputeSRV(2, frame.MaterialCache->GetSRV()->GPUHandle);
     commands->SetComputeSRV(3, frame.ShadowViews->GetSRV()->GPUHandle);
+    commands->SetComputeSRV(4, frame.ShadowCacheUpdateFlags->GetSRV()->GPUHandle);
     commands->SetComputeUAV(0, directional.ArgumentUAV->GPUHandle);
     commands->SetComputeUAV(1, directional.CountUAV->GPUHandle);
     commands->SetComputeUAV(2, pointSpotStatic.ArgumentUAV->GPUHandle);
@@ -100,8 +101,8 @@ void GDX12ShadowMapCullingPass::Execute(PassExecutionContext& context)
                 commands->ResourceBarrier({directional.Arguments->GetUAVBarrier(), directional.Count->GetUAVBarrier(),
                     pointSpotStatic.Arguments->GetUAVBarrier(), pointSpotStatic.Count->GetUAVBarrier(),
                     pointSpotDynamic.Arguments->GetUAVBarrier(), pointSpotDynamic.Count->GetUAVBarrier()});
-            const UINT offsets[] = {static_cast<UINT>(drawOffset), static_cast<UINT>(viewOffset)};
-            commands->GetCommandList()->SetComputeRoot32BitConstants(0, 2, offsets, 0);
+            const UINT offsets[] = {static_cast<UINT>(drawOffset), static_cast<UINT>(viewOffset), _resetCache};
+            commands->GetCommandList()->SetComputeRoot32BitConstants(0, 3, offsets, 0);
             commands->Dispatch(static_cast<UINT>(((std::min)(drawCount - drawOffset, uint64_t(drawsPerBatch)) + 63) / 64),
                 static_cast<UINT>((std::min)(viewCount - viewOffset, uint64_t(maxGroups))), 1);
         }
@@ -110,4 +111,8 @@ void GDX12ShadowMapCullingPass::Execute(PassExecutionContext& context)
         pointSpotStatic.Arguments->GetUAVBarrier(), pointSpotStatic.Count->GetUAVBarrier(),
         pointSpotDynamic.Arguments->GetUAVBarrier(), pointSpotDynamic.Count->GetUAVBarrier()});
     commands->EndPixEvent();
+    _resetCache = false;
 }
+
+void GDX12ShadowMapCullingPass::OnResourcesRecreated(PassInitContext&)
+{ _resetCache = true; }

@@ -26,6 +26,8 @@ public:
 
     GDX12LightGridConstants ClusteredLightingConstants = {};
     std::unique_ptr<GDX12UploadBuffer<ShadowView>> ShadowViews;
+    // Per-frame shadow-cache update flags, one UINT per light in LightsCache.
+    std::unique_ptr<GDX12UploadBuffer<UINT>> ShadowCacheUpdateFlags;
     std::unique_ptr<GDX12UploadBuffer<GDX12LightConstants>> LightsCache;
     std::unique_ptr<GDX12UploadBuffer<UINT>> ClusterLightMaskBuffer;
 };

@@ -1,3 +1,6 @@
+#ifndef CBUFFER_STRUCTURES_HLSLI
+#define CBUFFER_STRUCTURES_HLSLI
+
 //Values are copied from GDX12DescriptorHeap.h/GDX12SRVHeapIndexAllocation class
 #define TEXTURE2D_RANGE_LENGTH 99000
 #define TEXTURECUBE_RANGE_LENGTH 5000
@@ -43,6 +46,7 @@ struct Material
 #define LIGHT_TYPE_DIRECTIONAL 0u
 #define LIGHT_TYPE_POINT 1u
 #define LIGHT_TYPE_SPOT 2u
+#define NO_SHADOW_VIEW 0xffffffffu
 
 struct GDX12LightConstants
 {
@@ -57,6 +61,10 @@ struct GDX12LightConstants
     uint FirstShadowViewIndex;
 };
 
+// Matches ShadowUpdateFlags in GDX12ConstantStructures.h.
+#define SHADOW_UPDATE_STATIC 1u
+#define SHADOW_UPDATE_FINAL 2u
+
 struct ShadowView
 {
     float4x4 ViewProj;
@@ -64,6 +72,7 @@ struct ShadowView
     uint Type;
     float SplitDepth;
     float NormalBias;
+    uint LightIndex;
 };
 
 struct LightGridCB
@@ -162,3 +171,5 @@ float3 TransformNormal(float3 normal, float3x3 world)
     float signDet = dot(world[0], x) < 0 ? -1.0f : 1.0f;
     return SafeNormalize(mul(normal, float3x3(x, y, z)) * signDet);
 }
+
+#endif

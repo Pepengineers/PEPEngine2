@@ -4,6 +4,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12FSRUpscalePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12GPUCullingPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12ShadowMapCullingPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12ShadowMapPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12NISUpscalePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12DeferredGeometryPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12DeferredLightingPass.h"

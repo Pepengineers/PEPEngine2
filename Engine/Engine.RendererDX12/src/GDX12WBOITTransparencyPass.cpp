@@ -19,6 +19,15 @@ void GDX12WBOITTransparencyPass::Describe(PassDescription& s) const
 	s.AddInputTexture("InIrradiance", ResourceType::TextureCube).Usages = ResourceUsage::GraphicsShaderRead;
 	s.AddInputTexture("InPrefilteredEnvironment", ResourceType::TextureCube).Usages = ResourceUsage::GraphicsShaderRead;
 	s.AddInputTexture("InBRDFLut", ResourceType::Texture2D).Usages = ResourceUsage::GraphicsShaderRead;
+
+	auto& directionalMaps = s.AddInputTexture("InDirectionalMaps", ResourceType::Texture2DArray);
+	directionalMaps.Formats = {DXGI_FORMAT_D32_FLOAT};
+	directionalMaps.Usages = ResourceUsage::GraphicsShaderRead;
+
+	auto& pointSpotMaps = s.AddInputTexture("InPointSpotMaps", ResourceType::Texture2DArray);
+	pointSpotMaps.Formats = {DXGI_FORMAT_D32_FLOAT};
+	pointSpotMaps.Usages = ResourceUsage::GraphicsShaderRead;
+
 	auto& accum = s.AddOutputTexture(OutAccumulationTexture);
 	accum.Formats = {DXGI_FORMAT_R16G16B16A16_FLOAT};
 	accum.ClearColor = {0, 0, 0, 0};
@@ -44,8 +53,13 @@ void GDX12WBOITTransparencyPass::Initialize(PassInitContext& context)
 	// Root Signatures
 	GDX12RootSignatureDesc RSDesc1;
 	RSDesc1.NumSingleCBVSlots = 1;
-	RSDesc1.NumSingleSRVSlots = 8;
+	RSDesc1.NumSingleSRVSlots = 11;
 	RSDesc1.StaticSamplers = GetStaticSamplers();
+	CD3DX12_STATIC_SAMPLER_DESC shadowSampler(6, D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT);
+	shadowSampler.AddressU = shadowSampler.AddressV = shadowSampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+	shadowSampler.ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+	shadowSampler.BorderColor = D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE;
+	RSDesc1.StaticSamplers.push_back(shadowSampler);
 	RSDesc1.SRVRanges.push_back(GDX12RootSignatureRange(Texture2D_RangeLength));
 	RSDesc1.Constants = {1, sizeof(GDX12LightGridConstants) / sizeof(UINT)};
 	_transparencyRS = std::make_unique<GDX12RootSignature>(resources->Device, RSDesc1);
@@ -150,7 +164,10 @@ void GDX12WBOITTransparencyPass::Execute(PassExecutionContext& context)
 	cmdList->SetGraphicsSRV(5, context.GetInputTexture("InBRDFLut").GetSRV()->GPUHandle);
 	cmdList->SetGraphicsSRV(6, currentFrameConstants->LightsCache->GetSRV()->GPUHandle);
 	cmdList->SetGraphicsSRV(7, currentFrameConstants->ClusterLightMaskBuffer->GetSRV()->GPUHandle);
-	cmdList->SetGraphicsSRV(8, resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
+	cmdList->SetGraphicsSRV(8, context.GetInputTexture("InDirectionalMaps").GetSRV()->GPUHandle);
+	cmdList->SetGraphicsSRV(9, context.GetInputTexture("InPointSpotMaps").GetSRV()->GPUHandle);
+	cmdList->SetGraphicsSRV(10, currentFrameConstants->ShadowViews->GetSRV()->GPUHandle);
+	cmdList->SetGraphicsSRV(11, resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
 	const D3D12_CPU_DESCRIPTOR_HANDLE targets[] = {
 		context.GetOutputRTV(OutAccumulationTexture)->CPUHandle, context.GetOutputRTV(OutRevealageTexture)->CPUHandle};
 	const auto depth = context.GetInputTexture(InDepthBuffer).GetDSV()->CPUHandle;

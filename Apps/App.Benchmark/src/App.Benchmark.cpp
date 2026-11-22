@@ -19,6 +19,8 @@ namespace
     void ConfigureSingleGPUXeSS(FrameGraph& graph, const FrameGraphInputs& inputs)
     {
         auto culling = graph.AddPrimaryGPUPass<GDX12GPUCullingPass>("Frustum Culling");
+        auto shadowCulling = graph.AddPrimaryGPUPass<GDX12ShadowMapCullingPass>("Shadow Map Culling");
+        auto shadows = graph.AddPrimaryGPUPass<GDX12ShadowMapPass>("Shadow Maps");
         auto opaque = graph.AddPrimaryGPUPass<GDX12DeferredGeometryPass>("Opaque");
         auto ibl = graph.AddPrimaryGPUPass<GDX12IBLPrecomputePass>("IBL Precompute");
         auto lighting = graph.AddPrimaryGPUPass<GDX12DeferredLightingPass>("Deferred Lighting");
@@ -28,6 +30,9 @@ namespace
         auto upscale = graph.AddPrimaryGPUPass<GDX12XeSSUpscalePass>("XeSS");
         auto output = graph.AddPrimaryGPUPass<GDX12OutputToScreenPass>("Output To Screen");
 
+        graph.ConnectNodes(shadowCulling.GetOutput("OutDirectionalDrawStream"), shadows.GetInput("InDirectionalDrawStream"));
+        graph.ConnectNodes(shadowCulling.GetOutput("OutPointSpotStaticDrawStream"), shadows.GetInput("InPointSpotStaticDrawStream"));
+        graph.ConnectNodes(shadowCulling.GetOutput("OutPointSpotDynamicDrawStream"), shadows.GetInput("InPointSpotDynamicDrawStream"));
         graph.ConnectNodes(inputs.BackBuffer, clear.GetInput("InTexture"));
         graph.ConnectNodes(inputs.DepthStencil, clear.GetInput("InDepthBuffer"));
         graph.ConnectNodes(clear.GetOutput("OutClearedTexture"), output.GetInput("InBackBuffer"));
@@ -46,6 +51,10 @@ namespace
         graph.ConnectNodes(opaque.GetOutput("OutF0Baked"), lighting.GetInput("InF0Baked"));
         graph.ConnectNodes(opaque.GetOutput("OutEmissive"), lighting.GetInput("InEmissive"));
         graph.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), lighting.GetInput("InDepthBuffer"));
+        graph.ConnectNodes(shadows.GetOutput("OutDirectionalMaps"), lighting.GetInput("InDirectionalMaps"));
+        graph.ConnectNodes(shadows.GetOutput("OutPointSpotMaps"), lighting.GetInput("InPointSpotMaps"));
+        graph.ConnectNodes(shadows.GetOutput("OutDirectionalMaps"), transparency.GetInput("InDirectionalMaps"));
+        graph.ConnectNodes(shadows.GetOutput("OutPointSpotMaps"), transparency.GetInput("InPointSpotMaps"));
         graph.ConnectNodes(lighting.GetOutput("OutColorTexture"), composition.GetInput("InOpaqueTexture"));
         graph.ConnectNodes(transparency.GetOutput("OutAccumulationTexture"), composition.GetInput("InAccumulationTexture"));
         graph.ConnectNodes(transparency.GetOutput("OutRevealageTexture"), composition.GetInput("InRevealageTexture"));
@@ -58,6 +67,8 @@ namespace
     void ConfigureDualGPUXeSS(FrameGraph& graph, const FrameGraphInputs& inputs)
     {
         auto culling = graph.AddPrimaryGPUPass<GDX12GPUCullingPass>("Frustum Culling");
+        auto shadowCulling = graph.AddPrimaryGPUPass<GDX12ShadowMapCullingPass>("Shadow Map Culling");
+        auto shadows = graph.AddPrimaryGPUPass<GDX12ShadowMapPass>("Shadow Maps");
         auto opaque = graph.AddPrimaryGPUPass<GDX12DeferredGeometryPass>("Opaque");
         auto ibl = graph.AddPrimaryGPUPass<GDX12IBLPrecomputePass>("IBL Precompute");
         auto lighting = graph.AddPrimaryGPUPass<GDX12DeferredLightingPass>("Deferred Lighting");
@@ -67,6 +78,9 @@ namespace
         auto upscale = graph.AddSecondaryGPUPass<GDX12XeSSUpscalePass>("XeSS");
         auto output = graph.AddSecondaryGPUPass<GDX12OutputToScreenPass>("Output To Screen");
 
+        graph.ConnectNodes(shadowCulling.GetOutput("OutDirectionalDrawStream"), shadows.GetInput("InDirectionalDrawStream"));
+        graph.ConnectNodes(shadowCulling.GetOutput("OutPointSpotStaticDrawStream"), shadows.GetInput("InPointSpotStaticDrawStream"));
+        graph.ConnectNodes(shadowCulling.GetOutput("OutPointSpotDynamicDrawStream"), shadows.GetInput("InPointSpotDynamicDrawStream"));
         graph.ConnectNodes(inputs.BackBuffer, clear.GetInput("InTexture"));
         graph.ConnectNodes(inputs.DepthStencil, clear.GetInput("InDepthBuffer"));
         graph.ConnectNodes(clear.GetOutput("OutClearedTexture"), output.GetInput("InBackBuffer"));
@@ -85,6 +99,10 @@ namespace
         graph.ConnectNodes(opaque.GetOutput("OutF0Baked"), lighting.GetInput("InF0Baked"));
         graph.ConnectNodes(opaque.GetOutput("OutEmissive"), lighting.GetInput("InEmissive"));
         graph.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), lighting.GetInput("InDepthBuffer"));
+        graph.ConnectNodes(shadows.GetOutput("OutDirectionalMaps"), lighting.GetInput("InDirectionalMaps"));
+        graph.ConnectNodes(shadows.GetOutput("OutPointSpotMaps"), lighting.GetInput("InPointSpotMaps"));
+        graph.ConnectNodes(shadows.GetOutput("OutDirectionalMaps"), transparency.GetInput("InDirectionalMaps"));
+        graph.ConnectNodes(shadows.GetOutput("OutPointSpotMaps"), transparency.GetInput("InPointSpotMaps"));
         graph.ConnectNodes(lighting.GetOutput("OutColorTexture"), composition.GetInput("InOpaqueTexture"));
         graph.ConnectNodes(transparency.GetOutput("OutAccumulationTexture"), composition.GetInput("InAccumulationTexture"));
         graph.ConnectNodes(transparency.GetOutput("OutRevealageTexture"), composition.GetInput("InRevealageTexture"));

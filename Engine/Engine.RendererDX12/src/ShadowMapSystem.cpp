@@ -10,50 +10,82 @@ void ShadowMapSystem::SetCamera(const Matrix& view, const Matrix& projection, fl
     _farPlane = farPlane;
 }
 
-void ShadowMapSystem::UpdateCaster(UINT instance, const BoundingBox& bounds)
+void ShadowMapSystem::UpdateCaster(UINT instance, const BoundingBox& bounds, bool dynamic)
 {
-    _casters[instance] = bounds;
+    const auto previous = _casters.find(instance);
+    if (previous != _casters.end())
+        _changedCasterBounds.push_back({previous->second.Bounds, !previous->second.Dynamic});
+    _changedCasterBounds.push_back({bounds, !dynamic});
+    _casters[instance] = {bounds, dynamic};
     _casterBoundsDirty = true;
 }
 
 void ShadowMapSystem::RemoveCaster(UINT instance)
 {
-    if (_casters.erase(instance)) _casterBoundsDirty = true;
+    const auto caster = _casters.find(instance);
+    if (caster == _casters.end()) return;
+    _changedCasterBounds.push_back({caster->second.Bounds, !caster->second.Dynamic});
+    _casters.erase(caster);
+    _casterBoundsDirty = true;
 }
 
 void ShadowMapSystem::BuildViews(const std::vector<GDX12LightConstants>& lights)
 {
     UINT viewCount = 0;
+    UINT pointSpotCount = 0;
     for (const auto& light : lights)
     {
         if (light.FirstShadowViewIndex != UINT_MAX)
+        {
             viewCount += light.Type == LightType::Directional ? 4 : light.Type == LightType::Point ? 6 : 1;
+            if (light.Type != LightType::Directional) pointSpotCount += light.Type == LightType::Point ? 6 : 1;
+        }
     }
     Views.resize(viewCount);
+    LightUpdateFlags.assign(lights.size(), 0);
+    const bool arrayChanged = pointSpotCount != PointSpotArraySize;
     DirectionalArraySize = PointSpotArraySize = 0;
     if (_casterBoundsDirty)
     {
         _casterBounds = {};
         if (!_casters.empty())
         {
-            _casterBounds = _casters.begin()->second;
+            _casterBounds = _casters.begin()->second.Bounds;
             for (const auto& [instance, caster] : _casters)
-                BoundingBox::CreateMerged(_casterBounds, _casterBounds, caster);
+                BoundingBox::CreateMerged(_casterBounds, _casterBounds, caster.Bounds);
         }
         _casterBoundsDirty = false;
     }
-    for (const auto& light : lights)
+    for (UINT lightIndex = 0; lightIndex < lights.size(); ++lightIndex)
     {
+        const auto& light = lights[lightIndex];
         if (light.FirstShadowViewIndex == UINT_MAX) continue;
         if (light.Type == LightType::Directional)
             UpdateDirectionalViews(light, _casters.empty() ? nullptr : &_casterBounds);
         else
         {
-            const UINT count = light.Type == LightType::Point ? 6 : 1;
-            for (UINT face = 0; face < count; ++face)
-                Views[light.FirstShadowViewIndex + face].Layer = PointSpotArraySize++;
+            UINT updates = arrayChanged ? SHADOW_UPDATE_STATIC | SHADOW_UPDATE_FINAL : 0;
+            const auto projection = _pointSpotUpdates.find(light.FirstShadowViewIndex);
+            if (projection != _pointSpotUpdates.end()) updates |= projection->second;
+            const BoundingSphere influence(light.Position, light.Range);
+            for (const auto& change : _changedCasterBounds)
+            {
+                if (!influence.Intersects(change.Bounds)) continue;
+                updates |= SHADOW_UPDATE_FINAL;
+                if (change.Static) updates |= SHADOW_UPDATE_STATIC;
+            }
+            LightUpdateFlags[lightIndex] = updates;
+        }
+        const UINT count = light.Type == LightType::Directional ? 4 : light.Type == LightType::Point ? 6 : 1;
+        for (UINT face = 0; face < count; ++face)
+        {
+            auto& view = Views[light.FirstShadowViewIndex + face];
+            view.LightIndex = lightIndex;
+            if (light.Type != LightType::Directional) view.Layer = PointSpotArraySize++;
         }
     }
+    _pointSpotUpdates.clear();
+    _changedCasterBounds.clear();
 }
 
 void ShadowMapSystem::UpdateDirectionalViews(const GDX12LightConstants& light, const BoundingBox* casterBounds)
@@ -115,6 +147,7 @@ void ShadowMapSystem::UpdateDirectionalViews(const GDX12LightConstants& light, c
 
 void ShadowMapSystem::UpdatePointSpotViews(const GDX12LightConstants& light)
 {
+    _pointSpotUpdates[light.FirstShadowViewIndex] = SHADOW_UPDATE_STATIC | SHADOW_UPDATE_FINAL;
     const bool point = light.Type == LightType::Point;
     const UINT count = point ? 6 : 1;
     const UINT end = light.FirstShadowViewIndex + count;

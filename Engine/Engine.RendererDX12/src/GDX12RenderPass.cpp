@@ -41,6 +41,7 @@ std::vector<ExternalResourceUse> GDX12RenderPass::GetExternalResources(PassExecu
     if (_flags & RENDER_PASS_FLAG_USE_LIGHTING)
     {
         uses.push_back({&frame.ShadowViews->GetResource(), D3D12_RESOURCE_STATE_GENERIC_READ, {}});
+        uses.push_back({&frame.ShadowCacheUpdateFlags->GetResource(), D3D12_RESOURCE_STATE_GENERIC_READ, {}});
         uses.push_back({&frame.LightsCache->GetResource(), D3D12_RESOURCE_STATE_GENERIC_READ, {}});
         uses.push_back({&frame.ClusterLightMaskBuffer->GetResource(), D3D12_RESOURCE_STATE_GENERIC_READ, {}});
     }

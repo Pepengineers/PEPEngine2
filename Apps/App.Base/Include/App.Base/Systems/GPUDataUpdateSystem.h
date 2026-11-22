@@ -207,7 +207,7 @@ public:
                         }
                         BoundingBox bounds;
                         mesh->CPUMesh->GetSubMesh(i).Bounds.Transform(bounds, worldMatrix);
-                        shadows.UpdateCaster(instance, bounds);
+                        shadows.UpdateCaster(instance, bounds, renderer._shadowCasterDynamic);
                     }
                 }
                 renderer.DirtyFlag = false;

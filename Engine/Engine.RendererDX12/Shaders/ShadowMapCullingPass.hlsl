@@ -4,11 +4,13 @@ cbuffer CullingParameters : register(b0)
 {
     uint DrawOffset;
     uint ViewOffset;
+    uint ResetCache;
 };
 StructuredBuffer<InstanceData> InstanceCache : register(t0);
 StructuredBuffer<IndirectDrawArgs> InputCommands : register(t1);
 StructuredBuffer<Material> MaterialCache : register(t2);
 StructuredBuffer<ShadowView> ShadowViews : register(t3);
+StructuredBuffer<uint> ShadowCacheUpdateFlags : register(t4);
 RWStructuredBuffer<ShadowDrawArgs> DirectionalCommands : register(u0);
 RWStructuredBuffer<uint> DirectionalCount : register(u1);
 RWStructuredBuffer<ShadowDrawArgs> PointSpotStaticCommands : register(u2);
@@ -37,6 +39,11 @@ void CS(uint3 id : SV_DispatchThreadID)
     if (instance.CastShadows == 0 || MaterialCache[instance.MaterialIndex].RenderLayer == RENDER_LAYER_TRANSPARENT) return;
     uint viewIndex = ViewOffset + id.y;
     ShadowView view = ShadowViews[viewIndex];
+    if (view.Type != LIGHT_TYPE_DIRECTIONAL && ResetCache == 0)
+    {
+        uint update = instance.DynamicShadowCaster != 0 ? SHADOW_UPDATE_FINAL : SHADOW_UPDATE_STATIC;
+        if ((ShadowCacheUpdateFlags[view.LightIndex] & update) == 0) return;
+    }
     if (!IsBoxVisible(instance.BoundingBoxCenter, instance.BoundingBoxExtents, view.ViewProj)) return;
 
     ShadowDrawArgs command;

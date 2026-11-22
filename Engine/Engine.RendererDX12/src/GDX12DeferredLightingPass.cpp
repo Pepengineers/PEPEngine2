@@ -33,6 +33,15 @@ void GDX12DeferredLightingPass::Describe(PassDescription& s) const
     s.AddInputTexture("InIrradiance", ResourceType::TextureCube).Usages = ResourceUsage::NonPixelShaderRead;
     s.AddInputTexture("InPrefilteredEnvironment", ResourceType::TextureCube).Usages = ResourceUsage::NonPixelShaderRead;
     s.AddInputTexture("InBRDFLut", ResourceType::Texture2D).Usages = ResourceUsage::NonPixelShaderRead;
+
+    auto& directionalMaps = s.AddInputTexture("InDirectionalMaps", ResourceType::Texture2DArray);
+    directionalMaps.Formats = {DXGI_FORMAT_D32_FLOAT};
+    directionalMaps.Usages = ResourceUsage::NonPixelShaderRead;
+
+    auto& pointSpotMaps = s.AddInputTexture("InPointSpotMaps", ResourceType::Texture2DArray);
+    pointSpotMaps.Formats = {DXGI_FORMAT_D32_FLOAT};
+    pointSpotMaps.Usages = ResourceUsage::NonPixelShaderRead;
+
     s.RequireSameTextureSize({"InAlbedoMetallic", "InNormalRoughness", "InF0Baked", "InEmissive", "InDepthBuffer"});
     auto& output = s.AddOutputTexture("OutColorTexture");
     output.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
@@ -48,9 +57,14 @@ void GDX12DeferredLightingPass::Initialize(PassInitContext& context)
     GDX12RootSignatureDesc desc;
     desc.Constants = {sizeof(GDX12LightGridConstants) / sizeof(UINT)};
     desc.NumSingleCBVSlots = 1;
-    desc.NumSingleSRVSlots = 10;
+    desc.NumSingleSRVSlots = 13;
     desc.NumSingleUAVSlots = 1;
     desc.StaticSamplers = GetStaticSamplers();
+    CD3DX12_STATIC_SAMPLER_DESC shadowSampler(6, D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT);
+    shadowSampler.AddressU = shadowSampler.AddressV = shadowSampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+    shadowSampler.ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+    shadowSampler.BorderColor = D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE;
+    desc.StaticSamplers.push_back(shadowSampler);
     _root = std::make_unique<GDX12RootSignature>(resources->Device, desc);
     auto shader = GDX12ShaderCompiler::GetInstance().CompileShader(resources->Device, SHADERS_FOLDER "DeferredLightingPass.hlsl", nullptr, "CS", "cs");
     D3D12_COMPUTE_PIPELINE_STATE_DESC pso = {};
@@ -81,6 +95,9 @@ void GDX12DeferredLightingPass::Execute(PassExecutionContext& context)
     cmd->SetComputeSRV(7, context.GetInputTexture("InBRDFLut").GetSRV()->GPUHandle);
     cmd->SetComputeSRV(8, frame.LightsCache->GetSRV()->GPUHandle);
     cmd->SetComputeSRV(9, frame.ClusterLightMaskBuffer->GetSRV()->GPUHandle);
+    cmd->SetComputeSRV(10, context.GetInputTexture("InDirectionalMaps").GetSRV()->GPUHandle);
+    cmd->SetComputeSRV(11, context.GetInputTexture("InPointSpotMaps").GetSRV()->GPUHandle);
+    cmd->SetComputeSRV(12, frame.ShadowViews->GetSRV()->GPUHandle);
     cmd->SetComputeUAV(0, color.GetUAV()->GPUHandle);
     const auto size = color.GetDescription().GetSize();
     cmd->Dispatch((size.x + 7) / 8, (size.y + 7) / 8, 1);
