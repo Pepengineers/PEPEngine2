@@ -10,20 +10,28 @@ class SunShadowTileTransfer
 {
   public:
 	SunShadowTileTransfer(const QueueSubmission& submit, Id owner, GDX12DescriptorHeap& primaryHeap,
-	                      GDX12DescriptorHeap& ownerHeap)
+	                      GDX12DescriptorHeap& ownerHeap, const SunShadowTileTransfer* previous = nullptr)
 	    : _submit(submit), _owner(owner), _primaryHeap(primaryHeap), _ownerHeap(ownerHeap)
 	{
+		if (previous)
+		{
+			_packRoot = previous->_packRoot;
+			_publishRoot = previous->_publishRoot;
+			_pack = previous->_pack;
+			_publish = previous->_publish;
+			return;
+		}
 		auto& producer = submit.Device(owner);
 		auto& primary = submit.Device(0);
 		GDX12RootSignatureDesc desc;
 		desc.Constants = {4};
 		desc.NumSingleSRVSlots = desc.NumSingleUAVSlots = 1;
-		_packRoot = std::make_unique<GDX12RootSignature>(&producer, desc);
+		_packRoot = std::make_shared<GDX12RootSignature>(&producer, desc);
 		const D3D_SHADER_MACRO defines[] = {{"PACK_SUN_TILE", "1"}, {nullptr, nullptr}};
 		_pack = GDX12RenderHelpers::CreateComputePipeline(&producer, _packRoot.get(),
 		    APP_SHADERS_FOLDER "SunShadowTileTransfer.hlsl", "Pack", defines);
 		desc.NumSingleUAVSlots = 0;
-		_publishRoot = std::make_unique<GDX12RootSignature>(&primary, desc);
+		_publishRoot = std::make_shared<GDX12RootSignature>(&primary, desc);
 		auto& compiler = GDX12ShaderCompiler::GetInstance();
 		auto vs = compiler.CompileShader(&primary, APP_SHADERS_FOLDER "SunShadowTileTransfer.hlsl", nullptr, "VS", "vs");
 		auto ps = compiler.CompileShader(&primary, APP_SHADERS_FOLDER "SunShadowTileTransfer.hlsl", nullptr, "PS", "ps");
@@ -101,13 +109,24 @@ class SunShadowTileTransfer
 
 	Id Import(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work, GDX12Texture& atlas)
 	{
-		const Id imported = _transfer->Append(graph, bindings, work, _primaryTiles.Get(), Slices(), false);
+		const Id imported = Stage(graph, bindings, work);
+		Publish(graph, bindings, work, atlas, UINT_MAX);
+		return imported;
+	}
+
+	Id Stage(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work)
+	{
+		return _transfer->Append(graph, bindings, work, _primaryTiles.Get(), Slices(), false);
+	}
+
+	void Publish(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work, GDX12Texture& atlas, UINT mask)
+	{
 		const Id packed = NativeWork::ResourceFor(graph, bindings, _primaryTiles.Get(), "GPU0 received sun tiles");
 		const Id depth = NativeWork::ResourceFor(graph, bindings, atlas.GetResource()->D3DResource.Get(), "GPU0 sun atlas");
 		const auto dsv = atlas.GetDSV()->CPUHandle;
 		work.Add(graph, "publish dirty remote CSM tiles on GPU0",
 		         {{packed, Mode::Read, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE},
-		          {depth, Mode::Write, D3D12_RESOURCE_STATE_DEPTH_WRITE}}, [this, dsv](auto* cmd)
+		          {depth, Mode::Write, D3D12_RESOURCE_STATE_DEPTH_WRITE}}, [this, dsv, mask](auto* cmd)
 		{
 			auto* heap = _primaryHeap.GetHeap().Get();
 			cmd->SetDescriptorHeaps(1, &heap);
@@ -118,6 +137,7 @@ class SunShadowTileTransfer
 			cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 			for (UINT slice = 0; slice < _count; ++slice)
 			{
+				if (!(mask & (1u << _tiles[slice]))) continue;
 				const auto constants = Constants(slice);
 				const LONG x = LONG(constants[0]), y = LONG(constants[1]), size = LONG(_resolution);
 				const D3D12_VIEWPORT viewport{float(x), float(y), float(size), float(size), 0, 1};
@@ -128,7 +148,6 @@ class SunShadowTileTransfer
 				cmd->DrawInstanced(3, 1, 0, 0);
 			}
 		});
-		return imported;
 	}
 
   private:
@@ -147,7 +166,7 @@ class SunShadowTileTransfer
 	Id _owner;
 	GDX12DescriptorHeap& _primaryHeap;
 	GDX12DescriptorHeap& _ownerHeap;
-	std::unique_ptr<GDX12RootSignature> _packRoot, _publishRoot;
+	std::shared_ptr<GDX12RootSignature> _packRoot, _publishRoot;
 	ComPtr<ID3D12PipelineState> _pack, _publish;
 	GDX12ResourceHandle _primaryTiles, _ownerTiles;
 	GDX12Descriptor _srv, _uav;

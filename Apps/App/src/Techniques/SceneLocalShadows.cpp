@@ -743,7 +743,9 @@ void SceneLocalShadows::PackJob::Execute(size_t)
 			Frame->NextSlice += faces;
 		}
 		light.ShadowFirstSlice = cached.FirstSlice;
-		const UINT update = cached.Needed & ((light.ShadowFlags & 2u) ? UINT_MAX : ~cached.MapsValid);
+		const UINT dirty = cached.Needed & ((light.ShadowFlags & 2u) ? UINT_MAX : ~cached.MapsValid);
+		// Exact bootstrap may need faces that are valid only in this frame slot.
+		const UINT update = dirty && cached.Latest ? cached.Needed : dirty;
 		for (UINT face = 0; face < faces; ++face)
 		{
 			if (!(update & (1u << face)))
@@ -759,7 +761,7 @@ void SceneLocalShadows::PackJob::Execute(size_t)
 				throw std::length_error("Local shadow indirect buffer exceeds the buffer size limit");
 			}
 			Frame->Views.push_back({lightIndex, face, cached.FirstSlice + face, UINT(Frame->Packed.size()),
-			                        UINT(opaqueCount), UINT(maskedCount)});
+			                        UINT(opaqueCount), UINT(maskedCount), (dirty & (1u << face)) != 0});
 			for (const auto* commands : {&statics, &dynamics})
 			{
 				Frame->Packed.insert(Frame->Packed.end(), commands->Opaque.begin(), commands->Opaque.end());
@@ -838,9 +840,12 @@ UINT SceneLocalShadows::UpdateLights(Slot& frame)
 		const auto placement = std::find_if(_placements.begin(), _placements.end(), [&](const auto& entry)
 		{ return entry.first == GetLocalShadowKey(source); });
 		const Id owner = placement == _placements.end() ? 0 : placement->second;
-		if (cached.Owner != owner)
+		const bool latest = owner && std::find(_latestPlacements.begin(), _latestPlacements.end(),
+		                                      GetLocalShadowKey(source)) != _latestPlacements.end();
+		if (cached.Owner != owner || cached.Latest != latest)
 			cached.MapsValid = 0;
 		cached.Owner = owner;
+		cached.Latest = latest;
 		if (ShouldRenderLocalShadow(source, cached.HasLight ? &cached.Light : nullptr) ||
 		    (source.ShadowFlags & ShadowEnabled) != (cached.Light.ShadowFlags & ShadowEnabled))
 		{

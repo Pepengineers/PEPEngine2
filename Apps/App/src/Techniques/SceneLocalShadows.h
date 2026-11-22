@@ -68,12 +68,14 @@ class SceneLocalShadows
 		std::array<FaceCommands, 6> StaticFaces, DynamicFaces;
 		UINT FirstSlice = UINT_MAX, Needed = 0, StaticListsValid = 0, DynamicListsValid = 0, MapsValid = 0;
 		Id Owner = 0;
+		bool Latest = false;
 		bool HasLight = false;
 		bool SelectionDirty = true;
 	};
 	struct View
 	{
 		UINT Light, Face, Slice, First, OpaqueCount, MaskedCount;
+		bool Dirty = true;
 	};
 	struct Slot;
 	struct CullJob final : ParallelJob
@@ -141,6 +143,7 @@ class SceneLocalShadows
 	std::vector<Input> _inputs;
 	std::vector<GDX12RenderPrimitive> _grass;
 	std::vector<std::pair<GDX12LocalShadowKey, Id>> _placements;
+	std::vector<GDX12LocalShadowKey> _latestPlacements;
 	std::unordered_map<UINT, std::vector<UINT>> _instances, _transforms, _materials;
 	std::vector<UINT> _positions, _leaves;
 	bool _treeReady = false, _castersRebuilt = false;

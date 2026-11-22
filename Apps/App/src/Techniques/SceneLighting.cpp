@@ -32,10 +32,27 @@ AutoConsoleVariable<int> SunShadowSync(L"App.Shadows.Sun.CrossSync", 1,
 bool CompatibleLocalShadow(const GDX12LocalLightConstants& cached, const GDX12LocalLightConstants& current)
 {
 	return GetLocalShadowKey(cached) == GetLocalShadowKey(current) && cached.Type == current.Type &&
-	       cached.ShadowRevision == current.ShadowRevision && cached.ShadowFirstSlice == current.ShadowFirstSlice &&
-	       (cached._padding[2] & current._padding[2]) == current._padding[2] && cached.Range == current.Range &&
+	       cached.ShadowRevision == current.ShadowRevision &&
+	       cached.Range == current.Range &&
 	       std::memcmp(&cached.Position, &current.Position, sizeof(current.Position)) == 0 &&
 	       std::memcmp(cached.ShadowViewProj, current.ShadowViewProj, sizeof(current.ShadowViewProj)) == 0;
+}
+
+Id CopyShadowSlices(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work,
+                    ID3D12Resource* source, ID3D12Resource* target, std::vector<std::pair<UINT, UINT>> slices)
+{
+	const Id read = NativeWork::ResourceFor(graph, bindings, source, "GPU0 cached shadow slices");
+	const Id write = NativeWork::ResourceFor(graph, bindings, target, "GPU0 local shadow atlas");
+	return work.Add(graph, "GPU0 publish cached shadow slices",
+	    {{read, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE}, {write, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
+	    [source, target, slices = std::move(slices)](auto* cmd)
+	    {
+		    for (const auto& [from, to] : slices)
+		    {
+			    const CD3DX12_TEXTURE_COPY_LOCATION input(source, from), output(target, to);
+			    cmd->CopyTextureRegion(&output, 0, 0, 0, &input, nullptr);
+		    }
+	    });
 }
 
 constexpr UINT LightGridThreads = 64;
@@ -69,6 +86,26 @@ std::vector<Access> UniqueLightingAccesses(std::vector<Access> accesses)
 }
 } // namespace
 
+struct SceneLighting::ShadowPublication
+{
+	struct LocalLight
+	{
+		GDX12LocalLightConstants Metadata;
+		std::vector<std::pair<UINT, UINT>> Faces;
+	};
+	Id Owner = 0;
+	UINT OriginSlot = 0;
+	uint64_t Order = 0, LocalPlacement = 0, SunPlacement = 0, SceneRevision = 0, GrassRevision = 0;
+	CompletionToken Produced;
+	UINT TransferSlices = 0, LocalResolution = 0, SunResolution = 0, SunMask = 0, SunRevision = 0;
+	GDX12ShadowConstants SunSettings{};
+	std::map<UINT, LocalLight> Lights;
+	std::shared_ptr<ShadowDepthTransfer> Local;
+	std::shared_ptr<SunShadowTileTransfer> Sun;
+	GDX12ResourceHandle LocalDepth;
+	bool LocalStaged = false, SunStaged = false;
+};
+
 struct SceneLighting::RemoteShadows
 {
 	RemoteShadows(const std::shared_ptr<QueueSubmission>& submit, Id owner, RenderPipelineCommonData& common)
@@ -87,27 +124,20 @@ struct SceneLighting::RemoteShadows
 	SceneGeometry::RemoteProbeVegetation Vegetation;
 	std::unique_ptr<SceneLocalShadows> Local;
 	std::unique_ptr<SceneSunShadows> Sun;
-	std::unique_ptr<SunShadowTileTransfer> SunTransfer;
+	std::shared_ptr<SunShadowTileTransfer> SunTransfer;
 	std::array<GDX12Descriptor, 4> SceneViews;
-	std::unique_ptr<ShadowDepthTransfer> Transfer;
+	std::shared_ptr<ShadowDepthTransfer> Transfer;
+	std::shared_ptr<ShadowPublication> Publication;
 	Graph Plan;
 	NativeWork Work;
 	std::vector<ID3D12Resource*> Bindings;
 	Id Export = Invalid, Import = Invalid, Input = Invalid;
 	CompletionToken Produced, Imported, Consumer;
 	std::vector<UINT> Lights;
-	std::vector<UINT> PendingSlices;
-	std::map<UINT, GDX12LocalLightConstants> PublishedLights, PendingLights;
-	GDX12ResourceHandle PublishedLocalAtlas, PublishedSunAtlas, PendingLocalAtlas, PendingSunAtlas;
-	GDX12ShadowConstants PublishedSun{}, PendingSun{};
-	UINT PublishedSunMask = 0, PendingSunMask = 0;
-	uint64_t PublishedLocalPlacement = 0, PublishedSunPlacement = 0;
-	uint64_t PublishedLocalLayout = 0, PendingLocalLayout = 0;
-	uint64_t PendingSceneRevision = 0, PendingGrassCasterRevision = 0;
 	UINT Count = 0;
 	UINT SunMask = 0, NearMask = 0;
 	uint64_t MeshRevision = UINT64_MAX, VertexDeformationRevision = UINT64_MAX, TextureRevision = UINT64_MAX;
-	bool Reported = false, Pending = false, Async = false;
+	bool Reported = false;
 };
 
 SceneLighting::SceneLighting(GDX12DeviceResources& r, RenderPipelineCommonData& c)
@@ -143,6 +173,9 @@ SceneLighting::SceneLighting(GDX12DeviceResources& r, RenderPipelineCommonData& 
 }
 SceneLighting::~SceneLighting()
 {
+	_latestLocalShadows.clear();
+	_latestSunShadows.fill(nullptr);
+	for (auto& frame : _frames) frame.ShadowReads.clear();
 	if (_ssr)
 	{
 		_ssr->ClearDenendencies();
@@ -190,9 +223,14 @@ void SceneLighting::Freeze(SceneGeometry& geometry, UINT slot, const std::shared
 	_probeStaticShadows->Freeze(slot, staticVegetation, true);
 	auto& placements = _localShadows->_placements;
 	std::vector<std::pair<GDX12LocalShadowKey, Id>> resolved;
+	_localShadows->_latestPlacements.clear();
 	for (const auto& placement : _resources.LocalShadowPlacements)
 		if (const Id owner = submissions->SelectAdapter(placement.Adapter))
+		{
 			resolved.emplace_back(placement.Key, owner);
+			if (placement.CrossSync == ShadowCrossSync::Latest)
+				_localShadows->_latestPlacements.push_back(placement.Key);
+		}
 	if (placements != resolved)
 	{
 		placements = std::move(resolved);
@@ -379,109 +417,217 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 	const auto localAtlas = source.Atlas.GetResource()->D3DResource;
 	const auto sunAtlas = sun.Atlas.GetResource()->D3DResource;
 	const auto sunSettings = _resources.ShadowSettings;
-	const auto desiredLatest = [&](const GDX12LocalLightConstants& light)
+	auto& frame = _frames.at(_slot);
+	// Begin has retired this primary slot. Other slots retain the publications they read.
+	const UINT completed = frame.CrossSlotShadows & ~_reportedCrossSlotShadows;
+	if (completed && frame.ShadowConsumer && _submissions->Complete(frame.ShadowConsumer))
 	{
-		return std::any_of(_resources.LocalShadowPlacements.begin(), _resources.LocalShadowPlacements.end(),
-		    [&](const auto& item) { return item.Key == GetLocalShadowKey(light) && item.CrossSync == ShadowCrossSync::Latest; });
-	};
-	const auto localCompatible = [&](const RemoteShadows& remote, const GDX12LocalLightConstants& light)
+		Log::Info("RenderGraph", "GPU0 completed cross-slot shadow publication consumer fence=", frame.ShadowConsumer.Value,
+		          " slot=", _slot, " local=", bool(completed & 1u), " CSM=", bool(completed & 2u));
+		_reportedCrossSlotShadows |= completed;
+	}
+	frame.CrossSlotShadows = 0;
+	frame.ShadowReads.clear();
+	if (frame.LatestLocalAtlas.Get() != localAtlas.Get() || frame.LocalShadowLayout != source.LayoutRevision)
+		frame.LocalShadowOrders.clear();
+	if (frame.LatestSunAtlas.Get() != sunAtlas.Get())
+		frame.SunShadowOrders.fill(0);
+	frame.LatestLocalAtlas = localAtlas;
+	frame.LatestSunAtlas = sunAtlas;
+	frame.LocalShadowLayout = source.LayoutRevision;
+
+	const auto compatibleSun = [&](const ShadowPublication& publication)
 	{
-		const auto it = remote.PublishedLights.find(light.EntityId);
-		return remote.PublishedLocalPlacement == _localPlacementEpoch && remote.PublishedLocalLayout == source.LayoutRevision &&
-		       remote.PublishedLocalAtlas.Get() == localAtlas.Get() && it != remote.PublishedLights.end() &&
-		       CompatibleLocalShadow(it->second, light);
+		return _sunSync == 3 && publication.Sun && publication.Owner == _sunOwner &&
+		       publication.SunPlacement == _sunPlacementEpoch &&
+		       publication.SunResolution == _resources.ShadowQuality.SunResolution &&
+		       std::memcmp(&publication.SunSettings, &sunSettings, sizeof(sunSettings)) == 0;
 	};
-	const auto sunCompatible = [&](const RemoteShadows& remote)
+	const auto compatibleLocal = [&](const ShadowPublication& publication, UINT index)
 	{
-		return remote.PublishedSunPlacement == _sunPlacementEpoch &&
-		       remote.PublishedSunAtlas.Get() == sunAtlas.Get() && remote.PublishedSunMask == _sunRemoteMask &&
-		       std::memcmp(&remote.PublishedSun, &sunSettings, sizeof(sunSettings)) == 0;
+		const auto& light = source.Lights[index];
+		const auto found = publication.Lights.find(light.EntityId);
+		return source.Cache[index].Latest && light.ShadowFirstSlice != UINT_MAX &&
+		       publication.Owner == source.Cache[index].Owner && publication.LocalPlacement == _localPlacementEpoch &&
+		       publication.LocalResolution == source.Resolution && found != publication.Lights.end() &&
+		       CompatibleLocalShadow(found->second.Metadata, light);
 	};
-	std::set<std::pair<Id, bool>> importing;
+	for (auto it = _latestLocalShadows.begin(); it != _latestLocalShadows.end();)
+	{
+		const auto light = std::lower_bound(source.Lights.begin(), source.Lights.end(), it->first,
+		    [](const auto& item, UINT id) { return item.EntityId < id; });
+		if (light == source.Lights.end() || light->EntityId != it->first || !source.Cache[light - source.Lights.begin()].Latest)
+			it = _latestLocalShadows.erase(it);
+		else
+		{
+			for (auto& face : it->second)
+				if (face && face->LocalPlacement != _localPlacementEpoch) face.reset();
+			++it;
+		}
+	}
+	for (auto& cascade : _latestSunShadows)
+		if (cascade && cascade->SunPlacement != _sunPlacementEpoch) cascade.reset();
+
+	for (auto& candidateFrame : _frames)
+		for (auto& [lane, remote] : candidateFrame.ShadowOwners)
+		{
+			auto& publication = remote->Publication;
+			if (!publication || !publication->Produced || !_submissions->Complete(publication->Produced)) continue;
+			for (const auto& [entity, light] : publication->Lights)
+			{
+				const auto active = std::lower_bound(source.Lights.begin(), source.Lights.end(), entity,
+				    [](const auto& item, UINT id) { return item.EntityId < id; });
+				if (active == source.Lights.end() || active->EntityId != entity) continue;
+				const UINT index = UINT(active - source.Lights.begin());
+				if (!compatibleLocal(*publication, index)) continue;
+				for (const auto& [slice, face] : light.Faces)
+				{
+					auto& selected = _latestLocalShadows[entity][face];
+					if (!selected || !compatibleLocal(*selected, index) || selected->Order < publication->Order)
+						selected = publication;
+				}
+			}
+			if (compatibleSun(*publication))
+				for (UINT tile = 0; tile < _latestSunShadows.size(); ++tile)
+				{
+					if (!(publication->SunMask & (1u << tile))) continue;
+					auto& selected = _latestSunShadows[tile];
+					if (!selected || !compatibleSun(*selected) || selected->Order < publication->Order)
+						selected = publication;
+				}
+			publication.reset();
+		}
+
 	for (auto& [lane, remote] : owners)
 	{
-		const Id owner = lane.first;
 		remote->Export = remote->Import = Invalid;
 		if (!remote->Reported && remote->Consumer && _submissions->Complete(remote->Consumer))
 		{
 			_submissions->LogFirstImport("local shadow depth", remote->Produced, remote->Imported);
 			for (const UINT light : remote->Lights)
 				Log::Info("RenderGraph", "GPU0 completed local shadow consumer fence=", remote->Consumer.Value,
-				          " entity=", light, " slices=", remote->Count, " owner=", _submissions->AdapterLabel(owner));
+				          " entity=", light, " slices=", remote->Count, " owner=", _submissions->AdapterLabel(lane.first));
 			if (remote->SunMask)
 				Log::Info("RenderGraph", "GPU0 completed CSM consumer fence=", remote->Consumer.Value,
 				          " GPU0 cascade mask=", remote->NearMask, " imported cascade mask=", remote->SunMask,
-				          " owner=", _submissions->AdapterLabel(owner));
+				          " owner=", _submissions->AdapterLabel(lane.first));
 			remote->Reported = true;
 		}
-		if (!remote->Pending || !_submissions->Complete(remote->Produced)) continue;
-		remote->Pending = false;
-		const bool localReady = !remote->PendingSlices.empty() && remote->PendingLocalLayout == source.LayoutRevision &&
-		    remote->PendingLocalAtlas.Get() == localAtlas.Get() &&
-		    std::all_of(remote->PendingLights.begin(), remote->PendingLights.end(), [&](const auto& entry)
-		    {
-			    const auto current = std::lower_bound(source.Lights.begin(), source.Lights.end(), entry.first,
-			        [](const auto& light, UINT entity) { return light.EntityId < entity; });
-			    return current != source.Lights.end() && current->EntityId == entry.first &&
-			        source.Cache[current - source.Lights.begin()].Owner == owner && desiredLatest(*current) &&
-			        localCompatible(*remote, *current) && CompatibleLocalShadow(entry.second, *current);
-		    });
-		const bool sunReady = remote->PendingSunMask && owner == _sunOwner && SunShadowSync.GetValue() == 3 &&
-		    remote->PendingSunAtlas.Get() == sunAtlas.Get() && sunCompatible(*remote) &&
-		    std::memcmp(&remote->PendingSun, &sunSettings, sizeof(sunSettings)) == 0;
-		// A compatible snapshot can be displayed after a caster change, but it cannot validate the current cache.
-		const bool currentCasters = remote->PendingSceneRevision == source.SceneRevision &&
-		    remote->PendingGrassCasterRevision == source.GrassCasterRevision;
-		if (localReady)
-		{
-			if (currentCasters)
-				for (const auto& [entity, light] : remote->PendingLights)
-				{
-					const auto current = std::lower_bound(source.Lights.begin(), source.Lights.end(), entity,
-					    [](const auto& item, UINT key) { return item.EntityId < key; });
-					for (const UINT slice : remote->PendingSlices)
-						if (slice >= light.ShadowFirstSlice && slice - light.ShadowFirstSlice < LocalShadowFaceCount(light))
-							source.RemoteViews.push_back({UINT(current - source.Lights.begin()), slice - light.ShadowFirstSlice, slice});
-				}
-			remote->Import = remote->Transfer->Append(primary, primaryBindings, _work, localAtlas.Get(),
-			                                       std::move(remote->PendingSlices), false);
-		}
-		if (sunReady)
-		{
-			const Id imported = remote->SunTransfer->Import(primary, primaryBindings, _work, sun.Atlas);
-			if (remote->Import == Invalid) remote->Import = imported;
-			else primary.Operations[imported].Dependencies.push_back(remote->Import);
-			if (currentCasters)
-				sun.DirtyCascades &= ~remote->PendingSunMask;
-		}
-		if (localReady || sunReady) importing.insert(lane);
 	}
+
+	const auto currentCasters = [&](const ShadowPublication& publication)
+	{
+		return publication.SceneRevision == source.SceneRevision && publication.GrassRevision == source.GrassCasterRevision;
+	};
+	const auto stageLocal = [&](ShadowPublication& publication)
+	{
+		std::vector<UINT> slices(publication.TransferSlices);
+		for (UINT i = 0; i < slices.size(); ++i) slices[i] = i;
+		const auto desc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R32_TYPELESS, publication.LocalResolution,
+		    publication.LocalResolution, UINT16(slices.size()), 1);
+		publication.LocalDepth = _resources.Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc, D3D12_RESOURCE_STATE_COMMON);
+		publication.LocalStaged = true;
+		return publication.Local->Append(primary, primaryBindings, _work, publication.LocalDepth.Get(), std::move(slices), false);
+	};
+
+	std::vector<bool> available(source.Lights.size());
+	std::vector<UINT> current(source.Lights.size());
+	std::map<ShadowPublication*, std::vector<std::pair<UINT, UINT>>> imports;
+	for (UINT i = 0; i < source.Lights.size(); ++i)
+	{
+		const auto& light = source.Lights[i];
+		if (!source.Cache[i].Latest || light.ShadowFirstSlice == UINT_MAX) continue;
+		const auto found = _latestLocalShadows.find(light.EntityId);
+		if (found == _latestLocalShadows.end()) continue;
+		const auto& faces = found->second;
+		const UINT needed = light._padding[2];
+		UINT covered = 0;
+		for (UINT face = 0; face < faces.size(); ++face)
+			if (faces[face] && compatibleLocal(*faces[face], i)) covered |= 1u << face;
+		if ((covered & needed) != needed) continue;
+		available[i] = true;
+		for (UINT face = 0; face < faces.size(); ++face)
+		{
+			if (!(needed & (1u << face))) continue;
+			const auto& publication = faces[face];
+			if (currentCasters(*publication)) current[i] |= 1u << face;
+			auto& order = frame.LocalShadowOrders[light.EntityId][face];
+			if (order == publication->Order) continue;
+			const auto& tiles = publication->Lights.at(light.EntityId).Faces;
+			const auto tile = std::find_if(tiles.begin(), tiles.end(), [=](const auto& entry) { return entry.second == face; });
+			if (tile == tiles.end()) throw std::logic_error("Missing published local shadow face");
+			imports[publication.get()].emplace_back(tile->first, light.ShadowFirstSlice + face);
+			order = publication->Order;
+			frame.ShadowReads.push_back(publication);
+		}
+	}
+	for (auto& [publication, slices] : imports)
+	{
+		if (!publication->LocalStaged) stageLocal(*publication);
+		CopyShadowSlices(primary, primaryBindings, _work, publication->LocalDepth.Get(), localAtlas.Get(), std::move(slices));
+		if (publication->OriginSlot != _slot) frame.CrossSlotShadows |= 1u;
+	}
+
+	UINT sunCovered = 0;
+	for (UINT tile = 0; tile < _latestSunShadows.size(); ++tile)
+		if (_latestSunShadows[tile] && compatibleSun(*_latestSunShadows[tile])) sunCovered |= 1u << tile;
+	const bool sunAvailable = _sunRemoteMask && (sunCovered & _sunRemoteMask) == _sunRemoteMask;
+	if (sunAvailable)
+	{
+		std::map<ShadowPublication*, UINT> sunImports;
+		for (UINT tile = 0; tile < _latestSunShadows.size(); ++tile)
+		{
+			const UINT bit = 1u << tile;
+			if (!(_sunRemoteMask & bit)) continue;
+			const auto& publication = _latestSunShadows[tile];
+			if (frame.SunShadowOrders[tile] != publication->Order)
+			{
+				sunImports[publication.get()] |= bit;
+				frame.SunShadowOrders[tile] = publication->Order;
+				frame.ShadowReads.push_back(publication);
+			}
+			if (currentCasters(*publication) && publication->SunRevision == _resources.Lighting.SunShadowRevision &&
+			    !(_resources.Lighting.SunShadowFlags & ShadowEveryFrame))
+			{
+				sun.DirtyCascades &= ~bit;
+				sun.Update &= ~bit;
+			}
+		}
+		for (const auto& [publication, mask] : sunImports)
+		{
+			if (!publication->SunStaged)
+			{
+				publication->Sun->Stage(primary, primaryBindings, _work);
+				publication->SunStaged = true;
+			}
+			publication->Sun->Publish(primary, primaryBindings, _work, sun.Atlas, mask);
+			if (publication->OriginSlot != _slot) frame.CrossSlotShadows |= 2u;
+		}
+	}
+
 	std::map<std::pair<Id, bool>, std::vector<SceneLocalShadows::View>> views;
+	const auto busy = [&](Id owner)
+	{
+		const auto found = owners.find({owner, true});
+		return found != owners.end() && found->second->Publication != nullptr;
+	};
 	source.Views.erase(std::remove_if(source.Views.begin(), source.Views.end(), [&](const auto& view)
 	{
 		const Id owner = source.Cache[view.Light].Owner;
 		if (!owner) return false;
-		const auto& light = source.Lights[view.Light];
-		bool latest = desiredLatest(light);
-		const auto old = owners.find({owner, true});
-		if (latest && old != owners.end() && (old->second->Pending || importing.count({owner, true})))
+		const bool latest = source.Cache[view.Light].Latest && available[view.Light];
+		if (latest && (current[view.Light] & (1u << view.Face)) && !(source.Lights[view.Light].ShadowFlags & ShadowEveryFrame))
 		{
-			if (localCompatible(*old->second, light)) return true;
-			latest = false;
+			source.RemoteViews.push_back(view);
+			return true;
 		}
-		views[{owner, latest}].push_back(view);
+		if (!latest || (view.Dirty && !busy(owner)))
+			views[{owner, latest}].push_back(view);
 		return true;
 	}), source.Views.end());
 	const UINT sunUpdate = sun.Update & _sunRemoteMask;
-	std::pair<Id, bool> sunLane{_sunOwner, SunShadowSync.GetValue() == 3};
-	bool orderSun = sunUpdate != 0;
-	const auto oldSun = owners.find(sunLane);
-	if (orderSun && sunLane.second && oldSun != owners.end() &&
-	    (oldSun->second->Pending || importing.count(sunLane)))
-	{
-		if (sunCompatible(*oldSun->second)) orderSun = false;
-		else sunLane.second = false;
-	}
+	const std::pair<Id, bool> sunLane{_sunOwner, sunAvailable};
+	const bool orderSun = sunUpdate && (!sunAvailable || !busy(_sunOwner));
 	if (orderSun) views.try_emplace(sunLane);
 	if (views.empty()) return;
 
@@ -512,16 +658,25 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 		auto& entry = owners[lane];
 		if (!entry) entry = std::make_unique<RemoteShadows>(_submissions, owner, _common);
 		auto& remote = *entry;
-		remote.SunMask = orderSun && lane == sunLane ? sunUpdate : 0;
+		remote.SunMask = orderSun && lane == sunLane ? (_sunSync == 3 && !sunAvailable ? _sunRemoteMask : sunUpdate) : 0;
 		remote.NearMask = sun.Update & ~_sunRemoteMask;
-		const bool latest = lane.second && (!remote.SunMask || sunCompatible(remote)) &&
-		    std::all_of(batch.begin(), batch.end(), [&](const auto& view) { return localCompatible(remote, source.Lights[view.Light]); });
-		remote.Async = latest;
-		remote.PendingSceneRevision = source.SceneRevision;
-		remote.PendingGrassCasterRevision = source.GrassCasterRevision;
-		remote.PendingSlices.clear();
-		remote.PendingLights.clear();
-		remote.PendingSunMask = 0;
+		const bool latest = lane.second;
+		const bool publishSun = remote.SunMask && _sunSync == 3;
+		const bool publishLocal = std::any_of(batch.begin(), batch.end(),
+		    [&](const auto& view) { return source.Cache[view.Light].Latest; });
+		if (publishLocal || publishSun)
+		{
+			remote.Publication = std::make_shared<ShadowPublication>();
+			auto& publication = *remote.Publication;
+			publication.Owner = owner;
+			publication.OriginSlot = _slot;
+			publication.Order = ++_shadowOrder;
+			publication.LocalPlacement = _localPlacementEpoch;
+			publication.SunPlacement = _sunPlacementEpoch;
+			publication.SceneRevision = source.SceneRevision;
+			publication.GrassRevision = source.GrassCasterRevision;
+			if (!latest) frame.ShadowReads.push_back(remote.Publication);
+		}
 		auto& pass = *remote.Local;
 		auto& target = pass._slots.front();
 		remote.Resources.ShadowQuality.LocalResolution = source.Resolution;
@@ -672,52 +827,62 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 		scene.ShadowInputCopies.emplace_back(remote.Export, restored);
 		if (!batch.empty())
 		{
-			remote.Transfer = std::make_unique<ShadowDepthTransfer>(*_submissions, owner, source.Resolution, UINT(batch.size()));
+			remote.Transfer = std::make_shared<ShadowDepthTransfer>(*_submissions, owner, source.Resolution, UINT(batch.size()));
 			remote.Transfer->Append(graph, bindings, work, target.Atlas.GetResource()->D3DResource.Get(), std::move(from), true);
-			if (latest)
+			if (publishLocal)
 			{
-				remote.PendingLocalAtlas = localAtlas;
-				remote.PendingLocalLayout = source.LayoutRevision;
-				remote.PendingSlices = std::move(to);
-				for (const auto& view : batch)
+				auto& publication = *remote.Publication;
+				publication.Local = remote.Transfer;
+				publication.TransferSlices = UINT(batch.size());
+				publication.LocalResolution = source.Resolution;
+				for (UINT index = 0; index < batch.size(); ++index)
 				{
+					const auto& view = batch[index];
+					if (!source.Cache[view.Light].Latest) continue;
 					const auto& light = source.Lights[view.Light];
-					remote.PendingLights[light.EntityId] = light;
+					auto& entry = publication.Lights[light.EntityId];
+					entry.Metadata = light;
+					entry.Faces.emplace_back(index, view.Face);
 				}
 			}
-			else
+			if (!latest)
 			{
-				remote.Import = remote.Transfer->Append(primary, primaryBindings, _work, localAtlas.Get(), std::move(to), false);
+				if (publishLocal)
+				{
+					remote.Import = stageLocal(*remote.Publication);
+					std::vector<std::pair<UINT, UINT>> copies;
+					for (UINT index = 0; index < to.size(); ++index) copies.emplace_back(index, to[index]);
+					CopyShadowSlices(primary, primaryBindings, _work, remote.Publication->LocalDepth.Get(),
+					                 localAtlas.Get(), std::move(copies));
+				}
+				else
+					remote.Import = remote.Transfer->Append(primary, primaryBindings, _work, localAtlas.Get(), std::move(to), false);
 				source.RemoteViews.insert(source.RemoteViews.end(), batch.begin(), batch.end());
-				if (remote.PublishedLocalAtlas.Get() != localAtlas.Get() || remote.PublishedLocalPlacement != _localPlacementEpoch ||
-				    remote.PublishedLocalLayout != source.LayoutRevision)
-					remote.PublishedLights.clear();
-				remote.PublishedLocalAtlas = localAtlas;
-				remote.PublishedLocalPlacement = _localPlacementEpoch;
-				remote.PublishedLocalLayout = source.LayoutRevision;
-				const auto latestOwner = owners.find({owner, true});
 				for (const auto& view : batch)
 				{
-					const auto& light = source.Lights[view.Light];
-					if (lane.second) remote.PublishedLights[light.EntityId] = light;
-					else if (latestOwner != owners.end()) latestOwner->second->PublishedLights.erase(light.EntityId);
+					const UINT entity = source.Lights[view.Light].EntityId;
+					if (source.Cache[view.Light].Latest) frame.LocalShadowOrders[entity][view.Face] = remote.Publication->Order;
+					else frame.LocalShadowOrders.erase(entity);
 				}
 			}
 		}
 		if (remote.SunMask)
 		{
-			if (!remote.SunTransfer)
-				remote.SunTransfer = std::make_unique<SunShadowTileTransfer>(*_submissions, owner,
-				    *_resources.SRV_UAV_Heap, *heap);
+			if (!remote.SunTransfer || remote.SunTransfer.use_count() > 1)
+				remote.SunTransfer = std::make_shared<SunShadowTileTransfer>(*_submissions, owner,
+				    *_resources.SRV_UAV_Heap, *heap, remote.SunTransfer.get());
 			remote.SunTransfer->Prepare(_resources.ShadowQuality.SunResolution, remote.SunMask);
 			remote.SunTransfer->Export(graph, bindings, work, *remote.Sun->Output(0));
-			if (latest)
+			if (publishSun)
 			{
-				remote.PendingSunAtlas = sunAtlas;
-				remote.PendingSunMask = remote.SunMask;
-				remote.PendingSun = sunSettings;
+				auto& publication = *remote.Publication;
+				publication.Sun = remote.SunTransfer;
+				publication.SunResolution = _resources.ShadowQuality.SunResolution;
+				publication.SunMask = remote.SunMask;
+				publication.SunRevision = _resources.Lighting.SunShadowRevision;
+				publication.SunSettings = sunSettings;
 			}
-			else
+			if (!latest)
 			{
 				const Id imported = remote.SunTransfer->Import(primary, primaryBindings, _work, sun.Atlas);
 				if (remote.Import == Invalid) remote.Import = imported;
@@ -725,15 +890,10 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 				sun.Settings = sunSettings;
 				sun.Revision = _resources.Lighting.SunShadowRevision;
 				sun.DirtyCascades &= ~remote.SunMask;
-				if (lane.second)
-				{
-					remote.PublishedSunAtlas = sunAtlas;
-					remote.PublishedSunPlacement = _sunPlacementEpoch;
-					remote.PublishedSunMask = _sunRemoteMask;
-					remote.PublishedSun = sunSettings;
-				}
-				else if (const auto prior = owners.find({owner, true}); prior != owners.end())
-					prior->second->PublishedSunMask = 0;
+				if (publishSun) remote.Publication->SunStaged = true;
+				for (UINT tile = 0; tile < frame.SunShadowOrders.size(); ++tile)
+					if (remote.SunMask & (1u << tile))
+						frame.SunShadowOrders[tile] = publishSun ? remote.Publication->Order : 0;
 			}
 		}
 	}
@@ -765,7 +925,7 @@ void SceneLighting::AddShadowExchanges(const Schedule& primary, std::vector<Exec
 				    if (!remote.Work.Record(op, cmd)) throw std::logic_error("Missing owner shadow work");
 			    }, nullptr, nullptr, nullptr, {{input, source}});
 			    remote.Produced = remote.GPU.Completions().back();
-			    remote.Pending = remote.Async;
+			    if (remote.Publication) remote.Publication->Produced = remote.Produced;
 			    return remote.Produced;
 		    }});
 	}
@@ -773,6 +933,7 @@ void SceneLighting::AddShadowExchanges(const Schedule& primary, std::vector<Exec
 
 void SceneLighting::ShadowImportsSubmitted(const std::vector<CompletionToken>& completions)
 {
+	if (!completions.empty()) _frames.at(_slot).ShadowConsumer = completions.back();
 	for (auto& [owner, entry] : _frames.at(_slot).ShadowOwners)
 	{
 		auto& remote = *entry;

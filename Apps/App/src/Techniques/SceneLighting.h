@@ -73,6 +73,7 @@ class SceneLighting
 
   private:
 	struct RemoteShadows;
+	struct ShadowPublication;
 	struct Frame
 	{
 		std::unique_ptr<SceneAO> AO;
@@ -82,6 +83,13 @@ class SceneLighting
 		bool UploadLights = false;
 		GDX12LightGridConstants GridLayout{};
 		std::map<std::pair<Id, bool>, std::unique_ptr<RemoteShadows>> ShadowOwners;
+		std::vector<std::shared_ptr<ShadowPublication>> ShadowReads;
+		std::map<UINT, std::array<uint64_t, 6>> LocalShadowOrders;
+		std::array<uint64_t, 4> SunShadowOrders{};
+		uint64_t LocalShadowLayout = 0;
+		GDX12ResourceHandle LatestLocalAtlas, LatestSunAtlas;
+		UINT CrossSlotShadows = 0;
+		CompletionToken ShadowConsumer;
 	};
 	void AppendRemoteLocalShadows(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&);
 	void AddShadowExchanges(const Schedule&, std::vector<Executor::PacketExchange>&);
@@ -102,6 +110,10 @@ class SceneLighting
 	std::unique_ptr<SceneTransparency> _transparency;
 
 	std::vector<Frame> _frames;
+	std::map<UINT, std::array<std::shared_ptr<ShadowPublication>, 6>> _latestLocalShadows;
+	std::array<std::shared_ptr<ShadowPublication>, 4> _latestSunShadows;
+	uint64_t _shadowOrder = 0;
+	UINT _reportedCrossSlotShadows = 0;
 	std::shared_ptr<QueueSubmission> _submissions;
 	GDX12DeferredLightingPass _deferred;
 	std::unique_ptr<GDX12SSSRPass> _ssr;
