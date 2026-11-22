@@ -12,7 +12,7 @@
 
 namespace
 {
-    AutoConsoleVariable<bool> OptimizeShaders(L"r.Shaders.Optimize", true,
+    AutoConsoleVariable<bool> OptimizeShaders(L"Render.Shaders.Optimize", true,
         L"Optimize runtime DXC shaders. Set to 0 before startup for shader debugging.",
         EConsoleVariableFlags::ReadOnly);
 }
