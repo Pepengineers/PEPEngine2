@@ -273,6 +273,20 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 		_geometry->SubmitSkinning(slot, schedule, waits);
 		completion = _executor->Execute(schedule, _geometry->PlannedResources(slot), record, prefix, nullptr, nullptr, waits,
 		                                exchanges);
+		if (_benchmarkTime)
+		{
+			_benchmarkSky = c.Primary.Sky.Source;
+			_benchmarkLinks.clear();
+			for (const auto& wait : waits)
+				if (wait.Token && wait.Token.Device != 0)
+					_benchmarkLinks.push_back({BistroRender::Invalid, wait.Token.Device, wait.Packet});
+			for (size_t i = 0; i < exchanges.size(); ++i)
+			{
+				const auto token = _executor->ExchangeCompletions()[i];
+				if (token && token.Device != 0)
+					_benchmarkLinks.push_back({exchanges[i].Export, token.Device, exchanges[i].Import});
+			}
+		}
 		if (std::exchange(_checkPanelPlacement, false))
 		{
 			auto owners = PanelAdapters();

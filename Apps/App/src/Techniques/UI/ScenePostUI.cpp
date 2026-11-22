@@ -345,6 +345,14 @@ std::pair<bool, bool> ScenePostUI::BenchmarkPostEffects() const
 	return {stack._dof.IsActive(), stack._blur._preparedBlur};
 }
 
+std::pair<Id, Id> ScenePostUI::BenchmarkPublication() const
+{
+	if (!_remotePost) return {Invalid, Invalid};
+	const auto& frame = _remotePost->Frames.at(_resources.CurrFrameConstantsIndex);
+	if (!frame.Produced || !frame.SceneReady || !frame.BundleBytes) return {Invalid, Invalid};
+	return {_remotePost->Owner, frame.HudOwner};
+}
+
 std::vector<GDX12RenderPass*> ScenePostUI::Passes()
 {
 	if (_remotePost) return _remotePost->Stack->Passes();

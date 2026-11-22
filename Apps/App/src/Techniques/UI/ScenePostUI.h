@@ -24,6 +24,7 @@ class ScenePostUI
 	std::vector<std::pair<std::string, Id>> ExecutionDevices() const;
 	std::array<uint64_t, 4> BenchmarkTransferBytes() const;
 	std::pair<bool, bool> BenchmarkPostEffects() const;
+	std::pair<Id, Id> BenchmarkPublication() const;
 	void DrainPost();
 	void AddPostExchange(const Schedule&, std::vector<Executor::PacketExchange>&);
 	void PostPresented();

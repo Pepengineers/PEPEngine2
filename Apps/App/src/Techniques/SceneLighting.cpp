@@ -630,6 +630,14 @@ void SceneLighting::AppendPanelOwners(std::vector<std::pair<std::string, Id>>& o
 	for (size_t i = 0; i < probes.size(); ++i) owners.emplace_back("Probe " + std::to_string(i), probes[i]);
 }
 
+void SceneLighting::AppendBenchmarkShadowOwners(std::vector<std::pair<UINT, Id>>& owners) const
+{
+	const auto& local = _localShadows->_slots.at(_slot);
+	for (size_t i = 0; i < local.Lights.size(); ++i)
+		if (local.Lights[i].ShadowFirstSlice != UINT_MAX)
+			owners.emplace_back(local.Lights[i].EntityId, local.Cache.at(i).Owner);
+}
+
 void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12Resource*>& primaryBindings,
                                             SceneGeometry& geometry)
 {

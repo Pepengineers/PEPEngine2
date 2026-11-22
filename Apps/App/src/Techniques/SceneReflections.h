@@ -26,6 +26,7 @@ class SceneReflections
     void RemoteSubmitted(const std::vector<CompletionToken>&);
     void Reset();
     const auto& Owners() const { return _owners; }
+    void AppendPublishedOwners(std::vector<std::pair<std::string, Id>>& owners) const;
     std::pair<size_t, size_t> Readiness() const;
     GDX12Texture* Published()
     {

@@ -51,6 +51,8 @@ namespace BistroCharacters
     public:
         explicit Scene(unsigned seed = std::random_device{}()) : _seed(seed) {}
 
+        unsigned Seed() const { return _seed; }
+
         std::function<void()> CaptureReplayState(World& world)
         {
             struct Character
@@ -73,6 +75,8 @@ namespace BistroCharacters
             }
             return [this, &world, groups = _groups, states = std::move(states)]
             {
+                if (states.size() != _entities.size())
+                    throw std::runtime_error("Bistro character count changed during benchmark replay");
                 _groups = groups;
                 auto& ecs = world.GetECS();
                 for (size_t i = 0; i < _entities.size(); ++i)

@@ -160,6 +160,14 @@ std::pair<size_t, size_t> SceneReflections::Readiness() const
         ready += publication.Ready || (publication.Fence && publication.Fence <= done);
     return {ready, p._probes.size()};
 }
+
+void SceneReflections::AppendPublishedOwners(std::vector<std::pair<std::string, Id>>& owners) const
+{
+    if (!_passes->_enabled) return;
+    for (size_t i = 0; i < _owners.size() && i < _passes->_probes.size(); ++i)
+        if (_passes->_probes[i].Ready)
+            owners.emplace_back("Probe " + std::to_string(i), _owners[i]);
+}
 void SceneReflections::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, SceneGeometry& geometry,
                               SceneEnvironment& environment, UINT slot, GDX12Texture* localShadows,
                               GDX12Texture* staticLocalShadows,

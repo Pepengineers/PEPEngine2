@@ -72,6 +72,18 @@ class BistroRenderPipeline final : public IRenderPipeline
 	const auto& PanelOwners() const { return _panelOwners; }
 	uint64_t PanelRevision() const { return _panelRevision; }
 	const auto& FrameLinks() const { return _frameLinks; }
+	const auto& BenchmarkLinks() const { return _benchmarkLinks; }
+	const auto& BenchmarkSchedule() const { return _schedule; }
+	SkySource BenchmarkSkySource() const { return _benchmarkSky; }
+	auto BenchmarkPostPublication() const { return _post->BenchmarkPublication(); }
+	void AppendBenchmarkProbes(std::vector<std::pair<std::string, BistroRender::Id>>& owners) const
+	{
+		_lighting->AppendPublishedProbes(owners);
+	}
+	void AppendBenchmarkShadowOwners(std::vector<std::pair<UINT, BistroRender::Id>>& owners) const
+	{
+		_lighting->AppendBenchmarkShadowOwners(owners);
+	}
 	std::vector<std::pair<std::string, std::string>> PanelAdapters() const;
 	uint64_t PresentedFrames() const { return _presentedFrames; }
 	void SetBenchmarkTime(std::optional<double> seconds, bool localSkinning = true)
@@ -96,6 +108,8 @@ class BistroRenderPipeline final : public IRenderPipeline
 	std::vector<std::vector<BistroRender::Id>> _panelConsumers;
 	std::vector<std::pair<std::string, std::string>> _panelOwners;
 	std::vector<FrameLink> _frameLinks;
+	std::vector<FrameLink> _benchmarkLinks;
+	SkySource _benchmarkSky = SkySource::Off;
 	RenderPipelineBindings _bindings;
 	std::unique_ptr<BistroRender::SceneGeometry> _geometry;
 	std::unique_ptr<BistroRender::SceneEnvironment> _environment;

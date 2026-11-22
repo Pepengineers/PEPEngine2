@@ -49,6 +49,11 @@ class SceneLighting
 	Id LightGridDevice() const;
 	void AppendPanelOwners(std::vector<std::pair<std::string, Id>>&) const;
 	Id SunShadowDevice() const { return _sunOwner; }
+	void AppendPublishedProbes(std::vector<std::pair<std::string, Id>>& owners) const
+	{
+		_reflections->AppendPublishedOwners(owners);
+	}
+	void AppendBenchmarkShadowOwners(std::vector<std::pair<UINT, Id>>& owners) const;
 	void DrainLightGrid();
 	void AppendGpuLightGrid(Graph&, std::vector<ID3D12Resource*>&);
 	void SubmitLightGrid(const Schedule&, std::vector<PacketWait>&);
