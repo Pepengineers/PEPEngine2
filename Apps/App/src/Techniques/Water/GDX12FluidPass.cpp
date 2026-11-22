@@ -23,7 +23,7 @@ constexpr UINT ParameterSlotsPerFrame = 2; // Simulation and draw can read diffe
 constexpr UINT BillboardVertexCount = 4;
 constexpr UINT PackThreads = 128;
 static_assert(sizeof(XMFLOAT4) == 16, "Must match the water display payload");
-static_assert(sizeof(GDX12FluidParameters) == 336, "Must match FluidParameters.hlsli");
+static_assert(sizeof(GDX12FluidParameters) == 208, "Must match FluidParameters.hlsli");
 } // namespace
 GDX12FluidParticlePass::GDX12FluidParticlePass(GDX12DeviceResources& resources, RenderPipelineCommonData* common)
     : _resources(resources), _commonData(common)
@@ -80,7 +80,6 @@ void GDX12FluidParticlePass::PrepareStates()
 	bool retire = false;
 	for (const auto& instance : _instances)
 	{
-		ValidateFluidInstance(instance);
 		const auto& source = instance.Component.GetParticles();
 		if (!source || source->empty())
 		{

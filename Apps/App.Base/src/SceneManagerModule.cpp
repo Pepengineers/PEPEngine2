@@ -404,21 +404,3 @@ void SceneManagerModule::UpdateSystems(JobSystem& jobs, World& world, float dt, 
         throw;
     }
 }
-
-void SceneManagerModule::OnUpdate()
-{
-}
-
-void SceneManagerModule::OnRender()
-{
-}
-
-bool SceneManagerModule::ShouldTick()
-{
-    return false;
-}
-
-bool SceneManagerModule::ShouldRender()
-{
-    return false;
-}

@@ -65,8 +65,8 @@ class SceneLocalShadows
 	struct LightCache
 	{
 		GDX12LocalLightConstants Light;
-		std::array<FaceCommands, 6> StaticFaces, DynamicFaces;
-		UINT FirstSlice = UINT_MAX, Needed = 0, StaticListsValid = 0, DynamicListsValid = 0, MapsValid = 0;
+		std::array<FaceCommands, 6> Faces;
+		UINT FirstSlice = UINT_MAX, Needed = 0, ListsValid = 0, MapsValid = 0;
 		Id Owner = 0;
 		bool Latest = false;
 		bool HasLight = false;
@@ -95,6 +95,7 @@ class SceneLocalShadows
 		std::vector<LightCache> Cache;
 		std::vector<View> Views;
 		std::vector<View> RemoteViews;
+		std::vector<uint64_t> StaticDepthVersions;
 		std::vector<GDX12IndirectDrawArgs> Packed;
 		std::optional<GDX12LocalShadowFrustum> Camera;
 		XMFLOAT4X4 CameraMatrix{};
@@ -115,7 +116,7 @@ class SceneLocalShadows
 	};
 	static void DrawShadowViews(ID3D12GraphicsCommandList* cmd, const Slot& frame, ID3D12CommandSignature* signature,
 	                            ID3D12Resource* target, ID3D12PipelineState* opaquePipeline,
-	                            ID3D12PipelineState* maskedPipeline);
+	                            ID3D12PipelineState* maskedPipeline, bool clearDepth);
 	void UpdateCaster(UINT position, const Input& current);
 	void UpdateCamera(Slot&);
 	UINT UpdateLights(Slot&);
@@ -148,6 +149,7 @@ class SceneLocalShadows
 	std::vector<UINT> _positions, _leaves;
 	bool _treeReady = false, _castersRebuilt = false;
 	bool _staticOnly = false;
+	uint64_t _staticDepthVersion = 0;
 	uint64_t _sceneRevision = 0, _geometryRevision = 0, _meshRevision = 0, _textureRevision = 0;
 	uint64_t _grassReceiverRevision = 0;
 	uint64_t _grassCasterRevision = 0;

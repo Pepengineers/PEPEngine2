@@ -43,13 +43,6 @@ public:
 
     bool TryGetBodyTransform(World& world, PhysicsBodyHandle handle, DirectX::SimpleMath::Vector3& outPosition, DirectX::SimpleMath::Quaternion& outRotation) const;
     void MoveKinematicBody(World& world, PhysicsBodyHandle handle, const DirectX::SimpleMath::Vector3& targetPosition, const DirectX::SimpleMath::Quaternion& targetRotation, float dt);
-protected:
-    void OnUpdate() override;
-    void OnRender() override;
-
-    bool ShouldTick() override;
-    bool ShouldRender() override;
-
 private:
     void TryCreateBody(World& world, Entity entity);
     void TryDestroyBody(World& world, Entity entity);

@@ -16,7 +16,8 @@ class SceneAO
         uint64_t CameraRevision = 0;
         GDX12AOSettings Settings{};
     };
-    SceneAO(GDX12DeviceResources&, RenderPipelineCommonData&, GDX12Texture* depth, GDX12Texture* normals);
+    SceneAO(GDX12DeviceResources&, RenderPipelineCommonData&, const GDX12AmbientOcclusionPass::Pipelines&,
+            GDX12Texture* depth, GDX12Texture* normals);
     ~SceneAO();
     static bool SupportsRemote(const GDX12AOSettings&, bool depthNormals);
     void Freeze(GDX12Texture* depth, GDX12Texture* normals, GDX12Texture* motion, GDX12Texture* earlyNormals, UINT& temporalIndex,
@@ -53,10 +54,13 @@ class SceneAO
     void AppendReprojection(Plan&, const PreparedInputs&, GDX12Texture& source, GDX12Texture& target,
                             float scale = 1.f, bool terms = false);
     GDX12Texture* AppendVisibility(Plan&, const PreparedInputs&);
+    bool UsesNeutralOutput() const { return !_settings.IsActive() || (_width == 1 && _height == 1); }
 
     GDX12DeviceResources& _resources;
     RenderPipelineCommonData& _common;
+    const GDX12AmbientOcclusionPass::Pipelines& _pipelines;
     GDX12AmbientOcclusionPass _pass;
+    bool _outputIsNeutral = false;
     GDX12AOSettings _settings{};
     Matrix _projection;
     NativeWork _work;

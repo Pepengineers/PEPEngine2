@@ -535,8 +535,9 @@ struct SceneAO::Remote
     }
 };
 
-SceneAO::SceneAO(GDX12DeviceResources& r, RenderPipelineCommonData& c, GDX12Texture* depth, GDX12Texture* normals)
-    : _resources(r), _common(c)
+SceneAO::SceneAO(GDX12DeviceResources& r, RenderPipelineCommonData& c,
+                 const GDX12AmbientOcclusionPass::Pipelines& pipelines, GDX12Texture* depth, GDX12Texture* normals)
+    : _resources(r), _common(c), _pipelines(pipelines)
 {
     _pass.Setup(&r, &c);
     _pass.SetInputs({depth, normals});
@@ -566,7 +567,10 @@ void SceneAO::Freeze(GDX12Texture* depth, GDX12Texture* normals, GDX12Texture* m
     auto& p = _pass;
     p.SetInputs({depth, normals});
     if (p._output.GetWidth() != depth->GetWidth() || p._output.GetHeight() != depth->GetHeight())
+    {
         p.Resize();
+        _outputIsNeutral = false;
+    }
     _settings = GetAmbientOcclusionSettings();
     const auto& s = _settings;
     if (!p._hasPrevious || std::memcmp(&p._previous, &s, sizeof(s)))
@@ -641,8 +645,9 @@ void SceneAO::Freeze(GDX12Texture* depth, GDX12Texture* normals, GDX12Texture* m
         history.Last.reset();
     if (_offload != bool(_remote)) _common.ResetUpscalerHistory = true;
     _offload = bool(_remote);
-    if (!s.IsActive() || (_width == 1 && _height == 1))
+    if (UsesNeutralOutput())
         return;
+    _outputIsNeutral = false;
     if (!grid.Normals.IsInitialized())
         p.CreateGrid(grid, _width, _height, _half);
     const UINT slot = _resources.CurrFrameConstantsIndex;
@@ -751,7 +756,7 @@ struct SceneAO::Plan
     {
         auto& p = ao._pass;
         const UINT slot = ao._resources.CurrFrameConstantsIndex;
-        auto* root = p._root.get();
+        auto* root = ao._pipelines.Root.get();
         auto* heap = ao._resources.SRV_UAV_Heap->GetHeap().Get();
         auto* projection = sourceProjection ? sourceProjection : p._xeConstants.get();
         const auto camera = ao._resources.FrameConstants[slot]->CameraCB->GetElementAddress(ao._common.ActiveCameraCBufferIndex),
@@ -768,7 +773,7 @@ struct SceneAO::Plan
         for (UINT i = 0; i < 10; ++i)
             if (uavs[i])
                 writes[i] = uavs[i]->GPUHandle;
-        auto* pso = p._pipelines[pipeline].Get();
+        auto* pso = ao._pipelines.States[pipeline].Get();
         ao._work.Add(graph, name, std::move(accesses), [=](auto* cmd) {
             cmd->SetDescriptorHeaps(1, &heap);
             cmd->SetComputeRootSignature(root->GetRootSignature().Get());
@@ -880,8 +885,9 @@ void SceneAO::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings)
 {
     auto& p = _pass;
     Plan plan{*this, graph, bindings, AsyncAO.GetValue() ? Queue::Compute : Queue::Direct};
-    if (!_settings.IsActive() || (_width == 1 && _height == 1))
+    if (UsesNeutralOutput())
     {
+        if (_outputIsNeutral) return;
         plan.dispatch("AO neutral fallback", p.Neutral, p._output.GetWidth(), p._output.GetHeight(),
                  {plan.access(&p._output, Mode::Write, UnorderedAccess)}, {}, {p._output.GetUAV()});
         return;
@@ -1091,6 +1097,7 @@ std::optional<Executor::PacketExchange> SceneAO::Exchange(const Schedule& schedu
 
 void SceneAO::Submitted(const std::vector<CompletionToken>& completions)
 {
+    if (!completions.empty() && completions.back()) _outputIsNeutral = UsesNeutralOutput();
     if (!_offload) return;
     for (const auto packet : {_importPacket, _reprojectPacket})
         if (packet < completions.size()) _import->NoteReader(completions[packet]);

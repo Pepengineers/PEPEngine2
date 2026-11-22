@@ -36,6 +36,11 @@ void GDX12AmbientOcclusionPass::Initialize()
     const UINT frames = static_cast<UINT>(_resources->FrameConstants.size());
     _constants = std::make_unique<GDX12UploadBuffer<ShaderConstants>>(_resources->Device, frames);
     _xeConstants = std::make_unique<GDX12UploadBuffer<XeGTAO::GTAOConstants>>(_resources->Device, frames);
+    static_assert(sizeof(ShaderConstants) == 64);
+}
+
+GDX12AmbientOcclusionPass::Pipelines::Pipelines(GDX12Device* device)
+{
     GDX12RootSignatureDesc root;
     root.Constants.push_back(8);
     root.NumSingleCBVSlots = 3;
@@ -43,16 +48,15 @@ void GDX12AmbientOcclusionPass::Initialize()
     root.NumSingleUAVSlots = 10;
     root.StaticSamplers.emplace_back(0, D3D12_FILTER_MIN_MAG_MIP_POINT,
         D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
-    _root = std::make_unique<GDX12RootSignature>(_resources->Device, root);
+    Root = std::make_unique<GDX12RootSignature>(device, root);
     const char* entries[PipelineCount] = { "PrepareNormalsCS", "SSAOCS", "HBAOCS", "BlurCS", "ResolveCS",
         "XePrefilterCS", "XeMainCS", "XeDenoiseCS", "NeutralCS", "PrepareHalfCS", "UpsampleCS",
         "PadCACAOCS", "ReprojectCS", "PackFullCS", "ReprojectXeCS" };
     for (UINT i = 0; i < PipelineCount; ++i)
     {
-        _pipelines[i] = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _root.get(),
+        States[i] = GDX12RenderHelpers::CreateComputePipeline(device, Root.get(),
             SHADERS_FOLDER "AmbientOcclusion.hlsl", entries[i]);
     }
-    static_assert(sizeof(ShaderConstants) == 64);
 }
 
 void GDX12AmbientOcclusionPass::CreateTexture(GDX12Texture& texture, const DXGI_FORMAT format, const UINT width, const UINT height, const UINT mips)

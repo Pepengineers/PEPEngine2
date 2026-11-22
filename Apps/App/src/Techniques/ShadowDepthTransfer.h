@@ -5,7 +5,7 @@
 
 namespace BistroRender
 {
-// The owner retains the buffer until the primary import packet retires.
+// Keep the transfer alive until the receiving packet retires.
 class ShadowDepthTransfer
 {
   public:
@@ -39,17 +39,17 @@ class ShadowDepthTransfer
 	          std::vector<UINT> slices, bool exporting) const
 	{
 		const auto shape = depth->GetDesc();
-		if (graph.Device != (exporting ? _owner : 0) || slices.size() != _footprints.size() ||
+		if ((graph.Device != _owner && graph.Device != 0) || slices.size() != _footprints.size() ||
 		    shape.Format != DXGI_FORMAT_R32_TYPELESS || shape.Width != _resolution || shape.Height != _resolution ||
 		    shape.MipLevels != 1 || shape.SampleDesc.Count != 1 ||
 		    std::any_of(slices.begin(), slices.end(), [&](UINT slice) { return slice >= shape.DepthOrArraySize; }))
 			throw std::invalid_argument("Incompatible shadow depth array transfer");
-		auto* shared = _buffer.Resources[exporting ? 1 : 0].Get();
+		auto* shared = _buffer.Resources[graph.Device == _owner ? 1 : 0].Get();
 		const auto sharedId = NativeWork::ResourceFor(graph, bindings, shared, "cross-adapter shadow depth");
 		const auto depthId = NativeWork::ResourceFor(graph, bindings, depth, "shadow depth array");
 		const auto source = exporting ? depthId : sharedId;
 		const auto destination = exporting ? sharedId : depthId;
-		return work.Add(graph, exporting ? "owner export shadow depth slices" : "GPU0 import shadow depth slices",
+		return work.Add(graph, exporting ? "export shadow depth slices" : "import shadow depth slices",
 		                {{source, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE},
 		                 {destination, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
 		                [this, depth, shared, slices = std::move(slices), exporting](auto* cmd)

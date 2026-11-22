@@ -74,9 +74,17 @@ Schedule Compile(const Graph& g, bool singleDirect) {
     std::vector<State> states;
     std::vector<bool> lastWrite(g.Resources.size(),false),accessed(g.Resources.size(),false);
     for(const auto& r:g.Resources) states.push_back(r.Initial);
-    for(size_t count=0;count<n;++count) {
-        Id next=Invalid;
-        for(Id i=0;i<n;++i) if(remap[i]==Invalid && std::all_of(deps[i].begin(),deps[i].end(),[&](Id d){return remap[d]!=Invalid;})) {next=i;break;}
+    Id firstPending = 0;
+    for (size_t count = 0; count < n; ++count) {
+        while (remap[firstPending] != Invalid) ++firstPending;
+        Id next = Invalid;
+        for (Id i = firstPending; i < n; ++i) {
+            if (remap[i] == Invalid && std::all_of(deps[i].begin(), deps[i].end(),
+                    [&](Id dependency) { return remap[dependency] != Invalid; })) {
+                next = i;
+                break;
+            }
+        }
         if(next==Invalid) throw std::invalid_argument("dependency cycle");
         const auto& op=g.Operations[next];
         const auto queue=target(op);

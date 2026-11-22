@@ -156,9 +156,6 @@
     <ClInclude Include="Include\Common\Module.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Include\Common\Stopwatch.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="Include\Common\GameTimer.h">
       <Filter>Header Files</Filter>
     </ClInclude>

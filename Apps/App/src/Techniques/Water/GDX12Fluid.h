@@ -35,17 +35,6 @@ struct GDX12FluidSettings
 	float MaxAccelerationCmPerSecond2 = 100000;
 	Vector3 ContainerHalfExtentCm = Vector3(100);
 	float Restitution = 0.2f;
-	UINT FilterIterations = 0;
-	UINT FilterRadiusPixels = 0;
-	float FilterSigmaCm = 0.7f;
-	float FilterDepthRangeCm = 10;
-	float FilterEdgeCm = 1;
-	float IOR = 1.333f;
-	Vector3 AbsorptionPerCm = Vector3(0.015f, 0.004f, 0.002f);
-	Vector3 ScatteringColor = Vector3(0.02f, 0.08f, 0.1f);
-	float Roughness = 0.05f;
-	float RefractionPixels = 12;
-	float MaxOpticalThicknessCm = 1000;
 };
 
 struct GDX12FluidControls

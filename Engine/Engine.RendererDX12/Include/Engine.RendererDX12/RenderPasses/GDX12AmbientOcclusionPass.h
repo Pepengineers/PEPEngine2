@@ -35,6 +35,15 @@ private:
         PrepareNormals, SSAO, HBAO, Blur, Resolve, XePrefilter, XeMain, XeDenoise, Neutral, PrepareHalf, Upsample,
         PadCACAO, Reproject, PackFull, ReprojectXe, PipelineCount
     };
+public:
+    struct Pipelines
+    {
+        explicit Pipelines(GDX12Device* device);
+        std::unique_ptr<GDX12RootSignature> Root;
+        std::array<ComPtr<ID3D12PipelineState>, PipelineCount> States;
+    };
+
+private:
     struct WorkGrid
     {
         GDX12Texture Depth, Normals, Scratch[2], XeDepth, XeTerms[2], XeEdges, Visibility;
@@ -51,8 +60,6 @@ private:
 
     GDX12Texture _output;
     std::array<WorkGrid, 2> _grids;
-    std::array<ComPtr<ID3D12PipelineState>, PipelineCount> _pipelines;
-    std::unique_ptr<GDX12RootSignature> _root;
     std::unique_ptr<GDX12UploadBuffer<ShaderConstants>> _constants;
     std::unique_ptr<GDX12UploadBuffer<XeGTAO::GTAOConstants>> _xeConstants;
     GDX12AOSettings _previous = {};

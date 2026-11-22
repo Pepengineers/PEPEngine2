@@ -1,5 +1,4 @@
 ﻿#pragma once
-#include "Stopwatch.h"
 
 class Module
 {
@@ -10,24 +9,12 @@ public:
 
     void Update()
     {
-        if (ShouldTick())
-        {
-            Stopwatch stopwatch;
-            OnUpdate();
-            //TODO: Log it
-            stopwatch.GetElapsed();
-        }
+        if (ShouldTick()) OnUpdate();
     }
 
     void Render()
     {
-        if (ShouldRender())
-        {
-            Stopwatch stopwatch;
-            OnRender();
-            //TODO: Log it
-            stopwatch.GetElapsed();
-        }
+        if (ShouldRender()) OnRender();
     }
 
 protected:

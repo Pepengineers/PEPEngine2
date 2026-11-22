@@ -219,7 +219,6 @@
     <ClInclude Include="Include\Common\EnumMetadata.h" />
     <ClInclude Include="Include\Common\LockThreadQueue.h" />
     <ClInclude Include="Include\Common\Module.h" />
-    <ClInclude Include="Include\Common\Stopwatch.h" />
     <ClInclude Include="Include\Common\GameTimer.h" />
     <ClInclude Include="Include\Engine.Core\ConsoleModule.h" />
     <ClInclude Include="Include\Engine.Core\BenchmarkEngine.h" />

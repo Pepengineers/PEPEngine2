@@ -29,7 +29,7 @@ public:
     GDX12CommandQueue* Queue = nullptr;
     std::unique_ptr<GDX12DescriptorHeap> Heap;
     std::unique_ptr<GDX12RootSignature> Root;
-    ComPtr<ID3D12PipelineState> Save, Hash, Sort, Offsets, Density, Integrate;
+    ComPtr<ID3D12PipelineState> Hash, Sort, Offsets, Density, Integrate;
     std::array<Variant,4> Variants{{{0},{512},{1024},{2048}}};
     ComPtr<ID3D12QueryHeap> Queries;
     GDX12ResourceHandle TimeReadback;
@@ -58,7 +58,7 @@ public:
         const auto compile = [&](const char* entry, const D3D_SHADER_MACRO* defines=nullptr) {
             return GDX12RenderHelpers::CreateComputePipeline(&Device, Root.get(), APP_SHADERS_FOLDER "FluidSolver.hlsl", entry, defines);
         };
-        Save=compile("SavePrevious"); Hash=compile("Hash"); Sort=compile("Sort"); Offsets=compile("BuildOffsets"); Density=compile("Densities"); Integrate=compile("Integrate");
+        Hash=compile("Hash"); Sort=compile("Sort"); Offsets=compile("BuildOffsets"); Density=compile("Densities"); Integrate=compile("Integrate");
         for (auto& v : Variants) if (v.Tile) {
             const auto size=std::to_string(v.Tile);
             const D3D_SHADER_MACRO defines[]={{"WATER_SORT_TILE_SIZE",size.c_str()},{nullptr,nullptr}};
@@ -181,8 +181,6 @@ GDX12FluidSolver::Head RecordManual(Fixture& f, GDX12CommandList& c, Buffers& b,
     }
     c.SetComputeRootSignature(f.Root.get()); c.SetComputeRootConstantBufferView(1,constants);
     Dispatch d{b.Count,b.Capacity}; d.Reference=settings.ReferenceModel ? 1u : 0u;
-    Fixture::Constants(c,d); c.ResourceBarrier({current.GetUnorderedAccessBarrier()});
-    c.SetComputeUAV(0,b.Particles[head.Current]->GetUAV()->GPUHandle); c.SetPipelineState(f.Save); c.Dispatch((b.Count+127)/128,1,1); c.ResourceBarrier({current.GetUAVBarrier()});
     d.Dt=steps.Dt;
     for (UINT step=0;step<steps.Count;++step) {
         auto& input=b.Particles[head.Current]->GetResource(); auto& output=b.Particles[1-head.Current]->GetResource();

@@ -54,10 +54,6 @@ inline AutoConsoleVariable<UINT> PresetParticleCount(
     L"App.Water.PresetParticleCount", 0,
     L"Fluid resolution target on world restart, 25000..100000; 0 uses the legacy target",
     EConsoleVariableFlags::Default, [](UINT value) { return value == 0 || (value >= 25000 && value <= 100000); });
-inline AutoConsoleVariable<UINT> FilterRadiusPixels(L"App.Water.FilterRadiusPixels", 6,
-                                                    L"Water surface filter radius on world restart, 1..64 pixels",
-                                                    EConsoleVariableFlags::Default,
-                                                    [](UINT value) { return value >= 1 && value <= 64; });
 inline AutoConsoleVariable<float> ParticleRadius(L"App.Water.ParticleRadius", 0.15f,
                                                  L"Fluid render radius in simulation units, startup only, 0.01..0.2",
                                                  EConsoleVariableFlags::ReadOnly, [](float value)
@@ -241,9 +237,6 @@ class Scene
 		settings.PredictionSeconds = 1.0f / 120;
 		settings.ViscosityCm2PerSecond = 0;
 		settings.Restitution = 0.95f;
-		settings.FilterRadiusPixels = FilterRadiusPixels.GetValue();
-		settings.AbsorptionPerCm = {0.02f, 0.006f, 0.0015f};
-		settings.ScatteringColor = {0.015f, 0.18f, 0.45f};
 		return settings;
 	}
 	static Vector3 SpawnSize(UINT count, const Vector3& halfExtent)

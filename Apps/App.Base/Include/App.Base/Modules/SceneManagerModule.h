@@ -66,13 +66,6 @@ public:
         );
     }
 
-protected:
-    void OnUpdate() override;
-    void OnRender() override;
-
-    bool ShouldTick() override;
-    bool ShouldRender() override;
-
 private:
     bool LoadWorldContents(World& world);
 

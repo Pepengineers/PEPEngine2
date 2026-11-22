@@ -74,31 +74,21 @@ void CS(uint3 DTid : SV_DispatchThreadID)
     float currentSpeed = generatorBuffer.TotalTime * generatorBuffer.CloudSpeed;
     float q = fbm(uv * generatorBuffer.CloudScale * 0.5);
 
-    //ridged noise shape
     float r = 0.0;
-    uv *= generatorBuffer.CloudScale;
-    uv -= q - currentSpeed;
-    float weight = 0.8;
-    [unroll]
-    for (int noiseOctave = 0; noiseOctave < 8; noiseOctave++)
-    {
-        r += abs(weight * noise(uv));
-        uv = mul(RotateMatrix, uv) + currentSpeed;
-        weight *= 0.7;
-    }
-
-    //noise shape
     float f = 0.0;
-    uv = p * float2(generatorBuffer.RenderTargetSize.x / generatorBuffer.RenderTargetSize.y, 1.0);
     uv *= generatorBuffer.CloudScale;
     uv -= q - currentSpeed;
-    weight = 0.7;
+    float ridgeWeight = 0.8;
+    float shapeWeight = 0.7;
     [unroll]
-    for (int i = 0; i < 8; i++)
+    for (int i = 0; i < 8; ++i)
     {
-        f += weight * noise(uv);
+        float octave = noise(uv);
+        r += abs(ridgeWeight * octave);
+        f += shapeWeight * octave;
         uv = mul(RotateMatrix, uv) + currentSpeed;
-        weight *= 0.6;
+        ridgeWeight *= 0.7;
+        shapeWeight *= 0.6;
     }
 
     f *= r + f;
@@ -109,7 +99,7 @@ void CS(uint3 DTid : SV_DispatchThreadID)
     uv = p * float2(generatorBuffer.RenderTargetSize.x / generatorBuffer.RenderTargetSize.y, 1.0);
     uv *= generatorBuffer.CloudScale * 2.0;
     uv -= q - currentSpeed;
-    weight = 0.4;
+    float weight = 0.4;
     [unroll]
     for (int colourOctave = 0; colourOctave < 7; colourOctave++)
     {

@@ -376,10 +376,6 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 					                    closed[index] = 0;
 					                    const auto barriers = [&](const std::vector<Barrier>& bs, const char* phase)
 					                    {
-						                    if (bs.empty())
-						                    {
-							                    return;
-						                    }
 						                    PIXScopedEvent(cmd, PIX_COLOR(124, 143, 166), "%s / %s (%u)",
 						                                   packet.Name.c_str(), phase, static_cast<UINT>(bs.size()));
 						                    std::vector<D3D12_RESOURCE_BARRIER> native;

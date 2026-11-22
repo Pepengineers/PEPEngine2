@@ -14,16 +14,9 @@ struct GDX12FluidParameters
 	XMFLOAT3 Gravity;
 	float H;
 	float Mass, RestDensity, Stiffness, Viscosity;
-	float MaxSpeed, MaxAcceleration, Restitution, Sigma;
-	float DepthRange, EdgeDepth, IOR, Roughness;
-	XMFLOAT3 Absorption;
-	float RefractionPixels;
-	XMFLOAT3 Scattering;
-	float MaxThickness;
-	UINT FilterRadius, ResetMotion;
-	float NearStiffness, PredictionSeconds;
-	UINT LocalSimulation, Padding[3];
-	XMFLOAT4X4 PreviousContainerToWorld;
+	float MaxSpeed, MaxAcceleration, Restitution, NearStiffness;
+	float PredictionSeconds;
+	UINT LocalSimulation, Padding[2];
 };
 
 GDX12FluidParameters MakeFluidParameters(const Matrix& container, const GDX12FluidSettings& settings);
@@ -31,10 +24,7 @@ GDX12FluidParameters MakeFluidParameters(const Matrix& container, const GDX12Flu
 class GDX12FluidSolver
 {
   public:
-	struct Particle
-	{
-		XMFLOAT3 Position, Velocity, PreviousPosition;
-	};
+	using Particle = GDX12FluidParticle;
 	struct Prediction
 	{
 		XMFLOAT3 Position;
@@ -82,5 +72,5 @@ class GDX12FluidSolver
 	static constexpr UINT DispatchWords = sizeof(FluidDispatch) / sizeof(UINT);
 	void SortSpatialKeys(GDX12CommandList&, Buffers&, FluidDispatch&, UINT capacityGroups) const;
 	std::unique_ptr<GDX12RootSignature> _root;
-	ComPtr<ID3D12PipelineState> _save, _hash, _sort, _presort, _mergeTail, _offsets, _densities, _integrate;
+	ComPtr<ID3D12PipelineState> _hash, _sort, _presort, _mergeTail, _offsets, _densities, _integrate;
 };

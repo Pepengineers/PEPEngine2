@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include "GDX12GrassWind.h"
+#include "Engine.RendererDX12/GDX12DeviceResources.h"
 #include "Engine.RendererDX12/GDX12UploadBuffer.h"
 #include "Engine.RendererDX12/GDX12RootSignature.h"
 #include "Engine.RendererDX12/GDX12RenderGeometry.h"
@@ -9,10 +10,9 @@
 #include "Engine.RendererDX12/GDX12Particles.h"
 #include <unordered_map>
 #include <map>
-#include <tuple>
+#include <optional>
 
 class GDX12CommandList;
-class GDX12DeviceResources;
 class RenderPipelineCommonData;
 class GDX12Texture;
 namespace BistroRender { class SceneGeometry; class SceneGrass; }
@@ -22,7 +22,6 @@ class GDX12GrassRenderer
 {
 public:
     enum class Stage : std::uint8_t { Full, GBuffer, PrepassNormals, Depth, Shadow, Capture };
-    using CaptureLighting = GDX12CaptureLighting;
     explicit GDX12GrassRenderer(GDX12DeviceResources* resources, UINT descriptorStart = ConstantsResources);
     ~GDX12GrassRenderer();
     // Wait the current frame-slot fence before reusing staging or replacing its roots.
@@ -31,7 +30,6 @@ public:
         const std::vector<BistroInteractionSource>& sources = {}, float deltaSeconds = 0, uint64_t independentWind = 0,
         GDX12GrassRenderer* windDevice = nullptr, uint64_t responseWind = 0);
     GDX12ParticleInteractionField InteractionField() const;
-    void PrepareView(const GDX12GeometryContext& view, UINT patch, const GDX12Descriptor& materials, bool cullPatch = true);
     UINT PatchCount() const { return static_cast<UINT>(_drawOrder.size()); }
     void PublishPrimitives(GDX12RenderPrimitiveRegistry&, const IRenderGeometrySource*);
     void RemovePrimitives(GDX12RenderPrimitiveRegistry&);
@@ -49,19 +47,19 @@ private:
     {
         XMFLOAT4X4 World, PreviousWorld, ViewProjection;
         XMFLOAT4 EyeMaxDistance;
-        XMFLOAT4 PreviousEye;
+        XMFLOAT3 PreviousEye;
+        UINT ResetHistory;
         XMFLOAT4 Shape; // height, width, height variation, max bend
-        XMFLOAT4 Lod; // near, far, bend seconds, unused
-        XMFLOAT4 Patch; // extents xy, current time, previous time
+        XMFLOAT3 Lod; // near, far, bend seconds
+        UINT InteractionSize;
+        XMFLOAT2 PatchExtents;
+        UINT HiZWidth, HiZHeight;
         XMFLOAT4 WindArea; // center xy, extents xy
-        XMFLOAT4 WindForce; // normalized direction xy, speed, gust amplitude
-        XMFLOAT4 WindGust; // frequency, wavelength, maximum speed, unused
         XMFLOAT4 InteractionArea;
         UINT Count, Segments, Implementation, Seed;
-        UINT PointSource, Material, WindMode, Shadow;
-        UINT GridResolution, ResetHistory, Padding0, Padding1;
+        UINT PointSource, Material, GridResolution, Shadow;
     };
-    static_assert(sizeof(Parameters) == 384);
+    static_assert(sizeof(Parameters) == 336);
     struct WindParameters
     {
         XMFLOAT4 Area; // center xy, extents xy
@@ -112,17 +110,12 @@ private:
         FieldBuffer *Input, *Pressure, *Output;
         bool Async = false;
     };
-    struct Output
+    struct ViewInputs
     {
-        GDX12GeometryContext View;
-        GDX12CaptureLighting Lighting;
-        UINT Patch = 0;
-        uint64_t Owner = 0;
-        GDX12UploadBuffer<Parameters>* Constants = nullptr;
-        UINT ConstantIndex = 0;
-        FieldBuffer *CurrentWind = nullptr, *PreviousWind = nullptr;
-        GDX12GraphicsBindings Binding;
-        GDX12RenderBatch Batch;
+        const GrassState& State;
+        GDX12UploadBuffer<Parameters>* Constants;
+        UINT ConstantIndex;
+        FieldBuffer *CurrentWind, *PreviousWind;
     };
     struct Frame
     {
@@ -130,20 +123,24 @@ private:
         std::vector<std::unique_ptr<GDX12UploadBuffer<WindParameters>>> WindParametersBuffers;
         // Descriptors and upload mappings must survive every referencing command list.
         std::vector<std::unique_ptr<FieldBuffer>> RetiredFields;
-        std::vector<std::unique_ptr<GDX12UploadBuffer<Vertex>>> RetiredVertices;
         std::vector<std::unique_ptr<GDX12UploadBuffer<UINT>>> RetiredIndices;
         std::vector<GrassState> RetiredGrass;
         std::vector<WindJob> WindJobs;
         std::map<uint64_t, VelocityBuffers> ImportedWind;
         std::vector<std::pair<GDX12UploadBuffer<XMFLOAT3>*, GDX12UploadBuffer<XMFLOAT3>*>> RootUploads;
-        std::vector<std::unique_ptr<Output>> Outputs;
-        std::map<std::tuple<uint64_t, GDX12GeometryStage, UINT>, Output*> OutputIndex;
         UINT DrawCursor = 0;
         UINT WindCursor = 0;
         std::unique_ptr<GDX12UploadBuffer<BistroInteractionSource>> Sources;
         std::unique_ptr<GDX12UploadBuffer<InteractionParameters>> InteractionConstants;
     };
-    template<typename T> std::unique_ptr<GDX12UploadBuffer<T>> Buffer(UINT count, bool srv, bool uav);
+    template<typename T> std::unique_ptr<GDX12UploadBuffer<T>> Buffer(UINT count, bool srv, bool uav)
+    {
+        auto buffer = std::make_unique<GDX12UploadBuffer<T>>(_resources->Device, count, EBufferType::Default, false);
+        auto* heap = _resources->SRV_UAV_Heap.get();
+        if (srv) buffer->CreateSRV(heap, heap->GetAvailableIndex(_descriptorStart));
+        if (uav) buffer->CreateUAV(heap, heap->GetAvailableIndex(_descriptorStart));
+        return buffer;
+    }
     void Initialize();
     void InitializeGraphics(bool captureOnly = false);
     void InitializeWind();
@@ -157,8 +154,10 @@ private:
         FieldBuffer* input, FieldBuffer* pressure, FieldBuffer* output);
     void RetireWind(WindState& state);
     Frame& CurrentFrame();
-    std::unique_ptr<Output> PrepareViewInputs(const GDX12GeometryContext&, UINT patch, bool cullPatch);
-    Output* FindOutput(const GDX12GeometryContext&, UINT patch) const;
+    std::optional<ViewInputs> PrepareViewInputs(const GDX12GeometryContext&, UINT patch);
+    GDX12GraphicsBindings DrawBindings(const GDX12GeometryContext&, D3D12_GPU_VIRTUAL_ADDRESS parameters,
+        D3D12_GPU_DESCRIPTOR_HANDLE vertices, D3D12_GPU_DESCRIPTOR_HANDLE materials,
+        D3D12_GPU_VIRTUAL_ADDRESS main, D3D12_GPU_DESCRIPTOR_HANDLE localLights) const;
     static Stage RenderStage(GDX12GeometryStage);
 
     GDX12DeviceResources* _resources;
@@ -168,8 +167,7 @@ private:
     std::unordered_map<uint64_t, GrassState> _grass;
     std::unordered_map<uint64_t, WindState> _wind;
     std::vector<uint64_t> _drawOrder;
-    std::unique_ptr<GDX12RootSignature> _computeRoot, _graphicsRoot, _windRoot;
-    ComPtr<ID3D12PipelineState> _expandPSO, _clearPSO;
+    std::unique_ptr<GDX12RootSignature> _graphicsRoot, _windRoot;
     std::array<ComPtr<ID3D12PipelineState>, 6> _graphicsPSO;
     std::array<ComPtr<ID3D12PipelineState>, 7> _windPSO;
     std::unique_ptr<GDX12RootSignature> _interactionRoot;
@@ -180,7 +178,6 @@ private:
     bool _resetInteraction = true;
     uint64_t _interactionRevision = 0;
     ComPtr<ID3D12CommandSignature> _signature;
-    std::unique_ptr<GDX12UploadBuffer<Vertex>> _vertices;
     std::unique_ptr<GDX12UploadBuffer<UINT>> _indices, _arguments;
     std::unique_ptr<FieldBuffer> _neutralWind;
     Vector3 _previousEye = Vector3::Zero;

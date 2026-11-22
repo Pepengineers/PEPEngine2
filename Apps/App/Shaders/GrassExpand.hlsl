@@ -23,18 +23,11 @@ uint Hash(uint x)
 float Random(uint id) { return (Hash(id) & 0x00ffffffu) / 16777216.0f; }
 float3 Bend(float3 root, bool previous)
 {
-    if (WindMode == 0) return 0;
+    if (GridResolution == 0) return 0;
     float2 uv = (root.xz - WindArea.xy) / (WindArea.zw * 2) + 0.5f;
     if (any(uv < 0) || any(uv > 1)) return 0;
-    float2 velocity;
-    if (WindMode == 2) velocity = previous ? SampleWindGrid(PreviousWind, uv, GridResolution) :
-                                             SampleWindGrid(Wind, uv, GridResolution);
-    else
-    {
-        float time = previous ? Patch.w : Patch.z;
-        float wave = sin(6.2831853f * (time * WindGust.x + dot(root.xz, WindForce.xy) / WindGust.y));
-        velocity = WindForce.xy * min(WindGust.z, WindForce.z * (1 + WindForce.w * wave));
-    }
+    float2 velocity = previous ? SampleWindGrid(PreviousWind, uv, GridResolution) :
+                                 SampleWindGrid(Wind, uv, GridResolution);
     float2 bend = velocity * Lod.z;
     bend *= min(1, Shape.w / max(length(bend), 1e-6f));
     return float3(bend.x, 0, bend.y);
@@ -50,14 +43,12 @@ void ExpandBlade(uint3 id, uint variant)
     if (id.x >= Count) return;
     uint randomId = Hash(id.x ^ Seed);
     float3 root = PointSource != 0 ? Roots[id.x] :
-        float3((Random(randomId) * 2 - 1) * Patch.x, 0, (Random(randomId + 1) * 2 - 1) * Patch.y);
+        float3((Random(randomId) * 2 - 1) * PatchExtents.x, 0, (Random(randomId + 1) * 2 - 1) * PatchExtents.y);
     float height = max(0.01f, Shape.x * (1 + (Random(randomId + 2) * 2 - 1) * Shape.z));
     float3 rootW = mul(float4(root, 1), World).xyz;
     float3 previousRootW = mul(float4(root, 1), PreviousWorld).xyz;
     float3 up = mul(float4(0, height, 0, 0), World).xyz;
     float3 previousUp = mul(float4(0, height, 0, 0), PreviousWorld).xyz;
-    float3 extents = abs(up) * 0.5f + (abs(World[0].xyz) + abs(World[2].xyz)) * Shape.y + Shape.w + length(up);
-#if GRASS_BUILD_ONCE
     uint halfSegments = max(1u, Segments / 2);
     uint fullRibbons = Implementation == 1 ? 2 : 1;
     uint fullVertices = (Segments + 1) * 2 * fullRibbons;
@@ -69,27 +60,10 @@ void ExpandBlade(uint3 id, uint variant)
     uint ribbons = card ? 1 : fullRibbons;
     uint vertexBase = id.x * (fullVertices + halfVertices + 4) +
         (variant == 0 ? 0 : variant == 1 ? fullVertices : fullVertices + halfVertices);
-#else
-    if (!ShadowBoxVisible(rootW + up * 0.5f, extents, ViewProjection)) return;
-    float distance = length(rootW - EyeMaxDistance.xyz);
-    // Shadow culling has no camera distance cutoff: off-camera casters stay present.
-    if (Shadow == 0 && distance > EyeMaxDistance.w) return;
-    uint segments = distance > Lod.y && Shadow == 0 ? 1 : (distance > Lod.x ? max(1u, Segments / 2) : Segments);
-    bool card = distance > Lod.y && Shadow == 0;
-    bool previousCard = length(previousRootW - PreviousEye.xyz) > Lod.y;
-    bool reset = ResetHistory != 0 || card != previousCard;
-    uint ribbons = card ? 1 : (Implementation == 1 ? 2 : 1);
-    uint vertexCount = (segments + 1) * 2 * ribbons;
-    uint indexCount = segments * 6 * ribbons;
-    uint vertexBase, indexBase, ignored;
-    InterlockedAdd(Arguments[5], vertexCount, vertexBase);
-    InterlockedAdd(Arguments[0], indexCount, indexBase);
-    InterlockedAdd(Arguments[6], 1, ignored);
-#endif
     float3 bend = Bend(rootW, false);
     float3 previousBend = Bend(previousRootW, true);
-    float4 contact = SampleInteraction(Trail, rootW.xz, InteractionArea, Padding0);
-    float4 previousContact = SampleInteraction(PreviousTrail, previousRootW.xz, InteractionArea, Padding0);
+    float4 contact = SampleInteraction(Trail, rootW.xz, InteractionArea, InteractionSize);
+    float4 previousContact = SampleInteraction(PreviousTrail, previousRootW.xz, InteractionArea, InteractionSize);
     float2 direction = dot(contact.xy, contact.xy) > 1e-6f ? normalize(contact.xy) : float2(1, 0);
     float2 previousDirection = dot(previousContact.xy, previousContact.xy) > 1e-6f ? normalize(previousContact.xy) : float2(1, 0);
     bend += float3(direction.x, 0, direction.y) * length(up) * 0.7f * contact.z - up * 0.8f * contact.z;
@@ -136,27 +110,10 @@ void ExpandBlade(uint3 id, uint variant)
                 vertex.UV = float2(edge, 1 - t);
                 Vertices[start + segment * 2 + edge] = vertex;
             }
-#if !GRASS_BUILD_ONCE
-            if (segment < segments)
-            {
-                uint offset = indexBase + (ribbon * segments + segment) * 6;
-                uint v = start + segment * 2;
-                Indices[offset] = v;
-                Indices[offset + 1] = v + 2;
-                Indices[offset + 2] = v + 1;
-                Indices[offset + 3] = v + 1;
-                Indices[offset + 4] = v + 2;
-                Indices[offset + 5] = v + 3;
-            }
-#endif
         }
     }
 }
 
-[numthreads(64, 1, 1)]
-void ExpandCS(uint3 id : SV_DispatchThreadID) { ExpandBlade(id, 0); }
-
-#if GRASS_BUILD_ONCE
 [numthreads(64, 1, 1)]
 void BuildCS(uint3 id : SV_DispatchThreadID)
 {
@@ -168,7 +125,7 @@ StructuredBuffer<float> GrassHiZ : register(t5);
 
 bool Occluded(float3 center, float3 extents)
 {
-    if (Padding1 == 0) return false;
+    if (HiZSize.x == 0) return false;
     float2 lo = 1, hi = 0;
     float nearest = 0;
     [unroll] for (uint corner = 0; corner < 8; ++corner)
@@ -180,7 +137,7 @@ bool Occluded(float3 center, float3 extents)
         float2 uv = ndc.xy * float2(0.5f, -0.5f) + 0.5f;
         lo = min(lo, uv); hi = max(hi, uv); nearest = max(nearest, ndc.z);
     }
-    uint2 baseSize = uint2(Padding1, (uint)Lod.w);
+    uint2 baseSize = HiZSize;
     uint2 size = baseSize;
     lo = saturate(lo - 1.0f / size); hi = saturate(hi + 1.0f / size);
     uint level = (uint)ceil(log2(max(1.0f, max((hi.x - lo.x) * size.x, (hi.y - lo.y) * size.y))));
@@ -204,7 +161,7 @@ void CullCS(uint3 id : SV_DispatchThreadID)
     if (id.x >= Count) return;
     uint randomId = Hash(id.x ^ Seed);
     float3 root = PointSource != 0 ? Roots[id.x] :
-        float3((Random(randomId) * 2 - 1) * Patch.x, 0, (Random(randomId + 1) * 2 - 1) * Patch.y);
+        float3((Random(randomId) * 2 - 1) * PatchExtents.x, 0, (Random(randomId + 1) * 2 - 1) * PatchExtents.y);
     float height = max(0.01f, Shape.x * (1 + (Random(randomId + 2) * 2 - 1) * Shape.z));
     float3 rootW = mul(float4(root, 1), World).xyz;
     float3 up = mul(float4(0, height, 0, 0), World).xyz;
@@ -249,4 +206,3 @@ void CullCS(uint3 id : SV_DispatchThreadID)
             Indices[dst + 3] = v + 1; Indices[dst + 4] = v + 2; Indices[dst + 5] = v + 3;
         }
 }
-#endif

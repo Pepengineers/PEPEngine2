@@ -112,6 +112,7 @@ class SceneLighting
 	std::unique_ptr<SceneLocalShadows> _localShadows;
 	std::unique_ptr<SceneTransparency> _transparency;
 
+	GDX12AmbientOcclusionPass::Pipelines _aoPipelines;
 	std::vector<Frame> _frames;
 	std::map<Id, std::shared_ptr<ShadowVertexBaseline>> _shadowVertexBaselines;
 	std::map<UINT, std::array<std::shared_ptr<ShadowPublication>, 6>> _latestLocalShadows;

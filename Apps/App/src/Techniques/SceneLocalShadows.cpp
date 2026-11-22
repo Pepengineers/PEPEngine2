@@ -271,9 +271,9 @@ void SceneLocalShadows::Invalidate(const Caster& caster, bool listsChanged)
 			{
 				if (GDX12LocalShadowFrustum(cache.Light.ShadowViewProj[face]).Intersects(caster.Bounds))
 				{
-					if (listsChanged)
+					if (listsChanged && caster.Dynamic != _staticOnly)
 					{
-						(caster.Dynamic ? cache.DynamicListsValid : cache.StaticListsValid) &= ~(1u << face);
+						cache.ListsValid &= ~(1u << face);
 					}
 					cache.MapsValid &= ~(1u << face);
 				}
@@ -529,7 +529,7 @@ void SceneLocalShadows::RebuildCasters(UINT slot)
 	{
 		for (auto& cache : frame.Cache)
 		{
-			cache.StaticListsValid = cache.DynamicListsValid = cache.MapsValid = 0;
+			cache.ListsValid = cache.MapsValid = 0;
 		}
 	}
 	_treeReady = true;
@@ -622,8 +622,7 @@ void SceneLocalShadows::CullJob::Execute(size_t index)
 {
 	const auto& light = Frame->Lights[index];
 	auto& output = Frame->Cache[index];
-	if (!Frame->SelectionChanged && !output.SelectionDirty &&
-	    (output.Needed & ~(output.StaticListsValid & output.DynamicListsValid)) == 0)
+	if (!Frame->SelectionChanged && !output.SelectionDirty && !(output.Needed & ~output.ListsValid))
 	{
 		return;
 	}
@@ -658,6 +657,8 @@ void SceneLocalShadows::CullJob::Execute(size_t index)
 	const float margin = light.Range / Frame->Resolution * 0.3f + 0.01f;
 	for (const auto& grass : Owner->_grass)
 	{
+		if (output.Needed == allFaces)
+			break;
 		if (!grass.Visible || !grass.InstanceCount)
 		{
 			continue;
@@ -677,25 +678,19 @@ void SceneLocalShadows::CullJob::Execute(size_t index)
 			}
 		}
 	}
-	const auto gather = [&](UINT root, UINT& valid, auto& commands)
+	const UINT missing = output.Needed & ~output.ListsValid;
+	for (UINT face = 0; face < 6; ++face)
 	{
-		const UINT missing = output.Needed & ~valid;
-		for (UINT face = 0; face < 6; ++face)
+		if (missing & (1u << face))
 		{
-			if (missing & (1u << face))
-			{
-				commands[face].Opaque.clear();
-				commands[face].Masked.clear();
-			}
+			output.Faces[face].Opaque.clear();
+			output.Faces[face].Masked.clear();
 		}
-		if (missing && root != UINT_MAX)
-		{
-			Owner->Gather(root, light, faces, missing, commands);
-		}
-		valid |= missing;
-	};
-	gather(Owner->_staticRoot, output.StaticListsValid, output.StaticFaces);
-	gather(Owner->_staticOnly ? UINT_MAX : Owner->_dynamicRoot, output.DynamicListsValid, output.DynamicFaces);
+	}
+	const UINT root = Owner->_staticOnly ? Owner->_staticRoot : Owner->_dynamicRoot;
+	if (missing && root != UINT_MAX)
+		Owner->Gather(root, light, faces, missing, output.Faces);
+	output.ListsValid |= missing;
 }
 
 void SceneLocalShadows::PackJob::Execute(size_t)
@@ -743,7 +738,8 @@ void SceneLocalShadows::PackJob::Execute(size_t)
 			Frame->NextSlice += faces;
 		}
 		light.ShadowFirstSlice = cached.FirstSlice;
-		const UINT dirty = cached.Needed & ((light.ShadowFlags & 2u) ? UINT_MAX : ~cached.MapsValid);
+		const bool everyFrame = !Frame->Cull.Owner->_staticOnly && (light.ShadowFlags & ShadowEveryFrame);
+		const UINT dirty = cached.Needed & (everyFrame ? UINT_MAX : ~cached.MapsValid);
 		// Exact bootstrap may need faces that are valid only in this frame slot.
 		const UINT update = dirty && cached.Latest ? cached.Needed : dirty;
 		for (UINT face = 0; face < faces; ++face)
@@ -752,24 +748,17 @@ void SceneLocalShadows::PackJob::Execute(size_t)
 			{
 				continue;
 			}
-			const auto& statics = cached.StaticFaces[face];
-			const auto& dynamics = cached.DynamicFaces[face];
-			const size_t opaqueCount = statics.Opaque.size() + dynamics.Opaque.size();
-			const size_t maskedCount = statics.Masked.size() + dynamics.Masked.size();
+			const auto& commands = cached.Faces[face];
+			const size_t opaqueCount = commands.Opaque.size();
+			const size_t maskedCount = commands.Masked.size();
 			if (Frame->Packed.size() + opaqueCount + maskedCount > UINT_MAX / sizeof(GDX12IndirectDrawArgs))
 			{
 				throw std::length_error("Local shadow indirect buffer exceeds the buffer size limit");
 			}
 			Frame->Views.push_back({lightIndex, face, cached.FirstSlice + face, UINT(Frame->Packed.size()),
 			                        UINT(opaqueCount), UINT(maskedCount), (dirty & (1u << face)) != 0});
-			for (const auto* commands : {&statics, &dynamics})
-			{
-				Frame->Packed.insert(Frame->Packed.end(), commands->Opaque.begin(), commands->Opaque.end());
-			}
-			for (const auto* commands : {&statics, &dynamics})
-			{
-				Frame->Packed.insert(Frame->Packed.end(), commands->Masked.begin(), commands->Masked.end());
-			}
+			Frame->Packed.insert(Frame->Packed.end(), commands.Opaque.begin(), commands.Opaque.end());
+			Frame->Packed.insert(Frame->Packed.end(), commands.Masked.begin(), commands.Masked.end());
 		}
 	}
 }
@@ -849,7 +838,7 @@ UINT SceneLocalShadows::UpdateLights(Slot& frame)
 		if (ShouldRenderLocalShadow(source, cached.HasLight ? &cached.Light : nullptr) ||
 		    (source.ShadowFlags & ShadowEnabled) != (cached.Light.ShadowFlags & ShadowEnabled))
 		{
-			cached.StaticListsValid = cached.DynamicListsValid = cached.MapsValid = 0;
+			cached.ListsValid = cached.MapsValid = 0;
 			cached.SelectionDirty = true;
 		}
 		cached.Light = source;
@@ -921,9 +910,13 @@ void SceneLocalShadows::Complete(UINT slot)
 		frame.CommandUpload->CopyData(0, frame.Packed.data(), UINT(frame.Packed.size()));
 	}
 	std::vector<bool> updated(frame.Slices, false);
+	if (_staticOnly)
+		frame.StaticDepthVersions.resize(frame.Slices);
 	for (const auto& view : frame.Views)
 	{
 		updated[view.Slice] = true;
+		if (_staticOnly)
+			frame.StaticDepthVersions[view.Slice] = ++_staticDepthVersion;
 	}
 	for (UINT slice = 0; slice < frame.Slices; ++slice)
 	{
@@ -1036,7 +1029,7 @@ void SceneLocalShadows::AppendGrassViews(Graph& graph, std::vector<ID3D12Resourc
 		                    Matrix(frame.Lights[view.Light].ShadowViewProj[view.Face]).Transpose(), cameraPosition,
 		                    cameraAddress};
 		grassTarget.View.Key = (2ull << 60) | (uint64_t(view.Light) * 6 + view.Face);
-		grassTarget.View.Filter = _staticOnly ? GDX12GeometryFilter::Static : GDX12GeometryFilter::All;
+		grassTarget.View.Filter = _staticOnly ? GDX12GeometryFilter::Static : GDX12GeometryFilter::Dynamic;
 		grassTarget.View.FrameSlot = slot;
 		grassTarget.View.DepthFormat = DXGI_FORMAT_D32_FLOAT;
 		grassTarget.Depth = atlas;
@@ -1049,14 +1042,17 @@ void SceneLocalShadows::AppendGrassViews(Graph& graph, std::vector<ID3D12Resourc
 
 void SceneLocalShadows::DrawShadowViews(ID3D12GraphicsCommandList* cmd, const Slot& frame,
                                         ID3D12CommandSignature* signature, ID3D12Resource* target,
-                                        ID3D12PipelineState* opaquePipeline, ID3D12PipelineState* maskedPipeline)
+                                        ID3D12PipelineState* opaquePipeline, ID3D12PipelineState* maskedPipeline,
+                                        bool clearDepth)
 {
 	for (const auto& view : frame.Views)
 	{
-
+		if (!clearDepth && !view.OpaqueCount && !view.MaskedCount)
+			continue;
 		const auto dsv = frame.Dsvs[view.Slice]->CPUHandle;
 		cmd->OMSetRenderTargets(0, nullptr, FALSE, &dsv);
-		cmd->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1, 0, 0, nullptr);
+		if (clearDepth)
+			cmd->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1, 0, 0, nullptr);
 		cmd->SetGraphicsRoot32BitConstant(0, 0, 0);
 		cmd->SetGraphicsRoot32BitConstant(0, view.Light * 6 + view.Face, 1);
 		if (view.OpaqueCount)
@@ -1090,6 +1086,13 @@ void SceneLocalShadows::Append(
 	}
 	const auto resource = [&](ID3D12Resource* value, const char* name)
 	{ return NativeWork::ResourceFor(graph, bindings, value, name); };
+	const Id atlas = resource(frame.Atlas.GetResource()->D3DResource.Get(), "local shadow depth array");
+	if (!_staticOnly && frame.Packed.empty())
+	{
+		if (appendGrass)
+			AppendGrassViews(graph, bindings, slot, atlas, appendGrass);
+		return;
+	}
 	const Id commands = resource(frame.Commands->GetResource().D3DResource.Get(), "CPU-culled local shadow commands");
 	auto* target = frame.Commands->GetResource().D3DResource.Get();
 	if (!frame.Packed.empty())
@@ -1101,7 +1104,6 @@ void SceneLocalShadows::Append(
 		          {commands, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
 		         [=](auto* cmd) { cmd->CopyBufferRegion(target, 0, source, 0, bytes); });
 	}
-	const Id atlas = resource(frame.Atlas.GetResource()->D3DResource.Get(), "local shadow depth array");
 	const State read = D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE;
 	const auto sceneIds = inputs ? *inputs : std::array<Id, 5>{SceneInstances, SceneMaterials, SceneTransforms,
 	                                                          SceneVertices, SceneIndices};
@@ -1126,6 +1128,7 @@ void SceneLocalShadows::Append(
 	const auto lightSrv = lights.GetSRV()->GPUHandle;
 	const auto textures = _resources.SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex);
 	const UINT resolution = frame.Resolution;
+	const bool clearDepth = _staticOnly;
 	work.Add(graph, "local shadow CPU lists ExecuteIndirect", std::move(accesses),
 	         [=, &frame](auto* cmd)
 	         {
@@ -1138,7 +1141,7 @@ void SceneLocalShadows::Append(
 		         const D3D12_RECT rect{0, 0, LONG(resolution), LONG(resolution)};
 		         cmd->RSSetViewports(1, &viewport);
 		         cmd->RSSetScissorRects(1, &rect);
-		         DrawShadowViews(cmd, frame, signature, target, opaquePipeline, maskedPipeline);
+		         DrawShadowViews(cmd, frame, signature, target, opaquePipeline, maskedPipeline, clearDepth);
 	         });
 	if (appendGrass)
 	{

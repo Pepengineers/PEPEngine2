@@ -6,6 +6,7 @@
 #include "Engine.Core/Logging/Logger.h"
 #include "App.Base/Modules/RenderModule.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
+#include "Engine.RendererDX12/GDX12LocalLights.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
 #include <algorithm>
 #include <cassert>
@@ -318,7 +319,7 @@ void CreateGrassGeometry(GDX12Device* device, std::unique_ptr<GDX12RootSignature
 	                                                                                 &options, sizeof(options))) &&
 	                   options.WaveOps;
 	const D3D_SHADER_MACRO defines[] = {
-	    {"GRASS_BUILD_ONCE", "1"}, {"GRASS_WAVE_OPS", waves ? "1" : "0"}, {nullptr, nullptr}};
+	    {"GRASS_WAVE_OPS", waves ? "1" : "0"}, {nullptr, nullptr}};
 	if (build)
 		*build = GDX12RenderHelpers::CreateComputePipeline(
 		    device, root.get(), APP_SHADERS_FOLDER "GrassExpand.hlsl", "BuildCS", defines);
@@ -326,6 +327,33 @@ void CreateGrassGeometry(GDX12Device* device, std::unique_ptr<GDX12RootSignature
 	                                                          APP_SHADERS_FOLDER "GrassExpand.hlsl", "CullCS", defines);
 	clear = GDX12RenderHelpers::CreateComputePipeline(
 	    device, root.get(), APP_SHADERS_FOLDER "GrassExpand.hlsl", "ClearCS", defines);
+}
+
+auto GrassCullCommands(ID3D12DescriptorHeap* heap, GDX12RootSignature& layout,
+                       const ComPtr<ID3D12PipelineState>& clear, const ComPtr<ID3D12PipelineState>& cull,
+                       D3D12_GPU_VIRTUAL_ADDRESS parameters, D3D12_GPU_DESCRIPTOR_HANDLE roots,
+                       D3D12_GPU_DESCRIPTOR_HANDLE hiz, GDX12UploadBuffer<UINT>& indices,
+                       GDX12UploadBuffer<UINT>& arguments, UINT bladeCount)
+{
+	const auto root = layout.GetRootSignature();
+	const UINT b = layout.GetBRootParamIndex(0), t = layout.GetTRootParamIndex(0), u = layout.GetURootParamIndex(0);
+	const auto indexUav = indices.GetUAV()->GPUHandle, argsUav = arguments.GetUAV()->GPUHandle;
+	const auto barrier = CD3DX12_RESOURCE_BARRIER::UAV(arguments.GetResource().D3DResource.Get());
+	return [=](ID3D12GraphicsCommandList* cmd)
+	{
+		cmd->SetDescriptorHeaps(1, &heap);
+		cmd->SetComputeRootSignature(root.Get());
+		cmd->SetComputeRootConstantBufferView(b, parameters);
+		cmd->SetComputeRootDescriptorTable(t, roots);
+		cmd->SetComputeRootDescriptorTable(t + 5, hiz);
+		cmd->SetComputeRootDescriptorTable(u + 1, indexUav);
+		cmd->SetComputeRootDescriptorTable(u + 2, argsUav);
+		cmd->SetPipelineState(clear.Get());
+		cmd->Dispatch(1, 1, 1);
+		cmd->ResourceBarrier(1, &barrier);
+		cmd->SetPipelineState(cull.Get());
+		cmd->Dispatch((bladeCount + 63) / 64, 1, 1);
+	};
 }
 
 void RecordGrassView(ID3D12GraphicsCommandList* cmd, const GDX12GraphicsBindings& binding,
@@ -763,13 +791,12 @@ void SceneGrass::Append(Graph& g, UINT slot, std::vector<ID3D12Resource*>& all, 
 		recorded.Built.resize(gpu.PatchCount());
 		for (UINT patch = 0; patch < gpu.PatchCount(); ++patch)
 		{
-			gpu.PrepareView(targets.front().View, patch, materials, false);
-			const auto* output = gpu.FindOutput(targets.front().View, patch);
+			const auto output = gpu.PrepareViewInputs(targets.front().View, patch);
 			if (!output)
 			{
 				continue;
 			}
-			const auto& source = gpu._grass.at(output->Owner).Source;
+			const auto& source = output->State.Source;
 			auto& built = recorded.Built[patch];
 			GrassLocalBounds(source, false).Transform(built.Bounds, source.World);
 			const UINT ribbons = source.Implementation == GDX12GrassImplementation::CrossedRibbons ? 2u : 1u;
@@ -787,7 +814,8 @@ void SceneGrass::Append(Graph& g, UINT slot, std::vector<ID3D12Resource*>& all, 
 			const auto root = _geometryRoot->GetRootSignature();
 			const auto pipeline = _buildGeometry;
 			const auto cb = output->Constants->GetElementAddress(output->ConstantIndex);
-			const auto roots = gpu._grass.at(output->Owner).Roots[slot]->GetSRV()->GPUHandle;
+			const auto& rootBuffer = output->State.Roots[slot];
+			const auto roots = rootBuffer->GetSRV()->GPUHandle;
 			const auto wind = output->CurrentWind->GetSRV()->GPUHandle,
 			           previousWind = output->PreviousWind->GetSRV()->GPUHandle;
 			const auto trail = gpu._trail->GetSRV()->GPUHandle, previousTrail = gpu._previousTrail->GetSRV()->GPUHandle;
@@ -797,7 +825,7 @@ void SceneGrass::Append(Graph& g, UINT slot, std::vector<ID3D12Resource*>& all, 
 			const UINT groups = (GrassBladeCount(source) + 63) / 64;
 			add("grass patch " + std::to_string(patch) + " build all LOD vertices",
 			    {access(output->Constants, Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ),
-			     access(gpu._grass.at(output->Owner).Roots[slot].get(), Mode::Read,
+			     access(rootBuffer.get(), Mode::Read,
 			            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
 			     access(output->CurrentWind, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
 			     access(output->PreviousWind, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
@@ -830,16 +858,14 @@ void SceneGrass::Append(Graph& g, UINT slot, std::vector<ID3D12Resource*>& all, 
 		}
 		XMFLOAT4X4 clip;
 		XMStoreFloat4x4(&clip, target.View.ViewProjection.Transpose());
+		const GDX12LocalShadowFrustum frustum(clip);
 		for (UINT patch = 0; patch < gpu.PatchCount(); ++patch)
 		{
+			if (!frustum.Intersects(recorded.Built.at(patch).Bounds))
 			{
-				if (!LocalShadowFaceIntersects(clip, recorded.Built.at(patch).Bounds))
-				{
-					continue;
-				}
+				continue;
 			}
-			gpu.PrepareView(target.View, patch, materials, false);
-			const auto* output = gpu.FindOutput(target.View, patch);
+			const auto output = gpu.PrepareViewInputs(target.View, patch);
 			if (!output)
 			{
 				continue;
@@ -873,14 +899,16 @@ void SceneGrass::Append(Graph& g, UINT slot, std::vector<ID3D12Resource*>& all, 
 			}
 			if (mainPair && !hiZReady && target.View.SceneDepth)
 			{
-				UINT64 total = 0;
-				for (UINT w = target.Width, h = target.Height;; w = (w + 1) / 2, h = (h + 1) / 2)
+				struct HiZLevel { UINT Width, Height, SourceWidth, SourceHeight, SourceOffset, Offset; };
+				const UINT width = target.View.SceneDepth->GetWidth(), height = target.View.SceneDepth->GetHeight();
+				std::vector<HiZLevel> levels{{width, height, 0, 0, 0, 0}};
+				UINT64 total = UINT64(width) * height;
+				for (UINT span = 1; span < (std::max)(width, height); span *= 2)
 				{
+					const auto previous = levels.back();
+					const UINT w = (previous.Width + 1) / 2, h = (previous.Height + 1) / 2;
+					levels.push_back({w, h, previous.Width, previous.Height, previous.Offset, UINT(total)});
 					total += UINT64(w) * h;
-					if (w == 1 && h == 1)
-					{
-						break;
-					}
 				}
 				if (total > UINT_MAX / sizeof(float))
 				{
@@ -891,103 +919,57 @@ void SceneGrass::Append(Graph& g, UINT slot, std::vector<ID3D12Resource*>& all, 
 				const auto pipeline = _buildHiZ;
 				const auto depth = target.View.SceneDepth->GetSRV()->GPUHandle, hiz = recorded.HiZ->GetUAV()->GPUHandle;
 				const UINT t = _hiZRoot->GetTRootParamIndex(0), u = _hiZRoot->GetURootParamIndex(0);
-				const UINT width = target.Width, height = target.Height;
 				const auto barrier = CD3DX12_RESOURCE_BARRIER::UAV(recorded.HiZ->GetResource().D3DResource.Get());
 				add("grass opaque depth HiZ",
 				    {{target.Depth, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE},
 				     access(recorded.HiZ.get(), Mode::ReadWrite, UnorderedAccess)},
-				    [=](auto* cmd)
+				    [=, levels = std::move(levels)](auto* cmd)
 				    {
 					    cmd->SetDescriptorHeaps(1, &heap);
 					    cmd->SetComputeRootSignature(root.Get());
 					    cmd->SetPipelineState(pipeline.Get());
 					    cmd->SetComputeRootDescriptorTable(t, depth);
 					    cmd->SetComputeRootDescriptorTable(u, hiz);
-					    UINT sourceWidth = 0, sourceHeight = 0, sourceOffset = 0, offset = 0;
-					    for (UINT w = width, h = height;; w = (w + 1) / 2, h = (h + 1) / 2)
+					    for (const auto& level : levels)
 					    {
-						    const std::array<UINT, 6> constants = {w, h, sourceWidth, sourceHeight, sourceOffset, offset};
-						    cmd->SetComputeRoot32BitConstants(0, 6, constants.data(), 0);
-						    cmd->Dispatch((w + 7) / 8, (h + 7) / 8, 1);
-						    if (w == 1 && h == 1)
-						    {
-							    break;
-						    }
-						    cmd->ResourceBarrier(1, &barrier);
-						    sourceWidth = w;
-						    sourceHeight = h;
-						    sourceOffset = offset;
-						    offset += w * h;
+						    if (level.SourceWidth) cmd->ResourceBarrier(1, &barrier);
+						    cmd->SetComputeRoot32BitConstants(0, 6, &level, 0);
+						    cmd->Dispatch((level.Width + 7) / 8, (level.Height + 7) / 8, 1);
 					    }
 				    });
 				hiZReady = true;
 			}
-			const auto& state = gpu._grass.at(output->Owner);
-			auto* computeRoot = _geometryRoot.get();
-			const auto root = computeRoot->GetRootSignature();
-			const auto clear = _clearGeometry, expand = _cullGeometry;
-			const auto cb = output->Constants->GetElementAddress(output->ConstantIndex);
-			const std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 5> srvs = {
-			    state.Roots[slot]->GetSRV()->GPUHandle, output->CurrentWind->GetSRV()->GPUHandle,
-			    output->PreviousWind->GetSRV()->GPUHandle, gpu._trail->GetSRV()->GPUHandle,
-			    gpu._previousTrail->GetSRV()->GPUHandle};
-			const std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 3> uavs = {
-			    vertices->GetUAV()->GPUHandle, indices->GetUAV()->GPUHandle, arguments->GetUAV()->GPUHandle};
-			const UINT b = computeRoot->GetBRootParamIndex(0), t = computeRoot->GetTRootParamIndex(0),
-			           u = computeRoot->GetURootParamIndex(0), groups = (GrassBladeCount(state.Source) + 63) / 64;
-			const auto hizSrv = recorded.HiZ->GetSRV()->GPUHandle;
-			const auto bind = [=](ID3D12GraphicsCommandList* cmd)
-			{
-				cmd->SetDescriptorHeaps(1, &heap);
-				cmd->SetComputeRootSignature(root.Get());
-				cmd->SetComputeRootConstantBufferView(b, cb);
-				for (UINT i = 0; i < 5; ++i)
-				{
-					cmd->SetComputeRootDescriptorTable(t + i, srvs[i]);
-				}
-				for (UINT i = 0; i < 3; ++i)
-				{
-					cmd->SetComputeRootDescriptorTable(u + i, uavs[i]);
-				}
-				cmd->SetComputeRootDescriptorTable(t + 5, hizSrv);
-			};
-			std::vector<Access> accesses = {
-			    access(output->Constants, Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ),
-			    access(state.Roots[slot].get(), Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
-			    access(output->CurrentWind, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
-			    access(output->PreviousWind, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
-			    access(gpu._trail.get(), Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
-			    access(gpu._previousTrail.get(), Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
-			    access(vertices, Mode::Read, State(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)),
-			    access(indices, Mode::Write, UnorderedAccess),
-			    access(arguments, Mode::ReadWrite, UnorderedAccess)};
-			accesses.push_back(access(recorded.HiZ.get(), Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
 			const std::string name =
 			    "grass view " + std::to_string(target.View.Key) + " patch " + std::to_string(patch);
+			const auto cb = output->Constants->GetElementAddress(output->ConstantIndex);
+			auto* argumentBuffer = arguments->GetResource().D3DResource.Get();
 			if (!reuse)
 			{
-				const auto barrier = CD3DX12_RESOURCE_BARRIER::UAV(arguments->GetResource().D3DResource.Get());
-				add(name + " clear arguments and cull indices", std::move(accesses),
-				    [=](auto* cmd)
-				    {
-					    bind(cmd);
-					    cmd->SetPipelineState(clear.Get());
-					    cmd->Dispatch(1, 1, 1);
-					    cmd->ResourceBarrier(1, &barrier);
-					    cmd->SetPipelineState(expand.Get());
-					    cmd->Dispatch(groups, 1, 1);
-				    });
-				if (mainPair)
-				{
-					mainExpanded[patch] = true;
-				}
+				const auto& state = output->State;
+				auto* roots = state.Roots[slot].get();
+				add(name + " clear arguments and cull indices",
+				    {access(output->Constants, Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ),
+				     access(roots, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
+				     access(recorded.HiZ.get(), Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
+				     access(indices, Mode::Write, UnorderedAccess),
+				     access(arguments, Mode::ReadWrite, UnorderedAccess)},
+				    GrassCullCommands(heap, *_geometryRoot, _clearGeometry, _cullGeometry, cb,
+				                      roots->GetSRV()->GPUHandle, recorded.HiZ->GetSRV()->GPUHandle,
+				                      *indices, *arguments, GrassBladeCount(state.Source)));
+				if (mainPair) mainExpanded[patch] = true;
 			}
-			auto binding = output->Binding;
-			auto batch = output->Batch;
-			binding.SRVs.front().second = vertices->GetSRV()->GPUHandle;
-			batch.IndexBuffer.BufferLocation = indices->GetElementAddress(0);
-			batch.IndexBuffer.SizeInBytes = UINT(indices->GetElementCount() * sizeof(UINT));
-			batch.Draw.Arguments = arguments->GetResource().D3DResource.Get();
+			const auto& constants = *_resources.FrameConstants[slot];
+			D3D12_GPU_DESCRIPTOR_HANDLE localLights{};
+			if (target.View.CaptureLighting)
+			{
+				localLights = target.View.CaptureLighting->LocalLightSrv;
+				if (!localLights.ptr) localLights = constants.ShadowLights->GetSRV()->GPUHandle;
+			}
+			const auto binding = gpu.DrawBindings(target.View, cb, vertices->GetSRV()->GPUHandle,
+			    materials.GPUHandle, constants.MainCB->GetElementAddress(0), localLights);
+			const D3D12_INDEX_BUFFER_VIEW indexView{indices->GetElementAddress(0),
+			    indices->GetElementCount() * UINT(sizeof(UINT)), DXGI_FORMAT_R32_UINT};
+			const auto signature = gpu._signature;
 			std::vector<Access> draw = {
 			    access(vertices, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
 			    access(indices, Mode::Read, D3D12_RESOURCE_STATE_INDEX_BUFFER),
@@ -1019,7 +1001,7 @@ void SceneGrass::Append(Graph& g, UINT slot, std::vector<ID3D12Resource*>& all, 
 			add(name + pass, draw,
 			    [=](auto* cmd)
 			    {
-				    RecordGrassView(cmd, binding, target, batch.IndexBuffer, batch.Draw.Signature, batch.Draw.Arguments);
+				    RecordGrassView(cmd, binding, target, indexView, signature.Get(), argumentBuffer);
 			    });
 		}
 	}
@@ -1044,10 +1026,11 @@ void SceneGrass::AppendProbeCapture(Graph& graph, std::vector<ID3D12Resource*>& 
 	const auto lighting = target.View.CaptureLighting;
 	XMFLOAT4X4 clip;
 	XMStoreFloat4x4(&clip, target.View.ViewProjection.Transpose());
+	const GDX12LocalShadowFrustum frustum(clip);
 	for (UINT patch = 0; patch < gpu.PatchCount(); ++patch)
 	{
-		if (!LocalShadowFaceIntersects(clip, built.at(patch).Bounds)) continue;
-		const auto view = gpu.PrepareViewInputs(target.View, patch, false);
+		if (!frustum.Intersects(built.at(patch).Bounds)) continue;
+		const auto view = gpu.PrepareViewInputs(target.View, patch);
 		if (!view) continue;
 		const bool firstCapture = !capture.Root;
 		if (firstCapture)
@@ -1062,7 +1045,7 @@ void SceneGrass::AppendProbeCapture(Graph& graph, std::vector<ID3D12Resource*>& 
 		auto& indices = capture.Indices.at(slot);
 		if (!indices || indices->GetElementCount() < gpu._indices->GetElementCount())
 			indices = owner.Buffer<UINT>(gpu._indices->GetElementCount(), false, true);
-		const auto& state = gpu._grass.at(view->Owner);
+		const auto& state = view->State;
 		// Capture uses the same all-LOD wind/interaction-deformed vertices as the scene.
 		const auto vertices = mirror(built[patch].Vertices->GetResource(), sizeof(GDX12GrassRenderer::Vertex));
 		const auto roots = mirror(state.Roots.at(slot)->GetResource(), sizeof(XMFLOAT3));
@@ -1070,50 +1053,20 @@ void SceneGrass::AppendProbeCapture(Graph& graph, std::vector<ID3D12Resource*>& 
 		const auto cb = parameters.Native->GetGPUVirtualAddress() +
 		    UINT64(view->ConstantIndex) * view->Constants->GetElementSize();
 		const auto arguments = access(*capture.Arguments, Mode::ReadWrite, UnorderedAccess);
-		const auto indicesUav = indices->GetUAV()->GPUHandle, argsUav = capture.Arguments->GetUAV()->GPUHandle;
-		const auto hiz = capture.HiZ->GetSRV()->GPUHandle;
-		const auto root = capture.Root->GetRootSignature();
-		const UINT b = capture.Root->GetBRootParamIndex(0), t = capture.Root->GetTRootParamIndex(0),
-		           u = capture.Root->GetURootParamIndex(0), groups = (GrassBladeCount(state.Source) + 63) / 64;
-		const auto clear = capture.Clear, cull = capture.Cull;
 		auto* argumentBuffer = capture.Arguments->GetResource().D3DResource.Get();
 		work.Add(graph, "probe owner grass clear arguments and cull indices",
 		         {{parameters.Resource, Mode::Read, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER},
 		          {roots.Resource, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE},
 		          access(*capture.HiZ, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
 		          access(*indices, Mode::Write, UnorderedAccess), arguments},
-		         [=](auto* cmd) {
-			         cmd->SetDescriptorHeaps(1, &heap);
-			         cmd->SetComputeRootSignature(root.Get());
-			         cmd->SetComputeRootConstantBufferView(b, cb);
-			         cmd->SetComputeRootDescriptorTable(t, roots.Srv);
-			         cmd->SetComputeRootDescriptorTable(t + 5, hiz);
-			         cmd->SetComputeRootDescriptorTable(u + 1, indicesUav);
-			         cmd->SetComputeRootDescriptorTable(u + 2, argsUav);
-			         cmd->SetPipelineState(clear.Get());
-			         cmd->Dispatch(1, 1, 1);
-			         const auto barrier = CD3DX12_RESOURCE_BARRIER::UAV(argumentBuffer);
-			         cmd->ResourceBarrier(1, &barrier);
-			         cmd->SetPipelineState(cull.Get());
-			         cmd->Dispatch(groups, 1, 1);
-		         });
+		         GrassCullCommands(heap, *capture.Root, capture.Clear, capture.Cull, cb,
+		                           roots.Srv, capture.HiZ->GetSRV()->GPUHandle,
+		                           *indices, *capture.Arguments, GrassBladeCount(state.Source)));
 		const auto signature = owner._signature;
 		const D3D12_INDEX_BUFFER_VIEW indexView{indices->GetElementAddress(0),
 		                                     indices->GetElementCount() * UINT(sizeof(UINT)), DXGI_FORMAT_R32_UINT};
-		GDX12GraphicsBindings binding;
-		binding.Root = owner._graphicsRoot.get();
-		binding.Pipeline = owner._graphicsPSO.at(size_t(lighting ? GDX12GrassRenderer::Stage::Capture
-		                                                        : GDX12GrassRenderer::Stage::Shadow));
-		binding.Heap = descriptors;
-		binding.CBVs = {{0, cb}, {1, target.View.CameraConstants}};
-		binding.SRVs = {{0, vertices.Srv}, {1, materials.GPUHandle}, {8, descriptors->GetGPUHandle(Texture2D_StartIndex)}};
-		if (lighting)
-		{
-			binding.CBVs.insert(binding.CBVs.end(), {{2, main}, {3, lighting->ShadowConstants}});
-			binding.SRVs.insert(binding.SRVs.end(), {{2, lighting->SunShadow->GetSRV()->GPUHandle},
-			    {3, lighting->Irradiance->GetSRV()->GPUHandle}, {4, lighting->Prefiltered->GetSRV()->GPUHandle},
-			    {5, lighting->BRDF->GetSRV()->GPUHandle}, {6, localLights}, {7, lighting->LocalShadows->GetSRV()->GPUHandle}});
-		}
+		const auto binding = owner.DrawBindings(target.View, cb, vertices.Srv, materials.GPUHandle,
+		                                        lighting ? main : 0, localLights);
 		auto draws = target.AdditionalReads;
 		draws.insert(draws.end(), {{vertices.Resource, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE},
 		                          {parameters.Resource, Mode::Read, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER},

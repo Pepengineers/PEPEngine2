@@ -39,11 +39,12 @@ bool CompatibleLocalShadow(const GDX12LocalLightConstants& cached, const GDX12Lo
 }
 
 Id CopyShadowSlices(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work,
-                    ID3D12Resource* source, ID3D12Resource* target, std::vector<std::pair<UINT, UINT>> slices)
+                    ID3D12Resource* source, ID3D12Resource* target, std::vector<std::pair<UINT, UINT>> slices,
+                    const char* name = "GPU0 publish cached shadow slices")
 {
-	const Id read = NativeWork::ResourceFor(graph, bindings, source, "GPU0 cached shadow slices");
-	const Id write = NativeWork::ResourceFor(graph, bindings, target, "GPU0 local shadow atlas");
-	return work.Add(graph, "GPU0 publish cached shadow slices",
+	const Id read = NativeWork::ResourceFor(graph, bindings, source, "cached shadow slices");
+	const Id write = NativeWork::ResourceFor(graph, bindings, target, "local shadow atlas");
+	return work.Add(graph, name,
 	    {{read, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE}, {write, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
 	    [source, target, slices = std::move(slices)](auto* cmd)
 	    {
@@ -135,6 +136,12 @@ struct SceneLighting::RemoteShadows
 	std::shared_ptr<SunShadowTileTransfer> SunTransfer;
 	std::array<GDX12Descriptor, 4> SceneViews;
 	std::shared_ptr<ShadowDepthTransfer> Transfer;
+	std::unique_ptr<ShadowDepthTransfer> StaticTransfer;
+	GDX12ResourceHandle StaticDepth;
+	std::unordered_map<UINT, UINT> StaticSlots;
+	std::vector<uint64_t> StaticVersions;
+	std::vector<std::pair<UINT, uint64_t>> PendingStaticVersions;
+	uint64_t StaticPlacement = 0;
 	std::shared_ptr<ShadowPublication> Publication;
 	Graph Plan;
 	NativeWork Work;
@@ -160,7 +167,7 @@ struct SceneLighting::RemoteShadows
 };
 
 SceneLighting::SceneLighting(GDX12DeviceResources& r, RenderPipelineCommonData& c)
-    : _resources(r), _common(c), _frames(r.FrameConstants.size())
+    : _resources(r), _common(c), _aoPipelines(r.Device), _frames(r.FrameConstants.size())
 {
 	if (r.FrameConstants.size() > FFX_MAX_QUEUED_FRAMES)
 	{
@@ -228,7 +235,7 @@ void SceneLighting::Freeze(SceneGeometry& geometry, UINT slot, const std::shared
 	auto* normals = scene.Color[2].get();
 	if (!frame.AO)
 	{
-		frame.AO = std::make_unique<SceneAO>(_resources, _common, scene.DepthView.get(), normals);
+		frame.AO = std::make_unique<SceneAO>(_resources, _common, _aoPipelines, scene.DepthView.get(), normals);
 	}
 	frame.AO->Freeze(scene.DepthView.get(), normals, scene.Color[1].get(), geometry.PrepassNormals(slot), _aoTemporalIndex,
 	                 submissions, aoDevice, _aoHistory);
@@ -408,23 +415,26 @@ void SceneLighting::AppendShadows(Graph& graph, std::vector<ID3D12Resource*>& bi
 	auto& constants = *_resources.FrameConstants.at(_slot);
 	const auto appendGrass = [&](const GeometryTarget& view, Graph& g, std::vector<ID3D12Resource*>& resources)
 	{ geometry.AppendVegetationView(g, resources, _slot, view); };
-	_sunShadows->Append(graph, bindings, _slot,
-	                    {scene.Buffers[0].Srv.GPUHandle, scene.Buffers[1].Srv.GPUHandle, scene.Buffers[2].Srv.GPUHandle,
-	                     scene.Buffers[3].Srv.GPUHandle},
-	                    scene.Draws, scene.Geometry, appendGrass, ~_sunRemoteMask);
+	const std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 4> descriptors{scene.Buffers[0].Srv.GPUHandle,
+	    scene.Buffers[1].Srv.GPUHandle, scene.Buffers[2].Srv.GPUHandle, scene.Buffers[3].Srv.GPUHandle};
+	_sunShadows->Append(graph, bindings, _slot, descriptors, scene.Draws, scene.Geometry, appendGrass, ~_sunRemoteMask);
+	_probeStaticShadows->Append(graph, bindings, _slot, descriptors, scene.Geometry,
+	                            _probeStaticShadows->LightSource(_slot), appendGrass);
 	AppendRemoteLocalShadows(graph, bindings, geometry);
-	_localShadows->Append(graph, bindings, _slot,
-	                      {scene.Buffers[0].Srv.GPUHandle, scene.Buffers[1].Srv.GPUHandle,
-	                       scene.Buffers[2].Srv.GPUHandle, scene.Buffers[3].Srv.GPUHandle},
-	                      scene.Geometry, *constants.ShadowLights, appendGrass);
+	auto& local = _localShadows->_slots[_slot];
+	auto& statics = _probeStaticShadows->_slots[_slot];
+	if (!local.Views.empty())
 	{
-		_probeStaticShadows->Append(graph, bindings, _slot,
-		                            {scene.Buffers[0].Srv.GPUHandle, scene.Buffers[1].Srv.GPUHandle,
-		                             scene.Buffers[2].Srv.GPUHandle, scene.Buffers[3].Srv.GPUHandle},
-		                            scene.Geometry, _probeStaticShadows->LightSource(_slot), appendGrass);
-		_reflections->Append(graph, bindings, geometry, environment, _slot, _localShadows->Output(_slot),
-		                     _probeStaticShadows->Output(_slot), _probeStaticShadows->LightSource(_slot));
+		std::vector<std::pair<UINT, UINT>> slices;
+		for (const auto& view : local.Views)
+			slices.emplace_back(statics.Lights[view.Light].ShadowFirstSlice + view.Face, view.Slice);
+		CopyShadowSlices(graph, bindings, _work, statics.Atlas.GetResource()->D3DResource.Get(),
+		                 local.Atlas.GetResource()->D3DResource.Get(), std::move(slices), "restore static shadow depth");
 	}
+	_localShadows->Append(graph, bindings, _slot, descriptors,
+	                      scene.Geometry, *constants.ShadowLights, appendGrass);
+	_reflections->Append(graph, bindings, geometry, environment, _slot, &local.Atlas,
+	                     &statics.Atlas, _probeStaticShadows->LightSource(_slot));
 }
 
 void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12Resource*>& primaryBindings,
@@ -733,6 +743,58 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 		graph.FrameBoundary = false;
 		bindings.clear();
 		work.Commands.clear();
+		Id staticExport = Invalid, staticImport = Invalid;
+		remote.PendingStaticVersions.clear();
+		if (!batch.empty())
+		{
+			auto& statics = _probeStaticShadows->_slots[_slot];
+			if (remote.StaticPlacement != _localPlacementEpoch)
+			{
+				remote.StaticSlots.clear();
+				remote.StaticPlacement = _localPlacementEpoch;
+			}
+			std::vector<std::pair<UINT, UINT>> restore;
+			for (const auto& view : batch)
+			{
+				const UINT slice = statics.Lights[view.Light].ShadowFirstSlice + view.Face;
+				const auto slot = remote.StaticSlots.try_emplace(slice, UINT(remote.StaticSlots.size())).first->second;
+				restore.emplace_back(slot, UINT(restore.size()));
+			}
+			if (!remote.StaticDepth || remote.StaticDepth->GetDesc().Width != source.Resolution ||
+			    remote.StaticVersions.size() < remote.StaticSlots.size())
+			{
+				const auto desc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R32_TYPELESS, source.Resolution,
+				    source.Resolution, UINT16(remote.StaticSlots.size()), 1);
+				remote.StaticDepth = remote.Resources.Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc,
+				                                                            D3D12_RESOURCE_STATE_COMMON);
+				remote.StaticVersions.assign(remote.StaticSlots.size(), 0);
+			}
+			std::vector<UINT> primarySlices, ownerSlices;
+			for (UINT i = 0; i < batch.size(); ++i)
+			{
+				const auto& view = batch[i];
+				const UINT slice = statics.Lights[view.Light].ShadowFirstSlice + view.Face;
+				const auto version = statics.StaticDepthVersions[slice];
+				const UINT slot = restore[i].first;
+				if (remote.StaticVersions[slot] != version)
+				{
+					primarySlices.push_back(slice);
+					ownerSlices.push_back(slot);
+					remote.PendingStaticVersions.emplace_back(slot, version);
+				}
+			}
+			if (!primarySlices.empty())
+			{
+				remote.StaticTransfer = std::make_unique<ShadowDepthTransfer>(*_submissions, owner, source.Resolution,
+				                                                            UINT(primarySlices.size()));
+				staticExport = remote.StaticTransfer->Append(primary, primaryBindings, _work,
+				    statics.Atlas.GetResource()->D3DResource.Get(), std::move(primarySlices), true);
+				staticImport = remote.StaticTransfer->Append(graph, bindings, work, remote.StaticDepth.Get(),
+				                                             std::move(ownerSlices), false);
+			}
+			CopyShadowSlices(graph, bindings, work, remote.StaticDepth.Get(), target.Atlas.GetResource()->D3DResource.Get(),
+			                 std::move(restore), "restore static shadow depth");
+		}
 		remote.Mirror.Begin();
 		remote.Mirror.RetireUnused(live, [&](ID3D12Resource* retired) { remote.Vegetation.Forget(retired); });
 		const auto mirror = [&](Id id, bool refresh)
@@ -889,6 +951,11 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 		remote.Input = remote.Mirror.AppendImport(graph, bindings, work, true);
 		if (seed) ++remote.SeedVertices; // The scene import was prepended.
 		remote.Export = remote.Mirror.AppendExport(primary, primaryBindings, _work, restore.empty() ? Queue::Copy : Queue::Direct);
+		if (staticExport != Invalid)
+		{
+			primary.Operations[remote.Export].Dependencies.push_back(staticExport);
+			graph.Operations[staticImport + 1].Dependencies.push_back(remote.Input); // Scene import was prepended.
+		}
 		if (seed) baselineExports.emplace(owner, remote.Export);
 		else if (clone && producer != baselineExports.end())
 			primary.Operations[remote.Export].Dependencies.push_back(producer->second);
@@ -1004,6 +1071,8 @@ void SceneLighting::AddShadowExchanges(const Schedule& primary, std::vector<Exec
 				    if (!remote.Work.Record(op, cmd)) throw std::logic_error("Missing owner shadow work");
 			    }, nullptr, nullptr, nullptr, waits);
 			    remote.Produced = remote.GPU.Completions().back();
+			    for (const auto& [slot, version] : remote.PendingStaticVersions)
+				    remote.StaticVersions[slot] = version;
 			    if (seed != Invalid) remote.VertexBase->Ready = remote.GPU.Completions().at(seed);
 			    remote.VertexSource = remote.VertexBase->Source.Get();
 			    remote.VertexDeformationRevision = remote.Vertices.To;
@@ -1031,6 +1100,7 @@ void SceneLighting::RetireShadowSkinInputs(UINT slot)
 	{
 		auto& remote = *entry;
 		if (!remote.Produced || !_submissions->Complete(remote.Produced)) continue;
+		remote.StaticTransfer.reset();
 		const auto& update = remote.Vertices;
 		auto& reported = update.Seed || update.Clone ? remote.ReportedVertexBaseline : remote.ReportedVertexDelta;
 		if (!reported && (update.TransferBytes || update.LocalBytes || update.BaselineBytes))

@@ -45,14 +45,6 @@ Prediction Predict(uint i)
     return Predictions[i];
 }
 [numthreads(128, 1, 1)]
-void SavePrevious(uint i : SV_DispatchThreadID)
-{
-    if (i >= Count) return;
-    FluidParticle p = Next[i];
-    p.PreviousPosition = p.Position;
-    Next[i] = p;
-}
-[numthreads(128, 1, 1)]
 void Hash(uint i : SV_DispatchThreadID)
 {
     if (i >= Capacity) return;

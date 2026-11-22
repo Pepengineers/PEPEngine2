@@ -109,24 +109,6 @@ void PhysicsModule::MoveKinematicBody(World& world, PhysicsBodyHandle handle,
     if (auto* physics = GetPhysics(world)) physics->MoveKinematicBody(handle, position, rotation, dt);
 }
 
-void PhysicsModule::OnUpdate()
-{
-}
-
-void PhysicsModule::OnRender()
-{
-}
-
-bool PhysicsModule::ShouldTick()
-{
-    return false;
-}
-
-bool PhysicsModule::ShouldRender()
-{
-    return false;
-}
-
 void PhysicsModule::TryCreateBody(World& world, Entity entity)
 {
     auto& ecs = world.GetECS();

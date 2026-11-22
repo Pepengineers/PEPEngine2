@@ -40,18 +40,10 @@ GDX12FluidSettings ResolveFluidSettings(const GDX12FluidSettings& author, const 
 		throw std::invalid_argument("Invalid fluid quality");
 	}
 	auto result = author;
-	const UINT level = static_cast<UINT>((std::max)(1, quality));
 	if (!result.MaxSubsteps)
 	{
+		const UINT level = static_cast<UINT>((std::max)(1, quality));
 		result.MaxSubsteps = 16u << (std::min)(level - 1, 2u);
-	}
-	if (!result.FilterIterations)
-	{
-		result.FilterIterations = level;
-	}
-	if (!result.FilterRadiusPixels)
-	{
-		result.FilterRadiusPixels = 8u << (level - 1);
 	}
 	return result;
 }
@@ -71,13 +63,7 @@ void ValidateFluidSettings(const GDX12FluidSettings& s)
 	    !Finite(s.ContainerHalfExtentCm) || s.ContainerHalfExtentCm.x <= s.ParticleRadiusCm ||
 	    s.ContainerHalfExtentCm.y <= s.ParticleRadiusCm || s.ContainerHalfExtentCm.z <= s.ParticleRadiusCm ||
 	    s.ContainerHalfExtentCm.x > 1e6f || s.ContainerHalfExtentCm.y > 1e6f || s.ContainerHalfExtentCm.z > 1e6f ||
-	    !Range(s.Restitution, 0, 1) || s.FilterIterations > 16 || s.FilterRadiusPixels > 64 ||
-	    !Range(s.FilterSigmaCm, 0.001f, 1000) || !Range(s.FilterDepthRangeCm, 0.001f, 100000) ||
-	    !Range(s.FilterEdgeCm, 0, s.FilterDepthRangeCm) || !Range(s.IOR, 1, 3) || !Finite(s.AbsorptionPerCm) ||
-	    !Range(s.AbsorptionPerCm.x, 0, 100) || !Range(s.AbsorptionPerCm.y, 0, 100) ||
-	    !Range(s.AbsorptionPerCm.z, 0, 100) || !Finite(s.ScatteringColor) || !Range(s.ScatteringColor.x, 0, 100) ||
-	    !Range(s.ScatteringColor.y, 0, 100) || !Range(s.ScatteringColor.z, 0, 100) || !Range(s.Roughness, 0, 1) ||
-	    !Range(s.RefractionPixels, 0, 128) || !Range(s.MaxOpticalThicknessCm, 0.01f, 1e6f))
+	    !Range(s.Restitution, 0, 1))
 	{
 		throw std::invalid_argument("Invalid fluid component settings");
 	}
@@ -167,7 +153,6 @@ GDX12FluidParameters MakeFluidParameters(const Matrix& container, const GDX12Flu
 	GDX12FluidParameters p{};
 	XMStoreFloat4x4(&p.ContainerToWorld, XMMatrixTranspose(container));
 	XMStoreFloat4x4(&p.WorldToContainer, XMMatrixTranspose(container.Invert()));
-	p.PreviousContainerToWorld = p.ContainerToWorld;
 	p.HalfExtent = settings.ContainerHalfExtentCm;
 	p.Radius = settings.ParticleRadiusCm;
 	p.Gravity = settings.AccelerationCmPerSecond2;
@@ -179,16 +164,6 @@ GDX12FluidParameters MakeFluidParameters(const Matrix& container, const GDX12Flu
 	p.MaxSpeed = settings.MaxSpeedCmPerSecond;
 	p.MaxAcceleration = settings.MaxAccelerationCmPerSecond2;
 	p.Restitution = settings.Restitution;
-	p.Sigma = settings.FilterSigmaCm;
-	p.DepthRange = settings.FilterDepthRangeCm;
-	p.EdgeDepth = settings.FilterEdgeCm;
-	p.IOR = settings.IOR;
-	p.Roughness = settings.Roughness;
-	p.Absorption = settings.AbsorptionPerCm;
-	p.RefractionPixels = settings.RefractionPixels;
-	p.Scattering = settings.ScatteringColor;
-	p.MaxThickness = settings.MaxOpticalThicknessCm;
-	p.FilterRadius = settings.FilterRadiusPixels;
 	p.NearStiffness = settings.NearPressureStiffnessCm2PerSecond2;
 	p.PredictionSeconds = settings.PredictionSeconds;
 	p.LocalSimulation = settings.ReferenceModel ? 1u : 0u;
@@ -221,8 +196,6 @@ void GDX12FluidSolver::Initialize(GDX12Device* device)
 	desc.NumSingleSRVSlots = 5;
 	desc.NumSingleUAVSlots = 5;
 	auto root = std::make_unique<GDX12RootSignature>(device, desc);
-	_save = GDX12RenderHelpers::CreateComputePipeline(device, root.get(), APP_SHADERS_FOLDER "FluidSolver.hlsl",
-	                                                  "SavePrevious");
 	_hash =
 	    GDX12RenderHelpers::CreateComputePipeline(device, root.get(), APP_SHADERS_FOLDER "FluidSolver.hlsl", "Hash");
 	_sort =
@@ -250,16 +223,15 @@ void GDX12FluidSolver::Initialize(GDX12Device* device)
 GDX12FluidSolver::Buffers GDX12FluidSolver::CreateBuffers(GDX12Device* device, GDX12DescriptorHeap* heap,
                                                           const GDX12FluidInstance& instance)
 {
-	static_assert(sizeof(Particle) == 36);
+	static_assert(sizeof(Particle) == 24, "Must match FluidParticle in FluidParameters.hlsli");
 	static_assert(sizeof(Prediction) == 24);
-	ValidateFluidInstance(instance);
-	const auto& seed = instance.Component.GetParticles();
-	if (!device || !heap || !seed || seed->empty())
+	if (!device || !heap)
 	{
-		throw std::invalid_argument("Fluid solver requires device and seed");
+		throw std::invalid_argument("Fluid solver requires a device and descriptor heap");
 	}
+	const auto seed = MakeSeed(instance);
 	Buffers buffers;
-	buffers.Count = static_cast<UINT>(seed->size());
+	buffers.Count = static_cast<UINT>(seed.size());
 	buffers.Capacity = 1;
 	while (buffers.Capacity < buffers.Count)
 	{
@@ -275,8 +247,7 @@ GDX12FluidSolver::Buffers GDX12FluidSolver::CreateBuffers(GDX12Device* device, G
 	buffers.Predictions = SolverBuffer<Prediction>(device, heap, buffers.Count);
 	buffers.SeedUpload =
 	    std::make_unique<GDX12UploadBuffer<Particle>>(device, buffers.Count, EBufferType::Upload, false);
-	const auto particles = MakeSeed(instance);
-	buffers.SeedUpload->CopyData(0, particles.data(), buffers.Count);
+	buffers.SeedUpload->CopyData(0, seed.data(), buffers.Count);
 	return buffers;
 }
 
@@ -307,7 +278,7 @@ std::vector<GDX12FluidSolver::Particle> GDX12FluidSolver::MakeSeed(const GDX12Fl
 		{
 			velocity *= settings.MaxSpeedCmPerSecond / speed;
 		}
-		particles[i] = {position, velocity, position};
+		particles[i] = {position, velocity};
 	}
 	return particles;
 }
@@ -391,34 +362,28 @@ GDX12FluidSolver::Head GDX12FluidSolver::Record(GDX12CommandList& commands, Buff
 		throw std::invalid_argument("Invalid fluid substep plan");
 	}
 	GDX12Resource* particles[] = {&buffers.Particles[0]->GetResource(), &buffers.Particles[1]->GetResource()};
-	auto& density = buffers.Density->GetResource();
-	auto& keys = buffers.Keys->GetResource();
-	auto& offsets = buffers.Offsets->GetResource();
-	auto& predictions = buffers.Predictions->GetResource();
-	auto& current = *particles[head.Current];
 	if (head.SeedPending)
 	{
+		auto& current = *particles[head.Current];
 		commands.ResourceBarrier({current.GetTransitionBarrier(D3D12_RESOURCE_STATE_COPY_DEST)});
 		commands.CopyResource(current.D3DResource.Get(), buffers.SeedUpload->GetResource().D3DResource.Get());
 		head.SeedPending = false;
 	}
+	if (!steps.Count)
+	{
+		return head;
+	}
 
+	auto& density = buffers.Density->GetResource();
+	auto& keys = buffers.Keys->GetResource();
+	auto& offsets = buffers.Offsets->GetResource();
+	auto& predictions = buffers.Predictions->GetResource();
 	commands.SetComputeRootSignature(_root.get());
 	commands.SetComputeRootConstantBufferView(1, constants);
 
-	FluidDispatch dispatch = {buffers.Count, buffers.Capacity, 0, 0, 0, settings.ReferenceModel ? 1u : 0u};
+	FluidDispatch dispatch = {buffers.Count, buffers.Capacity, 0, 0, steps.Dt, settings.ReferenceModel ? 1u : 0u};
 	const UINT particleGroups = (buffers.Count + SolverGroupSize - 1) / SolverGroupSize;
 	const UINT capacityGroups = (buffers.Capacity + SolverGroupSize - 1) / SolverGroupSize;
-	const auto setDispatch = [&]
-	{ commands.GetCommandList()->SetComputeRoot32BitConstants(0, DispatchWords, &dispatch, 0); };
-	setDispatch();
-	commands.ResourceBarrier({current.GetTransitionBarrier(D3D12_RESOURCE_STATE_UNORDERED_ACCESS)});
-	commands.SetComputeUAV(0, buffers.Particles[head.Current]->GetUAV()->GPUHandle);
-	commands.SetPipelineState(_save);
-	commands.Dispatch(particleGroups, 1, 1);
-	commands.ResourceBarrier({current.GetUAVBarrier()});
-
-	dispatch.Dt = steps.Dt;
 	for (UINT step = 0; step < steps.Count; ++step)
 	{
 		if (settings.WaveAcceleration > 0)
@@ -439,7 +404,7 @@ GDX12FluidSolver::Head GDX12FluidSolver::Record(GDX12CommandList& commands, Buff
 		commands.SetComputeUAV(3, buffers.Offsets->GetUAV()->GPUHandle);
 		commands.SetComputeUAV(4, buffers.Predictions->GetUAV()->GPUHandle);
 		dispatch.K = dispatch.J = 0;
-		setDispatch();
+		commands.GetCommandList()->SetComputeRoot32BitConstants(0, DispatchWords, &dispatch, 0);
 		commands.SetPipelineState(_hash);
 		commands.Dispatch(capacityGroups, 1, 1);
 		commands.ResourceBarrier(

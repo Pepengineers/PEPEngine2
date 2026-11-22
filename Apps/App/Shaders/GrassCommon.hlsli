@@ -13,16 +13,13 @@ cbuffer GrassParameters : register(b0)
     float4x4 PreviousWorld;
     float4x4 ViewProjection;
     float4 EyeMaxDistance;
-    float4 PreviousEye;
+    float3 PreviousEye; uint ResetHistory;
     float4 Shape;
-    float4 Lod;
-    float4 Patch;
+    float3 Lod; uint InteractionSize;
+    float2 PatchExtents; uint2 HiZSize;
     float4 WindArea;
-    float4 WindForce;
-    float4 WindGust;
     float4 InteractionArea;
     uint Count, Segments, Implementation, Seed;
-    uint PointSource, MaterialIndex, WindMode, Shadow;
-    uint GridResolution, ResetHistory, Padding0, Padding1;
+    uint PointSource, MaterialIndex, GridResolution, Shadow;
 };
 #endif
