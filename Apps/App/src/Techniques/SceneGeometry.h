@@ -142,6 +142,7 @@ class SceneGeometry
 		std::array<Id, 5> BatchIds{};
 	};
 	void AppendSkinImports(Graph&, Slot&);
+	std::vector<std::pair<UINT, UINT>> ChangedVertexRanges(uint64_t since) const;
 	void RecordUploads(const Slot&, UINT bucket, ID3D12GraphicsCommandList*) const;
 	enum class GeometryPass { Depth, GBuffer, WorldCanvas };
 	void RecordGeometry(const Slot&, GeometryPass, ID3D12GraphicsCommandList*) const;
@@ -149,6 +150,9 @@ class SceneGeometry
 	GDX12DeviceResources& _resources;
 	std::vector<Slot> _slots;
 	uint64_t _vertexDeformationRevision = 0;
+	GDX12ResourceHandle _vertexChangeSource;
+	// Each boundary starts a span with the same last write revision.
+	std::map<UINT, uint64_t> _vertexWriteRevisions{{0, 0}};
 	std::unordered_set<Id> _reportedSkinOwners;
 	std::unique_ptr<GDX12RootSignature> _cullRoot, _clearRoot, _drawRoot;
 	std::unique_ptr<SceneGrass> _grass;

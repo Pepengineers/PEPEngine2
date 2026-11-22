@@ -361,6 +361,11 @@ void SceneGeometry::Freeze(UINT index, UINT camera, std::vector<GDX12SkinningWor
 		s.Geometry.IndexResource = _emptyIndices.Get();
 		s.Geometry.Indices = {_emptyIndices->GetGPUVirtualAddress(), EmptyGeometryBytes, DXGI_FORMAT_R32_UINT};
 	}
+	if (_vertexChangeSource.Get() != s.Geometry.VertexResource)
+	{
+		_vertexChangeSource = s.Geometry.VertexAllocation ? s.Geometry.VertexAllocation : _emptyVertices;
+		_vertexWriteRevisions = {{0, 0}};
+	}
 	s.Skin.clear();
 	for (auto& [owner, remote] : s.RemoteSkin)
 	{
@@ -372,6 +377,15 @@ void SceneGeometry::Freeze(UINT index, UINT camera, std::vector<GDX12SkinningWor
 	{
 		if ((UINT64(work.OutputVertex) + work.VertexCount) * sizeof(Vertex) > s.Geometry.Vertices.SizeInBytes)
 			throw std::logic_error("Skinning range exceeds the frozen vertex buffer");
+		const UINT end = work.OutputVertex + work.VertexCount;
+		const auto first = _vertexWriteRevisions.lower_bound(work.OutputVertex);
+		const auto after = _vertexWriteRevisions.upper_bound(end);
+		const auto nextRevision = std::prev(after)->second;
+		const bool joinPrevious = first != _vertexWriteRevisions.begin() &&
+		    std::prev(first)->second == _vertexDeformationRevision;
+		_vertexWriteRevisions.erase(first, after);
+		if (!joinPrevious) _vertexWriteRevisions.emplace(work.OutputVertex, _vertexDeformationRevision);
+		if (nextRevision != _vertexDeformationRevision) _vertexWriteRevisions.emplace(end, nextRevision);
 		if (!work.Owner)
 		{
 			s.Skin.push_back(std::move(work));
@@ -438,6 +452,21 @@ void SceneGeometry::Freeze(UINT index, UINT camera, std::vector<GDX12SkinningWor
 		}
 		s.SkinIds.push_back(ids);
 	}
+}
+
+std::vector<std::pair<UINT, UINT>> SceneGeometry::ChangedVertexRanges(uint64_t since) const
+{
+	std::vector<std::pair<UINT, UINT>> changed;
+	for (auto span = _vertexWriteRevisions.begin(), next = std::next(span);
+	     next != _vertexWriteRevisions.end(); ++span, ++next)
+	{
+		if (span->second <= since) continue;
+		if (!changed.empty() && changed.back().second == span->first)
+			changed.back().second = next->first;
+		else
+			changed.emplace_back(span->first, next->first);
+	}
+	return changed;
 }
 
 void SceneGeometry::AppendSkinImports(Graph& graph, Slot& slot)
