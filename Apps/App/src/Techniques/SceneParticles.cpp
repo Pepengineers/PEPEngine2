@@ -959,6 +959,17 @@ void SceneParticles::PauseIndependentClock()
 		if (lane.Solver) lane.Solver->PauseClock();
 }
 
+void SceneParticles::PreserveConsumedBursts(const GDX12ParticleSimulation& simulation)
+{
+	for (const auto& consumed : simulation.ConsumedBursts())
+	{
+		auto& saved = _consumedBursts[consumed.Id];
+		if (!saved.Total || consumed.ResetRevision > saved.ResetRevision ||
+		    (saved.ResetRevision == consumed.ResetRevision && consumed.Total > saved.Total))
+			saved = consumed;
+	}
+}
+
 void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, GDX12Texture* depth,
                                      Executor& primary, Id device, float worldRate, bool ownerDraw)
 {
@@ -987,6 +998,13 @@ void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, 
 		const D3D12_RANGE noWrites{0, 0};
 		sample.Buffer.D3DResource->Unmap(0, &noWrites);
 		sample.Frame = 0;
+	}
+	for (auto& emitter : _resources.ParticleEmitters)
+	{
+		if (emitter.Blend == ParticleBlend::Opaque) continue;
+		const auto saved = _consumedBursts.find(emitter.Id);
+		if (saved != _consumedBursts.end() && saved->second.ResetRevision == emitter.ResetRevision)
+			emitter.BurstBaseline = (std::max)(emitter.BurstBaseline, saved->second.Total);
 	}
 	_interaction = interaction;
 	auto* simulation = _resources.ParticleSimulation.get();
@@ -1026,6 +1044,7 @@ void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, 
 			primary.Drain();
 			lane.Solver->Drain();
 			lane.Generation = lane.Solver->Generation;
+			if (ownerDraw) PreserveConsumedBursts(lane.Solver->Solver);
 			for (auto& emitter : _resources.ParticleEmitters)
 				emitter.BurstBaseline = (std::max)(emitter.BurstBaseline,
 				    lane.Solver->Solver.ConsumedBurst(emitter.Id, emitter.ResetRevision));

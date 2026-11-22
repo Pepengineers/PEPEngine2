@@ -517,9 +517,8 @@ namespace
         if (created)
             renderModule.SetTextureReplicaSource(textureName, Engine::Core::ETextureType::Color,
                 [diffuseTexturePath, opacityTexturePath](auto& temporary) -> const Engine::Core::Texture* {
-                    auto& assets = Engine::Core::AssetManager::GetInstance();
-                    const auto* diffuse = assets.LoadTexture(diffuseTexturePath);
-                    const auto* opacity = assets.LoadTexture(opacityTexturePath);
+                    const auto diffuse = Engine::Core::TextureLoader::LoadTextureAsset(diffuseTexturePath);
+                    const auto opacity = Engine::Core::TextureLoader::LoadTextureAsset(opacityTexturePath);
                     if (diffuse && opacity) temporary = TryCreateDiffuseTextureWithOpacityAlpha(*diffuse, *opacity);
                     return temporary.get();
                 });

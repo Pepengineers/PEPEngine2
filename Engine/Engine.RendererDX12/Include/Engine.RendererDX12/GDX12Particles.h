@@ -138,6 +138,11 @@ struct GDX12ParticleRenderFrame
     bool ResetMotion = false;
 };
 
+struct GDX12ParticleBurstConsumption
+{
+    uint64_t Id, ResetRevision, Total;
+};
+
 class GDX12ParticleSimulation
 {
 public:
@@ -154,6 +159,7 @@ public:
     // Build the draw bindings for the result of this frame's planned simulation.
     GDX12ParticleRenderFrame RenderFrame() const;
     uint64_t ConsumedBurst(uint64_t id, uint64_t revision) const;
+    std::vector<GDX12ParticleBurstConsumption> ConsumedBursts() const;
     void SetInteractionField(GDX12ParticleInteractionField field) { _interaction = field; }
     GDX12Resource* GetInteractionResource() const { return _interaction.Resource; }
     void Execute(GDX12CommandList* commands, GDX12DeviceResources* resources,

@@ -1,6 +1,21 @@
 # Bistro MGPU transparency on MidSpec
 
-## Shared shading and depth-only transfer
+## Review fixes and release smoke
+
+Release x64 built with 0 errors. Two ordinary Bistro runs used `Render.PrimaryAdapter = 0` and `App.Particles.Adapter = -1`, with `App.WBOIT.Adapter = -1` for the local run and `1` for Exact on the Arc B570. The runner observed ordinary frame publication on RTX and two completed layer consumers in Exact mode. Neither smoke log contained error or critical entries. The runner stopped both hidden processes after capturing completion.
+
+| Exact frame | Transparent mesh commands after frustum culling | RTX to Arc, depth bytes | Arc to RTX, layer bytes | Arc mesh / resolve / export fence | RTX import / apply / frame fence |
+| --- | ---: | ---: | ---: | --- | --- |
+| 1 | 176 | 1,443,776 | 2,887,552 | 26 / 31 / 34 | 500 / 501 / 511 |
+| 2 | 177 | 1,443,776 | 2,887,552 | 36 / 41 / 44 | 698 / 699 / 709 |
+
+The render size was 752 × 470. CPU-to-Arc geometry upload was 46,307,880 bytes on frame 1 and zero on frame 2. The resident mesh cache includes off-screen meshes, while the submitted draw list uses the display culling plane equations. The logged command counts describe draw submission and are not pixel counts or a timing comparison.
+
+A transparent skinned mesh or a transparent emitter configured for the interaction field selects the primary WBOIT path for the frame and reports the reason. A change of owner preserves consumed burst totals by emitter and reset revision. When the diagnostic water draw will overwrite scene depth, the primary WBOIT path captures the same completed opaque depth version in a GPU0-local texture. Source images used to recreate diffuse-plus-opacity textures have temporary CPU lifetimes. These review paths were checked in source. There were no special-case runs for switching owners, fallback, water or texture memory.
+
+Local logs are `Build/bistro-wboit-review-release.log`, `Build/bistro-wboit-review--1-smoke.log` and `Build/bistro-wboit-review-1-smoke.log`.
+
+## Shared shading and depth-only transfer (b9af2897)
 
 The Release x64 app built successfully. Both modes use the same directional light and ambient shader for transparent meshes, sample opaque scene depth, and leave the separate transparent particle motion texture disabled. The local run used `App.WBOIT.Adapter = -1`. The Exact run used `App.WBOIT.Adapter = 1`. Both used `Render.PrimaryAdapter = 0` and `App.Particles.Adapter = -1`. The local run completed ordinary frames on the RTX 5050, including the publication recorded at sequence 61.
 

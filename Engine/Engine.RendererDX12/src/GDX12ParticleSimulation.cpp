@@ -68,6 +68,15 @@ uint64_t GDX12ParticleSimulation::ConsumedBurst(uint64_t id, uint64_t revision) 
     return 0;
 }
 
+std::vector<GDX12ParticleBurstConsumption> GDX12ParticleSimulation::ConsumedBursts() const
+{
+    std::vector<GDX12ParticleBurstConsumption> bursts;
+    if (_state)
+        for (const auto& [id, pool] : _state->Pools)
+            if (pool->BurstTotal) bursts.push_back({id, pool->ResetRevision, pool->BurstTotal});
+    return bursts;
+}
+
 void GDX12ParticleSimulation::BeginFrame(GDX12DeviceResources* resources, RenderPipelineCommonData& common,
     const std::vector<uint64_t>* excluded)
 {

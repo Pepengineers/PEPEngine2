@@ -14,7 +14,7 @@ class SceneTransparency
 	SceneTransparency(GDX12DeviceResources&, RenderPipelineCommonData&);
 	~SceneTransparency();
 	Id Begin(const std::shared_ptr<QueueSubmission>&, UINT slot, uint64_t frame);
-	void ExportPrepassDepth(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture*);
+	void PrepareOpaqueDepth(Graph&, std::vector<ID3D12Resource*>&, UINT slot, GDX12Texture*);
 	void AddExchange(const Schedule&, std::vector<Executor::PacketExchange>&);
 	void Submitted(const std::vector<CompletionToken>&);
 	void Presented();
@@ -47,11 +47,14 @@ class SceneTransparency
 	std::vector<std::unique_ptr<Remote>> _remoteSlots;
 	Remote* _remote = nullptr;
 	uint64_t _frame = 0;
+	unsigned _fallbackReasons = 0;
 	struct Frame
 	{
 		GDX12WBOITTransparencyPass Draw;
 		GDX12WBOITCompositionPass Compose;
 		GDX12Texture ImportedLayer;
+		GDX12Texture LocalDepthSnapshot;
+		GDX12Texture* RasterDepth = nullptr;
 		GDX12WBOITCompositionPass Apply;
 		bool Initialized = false;
 	};

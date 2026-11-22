@@ -94,13 +94,13 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	const auto slot = c.Primary.CurrFrameConstantsIndex;
 	_executorSlot = slot;
 	const auto& submissions = _executor->Submissions();
-	const auto transparencyOwner = _lighting->Transparency().Begin(submissions, slot, _frameNumber);
 	auto skin = c.Runtime.FreezeSkeletalMeshes([&](int requested)
 	{
 		const auto owner = submissions->SelectAdapter(requested);
 		return std::make_pair(owner, &submissions->Device(owner));
 	});
 	_geometry->Freeze(slot, c.Common.ActiveCameraCBufferIndex, std::move(skin), submissions);
+	const auto transparencyOwner = _lighting->Transparency().Begin(submissions, slot, _frameNumber);
 	const auto scenes = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
 	const auto* world = scenes->GetWorld();
 	const double delta = c.Common.GameTimer ? c.Common.GameTimer->DeltaTime() : 0;
@@ -154,7 +154,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 		}
 		particles.AppendOpaque(graph, resources, *_geometry, slot);
 		// In the combined path opaque particles finish writing depth with their G-buffer draw.
-		if (!_geometry->PrepassNormals(slot)) _lighting->Transparency().ExportPrepassDepth(graph, resources, depth);
+		if (!_geometry->PrepassNormals(slot)) _lighting->Transparency().PrepareOpaqueDepth(graph, resources, slot, depth);
 		if (!earlyEnvironment)
 		{
 			_environment->Append(graph, resources);
@@ -209,7 +209,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	{
 		particles.AppendSimulation(graph, resources, ParticleInputs::Depth, depth);
 		particles.AppendOpaquePrepass(graph, resources, *_geometry, slot);
-		if (_geometry->PrepassNormals(slot)) _lighting->Transparency().ExportPrepassDepth(graph, resources, depth);
+		if (_geometry->PrepassNormals(slot)) _lighting->Transparency().PrepareOpaqueDepth(graph, resources, slot, depth);
 	};
 	const auto afterDepthNormals = [&](auto& graph, auto& resources, BistroRender::Id ready)
 	{

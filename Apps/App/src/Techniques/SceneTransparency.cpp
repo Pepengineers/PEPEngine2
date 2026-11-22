@@ -6,7 +6,6 @@ namespace BistroRender
 GDX12Texture* SceneTransparency::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, SceneGeometry& geometry,
                                         UINT slot, GDX12Texture* hdr, SceneEnvironment& environment)
 {
-	_work.Commands.clear();
 	auto& frame = _frames.at(slot);
 	if (_remote) AppendRemote(geometry, slot, frame, hdr);
 	_water.AppendDraw(graph, bindings, hdr, geometry._slots.at(slot).Dsv.CPUHandle);
@@ -25,17 +24,21 @@ GDX12Texture* SceneTransparency::AppendPhase(Graph& graph, std::vector<ID3D12Res
 	auto& constants = *_resources.FrameConstants.at(slot);
 	auto& draw = phase.Draw;
 	auto& compose = phase.Compose;
-	auto* rasterDepth = geometry.Depth(slot);
+	auto* rasterDepth = phase.RasterDepth;
 	compose.SetApplyOpaqueAerialPerspective(!_opaqueContinuation);
 	draw.Setup(&_resources, &_common);
 	if (!phase.Initialized)
 	{
 		draw.InitializeRaster(rasterDepth);
 	}
-	else if (draw.OUT_Accumulation->GetWidth() != hdr->GetWidth() ||
-	         draw.OUT_Accumulation->GetHeight() != hdr->GetHeight())
+	else
 	{
-		draw.Resize();
+		draw.IN_DepthStencil = rasterDepth;
+		if (draw.OUT_Accumulation->GetWidth() != hdr->GetWidth() ||
+		    draw.OUT_Accumulation->GetHeight() != hdr->GetHeight())
+			draw.Resize();
+		else
+			draw.UpdateReadOnlyDepth();
 	}
 	auto* accum = draw.OUT_Accumulation.get();
 	auto* reveal = draw.OUT_Revealage.get();
@@ -88,7 +91,7 @@ GDX12Texture* SceneTransparency::AppendPhase(Graph& graph, std::vector<ID3D12Res
 	                                                            _resources.SkyAerialTransmittanceSRV.GPUHandle};
 	const auto textures = _resources.SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex);
 	const auto geom = scene.Geometry;
-	const auto depth = scene.ReadDepth.CPUHandle;
+	const auto depth = draw._readOnlyDepth->CPUHandle;
 	const D3D12_VIEWPORT viewport = accum->GetViewport();
 	const D3D12_RECT rect = accum->GetScissorRect();
 	const std::array<D3D12_CPU_DESCRIPTOR_HANDLE, 2> targets{accum->GetRTV()->CPUHandle, reveal->GetRTV()->CPUHandle};

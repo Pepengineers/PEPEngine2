@@ -21,6 +21,7 @@ class SceneWater
 	void Presented(uint64_t frame, const std::vector<CompletionToken>&);
 	void AppendSimulation(Graph&, std::vector<ID3D12Resource*>&);
 	void SetSceneInputs(GDX12Texture* opaqueDepth, GDX12Texture* opaqueMotion);
+	bool DrawsDiagnosticParticles() const { return !_surface.DrawSources().empty(); }
 	void AppendDraw(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* hdr, D3D12_CPU_DESCRIPTOR_HANDLE depth);
 	GDX12Texture* Depth() const { return _depth; }
 	GDX12Texture* Motion() const { return _motion; }

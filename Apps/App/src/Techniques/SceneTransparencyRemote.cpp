@@ -29,6 +29,19 @@ struct TransparentGeometry
 	std::map<std::tuple<UINT, UINT, INT>, std::pair<UINT, INT>> Offsets;
 };
 
+bool WboitVisible(const std::array<XMVECTOR, 6>& planes, const GDX12InstanceData& instance)
+{
+	const auto center = XMVectorSetW(XMLoadFloat3(&instance.BoundingBoxCenter), 1);
+	const auto extents = XMLoadFloat3(&instance.BoundingBoxExtents);
+	for (const auto plane : planes)
+	{
+		const float distance = XMVectorGetX(XMVector4Dot(center, plane));
+		const float radius = XMVectorGetX(XMVector3Dot(extents, XMVectorAbs(plane)));
+		if (distance + radius < 0) return false;
+	}
+	return true;
+}
+
 AutoConsoleVariable<int> WboitAdapter(L"App.WBOIT.Adapter", -1, L"DXGI adapter for exact Bistro WBOIT accumulation; -1 uses GPU0.",
                                       EConsoleVariableFlags::Default, [](int index) { return index >= -1; });
 Id PacketFor(const Schedule& plan, Id operation)
@@ -122,7 +135,47 @@ struct SceneTransparency::Remote
 Id SceneTransparency::Begin(const std::shared_ptr<QueueSubmission>& submit, UINT slot, uint64_t frame)
 {
 	_frame = frame;
-	const Id owner = submit->SelectAdapter(WboitAdapter.GetValue());
+	_work.Commands.clear();
+	Id owner = submit->SelectAdapter(WboitAdapter.GetValue());
+	constexpr unsigned SkinnedTransparent = 1, InteractionFieldEmitter = 2;
+	unsigned fallback = 0;
+	if (owner)
+	{
+		const auto& constants = *_resources.FrameConstants.at(slot);
+		const auto* cmds = _resources.IndirectCommandsCache->GetCPUData();
+		const auto* instances = constants.InstanceCache->GetCPUData();
+		const auto* materials = constants.MaterialCache->GetCPUData();
+		for (UINT i = 0; i < _resources.IndirectCommandsCache->GetElementCount(); ++i)
+		{
+			if (!cmds[i].InstanceCount || !cmds[i].IndexCountPerInstance) continue;
+			const auto& instance = instances[cmds[i].InstanceID];
+			const auto& material = materials[instance.MaterialIndex];
+			if (instance.SkinOutputVertex != UINT_MAX && material.RenderLayer == UINT(MaterialType::Transparent) &&
+			    !material.ReflectionProbePreview)
+			{
+				fallback |= SkinnedTransparent;
+				break;
+			}
+		}
+		if (std::any_of(_resources.ParticleEmitters.begin(), _resources.ParticleEmitters.end(), [](const auto& emitter) {
+			    return emitter.Blend != ParticleBlend::Opaque && emitter.InteractionEnabled;
+		    }))
+			fallback |= InteractionFieldEmitter;
+		if (fallback && fallback != _fallbackReasons)
+			Log::Warning("RenderGraph", "WBOIT uses local rendering on ", submit->AdapterLabel(0),
+			    " because the remote path requires rigid transparent meshes and depth-only particle inputs",
+			    " skinnedTransparent=", bool(fallback & SkinnedTransparent), " interactionFieldEmitter=", bool(fallback & InteractionFieldEmitter));
+		if (fallback) owner = 0;
+	}
+	_fallbackReasons = fallback;
+	const Id previousOwner = _shared ? _shared->Owner : 0;
+	if (owner != previousOwner)
+	{
+		if (_shared)
+			_particles.PreserveConsumedBursts(_shared->Simulation);
+		else if (_resources.ParticleSimulation)
+			_particles.PreserveConsumedBursts(*_resources.ParticleSimulation);
+	}
 	auto& entry = _remoteSlots.at(slot);
 	if (entry)
 	{
@@ -140,11 +193,44 @@ Id SceneTransparency::Begin(const std::shared_ptr<QueueSubmission>& submit, UINT
 	_remote = entry.get();
 	return owner;
 }
-void SceneTransparency::ExportPrepassDepth(Graph& primary, std::vector<ID3D12Resource*>& bindings, GDX12Texture* depth)
+void SceneTransparency::PrepareOpaqueDepth(Graph& primary, std::vector<ID3D12Resource*>& bindings,
+    UINT slot, GDX12Texture* depth)
 {
-	if (!_remote) return;
-	auto& r = *_remote;
 	auto* source = depth->GetResource()->D3DResource.Get();
+	if (!_remote)
+	{
+		auto& frame = _frames.at(slot);
+		frame.RasterDepth = depth;
+		if (!_water.DrawsDiagnosticParticles()) return;
+
+		// The later water draw writes the shared depth. Keep the version used by remote WBOIT.
+		auto& snapshot = frame.LocalDepthSnapshot;
+		if (!snapshot.IsInitialized() || snapshot.GetWidth() != depth->GetWidth() ||
+		    snapshot.GetHeight() != depth->GetHeight())
+		{
+			GDX12TextureDesc desc;
+			desc.Width = depth->GetWidth();
+			desc.Height = depth->GetHeight();
+			desc.Format = depth->GetFormat();
+			desc.SRV_UAV_Heap = _resources.SRV_UAV_Heap.get();
+			desc.SRVDesc = depth->ShaderViewDescription();
+			desc.SRVHeapIndex = snapshot.IsInitialized() ? snapshot.GetSRV()->HeapIndex
+			    : desc.SRV_UAV_Heap->GetAvailableIndex(SceneDescriptorStart);
+			desc.ExternalResource = _resources.Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, source->GetDesc(),
+			    D3D12_RESOURCE_STATE_COMMON);
+			snapshot.Initialize(desc);
+		}
+		auto* destination = snapshot.GetResource()->D3DResource.Get();
+		const Id sourceId = NativeWork::ResourceFor(primary, bindings, source, "opaque prepass depth");
+		const Id snapshotId = NativeWork::ResourceFor(primary, bindings, destination, "local WBOIT opaque depth snapshot");
+		_work.Add(primary, "save completed opaque depth for local WBOIT",
+		    {{sourceId, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE},
+		     {snapshotId, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
+		    [source, destination](auto* cmd) { cmd->CopyResource(destination, source); });
+		frame.RasterDepth = &snapshot;
+		return;
+	}
+	auto& r = *_remote;
 	r.Early.Commands.clear();
 	r.DepthMirror.Begin();
 	r.DepthMirror.RetireUnused({source}, [](auto*){});
@@ -323,27 +409,16 @@ void SceneTransparency::AppendRemote(SceneGeometry& geometry, UINT slot, Frame& 
 	const auto* sourceInstances = constants.InstanceCache->GetCPUData();
 	const auto* sourceTransforms = constants.TransformCache->GetCPUData();
 	const auto* sourceDraws = _resources.IndirectCommandsCache->GetCPUData();
-	std::vector<GDX12IndirectDrawArgs> draws;
-	std::vector<GDX12InstanceData> instances;
-	std::vector<GDX12TransformConstants> transforms;
-	std::vector<GDX12MaterialConstants> drawMaterials;
-	std::unordered_set<UINT> indices;
+	std::vector<GDX12IndirectDrawArgs> meshSources;
 	for (UINT i = 0; i < _resources.IndirectCommandsCache->GetElementCount(); ++i)
 	{
-		auto draw = sourceDraws[i];
+		const auto& draw = sourceDraws[i];
 		if (!draw.InstanceCount || !draw.IndexCountPerInstance) continue;
-		auto instance = sourceInstances[draw.InstanceID];
+		const auto& instance = sourceInstances[draw.InstanceID];
 		const auto& material = materials.GetCPUData()[instance.MaterialIndex];
-		if (material.RenderLayer != UINT(MaterialType::Transparent) || material.ReflectionProbePreview) continue;
-		indices.insert(material.DiffuseIndex);
-		draw.InstanceID = UINT(instances.size());
-		transforms.push_back(sourceTransforms[instance.TransformIndex]);
-		drawMaterials.push_back(material);
-		instance.TransformIndex = instance.MaterialIndex = draw.InstanceID;
-		draws.push_back(draw);
-		instances.push_back(instance);
+		if (material.RenderLayer == UINT(MaterialType::Transparent) && !material.ReflectionProbePreview)
+			meshSources.push_back(draw);
 	}
-	r.TransparentDraws = mesh.Draws = UINT(draws.size());
 	r.GeometryBytes = 0;
 	r.GeometryUploads = {};
 	const auto& geometryBuffer = *_resources.GeometryBuffer;
@@ -352,10 +427,10 @@ void SceneTransparency::AppendRemote(SceneGeometry& geometry, UINT slot, Frame& 
 	const auto key = [](const auto& draw) {
 		return std::make_tuple(draw.StartIndexLocation, draw.IndexCountPerInstance, draw.BaseVertexLocation);
 	};
-	if (!draws.empty())
+	if (!meshSources.empty())
 	{
 		if (!resident || r.SharedInputs->MeshRevision != revision ||
-		    std::any_of(draws.begin(), draws.end(), [&](const auto& draw) { return resident->Offsets.find(key(draw)) == resident->Offsets.end(); }))
+		    std::any_of(meshSources.begin(), meshSources.end(), [&](const auto& draw) { return resident->Offsets.find(key(draw)) == resident->Offsets.end(); }))
 		{
 			auto updated = std::make_shared<TransparentGeometry>();
 			auto& binding = updated->Binding;
@@ -363,7 +438,7 @@ void SceneTransparency::AppendRemote(SceneGeometry& geometry, UINT slot, Frame& 
 			const auto& sourceIndices = geometryBuffer.CPUIndices();
 			std::vector<Vertex> vertices;
 			std::vector<uint32_t> indexData;
-			for (const auto& draw : draws)
+			for (const auto& draw : meshSources)
 			{
 				if (!updated->Offsets.try_emplace(key(draw), UINT(indexData.size()), INT(vertices.size())).second) continue;
 				const size_t indexEnd = size_t(draw.StartIndexLocation) + draw.IndexCountPerInstance;
@@ -405,13 +480,38 @@ void SceneTransparency::AppendRemote(SceneGeometry& geometry, UINT slot, Frame& 
 			r.SharedInputs->MeshRevision = revision;
 		}
 		r.Geometry = resident;
+	}
+	else r.Geometry.reset();
+
+	// ViewProj is stored transposed for HLSL. Its CPU rows are the columns used in Culling.hlsl.
+	const auto m = XMLoadFloat4x4(&camera.ViewProj);
+	const std::array<XMVECTOR, 6> planes{m.r[3] + m.r[0], m.r[3] - m.r[0], m.r[3] + m.r[1],
+	    m.r[3] - m.r[1], m.r[2], m.r[3] - m.r[2]};
+	std::vector<GDX12IndirectDrawArgs> draws;
+	std::vector<GDX12InstanceData> instances;
+	std::vector<GDX12TransformConstants> transforms;
+	std::vector<GDX12MaterialConstants> drawMaterials;
+	std::unordered_set<UINT> indices;
+	for (auto draw : meshSources)
+	{
+		auto instance = sourceInstances[draw.InstanceID];
+		if (!WboitVisible(planes, instance)) continue;
+		const auto& material = materials.GetCPUData()[instance.MaterialIndex];
+		indices.insert(material.DiffuseIndex);
+		draw.InstanceID = UINT(instances.size());
+		transforms.push_back(sourceTransforms[instance.TransformIndex]);
+		drawMaterials.push_back(material);
+		instance.TransformIndex = instance.MaterialIndex = draw.InstanceID;
+		const auto& [index, vertex] = r.Geometry->Offsets.at(key(draw));
+		draw.StartIndexLocation = index;
+		draw.BaseVertexLocation = vertex;
+		draws.push_back(draw);
+		instances.push_back(instance);
+	}
+	r.TransparentDraws = mesh.Draws = UINT(draws.size());
+	if (mesh.Draws)
+	{
 		mesh.Geometry = r.Geometry->Binding;
-		for (auto& draw : draws)
-		{
-			const auto& [index, vertex] = r.Geometry->Offsets.at(key(draw));
-			draw.StartIndexLocation = index;
-			draw.BaseVertexLocation = vertex;
-		}
 		structured(0, drawMaterials);
 		structured(1, transforms);
 		structured(2, instances);
@@ -419,7 +519,6 @@ void SceneTransparency::AppendRemote(SceneGeometry& geometry, UINT slot, Frame& 
 		addRead(mesh.Geometry.VertexResource, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 		addRead(mesh.Geometry.IndexResource, D3D12_RESOURCE_STATE_INDEX_BUFFER);
 	}
-	else r.Geometry.reset();
 
 	auto& assetResources = r.SharedInputs->SimulationResources;
 	const auto asset = [&](GDX12Texture& texture) {

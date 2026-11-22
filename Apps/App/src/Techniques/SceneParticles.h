@@ -17,6 +17,7 @@ public:
     static int SecondaryAdapter();
     void BeginSimulation(GDX12ParticleInteractionField, GDX12Texture* depth, Executor&, Id device, float worldRate, bool ownerDraw);
     Id ExecutionDevice() const;
+    void PreserveConsumedBursts(const GDX12ParticleSimulation&);
     void PauseIndependentClock();
     void AddExchanges(const Schedule&, std::vector<PacketWait>&, std::vector<Executor::PacketExchange>&);
     void Submitted(const std::vector<CompletionToken>&);
@@ -94,6 +95,7 @@ private:
     std::vector<uint64_t> _remoteVersions;
     UINT _firstRemote = 0;
     std::vector<uint64_t> _visibleSources;
+    std::unordered_map<uint64_t, GDX12ParticleBurstConsumption> _consumedBursts;
     std::vector<Access> _drawReads;
     GDX12Texture *_accum = nullptr, *_reveal = nullptr;
     UINT _width = 0, _height = 0;
