@@ -55,6 +55,7 @@ class LindenSimulation
 	uint64_t DisplayRevision() const { return _pendingRevision; }
 
   private:
+	friend class SceneGeometry;
 	struct Resident
 	{
 		std::shared_ptr<const LindenMesh> Mesh;

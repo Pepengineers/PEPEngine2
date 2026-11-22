@@ -61,6 +61,7 @@ class SceneGrass
 	                        D3D12_GPU_DESCRIPTOR_HANDLE localLights, const MirrorVegetationBuffer&);
 
   private:
+	friend class SceneGeometry;
 	struct RemoteWind;
 	void RetireRemoteWind(Executor&);
 	static void AppendWindJobs(GDX12GrassRenderer&, Graph&, std::vector<ID3D12Resource*>&, NativeWork&, bool remote);

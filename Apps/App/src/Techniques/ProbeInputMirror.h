@@ -2,12 +2,14 @@
 
 #include "Graph/QueueSubmission.h"
 #include "NativeWork.h"
+#include <cassert>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace BistroRender
 {
-// One cache per owner. Before reusing the shared range, GPU0 must wait for the
-// preceding remote import. Keep the cache alive through both executors' work.
+// Begin and retirement run after the prior owner work completes, including its
+// import wait for GPU0's export.
 class ProbeInputMirror
 {
   public:
@@ -20,14 +22,20 @@ class ProbeInputMirror
         _sealed = false;
     }
 
-    // Retire both graphs before resetting the source identities or either endpoint.
-    void Reset()
+    void RetireUnused(const std::unordered_set<ID3D12Resource*>& live,
+                      const std::function<void(ID3D12Resource*)>& forgetLocalViews)
     {
-        Begin();
-        _mirrors.clear();
-        _transfer = {};
-        _retainedTransfers.clear();
-        _capacity = 0;
+        assert(_pending.empty());
+        for (auto entry = _mirrors.begin(); entry != _mirrors.end();)
+        {
+            if (live.count(entry->first))
+            {
+                ++entry;
+                continue;
+            }
+            forgetLocalViews(entry->second.Local.Get());
+            entry = _mirrors.erase(entry);
+        }
     }
 
     ID3D12Resource* Mirror(Graph& primary, std::vector<ID3D12Resource*>& bindings, ID3D12Resource* source,
@@ -42,16 +50,19 @@ class ProbeInputMirror
             try { Initialize(mirror, source); }
             catch (...) { _mirrors.erase(entry); throw; }
         }
-        if ((refresh || !mirror.Initialized) && !_pending.count(&mirror))
+        if ((refresh || !mirror.Initialized) && !_pending.count(source))
         {
             const UINT64 offset = Align(_bytes);
             if (offset > UINT64_MAX - mirror.Bytes)
                 throw std::overflow_error("Probe input transfer exceeds buffer size range");
-            _pending.emplace(&mirror, Pending{primaryResource, offset});
+            _pending.emplace(source, Pending{primaryResource, offset});
             _bytes = offset + mirror.Bytes;
         }
         return mirror.Local.Get();
     }
+
+    bool Contains(ID3D12Resource* source) const { return _mirrors.count(source) != 0; }
+    bool PendingCopy(ID3D12Resource* source) const { return _pending.count(source) != 0; }
 
     Id AppendExport(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work, Queue queue = Queue::Copy)
     {
@@ -151,9 +162,8 @@ class ProbeInputMirror
         if (_pending.empty()) return Invalid;
         if (_bytes > _capacity)
         {
-            auto transfer = _submit.CreateTransferBuffer(_remote, _bytes);
-            if (_transfer.Resources[0]) _retainedTransfers.push_back(std::move(_transfer));
-            _transfer = std::move(transfer);
+            auto replacement = _submit.CreateTransferBuffer(_remote, _bytes);
+            std::swap(_transfer, replacement);
             _capacity = _bytes;
         }
         auto* shared = _transfer.Resources[importing ? 1 : 0].Get();
@@ -168,9 +178,9 @@ class ProbeInputMirror
             UINT64 Offset;
         };
         std::vector<Copy> copies;
-        for (const auto& [entry, item] : _pending)
+        for (const auto& [source, item] : _pending)
         {
-            auto& mirror = *entry;
+            auto& mirror = _mirrors.at(source);
             auto* resource = importing ? mirror.Local.Get() : mirror.Source.Get();
             const Id id = importing ? NativeWork::ResourceFor(graph, bindings, resource, "probe owner-local input") : item.Source;
             const Resource& declaration = graph.Resources.at(id);
@@ -205,9 +215,8 @@ class ProbeInputMirror
     QueueSubmission& _submit;
     Id _remote;
     std::unordered_map<ID3D12Resource*, Image> _mirrors;
-    std::unordered_map<Image*, Pending> _pending;
+    std::unordered_map<ID3D12Resource*, Pending> _pending;
     QueueSubmission::TransferBuffer _transfer;
-    std::vector<QueueSubmission::TransferBuffer> _retainedTransfers;
     UINT64 _capacity = 0;
     UINT64 _bytes = 0;
     bool _sealed = false;

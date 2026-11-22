@@ -56,6 +56,8 @@ namespace BistroGrass
         L"Near LOD distance in cm, 1..1000000; far-card and cull distances are 2x and 4x",
         EConsoleVariableFlags::Default, [](float value) { return value >= 1 && value <= 1000000; });
     inline AutoConsoleVariable<bool> CastShadows(L"App.Grass.CastShadows", true, L"Grass casts directional and local shadows");
+    inline AutoConsoleVariable<bool> CaptureReflections(L"App.Grass.CaptureReflections", false,
+        L"Include Bistro grass in reflection probe captures");
 
     inline AutoConsoleVariable<bool> WindEnabled(L"App.Grass.Wind.Enabled", true, L"Enable wind for Bistro grass and the plaza linden");
     inline AutoConsoleVariable<WindAlgorithm> Algorithm(L"App.Grass.Wind.Algorithm", WindAlgorithm::Analytic,
@@ -107,7 +109,7 @@ namespace BistroGrass
         {
             return std::tie(Grass.Implementation, Grass.ExtentsCm, Grass.DensityPerSquareMetre, Grass.MaxBlades,
                 Grass.Segments, Grass.Seed, Grass.HeightCm, Grass.HeightVariation, Grass.WidthCm, Grass.BendSeconds,
-                Grass.MaxBendCm, Grass.LodDistanceCm, Grass.CastShadows);
+                Grass.MaxBendCm, Grass.LodDistanceCm, Grass.CastShadows, Grass.CaptureReflections);
         }
         auto WindKey() const
         {
@@ -158,7 +160,7 @@ namespace BistroGrass
         grass.FarCardDistanceCm = grass.LodDistanceCm * 2;
         grass.MaxDistanceCm = grass.LodDistanceCm * 4;
         grass.CastShadows = CastShadows.GetValue();
-        grass.CaptureReflections = false;
+        grass.CaptureReflections = CaptureReflections.GetValue();
         controls.WindEnabled = WindEnabled.GetValue();
         BoundingBox worldBounds;
         GrassLocalBounds(grass).Transform(worldBounds, Matrix::CreateRotationY(XMConvertToRadians(BistroArch::YawDegrees)));

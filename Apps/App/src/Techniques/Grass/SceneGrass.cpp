@@ -8,6 +8,7 @@
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
 #include <algorithm>
+#include <cassert>
 #include <set>
 
 namespace BistroRender
@@ -762,7 +763,7 @@ void SceneGrass::Append(Graph& g, UINT slot, std::vector<ID3D12Resource*>& all, 
 		recorded.Built.resize(gpu.PatchCount());
 		for (UINT patch = 0; patch < gpu.PatchCount(); ++patch)
 		{
-			gpu.PrepareView(targets.front().View, patch, &materials, false);
+			gpu.PrepareView(targets.front().View, patch, materials, false);
 			const auto* output = gpu.FindOutput(targets.front().View, patch);
 			if (!output)
 			{
@@ -837,7 +838,7 @@ void SceneGrass::Append(Graph& g, UINT slot, std::vector<ID3D12Resource*>& all, 
 					continue;
 				}
 			}
-			gpu.PrepareView(target.View, patch, &materials, false);
+			gpu.PrepareView(target.View, patch, materials, false);
 			const auto* output = gpu.FindOutput(target.View, patch);
 			if (!output)
 			{
@@ -1033,6 +1034,7 @@ void SceneGrass::AppendProbeCapture(Graph& graph, std::vector<ID3D12Resource*>& 
 	if (!gpu.PatchCount() || target.View.Filter == GDX12GeometryFilter::Static) return;
 	auto& owner = capture.GPU;
 	auto* descriptors = capture.Owner.SRV_UAV_Heap.get();
+	assert(materials._heap == descriptors);
 	const auto access = [&](auto& buffer, Mode mode, State state) {
 		return Access{NativeWork::ResourceFor(graph, bindings, buffer.GetResource().D3DResource.Get(),
 		                                      "probe grass scratch"), mode, state};
@@ -1045,10 +1047,10 @@ void SceneGrass::AppendProbeCapture(Graph& graph, std::vector<ID3D12Resource*>& 
 	for (UINT patch = 0; patch < gpu.PatchCount(); ++patch)
 	{
 		if (!LocalShadowFaceIntersects(clip, built.at(patch).Bounds)) continue;
-		gpu.PrepareView(target.View, patch, nullptr, false);
-		const auto* view = gpu.FindOutput(target.View, patch);
+		const auto view = gpu.PrepareViewInputs(target.View, patch, false);
 		if (!view) continue;
-		if (!capture.Root)
+		const bool firstCapture = !capture.Root;
+		if (firstCapture)
 		{
 			owner.InitializeGraphics(true);
 			CreateGrassGeometry(capture.Owner.Device, capture.Root, capture.Clear, capture.Cull);
@@ -1117,6 +1119,9 @@ void SceneGrass::AppendProbeCapture(Graph& graph, std::vector<ID3D12Resource*>& 
 		work.Add(graph, "probe owner grass HDR capture", std::move(draws), [=](auto* cmd) {
 			RecordGrassView(cmd, binding, target, indexView, signature.Get(), argumentBuffer);
 		});
+		if (firstCapture)
+			Log::Info("RenderGraph", "Queued remote reflection grass capture owner=", graph.Device,
+			          " view=", target.View.Key, " patch=", patch);
 	}
 }
 

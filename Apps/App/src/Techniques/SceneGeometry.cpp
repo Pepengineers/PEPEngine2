@@ -774,6 +774,38 @@ void SceneGeometry::AppendVegetationView(Graph& graph, std::vector<ID3D12Resourc
 	}
 }
 
+std::unordered_set<ID3D12Resource*> SceneGeometry::LiveProbeInputs() const
+{
+	const auto geometry = _resources.GeometryBuffer->FreezeRecordingBinding();
+	std::unordered_set<ID3D12Resource*> live{geometry.VertexResource, geometry.IndexResource,
+	                                       _emptyVertices.Get(), _emptyIndices.Get()};
+	const auto addBuffer = [&](const auto& buffer) {
+		if (buffer) live.insert(buffer->GetResource().D3DResource.Get());
+	};
+	for (const auto& slot : _slots)
+		for (UINT i = 0; i < 4; ++i)
+			live.insert(slot.Buffers[i].Data.Get());
+	for (const auto& frame : _grass->_frames)
+		for (const auto& patch : frame.Built)
+			addBuffer(patch.Vertices);
+	for (const auto& [id, grass] : _grass->_gpu->_grass)
+		for (const auto& roots : grass.Roots)
+			addBuffer(roots);
+	for (const auto& frame : _grass->_gpu->_frames)
+		for (const auto& parameters : frame.DrawParameters)
+			addBuffer(parameters);
+	if (const auto& linden = _lindenSimulation._resident)
+		for (const auto& pose : linden->Poses)
+			addBuffer(pose);
+	return live;
+}
+
+void SceneGeometry::RemoteProbeVegetation::Forget(ID3D12Resource* retired)
+{
+	for (auto view = Views.lower_bound({retired, 0}); view != Views.end() && view->first.first == retired;)
+		view = Views.erase(view);
+}
+
 void SceneGeometry::AppendVegetationView(Graph& primary, std::vector<ID3D12Resource*>& primaryBindings,
                                          ProbeInputMirror& inputs, Graph& remote,
                                          std::vector<ID3D12Resource*>& remoteBindings, NativeWork& work,

@@ -9,6 +9,7 @@
 #include "NativeWork.h"
 #include <array>
 #include <map>
+#include <unordered_set>
 
 namespace BistroRender
 {
@@ -27,10 +28,12 @@ class SceneGeometry
 	SceneGrass& Grass() { return *_grass; }
 	std::vector<GDX12RenderPrimitive> VegetationPrimitives() const;
 	void AppendVegetationView(Graph&, std::vector<ID3D12Resource*>&, UINT slot, const GeometryTarget&);
+	std::unordered_set<ID3D12Resource*> LiveProbeInputs() const;
 	class RemoteProbeVegetation
 	{
 	  public:
 		explicit RemoteProbeVegetation(GDX12DeviceResources& owner) : Grass(owner) {}
+		void Forget(ID3D12Resource*);
 
 	  private:
 		friend class SceneGeometry;

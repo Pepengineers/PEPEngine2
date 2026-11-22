@@ -262,6 +262,24 @@ void GDX12ReflectionProbePass::SelectProbe(UINT probe)
 
 void GDX12ReflectionProbePass::CreateCaptureTextures(UINT resolution)
 {
+    for (auto& probe : _probes)
+    {
+        if (probe.OwnsCapture || !probe.Raw) continue;
+        _resources->Device->GetCommandQueue()->Flush();
+        _statistics.TextureBytes -= AllocationBytes(_resources->Device, probe.Raw.get()) +
+            AllocationBytes(_resources->Device, probe.BakedColor.get()) + AllocationBytes(_resources->Device, probe.BakedDepth.get());
+        probe.RawRTVs.clear();
+        probe.RawMipSRVs.clear();
+        probe.BakedRTVs.clear();
+        probe.BakedDSVs.clear();
+        probe.Raw.reset();
+        probe.BakedColor.reset();
+        probe.BakedDepth.reset();
+        probe.CapturedFaces = probe.BakedFaces = probe.NextFace = 0;
+        probe.RebakePending = false;
+    }
+    if (!resolution) return;
+
     const UINT sunSize = (std::max)(1u, _resources->ShadowQuality.SunResolution / 2);
     if (!_sunShadow.IsInitialized() || _sunShadow.GetWidth() != sunSize)
     {
@@ -294,12 +312,13 @@ void GDX12ReflectionProbePass::CreateCaptureTextures(UINT resolution)
     }
     for (auto& probe : _probes)
     {
-        if (probe.Raw && probe.Raw->IsInitialized() && probe.Raw->GetWidth() == resolution) continue;
+        if (!probe.OwnsCapture || (probe.Raw && probe.Raw->IsInitialized() && probe.Raw->GetWidth() == resolution)) continue;
         _resources->Device->GetCommandQueue()->Flush();
         if (!probe.Raw) probe.Raw = std::make_unique<GDX12Texture>();
         CreateTexture(*probe.Raw, resolution, 6, captureMips, D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET, false);
         CreateFaceViews(*probe.Raw, probe.RawRTVs, false);
-        probe.CapturedFaces = 0;
+        probe.CapturedFaces = probe.NextFace = 0;
+        _scheduler.Reset();
         probe.RawMipSRVs.clear();
         for (UINT mip = 0; mip < captureMips; ++mip)
         {
@@ -355,8 +374,15 @@ void GDX12ReflectionProbePass::Prepare()
     const auto settings = _externalSettings ? *_externalSettings : GetReflectionSettings();
     if (!settings.Enabled || _resources->ReflectionProbes.empty())
     {
-        if (_resources->ReflectionProbes.empty())
-            for (auto& probe : _probes) { probe.Ready = false; probe.LastUpdate = 0; }
+        if (_resources->ReflectionProbes.empty() && !_probes.empty())
+        {
+            for (auto& probe : _probes)
+            {
+                probe.Ready = probe.OwnsCapture = false;
+                probe.LastUpdate = 0;
+            }
+            CreateCaptureTextures(0);
+        }
         if (_enabled) { _commonData->ResetHistory = true; ++_commonData->HistoryRevision; }
         _enabled = false;
         _scheduler.Reset();
@@ -397,7 +423,8 @@ void GDX12ReflectionProbePass::Prepare()
         _environmentRevision != _resources->ReflectionEnvironmentRevision;
     const bool staticGeometryChanged = _staticGeometryRevision != _resources->ReflectionStaticGeometryRevision;
     const bool shadowQualityChanged = !(_shadowQuality == _resources->ShadowQuality);
-    for (size_t i = 0; i < submitted.size(); ++i)
+    UINT maximumCaptureResolution = 0;
+    for (UINT i = 0; i < submitted.size(); ++i)
     {
         auto& probe = _probes[i];
         if (!SameReflectionCapture(probe.Source, submitted[i]) || shadowQualityChanged)
@@ -422,6 +449,8 @@ void GDX12ReflectionProbePass::Prepare()
             else { probe.BakedFaces = 0; probe.LastUpdate = 0; }
         }
         probe.Source = submitted[i];
+        probe.OwnsCapture = !_ownsCapture || _ownsCapture(i);
+        if (probe.OwnsCapture) maximumCaptureResolution = (std::max)(maximumCaptureResolution, probe.Source.Resolution);
     }
     _staticRevision = _resources->ReflectionStaticRevision;
     _staticGeometryRevision = _resources->ReflectionStaticGeometryRevision;
@@ -430,6 +459,7 @@ void GDX12ReflectionProbePass::Prepare()
     if (!_enabled || _settings.Scheduled != settings.Scheduled) _scheduler.Reset();
     _settings = settings;
     _enabled = true;
+    CreateCaptureTextures(maximumCaptureResolution);
     std::vector<GDX12ReflectionSchedule::Work> work(_probes.size());
     if (settings.Scheduled)
     {
@@ -437,18 +467,21 @@ void GDX12ReflectionProbePass::Prepare()
         std::vector<GDX12ReflectionSchedule::Probe> schedule;
         for (const auto& state : _probes)
         {
+            if (!state.OwnsCapture) continue;
             const auto& probe = state.Source;
             schedule.push_back({probe.Id, GDX12ReflectionSchedule::DistanceToBox({camera.x,camera.y,camera.z},
                 {probe.BoxMin.x,probe.BoxMin.y,probe.BoxMin.z}, {probe.BoxMax.x,probe.BoxMax.y,probe.BoxMax.z})});
         }
-        work = _scheduler.Select(schedule, settings.Policy);
+        const auto scheduled = _scheduler.Select(schedule, settings.Policy);
+        for (size_t i = 0, owned = 0; i < _probes.size(); ++i)
+            if (_probes[i].OwnsCapture) work[i] = scheduled[owned++];
     }
     else
     {
         for (size_t visited = 0; visited < _probes.size(); ++visited)
         {
             auto& probe = _probes[_roundRobinProbe];
-            if ((!_captureAllowed || _captureAllowed(_roundRobinProbe)) &&
+            if (probe.OwnsCapture && (!_captureAllowed || _captureAllowed(_roundRobinProbe)) &&
                 (!probe.Ready || probe.CapturedFaces || !probe.LastUpdate ||
                  (probe.Source.Implementation != 2 && _frameNumber - probe.LastUpdate >= probe.Source.UpdateInterval)))
             {
@@ -462,11 +495,15 @@ void GDX12ReflectionProbePass::Prepare()
     }
     // Scheduled priority may select an already frozen probe; only an explicit invalidation reopens it.
     for (UINT index = 0; index < _probes.size(); ++index)
-        if ((_captureAllowed && !_captureAllowed(index)) ||
+        if (!_probes[index].OwnsCapture || (_captureAllowed && !_captureAllowed(index)) ||
             (_probes[index].Source.Implementation == 2 && _probes[index].Ready &&
              _probes[index].LastUpdate && !_probes[index].CapturedFaces))
             work[index].Faces = 0;
-    CreateCaptureTextures(maximumResolution);
+    if (std::none_of(work.begin(), work.end(), [](const auto& item) { return item.Faces != 0; }))
+    {
+        _planPrepared = true;
+        return;
+    }
     _views.resize(_probes.size() * 14);
     auto& frame = _frames[_resources->CurrFrameConstantsIndex];
     const bool sunShadow = (_resources->Lighting.SunShadowFlags & 1u) != 0;
@@ -476,6 +513,7 @@ void GDX12ReflectionProbePass::Prepare()
     {
         auto& state = _probes[index];
         if (!work[index].Faces) continue;
+        assert(state.OwnsCapture && state.Raw);
         SelectProbe(index);
         for (UINT face = 0; face < 6; ++face)
         {
@@ -560,6 +598,8 @@ void GDX12ReflectionProbePass::ClearDenendencies()
     GDX12RenderPass::ClearDenendencies();
     _externalStaticShadows = _externalDynamicShadows = nullptr;
     _externalSettings = nullptr;
+    _ownsCapture = {};
+    _captureAllowed = {};
     _frames.clear();
     _probes.clear();
     _views.clear();

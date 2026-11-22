@@ -15,7 +15,7 @@ class GDX12CommandList;
 class GDX12DeviceResources;
 class RenderPipelineCommonData;
 class GDX12Texture;
-namespace BistroRender { class SceneGrass; }
+namespace BistroRender { class SceneGeometry; class SceneGrass; }
 
 // Owned by Bistro. Simulation may use COMPUTE; expansion and draw use DIRECT.
 class GDX12GrassRenderer
@@ -31,12 +31,13 @@ public:
         const std::vector<BistroInteractionSource>& sources = {}, float deltaSeconds = 0, uint64_t independentWind = 0,
         GDX12GrassRenderer* windDevice = nullptr, uint64_t responseWind = 0);
     GDX12ParticleInteractionField InteractionField() const;
-    void PrepareView(const GDX12GeometryContext& view, UINT patch, GDX12Descriptor* materialOverride = nullptr, bool cullPatch = true);
+    void PrepareView(const GDX12GeometryContext& view, UINT patch, const GDX12Descriptor& materials, bool cullPatch = true);
     UINT PatchCount() const { return static_cast<UINT>(_drawOrder.size()); }
     void PublishPrimitives(GDX12RenderPrimitiveRegistry&, const IRenderGeometrySource*);
     void RemovePrimitives(GDX12RenderPrimitiveRegistry&);
 
 private:
+    friend class BistroRender::SceneGeometry;
     friend class BistroRender::SceneGrass;
     struct Vertex
     {
@@ -156,6 +157,7 @@ private:
         FieldBuffer* input, FieldBuffer* pressure, FieldBuffer* output);
     void RetireWind(WindState& state);
     Frame& CurrentFrame();
+    std::unique_ptr<Output> PrepareViewInputs(const GDX12GeometryContext&, UINT patch, bool cullPatch);
     Output* FindOutput(const GDX12GeometryContext&, UINT patch) const;
     static Stage RenderStage(GDX12GeometryStage);
 

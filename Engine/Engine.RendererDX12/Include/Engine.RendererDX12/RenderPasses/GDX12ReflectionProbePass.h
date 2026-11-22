@@ -38,6 +38,7 @@ private:
         UINT BakedFaces = 0;
         uint64_t LastUpdate = 0;
         bool Ready = false;
+        bool OwnsCapture = false;
         UINT CapturedFaces = 0, NextFace = 0;
         bool RebakePending = false;
         std::unique_ptr<GDX12Texture> Raw;
@@ -80,6 +81,7 @@ private:
     GDX12Texture* _externalStaticShadows = nullptr;
     GDX12Texture* _externalDynamicShadows = nullptr;
     const GDX12ReflectionSettings* _externalSettings = nullptr;
+    std::function<bool(UINT)> _ownsCapture;
     std::function<bool(UINT)> _captureAllowed;
     GDX12Texture _published, _filtered, _depth, _sunShadow;
     bool _sunShadowNeedsClear = true;
