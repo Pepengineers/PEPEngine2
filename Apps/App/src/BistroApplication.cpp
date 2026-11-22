@@ -219,7 +219,7 @@ class BistroApplication final : public App
 		_bistroBounds->UpdateEmitters(world);
 		BistroParticles::Update(world);
 		InitializeCamera(world);
-		_benchmark.Initialize(world, _bistroCharacters);
+		_benchmark.Initialize(world, _bistroCharacters, *_bistroPipeline);
 		Engine::UI::EnableApplicationUIInput();
 		Engine::UI::SetDebugReconstructionStatusVisible(false);
 		IndirectCommandBuildSystem commands;
@@ -323,7 +323,7 @@ class BistroApplication final : public App
 	Entity _skyEntity = InvalidEntity;
 	double _sunCyclePhase = 0;
 	BistroGrass::Scene _bistroGrass;
-	BistroCharacters::Scene _bistroCharacters;
+	BistroCharacters::Scene _bistroCharacters{20261122};
 	BistroWater::Scene _bistroWater;
 	BistroReflections::Scene _bistroReflections{1, true};
 	BistroBenchmark _benchmark;

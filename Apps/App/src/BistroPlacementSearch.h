@@ -97,10 +97,9 @@ struct Result
     Config Settings;
     Size Output{}, Render{};
     double Fps = 0, P95 = 0, ThresholdFps = 0;
-    bool Valid = false, Remote = false, CheckedAllWindows = false;
+    bool Valid = false, Remote = false;
     std::array<bool, std::size(Techniques)> Activity{};
     std::string SourceCsv;
-    std::set<std::string> Execution;
 };
 
 struct Trial
@@ -158,7 +157,8 @@ public:
         _windAlgorithm = console.FindConsoleVariable(L"App.Grass.Wind.Algorithm").GetString();
         _preferredProvider = console.FindConsoleVariable(L"Render.Upscaler.Provider").GetInt();
         _preferredPreset = console.FindConsoleVariable(L"Render.Upscaler.Quality").GetInt();
-        csv.Config("Upscaled.NIS.Reason", "Streamline NIS evaluation can fail after recording begins; no safe in-flight fallback");
+        csv.Config("Upscaled.NIS.AutomaticSearchStatus", "unsupported by the benchmark runner");
+        csv.Config("Upscaled.NIS.Reason", "The runner cannot recover an in-flight Streamline evaluation failure; adapter support was not assessed");
         _placements.assign(std::begin(Placements), std::end(Placements));
         if (console.FindConsoleVariable(L"App.ReflectionProbes.Count").GetInt() > 0)
             _placements.push_back({L"App.ReflectionProbes.FirstAdapter", "Probe 0"});
@@ -247,7 +247,7 @@ public:
     Trial Calibration()
     {
         auto settings = _high;
-        if (const auto* reference = BestReference(false)) settings = reference->Settings;
+        if (const auto* reference = BestReference(false)) settings = FullComposition(reference->Settings);
         if (_remote) settings.Owners[Post] = _adapters.front();
         return Make(settings, "native route checkpoints", true);
     }
@@ -265,17 +265,17 @@ public:
         {
             if (const auto* reference = BestReference(Upscaled()))
             {
-                Seed(reference->Settings);
-                auto next = reference->Settings;
+                auto next = FullComposition(reference->Settings);
+                Seed(next);
                 if (next.Resolution + 1 < _sizes.size())
                 {
                     ++next.Resolution;
                     Seed(next, true);
                 }
                 const auto closest = ClosestReference(Upscaled());
-                if (closest != reference && closest) Seed(closest->Settings, true);
+                if (closest != reference && closest) Seed(FullComposition(closest->Settings), true);
                 const auto detail = DetailedReference(Upscaled());
-                if (detail && detail != reference && detail != closest) Seed(detail->Settings, true);
+                if (detail && detail != reference && detail != closest) Seed(FullComposition(detail->Settings), true);
             }
         }
         Config seed = _high;
@@ -319,7 +319,7 @@ public:
         return trial;
     }
 
-    std::optional<Trial> NextFinal()
+    const Result* Finalist() const
     {
         const auto* incumbent = Best(Upscaled());
         const Result* best = nullptr;
@@ -327,21 +327,24 @@ public:
         {
             if ((RemotePhase() && !result.Remote) || _fullSettings.count(candidate)) continue;
             const bool dominated = std::any_of(_short.begin(), _short.end(), [&](const auto& other)
-                { return Dominates(other.second, result); });
+                { return !_fullSettings.count(other.first) && Dominates(other.second, result); });
             if (dominated && result.Fps >= Threshold[_profile]) continue;
             if (!best || Better(result, *best)) best = &result;
         }
-        bool detailed = false;
-        if ((!incumbent || incumbent->Fps < Threshold[_profile]) && best && best->Fps < Threshold[_profile])
+        if ((!incumbent || incumbent->Fps < Threshold[_profile]) && _triedClosest &&
+            (!best || best->Fps < Threshold[_profile]))
         {
             const auto& detail = _detail[Upscaled()];
-            detailed = _triedClosest && detail && !_fullSettings.count(detail->Settings);
-            if (detailed) best = &*detail;
-            _triedClosest = true;
+            if (detail && !_fullSettings.count(detail->Settings)) return &*detail;
         }
-        if (best && (detailed || !incumbent || Better(*best, *incumbent) || best->Fps >= Threshold[_profile] * .96))
-            return Make(best->Settings, "finalist of trial " + std::to_string(best->Id), true);
-        return {};
+        return best && (!incumbent || Better(*best, *incumbent) || best->Fps >= Threshold[_profile] * .96)
+            ? best : nullptr;
+    }
+
+    Trial Confirm(const Result& result)
+    {
+        if (result.Fps < Threshold[_profile]) _triedClosest = true;
+        return Make(result.Settings, "finalist of trial " + std::to_string(result.Id), true);
     }
 
     void Record(const Trial& trial, const Result& result, BistroBenchmarkData::Csv& csv, bool outputUnavailable)
@@ -367,14 +370,6 @@ public:
             }
             return;
         }
-        if (result.CheckedAllWindows)
-            for (const auto& [config, previous] : _short)
-                if (previous.CheckedAllWindows && SameImage(previous, result) &&
-                    config.RemoteAOFilter == result.Settings.RemoteAOFilter && previous.Execution == result.Execution)
-                {
-                    csv.Config("Trial." + std::to_string(result.Id) + ".EquivalentTrial", std::to_string(previous.Id));
-                    return;
-                }
         _short.emplace(trial.Settings, result);
         auto& probe = _nearest[Upscaled()];
         if (!probe || Better(result, *probe)) probe = result;
@@ -390,11 +385,12 @@ public:
         for (bool upscaled : {false, true})
         {
             const auto prefix = std::string(upscaled ? "Upscaled." : "Native.") + ProfileName[_profile] + ".";
-            ReportResult(csv, prefix, Best(upscaled));
+            const auto* remote = Best(upscaled);
+            const auto* reference = _remote ? BestReference(upscaled) : nullptr;
+            const auto* best = remote && (!reference || Better(*remote, *reference)) ? remote : reference;
+            ReportResult(csv, prefix, best);
             if (_remote)
             {
-                const auto* reference = BestReference(upscaled);
-                const auto* remote = Best(upscaled);
                 ReportResult(csv, prefix + "SingleGPU.", reference);
                 ReportResult(csv, prefix + "MultiGPU.", remote);
                 if (!reference || !remote)
@@ -404,9 +400,8 @@ public:
                         "no verified route with a consumed remote publication");
                 else
                 {
-                    const auto* winner = Better(*remote, *reference) ? remote : reference;
-                    csv.Config(prefix + "Winner", winner->Fps < Threshold[_profile] ? "neither met the target" :
-                        winner == reference ? "Single GPU" : "Multi-GPU");
+                    csv.Config(prefix + "Winner", best->Fps < Threshold[_profile] ? "neither met the target" :
+                        best == reference ? "Single GPU" : "Multi-GPU");
                     if (SameImage(*remote, *reference))
                         csv.Config(prefix + "SameImageFpsGainPct",
                             BistroBenchmarkData::Csv::Number(100 * (remote->Fps / reference->Fps - 1)));
@@ -437,6 +432,13 @@ public:
     bool RemotePhase() const { return _remote; }
 
 private:
+    Config FullComposition(Config config) const
+    {
+        for (size_t i = 0; i < config.Levels.size(); ++i)
+            if (config.Levels[i] == Off) config.Levels[i] = _high.Levels[i];
+        return config;
+    }
+
     static bool ReadReference(std::istream& input, Result& r)
     {
         if (!(input >> r.Id >> r.Settings.Provider >> r.Settings.Preset >> r.Output.first >> r.Output.second >>
@@ -641,13 +643,13 @@ private:
                 for (size_t i = 0; i < _placements.size(); ++i)
                 {
                     if (config.Owners[i] == adapter) continue;
-                    next = config;
+                    next = FullComposition(config);
                     next.Owners[i] = adapter;
                     enqueue(next, "neighbor placement");
                 }
             if (config.Owners[AO] >= 0 && !config.RemoteAOFilter)
             {
-                next = config;
+                next = FullComposition(config);
                 next.RemoteAOFilter = true;
                 enqueue(next, "AO and filter on one adapter", true);
                 if (config.Levels[AO] == High && _values[AO][Epic] != _values[AO][High])
@@ -686,7 +688,6 @@ private:
         };
         const auto activeA = count(a, Medium), activeB = count(b, Medium);
         if (activeA != activeB) return activeA > activeB;
-        if (!meetsA && a.Fps != b.Fps) return a.Fps > b.Fps;
         const auto rank = [&](const Result& r)
         {
             const auto high = count(r, High);
@@ -705,15 +706,15 @@ private:
             a.Fps < b.Fps || a.Output.first < b.Output.first || a.Output.second < b.Output.second ||
             a.Render.first < b.Render.first || a.Render.second < b.Render.second)
             return false;
-        bool strict = a.Fps > b.Fps || a.Output != b.Output || a.Render != b.Render;
+        // Keep layouts whose short-window results are indistinguishable within measurement noise.
+        if (a.Fps <= b.Fps * 1.04) return false;
         for (size_t i = 0; i < a.Activity.size(); ++i)
         {
             const auto left = a.Activity[i] ? a.Settings.Levels[i] : Off;
             const auto right = b.Activity[i] ? b.Settings.Levels[i] : Off;
             if (left < right) return false;
-            strict |= left > right;
         }
-        return strict;
+        return true;
     }
 
     const Result* Best(bool upscaled) const

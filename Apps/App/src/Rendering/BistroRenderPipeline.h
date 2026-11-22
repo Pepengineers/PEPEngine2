@@ -75,6 +75,7 @@ class BistroRenderPipeline final : public IRenderPipeline
 	const auto& BenchmarkLinks() const { return _benchmarkLinks; }
 	const auto& BenchmarkSchedule() const { return _schedule; }
 	SkySource BenchmarkSkySource() const { return _benchmarkSky; }
+	bool BenchmarkLocalCloudsActive() const { return _environment->LocalCloudsActive(); }
 	auto BenchmarkPostPublication() const { return _post->BenchmarkPublication(); }
 	void AppendBenchmarkProbes(std::vector<std::pair<std::string, BistroRender::Id>>& owners) const
 	{

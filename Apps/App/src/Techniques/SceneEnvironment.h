@@ -18,6 +18,7 @@ class SceneEnvironment
     void Freeze(double simulationDelta, Executor&, uint64_t frame);
     void SetClouds(const GDX12CloudParameters&);
     void ResetClouds();
+    bool LocalCloudsActive() const { return _environment._cloudActive; }
     void Resize()
     {
         _environment.Resize();

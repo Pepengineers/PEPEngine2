@@ -232,9 +232,30 @@ public:
         catch (const std::exception& error) { Fail(world, console, pipeline, error.what()); }
     }
 
-    void Initialize(World& world, BistroCharacters::Scene& characters)
+    void Initialize(World& world, BistroCharacters::Scene& characters, BistroRenderPipeline& pipeline)
     {
         _characters = &characters;
+        // Capture authored startup state before either simulation or interactive play can advance it.
+        _replayScene = CaptureScene(world, pipeline);
+        std::vector<std::string> bodies;
+        world.GetECS().ForEach<TransformComponent, RigidBodyComponent>(
+            [&](Entity, const TransformComponent& transform, const RigidBodyComponent& body)
+        {
+            const auto& p = transform.Location;
+            const auto& r = transform.Rotation;
+            const auto& s = transform.Scale;
+            std::ostringstream state;
+            state << std::hexfloat << p.x << ' ' << p.y << ' ' << p.z << ' ' <<
+                r.x << ' ' << r.y << ' ' << r.z << ' ' << s.x << ' ' << s.y << ' ' << s.z << ' ' << int(body.MotionType);
+            bodies.push_back(state.str());
+        });
+        std::sort(bodies.begin(), bodies.end());
+        _startupBodies = world.GetECS().GetPool<RigidBodyComponent>().Size();
+        for (const auto& body : bodies)
+        {
+            for (unsigned char c : body) _startupLayout = (_startupLayout ^ c) * 1099511628211ull;
+            _startupLayout = (_startupLayout ^ '\n') * 1099511628211ull;
+        }
         if (std::filesystem::exists(DefaultsPath())) _startupDefault = CurrentMask(ConsoleModule{});
         world.GetECS().ForEach<NameComponent>([&](Entity entity, const NameComponent& name)
         {
@@ -747,7 +768,6 @@ private:
         _manualPlacement = manual;
         _placementPhase = 0;
         _calibrating = !manual;
-        _placementFinals = false;
         _placementWindow = nullptr;
         _placementPhysics = {};
         _shadowFixtures.clear();
@@ -769,6 +789,8 @@ private:
         ConsoleVariablePatch patch{{L"Render.FrameGeneration.Provider", "0"}, {L"App.Sky.SunCycle.Enabled", "false"}};
         if (!manual)
         {
+            if (world.GetECS().GetPool<RigidBodyComponent>().Size() != _startupBodies)
+                throw std::runtime_error("Cannot replay the Bistro startup scene after changing its physics bodies");
             uint16_t width, height;
             window.GetWindowSize(width, height);
             if (!width || !height || IsIconic(window.GetWindowHandle()))
@@ -808,10 +830,10 @@ private:
             if (!exeLength || exeLength == std::size(executable))
                 throw std::runtime_error("Cannot identify benchmark executable");
             std::ostringstream conditions;
-            conditions << "bistro-baseline-v2 " << std::setprecision(17) << Duration() << ' ' << Warmup << ' ' <<
+            conditions << "bistro-baseline-v3 " << std::setprecision(17) << Duration() << ' ' << Warmup << ' ' <<
                 std::filesystem::last_write_time(executable).time_since_epoch().count() << ' ' <<
                 pipeline.BenchmarkSubmissions().AdapterLabel(0) << ' ' << double(width) / height << ' ' <<
-                world.GetTimeScale() << ' ' << _characters->Seed();
+                world.GetTimeScale() << ' ' << _characters->Seed() << ' ' << _startupLayout;
             auto renderConditions = RenderConfig(console);
             std::sort(renderConditions.begin(), renderConditions.end());
             const auto controls = [](const auto& entries, const auto& name) {
@@ -821,15 +843,8 @@ private:
                 if (name.compare(0, 14, L"App.Benchmark.") != 0 && !controls(patch, name) &&
                     (!controls(controlled, name) || name == L"App.Grass.Wind.Algorithm"))
                     conditions << '\n' << std::quoted(std::filesystem::path(name).u8string()) << ' ' << std::quoted(value);
-            const auto placementConditions = conditions.str();
-            if (_replayConditions != placementConditions)
-            {
-                _replayScene = _initialScene;
-                _replayConditions = placementConditions;
-                _replayEpoch = _path.filename().u8string();
-            }
             _placementSearch.LinkBaseline(_path, std::string(BistroPlacement::ProfileName[_placementProfile]) + ' ' +
-                _replayEpoch + ' ' + placementConditions);
+                conditions.str());
             _trial = _placementSearch.Calibration();
             for (const auto& [name, value] : _placementSearch.Patch(_trial.Settings))
             {
@@ -839,7 +854,6 @@ private:
             }
             const double budget = PlacementBudgetSeconds.GetValue();
             _placementDeadline = _started + std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(budget - FinishReserve));
-            _phaseDeadline = _started + std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(budget / 2));
             _csv.Config("BudgetSeconds", Csv::Number(budget));
             _csv.Config("PlacementSeed", "20261122");
             _csv.Config("SkinningOwnerRestriction", "Remote skinning selection is startup-only; search uses scene GPU");
@@ -926,14 +940,11 @@ private:
         using BistroRender::Mode;
         const auto& packets = pipeline.LastSchedule().Packets;
         const auto& submissions = pipeline.BenchmarkSubmissions();
-        const auto phase = std::to_string(_trial.Full ? Phase(_routeTime) : _placementWindowIndex) + ".";
         const auto observe = [&](std::string_view role, BistroRender::Id owner, std::string_view consumer)
         {
             if (owner == 0 || owner == Invalid) return;
             const auto& label = submissions.AdapterLabel(owner);
-            const auto item = std::string(role) + " @ " + label + " -> " + std::string(consumer);
             _trialPublications.emplace(role, label, consumer);
-            _trialResult.Execution.insert(phase + item);
         };
         for (const auto& link : pipeline.BenchmarkLinks())
         {
@@ -975,7 +986,6 @@ private:
             activity[3] |= name == "opaque particles G-buffer (read-only depth)" ||
                 name == "transparent particles cull and global sort" || name == "GPU0 import particle snapshot";
             activity[4] |= name == "water draw unlit opaque particles" || name == "GPU0 import water display";
-            activity[5] |= name == "local cloud source";
             activity[7] |= name == "SSR specular composition";
             activity[10] |= name == "GPU0 import visible SkyView" || name == "GPU0 import aerial pair" ||
                 starts("camera environment / atmosphere/source kernel");
@@ -995,17 +1005,17 @@ private:
             for (const auto& packet : packets)
             {
                 _placementPasses.insert(packet.Name);
-                _trialResult.Execution.insert(phase + std::to_string(int(packet.Target)) + ":" + packet.Name);
                 match(packet.Name);
             }
         }
         const auto skySource = pipeline.BenchmarkSkySource();
         auto effectiveActivity = activity;
+        effectiveActivity[5] = pipeline.BenchmarkLocalCloudsActive();
         effectiveActivity[6] = !probes.empty();
         effectiveActivity[8] = dof;
         effectiveActivity[9] = blur;
         effectiveActivity[10] |= skySource == SkySource::SkyAtmosphere;
-        effectiveActivity[11] = skySource == SkySource::SkyBox;
+        effectiveActivity[11] = skySource == SkySource::SkyBox && !effectiveActivity[5];
         effectiveActivity[13] |= hud != Invalid;
         for (size_t i = 0; i < activity.size(); ++i)
         {
@@ -1013,10 +1023,7 @@ private:
             if (_calibrating) _placementSeenOnRoute[i] |= _trialResult.Activity[i];
         }
         for (const auto& owner : pipeline.PanelAdapters())
-        {
             _trialOwners.insert(owner);
-            _trialResult.Execution.insert(phase + owner.first + " @ " + owner.second);
-        }
         std::vector<std::pair<UINT, BistroRender::Id>> shadows;
         pipeline.AppendBenchmarkShadowOwners(shadows);
         for (const auto& [entity, owner] : shadows)
@@ -1024,7 +1031,6 @@ private:
             {
                 const auto& label = submissions.AdapterLabel(owner);
                 _trialOwners.emplace(found->second, label);
-                _trialResult.Execution.insert(phase + found->second + " @ " + label);
             }
     }
 
@@ -1151,7 +1157,6 @@ private:
         for (const auto& pass : _placementPasses) _csv.Config(_trialPrefix + "ActivePass", pass);
         WritePlacementPublications();
         _trialResult.Remote = !_trialPublications.empty();
-        _trialResult.CheckedAllWindows = !_trial.Full && _placementWindowIndex == _placementPhysics.size();
         if (!_manualPlacement && _multiGPU != _trialResult.Remote && _trialReason.empty())
             _trialReason = _multiGPU ? "no frame consumer observed on the requested placement" : "unexpected cross-GPU work";
         if (!_manualPlacement)
@@ -1198,6 +1203,11 @@ private:
         if (_calibrating)
         {
             _calibrating = false;
+            const auto now = Clock::now();
+            const double remaining = Seconds(now, _placementDeadline);
+            const double nativeBudget = std::min(remaining, std::max(remaining / 2, PlacementFullCost() + PlacementProbeCost));
+            _phaseDeadline = now +
+                std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(nativeBudget));
             if (std::any_of(_placementPhysics.begin(), _placementPhysics.end(), [](const auto& snapshot) { return !snapshot; }))
             {
                 Finish(world, console, pipeline, "incomplete route checkpoints");
@@ -1214,26 +1224,25 @@ private:
             _csv.Config(_trialPrefix + "ConsumedRemotePublication", role + " @ " + adapter + " -> " + consumer);
     }
 
+    double PlacementFullCost() const { return Warmup + Duration() + 2; }
+    static constexpr double PlacementProbeCost = 8 * (Warmup + 1 + 2) + 5;
+
     void NextPlacementTrial(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline)
     {
-        const double fullCost = Warmup + Duration() + 2;
-        const double shortCost = 8 * (Warmup + 1 + 2) + 5;
+        const double fullCost = PlacementFullCost();
         const double remaining = Seconds(Clock::now(), _placementPhase == 0 ? _phaseDeadline : _placementDeadline);
-        _placementFinals |= remaining < shortCost + 3 * fullCost;
-        if (!_placementFinals)
+        const auto* finalist = _placementSearch.Finalist();
+        if (remaining >= PlacementProbeCost + (finalist ? fullCost : 0))
             if (auto probe = _placementSearch.NextProbe())
             {
                 BeginPlacementTrial(world, console, pipeline, std::move(*probe));
                 return;
             }
-        if (remaining >= fullCost)
-            if (auto final = _placementSearch.NextFinal())
-            {
-                _placementFinals = true;
-                BeginPlacementTrial(world, console, pipeline, std::move(*final));
-                return;
-            }
-        _placementFinals = false;
+        if (finalist && remaining >= fullCost)
+        {
+            BeginPlacementTrial(world, console, pipeline, _placementSearch.Confirm(*finalist));
+            return;
+        }
         if (_placementSearch.BeginPhase(++_placementPhase))
             NextPlacementTrial(world, console, pipeline);
         else
@@ -2220,7 +2229,7 @@ private:
     struct Output { std::string Message, Path; };
     std::array<Output, 2> _output;
     bool _multiGPU = false;
-    bool _manualPlacement = false, _calibrating = false, _placementFinals = false, _placementWaitsOpen = false;
+    bool _manualPlacement = false, _calibrating = false, _placementWaitsOpen = false;
     unsigned _placementPhase = 0;
     size_t _placementWindowIndex = 0, _trialWindowCount = 0, _trialFrames = 0;
     size_t _trialPrimaryFrames = 0;
@@ -2231,7 +2240,8 @@ private:
     Clock::time_point _trialStarted, _placementDeadline, _phaseDeadline;
     std::array<std::function<void()>, 8> _placementPhysics;
     std::function<void()> _replayScene;
-    std::string _replayConditions, _replayEpoch;
+    size_t _startupBodies = 0;
+    uint64_t _startupLayout = 14695981039346656037ull;
     std::map<UINT, std::string> _shadowFixtures;
     BistroPlacement::Search _placementSearch;
     BistroPlacement::Trial _trial;
