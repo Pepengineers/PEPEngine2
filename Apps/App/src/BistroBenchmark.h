@@ -194,6 +194,8 @@ class BistroBenchmark
     };
 
 public:
+    inline static AutoConsoleVariable<bool> AutoStart{L"App.Benchmark.AutoStart", false,
+        L"Run quick Bistro queue tuning at Release startup."};
     inline static AutoConsoleVariable<bool> SkipBenchmark{L"App.Benchmark.SkipBenchmark", false,
         L"Skip automatic Bistro queue tuning at Release startup."};
 
@@ -252,17 +254,19 @@ public:
         if (!_active)
         {
             if (_font) ImGui::PushFont(_font);
-            if (ImGui::Button(_font ? u8"\u0410\u0432\u0442\u043e\u043f\u043e\u0434\u0431\u043e\u0440" : "Auto tune"))
+            if (ImGui::Button(_font ? u8"\u0411\u044b\u0441\u0442\u0440\u044b\u0439" : "Quick"))
                 Request(Action::Search);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Tune queues using short samples and a full finalist run, up to 10 minutes.");
             ImGui::SameLine();
-            if (ImGui::Button(_font ? u8"\u041f\u0440\u043e\u0433\u043e\u043d" : "Run"))
-                Request(Action::Run);
-            ImGui::SameLine();
-            if (ImGui::Button(_font ? u8"\u041f\u043e\u043b\u043d\u044b\u0439 \u043f\u0435\u0440\u0435\u0431\u043e\u0440" : "Full sweep"))
+            if (ImGui::Button(_font ? u8"\u041f\u043e\u043b\u043d\u044b\u0439" : "Full"))
                 Request(Action::Exhaustive);
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("%u full flights, about %.0f minutes. Saves the fastest layout as local startup defaults.",
                     Cases, Cases * (Warmup + FlightSeconds.GetValue()) / 60.);
+            ImGui::SameLine();
+            if (ImGui::Button(_font ? u8"\u041f\u0440\u043e\u0433\u043e\u043d" : "Run"))
+                Request(Action::Run);
             if (_font) ImGui::PopFont();
             if (!_message.empty()) DrawRunName(_message.c_str());
             if (!_savedPath.empty()) DrawRunName(_savedPath.c_str());

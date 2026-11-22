@@ -224,7 +224,7 @@ class BistroApplication final : public App
 		IndirectCommandBuildSystem commands;
 		commands.Schedule(GetJobs(), world, 0).Complete();
 #if !defined(_DEBUG) && !defined(DEBUG)
-		_autoBenchmarkPending = !SkipAutomaticBenchmark();
+		_autoBenchmarkPending = BistroBenchmark::AutoStart.GetValue() && !SkipAutomaticBenchmark();
 #endif
 		Log::Info("Bistro",
 		          "Loaded Bistro interior/exterior; fixed-step interior physics enabled; sun and local shadows");
