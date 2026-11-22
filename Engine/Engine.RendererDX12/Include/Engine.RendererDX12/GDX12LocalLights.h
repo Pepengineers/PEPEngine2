@@ -65,6 +65,15 @@ struct GDX12LocalShadowKey
     { return EntityId == other.EntityId && Generation == other.Generation; }
 };
 
+enum class ShadowCrossSync : std::uint8_t { Exact = 1, Latest = 3 };
+
+struct GDX12LocalShadowPlacement
+{
+    GDX12LocalShadowKey Key;
+    int Adapter = -1;
+    ShadowCrossSync CrossSync = ShadowCrossSync::Exact;
+};
+
 inline void SetLocalShadowGeneration(GDX12LocalLightConstants& light, uint64_t generation)
 {
     // CPU cache identity uses two unused words of the existing GPU layout.

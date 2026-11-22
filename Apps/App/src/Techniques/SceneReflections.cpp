@@ -21,7 +21,7 @@ struct SceneReflections::CaptureInputs
     GDX12GeometryBuffer::RecordingBinding Geometry{};
     UINT Draws = 0, Batches = 0, Instances = 0;
     D3D12_GPU_VIRTUAL_ADDRESS Main = 0, Sky = 0;
-    D3D12_GPU_DESCRIPTOR_HANDLE Lights{};
+    D3D12_GPU_DESCRIPTOR_HANDLE Lights{}, StaticLights{};
     std::array<GDX12Texture*, 4> Environment{};
     GDX12Texture* StaticShadows = nullptr;
     GDX12Texture* DynamicShadows = nullptr;
@@ -160,7 +160,8 @@ std::pair<size_t, size_t> SceneReflections::Readiness() const
 }
 void SceneReflections::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, SceneGeometry& geometry,
                               SceneEnvironment& environment, UINT slot, GDX12Texture* localShadows,
-                              GDX12Texture* staticLocalShadows)
+                              GDX12Texture* staticLocalShadows,
+                              GDX12UploadBuffer<GDX12LocalLightConstants>& staticLights)
 {
     auto& p = *_passes;
     auto& work = _work;
@@ -285,6 +286,7 @@ void SceneReflections::Append(Graph& graph, std::vector<ID3D12Resource*>& bindin
         in.Main = scene.Main;
         in.Sky = constants.SkyCB->GetElementAddress(0);
         in.Lights = constants.ShadowLights->GetSRV()->GPUHandle;
+        in.StaticLights = staticLights.GetSRV()->GPUHandle;
         in.StaticShadows = staticLocalShadows;
         in.DynamicShadows = localShadows;
         for (UINT i = 0; i < 4; ++i) in.Environment[i] = environment.Output(i)->GetTexture();
@@ -292,6 +294,7 @@ void SceneReflections::Append(Graph& graph, std::vector<ID3D12Resource*>& bindin
         in.Reads.push_back({scene.FrameIds[0], Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
         in.Reads.push_back({resource(&constants.SkyCB->GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
         in.Reads.push_back({resource(&constants.ShadowLights->GetResource()), Mode::Read, read});
+        in.Reads.push_back({resource(&staticLights.GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
         in.Vegetation = [&](const GeometryTarget& target) { geometry.AppendVegetationView(graph, bindings, slot, target); };
         AppendCapture(graph, bindings, work, p, _resources, in, publicationOperations, _publishing);
     }
@@ -512,7 +515,7 @@ void SceneReflections::AppendRemote(Graph& primary, std::vector<ID3D12Resource*>
         auto* skyBuffer = constants.SkyCB->GetResource().D3DResource.Get();
         auto* sky = mirror(NativeWork::ResourceFor(primary, primaryBindings, skyBuffer, "probe sky constants"), true);
         in.Sky = sky->GetGPUVirtualAddress();
-        in.Lights = remote.Lights->GetSRV()->GPUHandle;
+        in.StaticLights = in.Lights = remote.Lights->GetSRV()->GPUHandle;
         in.StaticShadows = in.DynamicShadows = &remote.ShadowFallback;
         const Id mainResource = bind(frame.MainCB->GetResource().D3DResource.Get());
         for (const auto buffer : {mainResource, bind(remote.Lights->GetResource().D3DResource.Get())})
@@ -848,6 +851,7 @@ void SceneReflections::AppendCapture(Graph& graph, std::vector<ID3D12Resource*>&
             visible = batch->VisibleInstancesAddress();
         }
         view.Lighting.LocalShadows = view.Filter == p.StaticGeometry ? in.StaticShadows : in.DynamicShadows;
+        view.Lighting.LocalLightSrv = view.Filter == p.StaticGeometry ? in.StaticLights : in.Lights;
         view.Lighting.Irradiance = in.Environment[0];
         view.Lighting.Prefiltered = in.Environment[1];
         view.Lighting.BRDF = in.Environment[2];
@@ -893,7 +897,7 @@ void SceneReflections::AppendCapture(Graph& graph, std::vector<ID3D12Resource*>&
         srvs[3] = p._sunShadow.GetSRV()->GPUHandle;
         for (UINT i = 0; i < 3; ++i)
             srvs[4 + i] = in.Environment[i]->GetSRV()->GPUHandle;
-        srvs[7] = in.Lights;
+        srvs[7] = view.Lighting.LocalLightSrv;
         srvs[8] = view.Lighting.LocalShadows->GetSRV()->GPUHandle;
         srvs[9] = in.Environment[3]->GetSRV()->GPUHandle;
         srvs[10] = resources.SkyTransmittanceSRV.GPUHandle;

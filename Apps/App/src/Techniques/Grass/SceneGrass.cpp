@@ -1041,7 +1041,7 @@ void SceneGrass::AppendProbeCapture(Graph& graph, std::vector<ID3D12Resource*>& 
 	};
 	auto* heap = descriptors->GetHeap().Get();
 	const auto& built = _frames.at(slot).Built;
-	const auto& lighting = *target.View.CaptureLighting;
+	const auto lighting = target.View.CaptureLighting;
 	XMFLOAT4X4 clip;
 	XMStoreFloat4x4(&clip, target.View.ViewProjection.Transpose());
 	for (UINT patch = 0; patch < gpu.PatchCount(); ++patch)
@@ -1102,13 +1102,18 @@ void SceneGrass::AppendProbeCapture(Graph& graph, std::vector<ID3D12Resource*>& 
 		                                     indices->GetElementCount() * UINT(sizeof(UINT)), DXGI_FORMAT_R32_UINT};
 		GDX12GraphicsBindings binding;
 		binding.Root = owner._graphicsRoot.get();
-		binding.Pipeline = owner._graphicsPSO.at(size_t(GDX12GrassRenderer::Stage::Capture));
+		binding.Pipeline = owner._graphicsPSO.at(size_t(lighting ? GDX12GrassRenderer::Stage::Capture
+		                                                        : GDX12GrassRenderer::Stage::Shadow));
 		binding.Heap = descriptors;
-		binding.CBVs = {{0, cb}, {1, target.View.CameraConstants}, {2, main}, {3, lighting.ShadowConstants}};
-		binding.SRVs = {{0, vertices.Srv}, {1, materials.GPUHandle}, {2, lighting.SunShadow->GetSRV()->GPUHandle},
-		                {3, lighting.Irradiance->GetSRV()->GPUHandle}, {4, lighting.Prefiltered->GetSRV()->GPUHandle},
-		                {5, lighting.BRDF->GetSRV()->GPUHandle}, {6, localLights}, {7, lighting.LocalShadows->GetSRV()->GPUHandle},
-		                {8, descriptors->GetGPUHandle(Texture2D_StartIndex)}};
+		binding.CBVs = {{0, cb}, {1, target.View.CameraConstants}};
+		binding.SRVs = {{0, vertices.Srv}, {1, materials.GPUHandle}, {8, descriptors->GetGPUHandle(Texture2D_StartIndex)}};
+		if (lighting)
+		{
+			binding.CBVs.insert(binding.CBVs.end(), {{2, main}, {3, lighting->ShadowConstants}});
+			binding.SRVs.insert(binding.SRVs.end(), {{2, lighting->SunShadow->GetSRV()->GPUHandle},
+			    {3, lighting->Irradiance->GetSRV()->GPUHandle}, {4, lighting->Prefiltered->GetSRV()->GPUHandle},
+			    {5, lighting->BRDF->GetSRV()->GPUHandle}, {6, localLights}, {7, lighting->LocalShadows->GetSRV()->GPUHandle}});
+		}
 		auto draws = target.AdditionalReads;
 		draws.insert(draws.end(), {{vertices.Resource, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE},
 		                          {parameters.Resource, Mode::Read, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER},
@@ -1116,10 +1121,10 @@ void SceneGrass::AppendProbeCapture(Graph& graph, std::vector<ID3D12Resource*>& 
 		                          {arguments.Resource, Mode::Read, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT},
 		                          {target.Depth, Mode::Write, D3D12_RESOURCE_STATE_DEPTH_WRITE}});
 		for (auto color : target.Colors) draws.push_back({color, Mode::Write, D3D12_RESOURCE_STATE_RENDER_TARGET});
-		work.Add(graph, "probe owner grass HDR capture", std::move(draws), [=](auto* cmd) {
+		work.Add(graph, lighting ? "probe owner grass HDR capture" : "shadow owner grass depth", std::move(draws), [=](auto* cmd) {
 			RecordGrassView(cmd, binding, target, indexView, signature.Get(), argumentBuffer);
 		});
-		if (firstCapture)
+		if (firstCapture && lighting)
 			Log::Info("RenderGraph", "Queued remote reflection grass capture owner=", graph.Device,
 			          " view=", target.View.Key, " patch=", patch);
 	}

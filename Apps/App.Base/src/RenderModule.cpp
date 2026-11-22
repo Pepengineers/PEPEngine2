@@ -486,13 +486,15 @@ void RenderModule::SubmitSky(World& world)
     _primaryResources.Sky = std::move(sky);
 }
 
-void RenderModule::SubmitLights(std::vector<GDX12LocalLightConstants> lights, const GDX12MainConstants& settings)
+void RenderModule::SubmitLights(std::vector<GDX12LocalLightConstants> lights, const GDX12MainConstants& settings,
+                                std::vector<GDX12LocalShadowPlacement> placements)
 {
     uint16_t width, height;
     _window->GetWindowSize(width, height);
     const auto upload = [&](GDX12DeviceResources& resources)
     {
         resources.LocalLights = lights;
+        resources.LocalShadowPlacements = std::move(placements);
         resources.Lighting = settings;
         const auto& sky = _primaryResources.Sky;
         if (sky.Source == SkySource::SkyAtmosphere)

@@ -9,6 +9,7 @@ struct WorldLighting
 {
     GDX12MainConstants Main;
     std::vector<GDX12LocalLightConstants> Local;
+    std::vector<GDX12LocalShadowPlacement> ShadowPlacements;
 };
 
 template<typename... Components>
@@ -48,6 +49,8 @@ inline WorldLighting CollectWorldLights(ECSStorage<Components...>& ecs, bool loc
                 data.ShadowFlags = (light.CastShadows ? 1u : 0u) | (light.ShadowUpdate == ShadowUpdateMode::EveryFrame ? 2u : 0u);
             data.ShadowRevision = light.ShadowRevision;
             if (localShadows && light.CastShadows) BuildLocalLightShadowMatrices(data);
+            if (localShadows && light.CastShadows && light.ShadowAdapter >= 0)
+                result.ShadowPlacements.push_back({GetLocalShadowKey(data), light.ShadowAdapter, light.CrossSync});
             result.Local.push_back(data);
         });
     std::sort(result.Local.begin(), result.Local.end(), [](const auto& a, const auto& b) { return a.EntityId < b.EntityId; });

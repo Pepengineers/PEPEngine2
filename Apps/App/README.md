@@ -26,6 +26,34 @@ Editor/Benchmark application targets are not part of this renderer.
 `false` uses DIRECT. Scheduling is controlled by the graph, with no separate
 legacy per-technique async switches.
 
+### Shadow placement
+
+Bistro renders shadows on the primary adapter by default. `App.Shadows.Sun.Adapter`
+selects the DXGI hardware index for the far CSM cascades (`-1` keeps all cascades
+local). `App.Shadows.Sun.NearCascades` gives the number of active cascades kept on
+GPU0, starting at the camera. Use `0` for an entirely remote CSM or the active
+cascade count for an entirely local CSM.
+
+Each Bistro fixture has `App.Shadows.Local.Adapter.<fixture name>` and
+`App.Shadows.Local.CrossSync.<fixture name>` settings. All six faces of a point
+light use the same settings. The Sun uses `App.Shadows.Sun.CrossSync`.
+`1` (Exact) waits on the owner GPU export for the current frame. `3` (Latest)
+uses the last compatible depth already in the primary atlas until a newer
+export completes. The first publication and changes to the shadow projection,
+identity or atlas layout use Exact so that the sampled depth matches its metadata.
+
+For primary hardware index `0` and secondary index `1`, this configuration
+places the first two sun cascades on GPU0, the rest on GPU1, and sends one point
+light to GPU1 independently:
+
+```ini
+App.Shadows.Sun.Adapter = 1
+App.Shadows.Sun.NearCascades = 2
+App.Shadows.Sun.CrossSync = 1
+App.Shadows.Local.Adapter.Paris_Building_01_paris_building_01_bottom_44 = 1
+App.Shadows.Local.CrossSync.Paris_Building_01_paris_building_01_bottom_44 = 3
+```
+
 ### Early camera DepthNormals
 
 DepthNormals is enabled by default. Set `App.DepthNormalsPrepass = false`

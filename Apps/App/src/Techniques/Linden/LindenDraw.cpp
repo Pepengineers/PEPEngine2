@@ -27,7 +27,7 @@ LindenDraw::LindenDraw(GDX12DeviceResources& resources, bool captureOnly) : _res
 	auto& compiler = GDX12ShaderCompiler::GetInstance();
 	for (auto stage : {Stage::Depth, Stage::DepthNormals, Stage::GBuffer, Stage::Shadow, Stage::Capture})
 	{
-		if (captureOnly && stage != Stage::Capture) continue;
+		if (captureOnly && stage != Stage::Capture && stage != Stage::Shadow) continue;
 		const bool depth = stage == Stage::Depth || stage == Stage::Shadow;
 		const bool normals = stage == Stage::DepthNormals;
 		const D3D_SHADER_MACRO prepass[] = {{"LINDEN_DEPTH_NORMALS", "1"}, {nullptr, nullptr}};
@@ -98,8 +98,8 @@ void LindenDraw::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, Na
 	case GDX12GeometryStage::ReflectionCapture: stage = Stage::Capture; break;
 	default: return;
 	}
-	if (remote && stage != Stage::Capture)
-		throw std::invalid_argument("Remote linden inputs require a probe capture view");
+	if (remote && stage != Stage::Capture && stage != Stage::Shadow)
+		throw std::invalid_argument("Unsupported remote linden view");
 
 	auto id = [&](auto* buffer, const char* name)
 	{ return NativeWork::ResourceFor(graph, bindings, buffer->GetResource().D3DResource.Get(), name); };
@@ -170,7 +170,8 @@ void LindenDraw::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, Na
 		srvs[3] = lighting.Irradiance->GetSRV()->GPUHandle;
 		srvs[4] = lighting.Prefiltered->GetSRV()->GPUHandle;
 		srvs[5] = lighting.BRDF->GetSRV()->GPUHandle;
-		srvs[6] = remote ? remote->LocalLights : frame->ShadowLights->GetSRV()->GPUHandle;
+		srvs[6] = remote ? remote->LocalLights : lighting.LocalLightSrv.ptr ? lighting.LocalLightSrv
+		                                                     : frame->ShadowLights->GetSRV()->GPUHandle;
 		srvs[7] = lighting.LocalShadows->GetSRV()->GPUHandle;
 		shadowConstants = lighting.ShadowConstants;
 	}

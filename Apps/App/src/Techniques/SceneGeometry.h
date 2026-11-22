@@ -91,6 +91,7 @@ class SceneGeometry
 		LindenDisplayedPose LindenPose{};
 		std::shared_ptr<const LindenMesh> Linden;
 		std::vector<ID3D12Resource*> PlannedBindings;
+		std::vector<std::pair<Id, Id>> ShadowInputCopies;
 		std::array<Buffer, 8> Buffers;      // instances/templates/materials/transforms/opaque/count/transparent/count
 		std::array<Buffer, 2> FrameBuffers; // immutable main/camera constants
 		std::array<Id, 2> FrameIds{};

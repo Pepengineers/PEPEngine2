@@ -643,6 +643,7 @@ Schedule SceneGeometry::Plan(UINT index, const AppendTechnique& append, const Ap
 	}
 	const std::vector<GeometryTarget> targets{depthTarget, gbufferTarget};
 	s.LindenWork.Commands.clear();
+	s.ShadowInputCopies.clear();
 	s.Linden = _linden;
 	s.LindenPose = {};
 	const Id grassBegin = Id(g.Operations.size());
@@ -721,6 +722,27 @@ Schedule SceneGeometry::Plan(UINT index, const AppendTechnique& append, const Ap
 			continue;
 		}
 		order.push_back(id);
+	}
+	for (const auto& [exportOp, restoreOp] : s.ShadowInputCopies)
+	{
+		const auto& inputs = g.Operations[exportOp].Accesses;
+		const auto original = std::find(order.begin(), order.end(), exportOp);
+		auto destination = order.begin();
+		for (auto operation = order.begin(); operation != original; ++operation)
+		{
+			const auto& accesses = g.Operations[*operation].Accesses;
+			if (std::any_of(accesses.begin(), accesses.end(), [&](const auto& access)
+			{
+				return access.Usage != Mode::Read && std::any_of(inputs.begin(), inputs.end(),
+				    [&](const auto& input) { return input.Resource == access.Resource; });
+			})) destination = operation + 1;
+		}
+		const auto insertion = destination - order.begin();
+		order.erase(original);
+		if (restoreOp != Invalid) order.erase(std::find(order.begin(), order.end(), restoreOp));
+		// The export depends on the frozen input producers, leaving G-buffer draws independent of GPU1.
+		auto inserted = order.insert(order.begin() + insertion, exportOp);
+		if (restoreOp != Invalid) order.insert(inserted + 1, restoreOp);
 	}
 	std::vector<Id> remap(g.Operations.size(), Invalid);
 	for (Id i = 0; i < order.size(); ++i)
@@ -814,8 +836,9 @@ void SceneGeometry::AppendVegetationView(Graph& primary, std::vector<ID3D12Resou
                                          D3D12_GPU_VIRTUAL_ADDRESS mainAddress, D3D12_GPU_DESCRIPTOR_HANDLE localLights)
 {
 	if (!view.View.IncludeApplicationGeometry) return;
-	if (view.View.Stage != GDX12GeometryStage::ReflectionCapture || !view.View.CaptureLighting)
-		throw std::invalid_argument("Remote vegetation requires probe capture lighting");
+	const bool capture = view.View.Stage == GDX12GeometryStage::ReflectionCapture && view.View.CaptureLighting;
+	if (!capture && view.View.Stage != GDX12GeometryStage::Shadow)
+		throw std::invalid_argument("Unsupported remote vegetation view");
 	auto& scene = _slots.at(slot);
 	auto& owner = vegetation.Grass.Owner;
 	const auto mirror = [&](GDX12Resource& source, UINT stride) {
@@ -850,8 +873,11 @@ void SceneGeometry::AppendVegetationView(Graph& primary, std::vector<ID3D12Resou
 	};
 	read(material, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
 	for (const auto constant : {main, target.Camera})
+	{
+		if (constant == Invalid) continue;
 		read(constant, remote.Resources.at(constant).Memory == Heap::Upload ? D3D12_RESOURCE_STATE_GENERIC_READ :
 		                                                                    D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+	}
 	_grass->AppendProbeCapture(remote, remoteBindings, work, vegetation.Grass, slot, target, remoteMaterials,
 	                           mainAddress, localLights, mirror);
 	if (scene.Linden)

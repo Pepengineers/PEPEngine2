@@ -26,11 +26,13 @@ class SceneLocalShadows
 	void Append(
 	    Graph&, std::vector<ID3D12Resource*>&, UINT slot, const std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 4>& scene,
 	    GDX12GeometryBuffer::RecordingBinding geometry, GDX12UploadBuffer<GDX12LocalLightConstants>& lights,
-	    const std::function<void(const GeometryTarget&, Graph&, std::vector<ID3D12Resource*>&)>& appendGrass = {});
+	    const std::function<void(const GeometryTarget&, Graph&, std::vector<ID3D12Resource*>&)>& appendGrass = {},
+	    const std::array<Id, 5>* inputs = nullptr, const std::vector<Access>& materialTextures = {});
 	bool Record(UINT slot, Id id, ID3D12GraphicsCommandList* cmd) const { return _slots.at(slot).Work.Record(id, cmd); }
 	GDX12Texture* Output(UINT slot) { return &_slots.at(slot).Atlas; }
 
   private:
+	friend class SceneLighting;
 	using GrassAppender = std::function<void(const GeometryTarget&, Graph&, std::vector<ID3D12Resource*>&)>;
 	void AppendGrassViews(Graph& graph, std::vector<ID3D12Resource*>& bindings, UINT slot, Id atlas,
 	                      const GrassAppender& appendGrass);
@@ -65,6 +67,7 @@ class SceneLocalShadows
 		GDX12LocalLightConstants Light;
 		std::array<FaceCommands, 6> StaticFaces, DynamicFaces;
 		UINT FirstSlice = UINT_MAX, Needed = 0, StaticListsValid = 0, DynamicListsValid = 0, MapsValid = 0;
+		Id Owner = 0;
 		bool HasLight = false;
 		bool SelectionDirty = true;
 	};
@@ -89,6 +92,7 @@ class SceneLocalShadows
 		std::vector<GDX12LocalLightConstants> Lights;
 		std::vector<LightCache> Cache;
 		std::vector<View> Views;
+		std::vector<View> RemoteViews;
 		std::vector<GDX12IndirectDrawArgs> Packed;
 		std::optional<GDX12LocalShadowFrustum> Camera;
 		XMFLOAT4X4 CameraMatrix{};
@@ -135,6 +139,7 @@ class SceneLocalShadows
 	UINT _staticRoot = UINT_MAX, _dynamicRoot = UINT_MAX;
 	std::vector<Input> _inputs;
 	std::vector<GDX12RenderPrimitive> _grass;
+	std::vector<std::pair<GDX12LocalShadowKey, Id>> _placements;
 	std::unordered_map<UINT, std::vector<UINT>> _instances, _transforms, _materials;
 	std::vector<UINT> _positions, _leaves;
 	bool _treeReady = false, _castersRebuilt = false;

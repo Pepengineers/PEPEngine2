@@ -59,11 +59,12 @@ SceneSunShadows::SceneSunShadows(GDX12DeviceResources& r, RenderPipelineCommonDa
 	graphics.SRVRanges.emplace_back(Texture2D_RangeLength);
 	_graphicsRoot = std::make_unique<GDX12RootSignature>(r.Device, graphics);
 	GDX12RootSignatureDesc compute;
+	compute.Constants = {1};
 	compute.NumSingleCBVSlots = 1;
 	compute.NumSingleSRVSlots = 3;
 	compute.NumSingleUAVSlots = 5;
 	_computeRoot = std::make_unique<GDX12RootSignature>(r.Device, compute);
-	D3D_SHADER_MACRO defines[] = {{"SHADOW_CULLING", "1"}, {nullptr, nullptr}};
+	D3D_SHADER_MACRO defines[] = {{"SHADOW_CULLING", "1"}, {"SHADOW_CASCADE_MASK", "1"}, {nullptr, nullptr}};
 	_cull = GDX12RenderHelpers::CreateComputePipeline(r.Device, _computeRoot.get(), SHADERS_FOLDER "ShadowPass.hlsl",
 	                                                  "CS", defines);
 	_clear = GDX12RenderHelpers::CreateComputePipeline(r.Device, _computeRoot.get(), SHADERS_FOLDER "ShadowPass.hlsl",
@@ -293,15 +294,20 @@ void SceneSunShadows::PrepareIndirectBuffers(Slot& s, UINT draws)
 }
 
 void SceneSunShadows::AppendGrassViews(Graph& graph, std::vector<ID3D12Resource*>& bindings, UINT slot, Id atlas,
-                                       const GrassAppender& appendGrass)
+                                       UINT update, const GrassAppender& appendGrass)
 {
 	auto& s = _slots.at(slot);
-	const UINT cascadeCount = _resources.ShadowSettings.CascadeCount, resolution = s.Resolution, update = s.Update;
+	const UINT cascadeCount = _resources.ShadowSettings.CascadeCount, resolution = s.Resolution;
 	const auto dsv = s.Atlas.GetDSV()->CPUHandle;
 	const auto cameraPosition = _common.CameraView.Invert().Translation();
-	auto& camera = *_resources.FrameConstants.at(slot)->CameraCB;
-	const Id cameraId =
-	    NativeWork::ResourceFor(graph, bindings, camera.GetResource().D3DResource.Get(), "sun grass camera constants");
+	Id cameraId = Invalid;
+	D3D12_GPU_VIRTUAL_ADDRESS cameraAddress = 0;
+	if (!graph.Device)
+	{
+		auto& camera = *_resources.FrameConstants.at(slot)->CameraCB;
+		cameraId = NativeWork::ResourceFor(graph, bindings, camera.GetResource().D3DResource.Get(), "sun grass camera constants");
+		cameraAddress = camera.GetElementAddress(_common.ActiveCameraCBufferIndex);
+	}
 	for (UINT cascade = 0; cascade < cascadeCount; ++cascade)
 	{
 		if (!(update & (1u << cascade)))
@@ -311,7 +317,7 @@ void SceneSunShadows::AppendGrassViews(Graph& graph, std::vector<ID3D12Resource*
 		const auto region = SunShadowRegion(cascade, resolution);
 		GeometryTarget target;
 		target.View = {GDX12GeometryStage::Shadow, Matrix(_resources.ShadowSettings.ViewProj[cascade]).Transpose(),
-		               cameraPosition, camera.GetElementAddress(_common.ActiveCameraCBufferIndex)};
+		               cameraPosition, cameraAddress};
 		target.View.Key = (4ull << 60) | cascade;
 		target.View.FrameSlot = slot;
 		target.View.DepthFormat = DXGI_FORMAT_D32_FLOAT;
@@ -329,7 +335,8 @@ void SceneSunShadows::AppendGrassViews(Graph& graph, std::vector<ID3D12Resource*
 void SceneSunShadows::Append(
     Graph& graph, std::vector<ID3D12Resource*>& bindings, UINT slot,
     const std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 4>& scene, UINT draws, GDX12GeometryBuffer::RecordingBinding geometry,
-    const std::function<void(const GeometryTarget&, Graph&, std::vector<ID3D12Resource*>&)>& appendGrass)
+    const std::function<void(const GeometryTarget&, Graph&, std::vector<ID3D12Resource*>&)>& appendGrass,
+    UINT mask, const std::array<Id, 6>* inputs, const std::vector<Access>& materialTextures)
 {
 	auto& s = _slots.at(slot);
 	auto& work = s.Work;
@@ -340,7 +347,8 @@ void SceneSunShadows::Append(
 	PrepareAtlas(s, resolution);
 	const Id atlas = resource(s.Atlas.GetResource()->D3DResource.Get(), "sun shadow atlas");
 	const auto dsv = s.Atlas.GetDSV()->CPUHandle;
-	if (!s.Update || !resolution)
+	const UINT update = s.Update & mask;
+	if (!update || !resolution)
 	{
 		if (!s.Rendered)
 		{
@@ -369,21 +377,24 @@ void SceneSunShadows::Append(
 		         cmd->SetComputeRootDescriptorTable(compute->GetURootParamIndex(4), countsUav);
 		         cmd->Dispatch(1, 1, 1);
 	         });
-	std::vector<Access> culling{{SceneInstances, Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE},
-	                            {SceneCommands, Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE},
-	                            {SceneMaterials, Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE},
+	const auto ids = inputs ? *inputs : std::array<Id, 6>{SceneInstances, SceneMaterials, SceneTransforms,
+	                                                       SceneVertices, SceneIndices, SceneCommands};
+	std::vector<Access> culling{{ids[0], Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE},
+	                            {ids[5], Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE},
+	                            {ids[1], Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE},
 	                            {constants, Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ},
 	                            {counters, Mode::ReadWrite, UnorderedAccess}};
 	std::vector<Access> rendering{
-	    {SceneInstances, Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE},
-	    {SceneMaterials, Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE},
-	    {SceneTransforms, Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE},
-	    {SceneVertices, Mode::Read,
+	    {ids[0], Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE},
+	    {ids[1], Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE},
+	    {ids[2], Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE},
+	    {ids[3], Mode::Read,
 	     D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE},
-	    {SceneIndices, Mode::Read, D3D12_RESOURCE_STATE_INDEX_BUFFER},
+	    {ids[4], Mode::Read, D3D12_RESOURCE_STATE_INDEX_BUFFER},
 	    {constants, Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ},
 	    {counters, Mode::Read, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT},
 	    {atlas, Mode::Write, D3D12_RESOURCE_STATE_DEPTH_WRITE}};
+	rendering.insert(rendering.end(), materialTextures.begin(), materialTextures.end());
 	std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 4> uavs{};
 	std::array<ID3D12Resource*, 4> commands{};
 	for (UINT i = 0; i < 4; ++i)
@@ -395,14 +406,14 @@ void SceneSunShadows::Append(
 		rendering.push_back({id, Mode::Read, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT});
 	}
 	const UINT cascadeCount = _resources.ShadowSettings.CascadeCount;
-	const UINT update = s.Update;
 	work.Add(graph, "sun cull " + std::to_string(cascadeCount) + " cascades", std::move(culling),
 	         [=](auto* cmd)
 	         {
 		         cmd->SetDescriptorHeaps(1, &heap);
 		         cmd->SetComputeRootSignature(compute->GetRootSignature().Get());
 		         cmd->SetPipelineState(cull);
-		         cmd->SetComputeRootConstantBufferView(compute->GetBRootParamIndex(0), cbv);
+		         cmd->SetComputeRoot32BitConstant(0, update, 0);
+		         cmd->SetComputeRootConstantBufferView(compute->GetBRootParamIndex(1), cbv);
 		         for (UINT i = 0; i < 3; ++i)
 		         {
 			         cmd->SetComputeRootDescriptorTable(compute->GetTRootParamIndex(i), scene[i]);
@@ -437,7 +448,7 @@ void SceneSunShadows::Append(
 	         });
 	if (appendGrass)
 	{
-		AppendGrassViews(graph, bindings, slot, atlas, appendGrass);
+		AppendGrassViews(graph, bindings, slot, atlas, update, appendGrass);
 	}
 	s.Settings = _resources.ShadowSettings;
 	s.Revision = _resources.Lighting.SunShadowRevision;

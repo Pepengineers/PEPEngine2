@@ -695,6 +695,7 @@ void SceneLocalShadows::CullJob::Execute(size_t index)
 void SceneLocalShadows::PackJob::Execute(size_t)
 {
 	Frame->Views.clear();
+	Frame->RemoteViews.clear();
 	Frame->Packed.clear();
 	UINT additional = 0;
 	for (UINT i = 0; i < Frame->Lights.size(); ++i)
@@ -826,6 +827,12 @@ UINT SceneLocalShadows::UpdateLights(Slot& frame)
 		source.ShadowFlags &= ~ShadowEveryFrame;
 		source.ShadowFirstSlice = 0;
 		auto& cached = frame.Cache[i];
+		const auto placement = std::find_if(_placements.begin(), _placements.end(), [&](const auto& entry)
+		{ return entry.first == GetLocalShadowKey(source); });
+		const Id owner = placement == _placements.end() ? 0 : placement->second;
+		if (cached.Owner != owner)
+			cached.MapsValid = 0;
+		cached.Owner = owner;
 		if (ShouldRenderLocalShadow(source, cached.HasLight ? &cached.Light : nullptr) ||
 		    (source.ShadowFlags & ShadowEnabled) != (cached.Light.ShadowFlags & ShadowEnabled))
 		{
@@ -932,10 +939,9 @@ void SceneLocalShadows::Complete(UINT slot)
 void SceneLocalShadows::Submitted(UINT slot)
 {
 	auto& frame = _slots.at(slot);
-	for (const auto& view : frame.Views)
-	{
-		frame.Cache[view.Light].MapsValid |= 1u << view.Face;
-	}
+	for (const auto* views : {&frame.Views, &frame.RemoteViews})
+		for (const auto& view : *views)
+			frame.Cache[view.Light].MapsValid |= 1u << view.Face;
 }
 
 void SceneLocalShadows::PrepareAtlas(Slot& frame, UINT requestedSlices)
@@ -999,16 +1005,22 @@ void SceneLocalShadows::AppendGrassViews(Graph& graph, std::vector<ID3D12Resourc
 	const auto& views = frame.Views;
 	const UINT resolution = frame.Resolution;
 	const auto cameraPosition = _common.CameraView.Invert().Translation();
-	auto& camera = *_resources.FrameConstants.at(slot)->CameraCB;
-	const Id cameraResource =
-	    NativeWork::ResourceFor(graph, bindings, camera.GetResource().D3DResource.Get(), "local grass shadow camera");
+	Id cameraResource = Invalid;
+	D3D12_GPU_VIRTUAL_ADDRESS cameraAddress = 0;
+	if (!graph.Device)
+	{
+		auto& camera = *_resources.FrameConstants.at(slot)->CameraCB;
+		cameraResource = NativeWork::ResourceFor(graph, bindings, camera.GetResource().D3DResource.Get(),
+		                                         "local grass shadow camera");
+		cameraAddress = camera.GetElementAddress(_common.ActiveCameraCBufferIndex);
+	}
 	for (UINT i = 0; i < views.size(); ++i)
 	{
 		const auto& view = views[i];
 		GeometryTarget grassTarget;
 		grassTarget.View = {GDX12GeometryStage::Shadow,
 		                    Matrix(frame.Lights[view.Light].ShadowViewProj[view.Face]).Transpose(), cameraPosition,
-		                    camera.GetElementAddress(_common.ActiveCameraCBufferIndex)};
+		                    cameraAddress};
 		grassTarget.View.Key = (2ull << 60) | (uint64_t(view.Light) * 6 + view.Face);
 		grassTarget.View.Filter = _staticOnly ? GDX12GeometryFilter::Static : GDX12GeometryFilter::All;
 		grassTarget.View.FrameSlot = slot;
@@ -1052,7 +1064,8 @@ void SceneLocalShadows::Append(
     Graph& graph, std::vector<ID3D12Resource*>& bindings, UINT slot,
     const std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 4>& scene, GDX12GeometryBuffer::RecordingBinding geometry,
     GDX12UploadBuffer<GDX12LocalLightConstants>& lights,
-    const std::function<void(const GeometryTarget&, Graph&, std::vector<ID3D12Resource*>&)>& appendGrass)
+    const std::function<void(const GeometryTarget&, Graph&, std::vector<ID3D12Resource*>&)>& appendGrass,
+    const std::array<Id, 5>* inputs, const std::vector<Access>& materialTextures)
 {
 	auto& frame = _slots.at(slot);
 	auto& work = frame.Work;
@@ -1076,16 +1089,21 @@ void SceneLocalShadows::Append(
 	}
 	const Id atlas = resource(frame.Atlas.GetResource()->D3DResource.Get(), "local shadow depth array");
 	const State read = D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE;
+	const auto sceneIds = inputs ? *inputs : std::array<Id, 5>{SceneInstances, SceneMaterials, SceneTransforms,
+	                                                          SceneVertices, SceneIndices};
+	const Id lightId = resource(lights.GetResource().D3DResource.Get(), "local shadow light data");
 	std::vector<Access> accesses{
-	    {SceneInstances, Mode::Read, read},
-	    {SceneMaterials, Mode::Read, read},
-	    {SceneTransforms, Mode::Read, read},
-	    {SceneVertices, Mode::Read,
+	    {sceneIds[0], Mode::Read, read},
+	    {sceneIds[1], Mode::Read, read},
+	    {sceneIds[2], Mode::Read, read},
+	    {sceneIds[3], Mode::Read,
 	     D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE},
-	    {SceneIndices, Mode::Read, D3D12_RESOURCE_STATE_INDEX_BUFFER},
+	    {sceneIds[4], Mode::Read, D3D12_RESOURCE_STATE_INDEX_BUFFER},
 	    {commands, Mode::Read, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT},
-	    {resource(lights.GetResource().D3DResource.Get(), "local shadow light data"), Mode::Read, read},
+	    {lightId, Mode::Read, graph.Resources.at(lightId).Memory == Heap::Upload
+	                              ? State(D3D12_RESOURCE_STATE_GENERIC_READ) : read},
 	    {atlas, Mode::Write, D3D12_RESOURCE_STATE_DEPTH_WRITE}};
+	accesses.insert(accesses.end(), materialTextures.begin(), materialTextures.end());
 	auto* heap = _resources.SRV_UAV_Heap->GetHeap().Get();
 	auto* root = _root.get();
 	auto* opaquePipeline = _opaqueDraw.Get();

@@ -27,7 +27,7 @@ struct NativeWork
 		}
 		if (!resource || bindings.size() != graph.Resources.size())
 		{
-			throw std::logic_error("Invalid native technique resource");
+			throw std::logic_error("Invalid native technique resource: " + name);
 		}
 		D3D12_HEAP_PROPERTIES heap{};
 		ThrowIfFailed(resource->GetHeapProperties(&heap, nullptr));

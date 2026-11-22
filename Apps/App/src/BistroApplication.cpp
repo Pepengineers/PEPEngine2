@@ -1,6 +1,7 @@
 #include "BistroApplication.h"
 #include "Rendering/BistroRenderPipeline.h"
 #include "App.Base/ECS/Components/ReflectionProbeComponent.h"
+#include "App.Base/BistroLightPlacements.h"
 #include "App.Base/App.h"
 #include "Common/RuntimePaths.h"
 #include "Engine.Core/ConsoleModule.h"
@@ -22,11 +23,46 @@
 #include <stdexcept>
 #include <algorithm>
 #include <cmath>
+#include <unordered_map>
 #include <WindowsX.h>
 #include "Engine.UI/UI_test.h"
 
 namespace
 {
+struct BistroLocalShadowSettings
+{
+	explicit BistroLocalShadowSettings(const std::wstring& name)
+	    : Adapter(L"App.Shadows.Local.Adapter." + name, -1, L"Hardware GPU index; -1 uses GPU0",
+	              EConsoleVariableFlags::Default, [](int index) { return index >= -1; }),
+	      CrossSync(L"App.Shadows.Local.CrossSync." + name, 1, L"Remote shadow freshness: 1 Exact, 3 Latest",
+	                EConsoleVariableFlags::Default, [](int mode) { return mode == 1 || mode == 3; })
+	{}
+	AutoConsoleVariable<int> Adapter, CrossSync;
+};
+
+const auto LocalShadowSettings = []
+{
+	std::unordered_map<std::string, std::unique_ptr<BistroLocalShadowSettings>> settings;
+	for (const auto& fixture : BistroLightPlacements)
+	{
+		const std::string name = fixture.Name;
+		settings.emplace(name, std::make_unique<BistroLocalShadowSettings>(std::wstring(name.begin(), name.end())));
+	}
+	return settings;
+}();
+
+void UpdateLocalShadowSettings(World& world)
+{
+	world.GetECS().ForEach<NameComponent, LightComponent>([](Entity, const NameComponent& name, LightComponent& light)
+	{
+		if (light.Type == LightType::Directional) return;
+		const auto settings = LocalShadowSettings.find(name.value);
+		if (settings == LocalShadowSettings.end()) return;
+		light.ShadowAdapter = settings->second->Adapter.GetValue();
+		light.CrossSync = static_cast<ShadowCrossSync>(settings->second->CrossSync.GetValue());
+	});
+}
+
 constexpr float SunDiskScale = 2.5f;
 constexpr float MouseDegreesPerPixel = 0.15f;
 constexpr float CameraPitchLimit = 89.0f;
@@ -143,6 +179,7 @@ class BistroApplication final : public App
 
 		auto& world = *scenes->GetWorld();
 		world.SetPaused(false);
+		UpdateLocalShadowSettings(world);
 		InitializeSky(world);
 		_bistroReflections.Update(world, 0);
 		UpdateSky(world);
@@ -173,6 +210,7 @@ class BistroApplication final : public App
 	{
 		auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
 		_benchmark.Update(world, *Locator.GetModule<ConsoleModule>());
+		UpdateLocalShadowSettings(world);
 		_bistroReflections.Update(world, timer.DeltaTime());
 		const float sceneDelta = world.IsPaused() ? 0.f : timer.DeltaTime() * world.GetTimeScale();
 		UpdateSky(world, sceneDelta);

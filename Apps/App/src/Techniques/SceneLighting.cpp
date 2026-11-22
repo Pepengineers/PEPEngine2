@@ -1,11 +1,17 @@
 #include "SceneLighting.h"
+#include "ProbeInputMirror.h"
+#include "ShadowDepthTransfer.h"
+#include "ShadowGeometry.h"
+#include "SunShadowTileTransfer.h"
 #include "Common/ConsoleVariables.h"
+#include "Engine.Core/Logging/Logger.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include <FidelityFX/host/ffx_sssr.h>
 #include <FidelityFX/host/backends/dx12/ffx_dx12.h>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <set>
 namespace BistroRender
 {
 namespace
@@ -13,6 +19,24 @@ namespace
 AutoConsoleVariable<bool> AsyncLightGrid(L"App.Async.LightGrid", false,
                                         L"Build the light grid on the local COMPUTE queue.",
                                         EConsoleVariableFlags::Default);
+AutoConsoleVariable<int> SunShadowAdapter(L"App.Shadows.Sun.Adapter", -1,
+    L"DXGI hardware index for far CSM cascades; -1 uses GPU0", EConsoleVariableFlags::Default,
+    [](int index) { return index >= -1; });
+AutoConsoleVariable<UINT> SunShadowNearCount(L"App.Shadows.Sun.NearCascades", 2,
+    L"Number of nearest active sun cascades drawn on GPU0", EConsoleVariableFlags::Default,
+    [](UINT count) { return count <= 4; });
+AutoConsoleVariable<int> SunShadowSync(L"App.Shadows.Sun.CrossSync", 1,
+    L"Remote sun shadow freshness: 1 Exact, 3 Latest", EConsoleVariableFlags::Default,
+    [](int mode) { return mode == 1 || mode == 3; });
+
+bool CompatibleLocalShadow(const GDX12LocalLightConstants& cached, const GDX12LocalLightConstants& current)
+{
+	return GetLocalShadowKey(cached) == GetLocalShadowKey(current) && cached.Type == current.Type &&
+	       cached.ShadowRevision == current.ShadowRevision && cached.ShadowFirstSlice == current.ShadowFirstSlice &&
+	       (cached._padding[2] & current._padding[2]) == current._padding[2] && cached.Range == current.Range &&
+	       std::memcmp(&cached.Position, &current.Position, sizeof(current.Position)) == 0 &&
+	       std::memcmp(cached.ShadowViewProj, current.ShadowViewProj, sizeof(current.ShadowViewProj)) == 0;
+}
 
 constexpr UINT LightGridThreads = 64;
 constexpr UINT LightingTileSize = 8;
@@ -44,6 +68,47 @@ std::vector<Access> UniqueLightingAccesses(std::vector<Access> accesses)
 	return result;
 }
 } // namespace
+
+struct SceneLighting::RemoteShadows
+{
+	RemoteShadows(const std::shared_ptr<QueueSubmission>& submit, Id owner, RenderPipelineCommonData& common)
+	    : GPU(submit, owner, 1), Mirror(*submit, owner), Vegetation(Resources)
+	{
+		Resources.Initialize(&submit->Device(owner));
+		Local = std::make_unique<SceneLocalShadows>(Resources, common);
+	}
+	~RemoteShadows()
+	{
+		try { GPU.Drain(); } catch (...) {}
+	}
+	Executor GPU;
+	ProbeInputMirror Mirror;
+	GDX12DeviceResources Resources;
+	SceneGeometry::RemoteProbeVegetation Vegetation;
+	std::unique_ptr<SceneLocalShadows> Local;
+	std::unique_ptr<SceneSunShadows> Sun;
+	std::unique_ptr<SunShadowTileTransfer> SunTransfer;
+	std::array<GDX12Descriptor, 4> SceneViews;
+	std::unique_ptr<ShadowDepthTransfer> Transfer;
+	Graph Plan;
+	NativeWork Work;
+	std::vector<ID3D12Resource*> Bindings;
+	Id Export = Invalid, Import = Invalid, Input = Invalid;
+	CompletionToken Produced, Imported, Consumer;
+	std::vector<UINT> Lights;
+	std::vector<UINT> PendingSlices;
+	std::map<UINT, GDX12LocalLightConstants> PublishedLights, PendingLights;
+	GDX12ResourceHandle PublishedLocalAtlas, PublishedSunAtlas, PendingLocalAtlas, PendingSunAtlas;
+	GDX12ShadowConstants PublishedSun{}, PendingSun{};
+	UINT PublishedSunMask = 0, PendingSunMask = 0;
+	uint64_t PublishedLocalPlacement = 0, PublishedSunPlacement = 0;
+	uint64_t PendingSceneRevision = 0, PendingGrassRevision = 0;
+	UINT Count = 0;
+	UINT SunMask = 0, NearMask = 0;
+	uint64_t MeshRevision = UINT64_MAX, TextureRevision = UINT64_MAX;
+	bool Reported = false, Pending = false, Async = false;
+};
+
 SceneLighting::SceneLighting(GDX12DeviceResources& r, RenderPipelineCommonData& c)
     : _resources(r), _common(c), _frames(r.FrameConstants.size())
 {
@@ -92,6 +157,7 @@ void SceneLighting::Reset()
 }
 void SceneLighting::Freeze(SceneGeometry& geometry, UINT slot, const std::shared_ptr<QueueSubmission>& submissions, Id aoDevice)
 {
+	_submissions = submissions;
 	if (_pendingReset)
 	{
 		_reflections->Reset();
@@ -121,8 +187,37 @@ void SceneLighting::Freeze(SceneGeometry& geometry, UINT slot, const std::shared
 	staticVegetation.erase(std::remove_if(staticVegetation.begin(), staticVegetation.end(),
 	                                      [](const auto& primitive) { return primitive.Dynamic; }), staticVegetation.end());
 	_probeStaticShadows->Freeze(slot, staticVegetation, true);
+	auto& placements = _localShadows->_placements;
+	std::vector<std::pair<GDX12LocalShadowKey, Id>> resolved;
+	for (const auto& placement : _resources.LocalShadowPlacements)
+		if (const Id owner = submissions->SelectAdapter(placement.Adapter))
+			resolved.emplace_back(placement.Key, owner);
+	if (placements != resolved)
+	{
+		placements = std::move(resolved);
+		++_localPlacementEpoch;
+	}
 	_localShadows->Freeze(slot, vegetation, true);
 	_sunShadows->Freeze(slot, _localShadows->CastersRebuilt(), _localShadows->ChangedCasterBounds(), vegetation);
+	auto& sun = _sunShadows->_slots.at(slot);
+	const Id sunOwner = submissions->SelectAdapter(SunShadowAdapter.GetValue());
+	const UINT cascadeCount = _resources.ShadowSettings.CascadeCount;
+	const UINT nearCount = sunOwner ? (std::min)(cascadeCount, SunShadowNearCount.GetValue()) : cascadeCount;
+	const UINT active = (1u << cascadeCount) - 1;
+	const UINT sunMask = active & ~((1u << nearCount) - 1);
+	const int sync = SunShadowSync.GetValue();
+	if (_sunOwner != sunOwner || _sunRemoteMask != sunMask || _sunSync != sync)
+		++_sunPlacementEpoch;
+	_sunOwner = sunOwner;
+	_sunRemoteMask = sunMask;
+	_sunSync = sync;
+	if (sun.Owner != _sunOwner || sun.Near != nearCount)
+	{
+		if (_resources.Lighting.SunShadowFlags & ShadowEnabled) sun.Update |= active;
+		sun.DirtyCascades |= active;
+		sun.Owner = _sunOwner;
+		sun.Near = nearCount;
+	}
 	constants.ShadowCB->CopyData(0, _resources.ShadowSettings);
 	if (!constants.LocalLightCache->GetElementCount())
 	{
@@ -130,6 +225,9 @@ void SceneLighting::Freeze(SceneGeometry& geometry, UINT slot, const std::shared
 		constants.LocalLightCache->CopyData(0, GDX12LocalLightConstants{});
 	}
 	_probeStaticShadows->Complete(slot);
+	auto& staticLights = _probeStaticShadows->LightSource(slot);
+	if (!staticLights.GetSRV())
+		staticLights.CreateSRV(_resources.SRV_UAV_Heap.get(), _resources.SRV_UAV_Heap->GetAvailableIndex(SceneDescriptorStart));
 	_localShadows->Complete(slot);
 	auto& lightSource = _localShadows->LightSource(slot);
 	const UINT count = lightSource.GetElementCount();
@@ -159,7 +257,7 @@ void SceneLighting::Freeze(SceneGeometry& geometry, UINT slot, const std::shared
 void SceneLighting::AppendGpuLightGrid(Graph& graph, std::vector<ID3D12Resource*>& bindings,
                                        const SceneGeometry& geometry)
 {
-	const auto& scene = geometry._slots.at(_slot);
+	auto& scene = geometry._slots.at(_slot);
 	const auto& frame = _frames.at(_slot);
 	auto& grid = _deferred._grids.at(_slot);
 	const auto& layout = frame.GridLayout;
@@ -255,7 +353,8 @@ void SceneLighting::AppendShadows(Graph& graph, std::vector<ID3D12Resource*>& bi
 	_sunShadows->Append(graph, bindings, _slot,
 	                    {scene.Buffers[0].Srv.GPUHandle, scene.Buffers[1].Srv.GPUHandle, scene.Buffers[2].Srv.GPUHandle,
 	                     scene.Buffers[3].Srv.GPUHandle},
-	                    scene.Draws, scene.Geometry, appendGrass);
+	                    scene.Draws, scene.Geometry, appendGrass, ~_sunRemoteMask);
+	AppendRemoteLocalShadows(graph, bindings, geometry);
 	_localShadows->Append(graph, bindings, _slot,
 	                      {scene.Buffers[0].Srv.GPUHandle, scene.Buffers[1].Srv.GPUHandle,
 	                       scene.Buffers[2].Srv.GPUHandle, scene.Buffers[3].Srv.GPUHandle},
@@ -264,11 +363,415 @@ void SceneLighting::AppendShadows(Graph& graph, std::vector<ID3D12Resource*>& bi
 		_probeStaticShadows->Append(graph, bindings, _slot,
 		                            {scene.Buffers[0].Srv.GPUHandle, scene.Buffers[1].Srv.GPUHandle,
 		                             scene.Buffers[2].Srv.GPUHandle, scene.Buffers[3].Srv.GPUHandle},
-		                            scene.Geometry, *constants.ShadowLights, appendGrass);
+		                            scene.Geometry, _probeStaticShadows->LightSource(_slot), appendGrass);
 		_reflections->Append(graph, bindings, geometry, environment, _slot, _localShadows->Output(_slot),
-		                     _probeStaticShadows->Output(_slot));
+		                     _probeStaticShadows->Output(_slot), _probeStaticShadows->LightSource(_slot));
 	}
 }
+
+void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12Resource*>& primaryBindings,
+                                            SceneGeometry& geometry)
+{
+	auto& source = _localShadows->_slots.at(_slot);
+	auto& owners = _frames.at(_slot).ShadowOwners;
+	auto& sun = _sunShadows->_slots.at(_slot);
+	const auto localAtlas = source.Atlas.GetResource()->D3DResource;
+	const auto sunAtlas = sun.Atlas.GetResource()->D3DResource;
+	const auto sunSettings = _resources.ShadowSettings;
+	const auto desiredLatest = [&](const GDX12LocalLightConstants& light)
+	{
+		return std::any_of(_resources.LocalShadowPlacements.begin(), _resources.LocalShadowPlacements.end(),
+		    [&](const auto& item) { return item.Key == GetLocalShadowKey(light) && item.CrossSync == ShadowCrossSync::Latest; });
+	};
+	const auto localCompatible = [&](const RemoteShadows& remote, const GDX12LocalLightConstants& light)
+	{
+		const auto it = remote.PublishedLights.find(light.EntityId);
+		return remote.PublishedLocalPlacement == _localPlacementEpoch &&
+		       remote.PublishedLocalAtlas.Get() == localAtlas.Get() && it != remote.PublishedLights.end() &&
+		       CompatibleLocalShadow(it->second, light);
+	};
+	const auto sunCompatible = [&](const RemoteShadows& remote)
+	{
+		return remote.PublishedSunPlacement == _sunPlacementEpoch &&
+		       remote.PublishedSunAtlas.Get() == sunAtlas.Get() && remote.PublishedSunMask == _sunRemoteMask &&
+		       std::memcmp(&remote.PublishedSun, &sunSettings, sizeof(sunSettings)) == 0;
+	};
+	std::set<std::pair<Id, bool>> importing;
+	for (auto& [lane, remote] : owners)
+	{
+		const Id owner = lane.first;
+		remote->Export = remote->Import = Invalid;
+		if (!remote->Reported && remote->Consumer && _submissions->Complete(remote->Consumer))
+		{
+			_submissions->LogFirstImport("local shadow depth", remote->Produced, remote->Imported);
+			for (const UINT light : remote->Lights)
+				Log::Info("RenderGraph", "GPU0 completed local shadow consumer fence=", remote->Consumer.Value,
+				          " entity=", light, " slices=", remote->Count, " owner=", _submissions->AdapterLabel(owner));
+			if (remote->SunMask)
+				Log::Info("RenderGraph", "GPU0 completed CSM consumer fence=", remote->Consumer.Value,
+				          " GPU0 cascade mask=", remote->NearMask, " imported cascade mask=", remote->SunMask,
+				          " owner=", _submissions->AdapterLabel(owner));
+			remote->Reported = true;
+		}
+		if (!remote->Pending || !_submissions->Complete(remote->Produced)) continue;
+		remote->Pending = false;
+		const bool localReady = !remote->PendingSlices.empty() && remote->PendingLocalAtlas.Get() == localAtlas.Get() &&
+		    std::all_of(remote->PendingLights.begin(), remote->PendingLights.end(), [&](const auto& entry)
+		    {
+			    const auto current = std::lower_bound(source.Lights.begin(), source.Lights.end(), entry.first,
+			        [](const auto& light, UINT entity) { return light.EntityId < entity; });
+			    return current != source.Lights.end() && current->EntityId == entry.first &&
+			        source.Cache[current - source.Lights.begin()].Owner == owner && desiredLatest(*current) &&
+			        localCompatible(*remote, *current) && CompatibleLocalShadow(entry.second, *current);
+		    });
+		const bool sunReady = remote->PendingSunMask && owner == _sunOwner && SunShadowSync.GetValue() == 3 &&
+		    remote->PendingSunAtlas.Get() == sunAtlas.Get() && sunCompatible(*remote) &&
+		    std::memcmp(&remote->PendingSun, &sunSettings, sizeof(sunSettings)) == 0;
+		if (localReady)
+		{
+			if (remote->PendingSceneRevision == source.SceneRevision && remote->PendingGrassRevision == source.GrassReceiverRevision)
+				for (const auto& [entity, light] : remote->PendingLights)
+				{
+					const auto current = std::lower_bound(source.Lights.begin(), source.Lights.end(), entity,
+					    [](const auto& item, UINT key) { return item.EntityId < key; });
+					for (const UINT slice : remote->PendingSlices)
+						if (slice >= light.ShadowFirstSlice && slice - light.ShadowFirstSlice < LocalShadowFaceCount(light))
+							source.RemoteViews.push_back({UINT(current - source.Lights.begin()), slice - light.ShadowFirstSlice, slice});
+				}
+			remote->Import = remote->Transfer->Append(primary, primaryBindings, _work, localAtlas.Get(),
+			                                       std::move(remote->PendingSlices), false);
+		}
+		if (sunReady)
+		{
+			const Id imported = remote->SunTransfer->Import(primary, primaryBindings, _work, sun.Atlas);
+			if (remote->Import == Invalid) remote->Import = imported;
+			else primary.Operations[imported].Dependencies.push_back(remote->Import);
+			if (remote->PendingSceneRevision == source.SceneRevision && remote->PendingGrassRevision == source.GrassReceiverRevision)
+				sun.DirtyCascades &= ~remote->PendingSunMask;
+		}
+		if (localReady || sunReady) importing.insert(lane);
+	}
+	std::map<std::pair<Id, bool>, std::vector<SceneLocalShadows::View>> views;
+	source.Views.erase(std::remove_if(source.Views.begin(), source.Views.end(), [&](const auto& view)
+	{
+		const Id owner = source.Cache[view.Light].Owner;
+		if (!owner) return false;
+		const auto& light = source.Lights[view.Light];
+		bool latest = desiredLatest(light);
+		const auto old = owners.find({owner, true});
+		if (latest && old != owners.end() && (old->second->Pending || importing.count({owner, true})))
+		{
+			if (localCompatible(*old->second, light)) return true;
+			latest = false;
+		}
+		views[{owner, latest}].push_back(view);
+		return true;
+	}), source.Views.end());
+	const UINT sunUpdate = sun.Update & _sunRemoteMask;
+	std::pair<Id, bool> sunLane{_sunOwner, SunShadowSync.GetValue() == 3};
+	bool orderSun = sunUpdate != 0;
+	const auto oldSun = owners.find(sunLane);
+	if (orderSun && sunLane.second && oldSun != owners.end() &&
+	    (oldSun->second->Pending || importing.count(sunLane)))
+	{
+		if (sunCompatible(*oldSun->second)) orderSun = false;
+		else sunLane.second = false;
+	}
+	if (orderSun) views.try_emplace(sunLane);
+	if (views.empty()) return;
+
+	auto& scene = geometry._slots.at(_slot);
+	auto live = geometry.LiveProbeInputs();
+	auto& materials = *_resources.FrameConstants.at(_slot)->MaterialCache;
+	std::set<UINT> maskedTextures;
+	for (UINT i = 0; i < materials.GetElementCount(); ++i)
+	{
+		const auto& material = materials.GetCPUData()[i];
+		if (material.RenderLayer == UINT(MaterialType::Masked) && !material.ReflectionProbePreview)
+			maskedTextures.insert(material.DiffuseIndex);
+	}
+	std::vector<GDX12Texture*> textures;
+	for (const auto& [name, texture] : _resources.Textures)
+	{
+		const UINT index = texture->GetSRV()->HeapIndex;
+		if (index < Texture2D_StartIndex || !maskedTextures.count(index - Texture2D_StartIndex)) continue;
+		textures.push_back(texture.get());
+		live.insert(texture->GetResource()->D3DResource.Get());
+	}
+	auto& camera = *_resources.FrameConstants.at(_slot)->CameraCB;
+	auto* cameraBuffer = camera.GetResource().D3DResource.Get();
+	live.insert(cameraBuffer);
+	for (const auto& [lane, batch] : views)
+	{
+		const Id owner = lane.first;
+		auto& entry = owners[lane];
+		if (!entry) entry = std::make_unique<RemoteShadows>(_submissions, owner, _common);
+		auto& remote = *entry;
+		remote.SunMask = orderSun && lane == sunLane ? sunUpdate : 0;
+		remote.NearMask = sun.Update & ~_sunRemoteMask;
+		const bool latest = lane.second && (!remote.SunMask || sunCompatible(remote)) &&
+		    std::all_of(batch.begin(), batch.end(), [&](const auto& view) { return localCompatible(remote, source.Lights[view.Light]); });
+		remote.Async = latest;
+		remote.PendingSceneRevision = source.SceneRevision;
+		remote.PendingGrassRevision = source.GrassReceiverRevision;
+		remote.PendingSlices.clear();
+		remote.PendingLights.clear();
+		remote.PendingSunMask = 0;
+		auto& pass = *remote.Local;
+		auto& target = pass._slots.front();
+		remote.Resources.ShadowQuality.LocalResolution = source.Resolution;
+		pass.PrepareAtlas(target, UINT(batch.size()));
+		target.Lights = source.Lights;
+		target.Views.clear();
+		target.Packed.clear();
+		std::vector<UINT> from, to;
+		remote.Lights.clear();
+		for (auto view : batch)
+		{
+			to.push_back(view.Slice);
+			view.Slice = UINT(from.size());
+			from.push_back(view.Slice);
+			const auto first = source.Packed.begin() + view.First;
+			view.First = UINT(target.Packed.size());
+			target.Packed.insert(target.Packed.end(), first, first + view.OpaqueCount + view.MaskedCount);
+			target.Views.push_back(view);
+			const auto entity = target.Lights[view.Light].EntityId;
+			if (remote.Lights.empty() || remote.Lights.back() != entity) remote.Lights.push_back(entity);
+		}
+		remote.Count = UINT(batch.size());
+		auto* heap = remote.Resources.SRV_UAV_Heap.get();
+		if (!batch.empty())
+		{
+			pass.Complete(0);
+			if (!target.LightUpload->GetSRV()) target.LightUpload->CreateSRV(heap, heap->GetAvailableIndex(SceneDescriptorStart));
+		}
+		auto& graph = remote.Plan;
+		auto& bindings = remote.Bindings;
+		auto& work = remote.Work;
+		graph = {};
+		graph.Device = owner;
+		graph.FrameBoundary = false;
+		bindings.clear();
+		work.Commands.clear();
+		remote.Mirror.Begin();
+		remote.Mirror.RetireUnused(live, [&](ID3D12Resource* retired) { remote.Vegetation.Forget(retired); });
+		const auto mirror = [&](Id id, bool refresh)
+		{ return remote.Mirror.Mirror(primary, primaryBindings, primaryBindings.at(id), id, refresh); };
+		const auto bind = [&](ID3D12Resource* resource)
+		{ return NativeWork::ResourceFor(graph, bindings, resource, "shadow owner input"); };
+		std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 4> descriptors{};
+		std::array<Id, 6> inputs{};
+		constexpr UINT strides[]{sizeof(GDX12InstanceData), sizeof(GDX12IndirectDrawArgs),
+		                         sizeof(GDX12MaterialConstants), sizeof(GDX12TransformConstants)};
+		constexpr std::array sceneInputs{SceneInstances, SceneMaterials, SceneTransforms, SceneCommands};
+		for (UINT output = 0; output < sceneInputs.size(); ++output)
+		{
+			const auto index = sceneInputs[output];
+			auto* local = mirror(index, true);
+			inputs[index == SceneCommands ? 5 : output] = bind(local);
+			auto& descriptor = remote.SceneViews[index];
+			D3D12_SHADER_RESOURCE_VIEW_DESC view{};
+			view.Format = DXGI_FORMAT_UNKNOWN;
+			view.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+			view.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+			view.Buffer.StructureByteStride = strides[index];
+			view.Buffer.NumElements = UINT(scene.Buffers[index].Bytes / strides[index]);
+			descriptor.InitAsSRV(local, &view, heap, descriptor.HeapIndex == UINT_MAX
+			    ? heap->GetAvailableIndex(SceneDescriptorStart) : descriptor.HeapIndex);
+			descriptors[index] = descriptor.GPUHandle;
+		}
+		auto mesh = scene.Geometry;
+		const auto meshRevision = _resources.GeometryBuffer->GetMeshCacheRevision();
+		const bool meshChanged = remote.MeshRevision != meshRevision;
+		remote.MeshRevision = meshRevision;
+		mesh.VertexResource = mirror(SceneVertices, meshChanged || !scene.Skin.empty());
+		mesh.IndexResource = mirror(SceneIndices, meshChanged);
+		mesh.Vertices.BufferLocation = mesh.VertexResource->GetGPUVirtualAddress();
+		mesh.Indices.BufferLocation = mesh.IndexResource->GetGPUVirtualAddress();
+		inputs[3] = bind(mesh.VertexResource);
+		inputs[4] = bind(mesh.IndexResource);
+		const Id cameraSource = NativeWork::ResourceFor(primary, primaryBindings, cameraBuffer, "shadow camera input");
+		auto* localCamera = mirror(cameraSource, true);
+		const Id cameraId = bind(localCamera);
+		const auto cameraAddress = localCamera->GetGPUVirtualAddress() +
+		    UINT64(_common.ActiveCameraCBufferIndex) * camera.GetElementSize();
+		const bool materialsChanged = remote.TextureRevision != _resources.TextureRevision;
+		remote.TextureRevision = _resources.TextureRevision;
+		std::vector<Access> materialReads, restore;
+		for (auto* texture : textures)
+		{
+			auto& resource = *texture->GetResource();
+			auto* native = resource.D3DResource.Get();
+			const auto found = std::find(primaryBindings.begin(), primaryBindings.end(), native);
+			Id id = Id(found - primaryBindings.begin());
+			if (found == primaryBindings.end())
+			{
+				id = NativeWork::ResourceFor(primary, primaryBindings, native, "shadow material texture");
+				primary.Resources[id].Initial = primary.Resources[id].Final = resource.GetCurrentState();
+			}
+			const bool refresh = materialsChanged || !remote.Mirror.Contains(native);
+			auto* local = mirror(id, refresh);
+			if (refresh)
+			{
+				const auto view = texture->ShaderViewDescription();
+				remote.Resources.Device->GetDevice()->CreateShaderResourceView(
+				    local, &view, heap->GetCPUHandle(texture->GetSRV()->HeapIndex));
+			}
+			constexpr State read = D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE;
+			materialReads.push_back({bind(local), Mode::Read, read});
+			if (remote.Mirror.PendingCopy(native)) restore.push_back({id, Mode::Read, read});
+		}
+		materialReads = UniqueLightingAccesses(std::move(materialReads));
+		const auto vegetation = [&](const GeometryTarget& view, Graph&, std::vector<ID3D12Resource*>&)
+		{
+			auto grass = view;
+			grass.View.FrameSlot = _slot;
+			grass.Camera = cameraId;
+			grass.View.CameraConstants = cameraAddress;
+			grass.AdditionalReads = materialReads;
+			geometry.AppendVegetationView(primary, primaryBindings, remote.Mirror, graph, bindings, work,
+			    remote.Vegetation, _slot, grass, remote.SceneViews[SceneMaterials], inputs[1], Invalid, 0, {});
+		};
+		const auto addWork = [&](NativeWork& planned)
+		{
+			work.Commands.insert(work.Commands.end(), std::make_move_iterator(planned.Commands.begin()),
+			                     std::make_move_iterator(planned.Commands.end()));
+		};
+		if (!batch.empty())
+		{
+			const std::array<Id, 5> localInputs{inputs[0], inputs[1], inputs[2], inputs[3], inputs[4]};
+			pass.Append(graph, bindings, 0, descriptors, mesh, *target.LightUpload, vegetation, &localInputs, materialReads);
+			addWork(target.Work);
+		}
+		if (remote.SunMask)
+		{
+			if (!remote.Sun) remote.Sun = std::make_unique<SceneSunShadows>(remote.Resources, _common);
+			auto& shadow = *remote.Sun;
+			remote.Resources.ShadowQuality.SunResolution = _resources.ShadowQuality.SunResolution;
+			remote.Resources.ShadowSettings = _resources.ShadowSettings;
+			remote.Resources.FrameConstants.front()->ShadowCB->CopyData(0, _resources.ShadowSettings);
+			shadow._slots.front().Update = remote.SunMask;
+			shadow.Append(graph, bindings, 0, descriptors, scene.Draws, mesh, vegetation, remote.SunMask,
+			              &inputs, materialReads);
+			addWork(shadow._slots.front().Work);
+		}
+		std::sort(work.Commands.begin(), work.Commands.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+		remote.Input = remote.Mirror.AppendImport(graph, bindings, work, true);
+		remote.Export = remote.Mirror.AppendExport(primary, primaryBindings, _work, restore.empty() ? Queue::Copy : Queue::Direct);
+		Id restored = Invalid;
+		if (!restore.empty())
+			restored = _work.Add(primary, "restore GPU0 shadow material textures", UniqueLightingAccesses(std::move(restore)),
+			                     [](auto*) {}, {remote.Export});
+		scene.ShadowInputCopies.emplace_back(remote.Export, restored);
+		if (!batch.empty())
+		{
+			remote.Transfer = std::make_unique<ShadowDepthTransfer>(*_submissions, owner, source.Resolution, UINT(batch.size()));
+			remote.Transfer->Append(graph, bindings, work, target.Atlas.GetResource()->D3DResource.Get(), std::move(from), true);
+			if (latest)
+			{
+				remote.PendingLocalAtlas = localAtlas;
+				remote.PendingSlices = std::move(to);
+				for (const auto& view : batch)
+				{
+					const auto& light = source.Lights[view.Light];
+					remote.PendingLights[light.EntityId] = light;
+				}
+			}
+			else
+			{
+				remote.Import = remote.Transfer->Append(primary, primaryBindings, _work, localAtlas.Get(), std::move(to), false);
+				source.RemoteViews.insert(source.RemoteViews.end(), batch.begin(), batch.end());
+				if (remote.PublishedLocalAtlas.Get() != localAtlas.Get() || remote.PublishedLocalPlacement != _localPlacementEpoch)
+					remote.PublishedLights.clear();
+				remote.PublishedLocalAtlas = localAtlas;
+				remote.PublishedLocalPlacement = _localPlacementEpoch;
+				const auto latestOwner = owners.find({owner, true});
+				for (const auto& view : batch)
+				{
+					const auto& light = source.Lights[view.Light];
+					if (lane.second) remote.PublishedLights[light.EntityId] = light;
+					else if (latestOwner != owners.end()) latestOwner->second->PublishedLights.erase(light.EntityId);
+				}
+			}
+		}
+		if (remote.SunMask)
+		{
+			if (!remote.SunTransfer)
+				remote.SunTransfer = std::make_unique<SunShadowTileTransfer>(*_submissions, owner,
+				    *_resources.SRV_UAV_Heap, *heap);
+			remote.SunTransfer->Prepare(_resources.ShadowQuality.SunResolution, remote.SunMask);
+			remote.SunTransfer->Export(graph, bindings, work, *remote.Sun->Output(0));
+			if (latest)
+			{
+				remote.PendingSunAtlas = sunAtlas;
+				remote.PendingSunMask = remote.SunMask;
+				remote.PendingSun = sunSettings;
+			}
+			else
+			{
+				const Id imported = remote.SunTransfer->Import(primary, primaryBindings, _work, sun.Atlas);
+				if (remote.Import == Invalid) remote.Import = imported;
+				else primary.Operations[imported].Dependencies.push_back(remote.Import);
+				sun.Settings = sunSettings;
+				sun.Revision = _resources.Lighting.SunShadowRevision;
+				sun.DirtyCascades &= ~remote.SunMask;
+				if (lane.second)
+				{
+					remote.PublishedSunAtlas = sunAtlas;
+					remote.PublishedSunPlacement = _sunPlacementEpoch;
+					remote.PublishedSunMask = _sunRemoteMask;
+					remote.PublishedSun = sunSettings;
+				}
+				else if (const auto prior = owners.find({owner, true}); prior != owners.end())
+					prior->second->PublishedSunMask = 0;
+			}
+		}
+	}
+}
+
+void SceneLighting::AddShadowExchanges(const Schedule& primary, std::vector<Executor::PacketExchange>& exchanges)
+{
+	const auto packet = [](const Schedule& schedule, Id operation)
+	{
+		const auto it = std::find_if(schedule.Packets.begin(), schedule.Packets.end(),
+		                             [=](const auto& entry) { return entry.Operation == operation; });
+		if (it == schedule.Packets.end()) throw std::logic_error("Missing cross-adapter shadow packet");
+		return Id(it - schedule.Packets.begin());
+	};
+	for (auto& [lane, entry] : _frames.at(_slot).ShadowOwners)
+	{
+		auto& remote = *entry;
+		if (remote.Import != Invalid) remote.Import = packet(primary, remote.Import);
+		if (remote.Export == Invalid) continue;
+		auto schedule = Compile(remote.Plan);
+		const Id input = packet(schedule, remote.Input);
+		remote.GPU.Begin(0);
+		remote.GPU.Reserve(schedule);
+		exchanges.push_back({packet(primary, remote.Export), remote.Import,
+		    [&remote, schedule = std::move(schedule), input](CompletionToken source)
+		    {
+			    remote.GPU.Execute(schedule, remote.Bindings, [&remote](Id op, UINT, ID3D12GraphicsCommandList* cmd)
+			    {
+				    if (!remote.Work.Record(op, cmd)) throw std::logic_error("Missing owner shadow work");
+			    }, nullptr, nullptr, nullptr, {{input, source}});
+			    remote.Produced = remote.GPU.Completions().back();
+			    remote.Pending = remote.Async;
+			    return remote.Produced;
+		    }});
+	}
+}
+
+void SceneLighting::ShadowImportsSubmitted(const std::vector<CompletionToken>& completions)
+{
+	for (auto& [owner, entry] : _frames.at(_slot).ShadowOwners)
+	{
+		auto& remote = *entry;
+		if (remote.Import == Invalid) continue;
+		remote.Imported = completions.at(remote.Import);
+		remote.Consumer = completions.back();
+	}
+}
+
 void SceneLighting::PrepareDeferred(SceneGeometry& geometry, SceneEnvironment& environment)
 {
 	auto& scene = geometry._slots.at(_slot);

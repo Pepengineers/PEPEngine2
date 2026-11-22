@@ -123,7 +123,7 @@ void GDX12GrassRenderer::InitializeGraphics(bool captureOnly)
     for (UINT i = 0; i < _graphicsPSO.size(); ++i)
     {
         const auto stage = static_cast<Stage>(i);
-        if (captureOnly && stage != Stage::Capture) continue;
+        if (captureOnly && stage != Stage::Capture && stage != Stage::Shadow) continue;
         const bool depth = stage == Stage::Depth || stage == Stage::Shadow;
         const bool capture = stage == Stage::Capture;
         D3D_SHADER_MACRO captureDefines[] = { { "GRASS_CAPTURE", "1" }, { nullptr, nullptr } };
@@ -683,7 +683,8 @@ void GDX12GrassRenderer::PrepareView(const GDX12GeometryContext& view, UINT patc
         binding.SRVs.insert(binding.SRVs.end(), {
             { 2, lighting.SunShadow->GetSRV()->GPUHandle }, { 3, lighting.Irradiance->GetSRV()->GPUHandle },
             { 4, lighting.Prefiltered->GetSRV()->GPUHandle }, { 5, lighting.BRDF->GetSRV()->GPUHandle },
-            { 6, constants->ShadowLights->GetSRV()->GPUHandle }, { 7, lighting.LocalShadows->GetSRV()->GPUHandle } });
+            { 6, lighting.LocalLightSrv.ptr ? lighting.LocalLightSrv : constants->ShadowLights->GetSRV()->GPUHandle },
+            { 7, lighting.LocalShadows->GetSRV()->GPUHandle } });
     }
     auto& batch = output->Batch;
     batch.Binding = &binding;

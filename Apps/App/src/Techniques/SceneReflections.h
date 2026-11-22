@@ -18,7 +18,8 @@ class SceneReflections
         _historyBase = _common.HistoryRevision;
     }
     void Append(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, SceneEnvironment&, UINT slot,
-                GDX12Texture* localShadows = nullptr, GDX12Texture* staticLocalShadows = nullptr);
+                GDX12Texture* localShadows, GDX12Texture* staticLocalShadows,
+                GDX12UploadBuffer<GDX12LocalLightConstants>& staticLights);
     bool Record(Id, ID3D12GraphicsCommandList*) const;
     void Submitted(uint64_t fence);
     void AddExchanges(const Schedule&, std::vector<PacketWait>&, std::vector<Executor::PacketExchange>&);

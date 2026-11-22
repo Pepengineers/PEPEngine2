@@ -3,6 +3,7 @@
 #include <cstdint>
 #include "Engine.Core/ECS/Component.h"
 #include "Engine.RendererDX12/D3DHelpers.h"
+#include "Engine.RendererDX12/GDX12LocalLights.h"
 
 enum class LightType : std::uint8_t { Directional, Point, Spot };
 enum class ShadowUpdateMode : std::uint8_t { Cached, EveryFrame };
@@ -18,6 +19,8 @@ struct LightComponent : ComponentTag
     bool Enabled = true;
     bool CastShadows = true;
     ShadowUpdateMode ShadowUpdate = ShadowUpdateMode::Cached;
+    int ShadowAdapter = -1; // DXGI hardware index; -1 uses the primary adapter.
+    ShadowCrossSync CrossSync = ShadowCrossSync::Exact;
     uint32_t ShadowRevision = 1;
 
     void InvalidateShadow() { ++ShadowRevision; }

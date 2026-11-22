@@ -1,7 +1,12 @@
 #include "CBufferStructures.hlsl"
 
 #ifdef SHADOW_CULLING
+#ifdef SHADOW_CASCADE_MASK
+cbuffer CascadeMask : register(b0) { uint ActiveCascades; };
+ConstantBuffer<ShadowCB> CBShadow : register(b1);
+#else
 ConstantBuffer<ShadowCB> CBShadow : register(b0);
+#endif
 StructuredBuffer<IndirectDrawArgs> InputCommands : register(t1);
 RWStructuredBuffer<IndirectDrawArgs> Commands0 : register(u0);
 RWStructuredBuffer<IndirectDrawArgs> Commands1 : register(u1);
@@ -48,6 +53,9 @@ void CS(uint3 id : SV_DispatchThreadID)
     uint stream = material.RenderLayer == 1 ? 1 : 0;
     for (uint cascade = 0; cascade < CBShadow.CascadeCount; ++cascade)
     {
+#ifdef SHADOW_CASCADE_MASK
+        if ((ActiveCascades & (1u << cascade)) == 0u) continue;
+#endif
         if (!Visible(instance, CBShadow.ViewProj[cascade])) continue;
         uint index;
         InterlockedAdd(Counters[2 * cascade + stream], 1, index);

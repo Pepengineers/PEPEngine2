@@ -17,14 +17,17 @@ class SceneSunShadows
 	void Append(
 	    Graph&, std::vector<ID3D12Resource*>&, UINT slot, const std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 4>& scene,
 	    UINT draws, GDX12GeometryBuffer::RecordingBinding geometry,
-	    const std::function<void(const GeometryTarget&, Graph&, std::vector<ID3D12Resource*>&)>& appendGrass = {});
+	    const std::function<void(const GeometryTarget&, Graph&, std::vector<ID3D12Resource*>&)>& appendGrass = {},
+	    UINT mask = UINT_MAX, const std::array<Id, 6>* inputs = nullptr,
+	    const std::vector<Access>& materialTextures = {});
 	bool Record(UINT slot, Id id, ID3D12GraphicsCommandList* cmd) const { return _slots.at(slot).Work.Record(id, cmd); }
 	GDX12Texture* Output(UINT slot) { return &_slots.at(slot).Atlas; }
 
   private:
+	friend class SceneLighting;
 	using GrassAppender = std::function<void(const GeometryTarget&, Graph&, std::vector<ID3D12Resource*>&)>;
 	void AppendGrassViews(Graph& graph, std::vector<ID3D12Resource*>& bindings, UINT slot, Id atlas,
-	                      const GrassAppender& appendGrass);
+	                      UINT update, const GrassAppender& appendGrass);
 	struct VegetationCaster
 	{
 		uint64_t Revision;
@@ -39,6 +42,8 @@ class SceneSunShadows
 		BoundingBox Bounds{};
 		bool HasBounds = false, BoundsReady = false, Rendered = false;
 		UINT Resolution = UINT_MAX, Revision = 0, Update = 0, DirtyCascades = 0;
+		Id Owner = 0;
+		UINT Near = UINT_MAX;
 		std::vector<VegetationCaster> Vegetation;
 		GDX12ShadowConstants Settings{};
 	};

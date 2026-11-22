@@ -7,6 +7,7 @@
 #include "SceneProbePreview.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12DeferredLightingPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12SSSRPass.h"
+#include <map>
 namespace BistroRender
 {
 class SceneLighting
@@ -28,10 +29,12 @@ class SceneLighting
 	                       std::vector<Executor::PacketExchange>& exchanges)
 	{
 		_reflections->AddExchanges(schedule, waits, exchanges);
+		AddShadowExchanges(schedule, exchanges);
 	}
 	void ProbesSubmitted(const std::vector<CompletionToken>& completions)
 	{
 		_reflections->RemoteSubmitted(completions);
+		ShadowImportsSubmitted(completions);
 	}
 	void AOPresented(uint64_t frame, const std::vector<CompletionToken>& completions)
 	{
@@ -69,6 +72,7 @@ class SceneLighting
 	}
 
   private:
+	struct RemoteShadows;
 	struct Frame
 	{
 		std::unique_ptr<SceneAO> AO;
@@ -77,7 +81,11 @@ class SceneLighting
 		GDX12ResourceHandle LightSource;
 		bool UploadLights = false;
 		GDX12LightGridConstants GridLayout{};
+		std::map<std::pair<Id, bool>, std::unique_ptr<RemoteShadows>> ShadowOwners;
 	};
+	void AppendRemoteLocalShadows(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&);
+	void AddShadowExchanges(const Schedule&, std::vector<Executor::PacketExchange>&);
+	void ShadowImportsSubmitted(const std::vector<CompletionToken>&);
 	void AppendShadows(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, SceneEnvironment&);
 	void AppendDeferred(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, SceneEnvironment&);
 	GDX12Texture* AppendSSR(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, SceneEnvironment&);
@@ -94,6 +102,7 @@ class SceneLighting
 	std::unique_ptr<SceneTransparency> _transparency;
 
 	std::vector<Frame> _frames;
+	std::shared_ptr<QueueSubmission> _submissions;
 	GDX12DeferredLightingPass _deferred;
 	std::unique_ptr<GDX12SSSRPass> _ssr;
 	NativeWork _work;
@@ -101,6 +110,10 @@ class SceneLighting
 	ComPtr<ID3D12PipelineState> _gridBuild;
 	bool _forceReset = true;
 	UINT _slot = 0;
+	Id _sunOwner = 0;
+	UINT _sunRemoteMask = 0;
+	int _sunSync = 1;
+	uint64_t _localPlacementEpoch = 0, _sunPlacementEpoch = 0;
 	bool _initialized = false;
 	bool _pendingReset = false;
 	GDX12SSRSettings _ssrSettings{};
