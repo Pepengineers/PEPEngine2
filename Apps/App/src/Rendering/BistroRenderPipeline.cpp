@@ -245,15 +245,31 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	}
 	catch (...)
 	{
-		_cloudPicture->Submitted(_executor->Completions());
-		_environment->AtmosphereSubmitted(_frameNumber, _executor->Completions());
-		_post->PostersSubmitted(_frameNumber, _executor->Completions());
-		water.Submitted(_executor->Completions());
-		grass.WindSubmitted(_frameNumber, _executor->Completions());
-		particles.Submitted(_executor->Completions());
-		_lighting->AOSubmitted(_executor->Completions());
-		_lighting->ProbesSubmitted(_executor->Completions());
 		_post->Reconstruction().CancelRecording();
+		const auto& completions = _executor->Completions();
+		try
+		{
+			if (completions.empty())
+			{
+				// A skinning owner may have submitted work before GPU0 had any packets to report.
+				_geometry->DrainSkinning();
+			}
+			else
+			{
+				_cloudPicture->Submitted(completions);
+				_environment->AtmosphereSubmitted(_frameNumber, completions);
+				_post->PostersSubmitted(_frameNumber, completions);
+				water.Submitted(completions);
+				grass.WindSubmitted(_frameNumber, completions);
+				particles.Submitted(completions);
+				_lighting->AOSubmitted(completions);
+				_lighting->ProbesSubmitted(completions);
+			}
+		}
+		catch (...)
+		{
+			OutputDebugStringA("Bistro submission cleanup failed; preserving the original exception.\n");
+		}
 		throw;
 	}
 	_geometry->SkinningSubmitted(slot, _frameNumber, _executor->Completions().back());
