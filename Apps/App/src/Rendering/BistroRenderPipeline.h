@@ -1,4 +1,5 @@
 #pragma once
+#include <chrono>
 #include "App.Base/Rendering/IRenderPipeline.h"
 #include "Techniques/SceneGeometry.h"
 #include "Techniques/SceneEnvironment.h"
@@ -60,14 +61,24 @@ class BistroRenderPipeline final : public IRenderPipeline
 	uint64_t ExecuteFrame(RenderPipelineContext&, GDX12CommandList*,
 	                      const std::function<void(GDX12CommandList*)>&) override;
 	void FramePresented() override;
+	void BeforePresent() override { _beforePresent = std::chrono::steady_clock::now(); }
+	auto PresentTime() const { return _beforePresent; }
 	void WriteExecution(std::ostream& output) const override { _schedule->Write(output); }
 	const BistroRender::Schedule& LastSchedule() const { return *_schedule; }
 	bool HasRemoteCloudPicture() const { return _cloudPicture->IsRemote(); }
 	uint64_t PresentedFrames() const { return _presentedFrames; }
-	void SetBenchmarkTime(std::optional<double> seconds) { _benchmarkTime = seconds; }
+	void SetBenchmarkTime(std::optional<double> seconds, bool localSkinning = true)
+	{
+		_benchmarkTime = seconds;
+		_benchmarkLocalSkinning = seconds.has_value() && localSkinning;
+	}
 	void ResetBenchmarkClouds() { _environment->ResetClouds(); }
 	std::function<void()> CaptureBenchmarkPhysics(World&);
 	std::vector<std::pair<std::string, std::string>> BenchmarkAdapters() const;
+	const auto& BenchmarkSubmissions() const { return *_executor->Submissions(); }
+	auto& BenchmarkSubmissions() { return *_executor->Submissions(); }
+	auto BenchmarkTransferBytes() const { return _post->BenchmarkTransferBytes(); }
+	auto BenchmarkPostEffects() const { return _post->BenchmarkPostEffects(); }
 	void PauseIndependentClocks();
 
   private:
@@ -82,8 +93,10 @@ class BistroRenderPipeline final : public IRenderPipeline
 	std::shared_ptr<const BistroRender::Schedule> _schedule = std::make_shared<BistroRender::Schedule>();
 	double _animationTime = 0;
 	std::optional<double> _benchmarkTime;
+	bool _benchmarkLocalSkinning = false;
 	std::shared_ptr<BistroWaves::Controller> _waves;
 	uint64_t _presentedFrames = 0;
+	std::chrono::steady_clock::time_point _beforePresent{};
 	uint64_t _frameNumber = 0;
 	std::array<BistroRender::Id, 5> _reportedDevices{
 	    BistroRender::Invalid, BistroRender::Invalid, BistroRender::Invalid, BistroRender::Invalid, BistroRender::Invalid};

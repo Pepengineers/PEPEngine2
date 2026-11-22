@@ -30,6 +30,10 @@ public:
     Id SelectAdapter(int hardwareIndex);
     const std::string& AdapterLabel(Id) const;
     void LogFirstImport(const char* technique, CompletionToken source, CompletionToken imported) const;
+    struct BenchmarkWait { Id From, To; Queue SourceQueue, TargetQueue; uint64_t FirstFence, Count; };
+    void BeginBenchmarkWaits();
+    std::vector<BenchmarkWait> EndBenchmarkWaits();
+    std::vector<int> BenchmarkAdapterIndices() const;
     uint64_t Incarnation() const { return _incarnation; }
     struct TransferBuffer {
         std::array<ComPtr<ID3D12Heap>, 2> Heaps;
@@ -72,6 +76,8 @@ private:
     std::map<std::tuple<Id, Id, size_t>, ComPtr<ID3D12Fence>> _peerFences;
     uint64_t _incarnation;
     mutable std::mutex _mutex;
+    bool _benchmarking = false;
+    std::vector<BenchmarkWait> _benchmarkWaits;
     mutable std::atomic<bool> _quarantined{false};
 };
 }

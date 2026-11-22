@@ -47,6 +47,7 @@ class SceneLighting
 	}
 	void UpdateLightGridOwner(Executor& primary);
 	Id LightGridDevice() const;
+	Id SunShadowDevice() const { return _sunOwner; }
 	void DrainLightGrid();
 	void AppendGpuLightGrid(Graph&, std::vector<ID3D12Resource*>&);
 	void SubmitLightGrid(const Schedule&, std::vector<PacketWait>&);

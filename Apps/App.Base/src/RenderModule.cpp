@@ -974,6 +974,7 @@ void RenderModule::OnRender()
     GetCurrentPrimaryFrameConstants()->FenceValue = completion;
     _primaryGPUTimer->OnCommandListExecuted(completion);
     _backBuffer->GetFrameGeneration().EndRendering();
+    _pipeline->BeforePresent();
     if (_backBuffer->Present()) _pipeline->FramePresented();
 }
 

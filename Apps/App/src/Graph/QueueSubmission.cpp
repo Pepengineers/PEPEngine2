@@ -123,6 +123,28 @@ const std::string& QueueSubmission::AdapterLabel(Id id) const
     return _adapterLabels.at(id == 0 ? _primaryIndex : id - 1);
 }
 
+void QueueSubmission::BeginBenchmarkWaits()
+{
+    std::lock_guard<std::mutex> lock(_mutex);
+    _benchmarkWaits.clear();
+    _benchmarking = true;
+}
+
+std::vector<QueueSubmission::BenchmarkWait> QueueSubmission::EndBenchmarkWaits()
+{
+    std::lock_guard<std::mutex> lock(_mutex);
+    _benchmarking = false;
+    return std::exchange(_benchmarkWaits, {});
+}
+
+std::vector<int> QueueSubmission::BenchmarkAdapterIndices() const
+{
+    std::vector<int> adapters;
+    for (int i = 0; i < int(_adapters.size()); ++i)
+        if (i != _primaryIndex) adapters.push_back(i);
+    return adapters;
+}
+
 void QueueSubmission::LogFirstImport(const char* technique, CompletionToken source, CompletionToken imported) const
 {
     assert(source && source.Device != 0 && imported && imported.Device == 0);
@@ -268,6 +290,16 @@ CompletionToken QueueSubmission::Submit(Id device,BistroRender::Queue target,
                 _peerFences.at({token.Device, device, Index(token.Target)}).Get();
             if(!fence) throw std::invalid_argument("missing cross-device fence handle");
             ThrowIfFailed(t.Queue->GetCommandQueue()->Wait(fence,token.Value));
+            if (_benchmarking && token.Device != device)
+            {
+                const auto wait = std::find_if(_benchmarkWaits.begin(), _benchmarkWaits.end(), [&](const auto& w)
+                {
+                    return w.From == token.Device && w.To == device && w.SourceQueue == token.Target && w.TargetQueue == target;
+                });
+                if (wait == _benchmarkWaits.end())
+                    _benchmarkWaits.push_back({token.Device, device, token.Target, target, token.Value, 1});
+                else ++wait->Count;
+            }
         }
         uint64_t value=0;
         if(external) { t.Queue->ExecuteCommandList(external); value=external->FenceValue; }

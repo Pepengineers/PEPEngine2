@@ -240,7 +240,7 @@ class BistroApplication final : public App
 			_autoBenchmarkPending = false;
 			_benchmark.RequestAutomatic();
 		}
-		_benchmark.Update(world, *Locator.GetModule<ConsoleModule>(), *render, *_bistroPipeline);
+		_benchmark.Update(world, *Locator.GetModule<ConsoleModule>(), *render, *_bistroPipeline, *GetWindow());
 		Engine::UI::SetSettingsEditingEnabled(!_benchmark.Active());
 		UpdateLocalShadowSettings(world);
 		_bistroReflections.Update(world, timer.DeltaTime());

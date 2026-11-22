@@ -22,6 +22,8 @@ class ScenePostUI
 	std::vector<GDX12RenderPass*> Passes();
 	bool UpdatePostOwner(RenderPipelineContext&, const std::shared_ptr<QueueSubmission>&, Id);
 	std::vector<std::pair<std::string, Id>> ExecutionDevices() const;
+	std::array<uint64_t, 4> BenchmarkTransferBytes() const;
+	std::pair<bool, bool> BenchmarkPostEffects() const;
 	void DrainPost();
 	void AddPostExchange(const Schedule&, std::vector<Executor::PacketExchange>&);
 	void PostPresented();

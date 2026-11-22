@@ -107,7 +107,7 @@ void BistroInfoPanel::Draw(RenderModule& render, const BistroRenderPipeline& pip
 
     const auto* vp = ImGui::GetMainViewport();
     const float height = std::min(Height(vp->Size.x), vp->Size.y);
-    const bool wide = vp->Size.x >= 900;
+    const bool wide = vp->Size.x >= 1050;
     ImGuiWindowClass windowClass;
     windowClass.ClassId = ImGui::GetID("Bistro information class");
     windowClass.DockingAllowUnclassed = false;
@@ -147,6 +147,14 @@ void BistroInfoPanel::Draw(RenderModule& render, const BistroRenderPipeline& pip
             ImGui::PlotLines("##fps", _fps.data(), static_cast<int>(_count),
                 _count == _fps.size() ? static_cast<int>(_next) : 0, nullptr, 0.f, FLT_MAX, {width, 18});
         };
+        const auto benchmarks = [&]
+        {
+            Heading("SINGLE GPU");
+            benchmark.DrawControls(false);
+            ImGui::Separator();
+            Heading("MULTI-GPU");
+            benchmark.DrawControls(true);
+        };
         if (wide && ImGui::BeginTable("Telemetry columns", 3, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_BordersInnerV))
         {
             ImGui::TableSetupColumn("Frame", ImGuiTableColumnFlags_WidthStretch, .9f);
@@ -159,8 +167,7 @@ void BistroInfoPanel::Draw(RenderModule& render, const BistroRenderPipeline& pip
             Heading("GPU QUEUES");
             DrawQueues(pipeline);
             ImGui::TableNextColumn();
-            Heading("BENCHMARK");
-            benchmark.DrawControls();
+            benchmarks();
             ImGui::EndTable();
         }
         else if (!wide)
@@ -170,7 +177,7 @@ void BistroInfoPanel::Draw(RenderModule& render, const BistroRenderPipeline& pip
             ImGui::Separator();
             DrawQueues(pipeline);
             ImGui::Separator();
-            benchmark.DrawControls();
+            benchmarks();
         }
     }
     ImGui::End();

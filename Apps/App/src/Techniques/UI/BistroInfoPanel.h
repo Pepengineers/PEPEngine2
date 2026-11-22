@@ -10,7 +10,7 @@ class RenderModule;
 class BistroInfoPanel
 {
 public:
-    static float Height(float width) { return width >= 900 ? 98.f : 204.f; }
+    static float Height(float width) { return width >= 1050 ? 148.f : 246.f; }
     void Draw(RenderModule&, const BistroRenderPipeline&, BistroBenchmark&, float frameSeconds);
 
 private:

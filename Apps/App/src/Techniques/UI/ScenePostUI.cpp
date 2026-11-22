@@ -333,6 +333,19 @@ std::vector<std::pair<std::string, Id>> ScenePostUI::ExecutionDevices() const
 	    {"AtriumCanvasAdapter", posters[0]}, {"TerraceCanvasAdapter", posters[1]}, {"CloudCanvasAdapter", posters[2]}};
 }
 
+std::array<uint64_t, 4> ScenePostUI::BenchmarkTransferBytes() const
+{
+	if (!_remotePost) return {};
+	const auto& frame = _remotePost->Frames.at(_resources.CurrFrameConstantsIndex);
+	return {frame.BundleBytes, frame.HudBytes, frame.UiBytes, _remotePost->Direct ? 0 : frame.Display.Bytes};
+}
+
+std::pair<bool, bool> ScenePostUI::BenchmarkPostEffects() const
+{
+	const auto& stack = _remotePost ? *_remotePost->Stack : *this;
+	return {stack._dof.IsActive(), stack._blur._preparedBlur};
+}
+
 std::vector<GDX12RenderPass*> ScenePostUI::Passes()
 {
 	if (_remotePost) return _remotePost->Stack->Passes();

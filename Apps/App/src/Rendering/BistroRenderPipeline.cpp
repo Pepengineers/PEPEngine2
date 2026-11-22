@@ -116,7 +116,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	const auto& submissions = _executor->Submissions();
 	auto skin = c.Runtime.FreezeSkeletalMeshes([&](int requested)
 	{
-		const auto owner = submissions->SelectAdapter(_benchmarkTime ? -1 : requested);
+		const auto owner = submissions->SelectAdapter(_benchmarkLocalSkinning ? -1 : requested);
 		return std::make_pair(owner, &submissions->Device(owner));
 	});
 	_geometry->Freeze(slot, c.Common.ActiveCameraCBufferIndex, std::move(skin), submissions);
@@ -364,6 +364,7 @@ std::vector<std::pair<std::string, std::string>> BistroRenderPipeline::Benchmark
 	    {"SkyViewAdapter", devices.AdapterLabel(skyView)},
 	    {"AerialPerspectiveAdapter", devices.AdapterLabel(aerial)},
 	    {"LightGridAdapter", devices.AdapterLabel(_lighting->LightGridDevice())},
+	    {"SunShadowAdapter", devices.AdapterLabel(_lighting->SunShadowDevice())},
 	    {"ParticleAdapter", devices.AdapterLabel(_lighting->Particles().ExecutionDevice())},
 	    {"WaterAdapter", devices.AdapterLabel(_lighting->Water().ExecutionDevice())},
 	    {"CloudPictureAdapter", devices.AdapterLabel(_cloudPicture->ExecutionDevice())},
