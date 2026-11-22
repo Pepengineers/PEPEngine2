@@ -357,7 +357,7 @@ void SceneLocalShadows::UpdateCasters(UINT slot)
 	_changedCasterBounds.clear();
 	_castersRebuilt = false;
 	auto& frame = *_resources.FrameConstants.at(slot);
-	auto changed = (_staticOnly ? _resources.IndirectCommandsCache->ChangedElements()
+	const auto commands = (_staticOnly ? _resources.IndirectCommandsCache->ChangedElements()
 	                            : _resources.IndirectCommandsCache->ConsumeChangedElements());
 	const auto instances =
 	    (_staticOnly ? frame.InstanceCache->ChangedElements() : frame.InstanceCache->ConsumeChangedElements());
@@ -386,22 +386,36 @@ void SceneLocalShadows::UpdateCasters(UINT slot)
 		++_sceneRevision;
 		_castersRebuilt = true;
 	}
+	if (++_changeGeneration == 0)
+	{
+		_commandGeneration.clear();
+		_materialGeneration.clear();
+		++_changeGeneration;
+	}
+	_commandGeneration.resize(_inputs.size());
+	_materialGeneration.resize(frame.MaterialCache->GetElementCount());
+	_changedCommands.clear();
+	const auto markCommand = [&](UINT index)
+	{
+		auto& generation = _commandGeneration.at(index);
+		if (generation == _changeGeneration) return;
+		generation = _changeGeneration;
+		_changedCommands.push_back(index);
+	};
 	const auto append = [&](const auto& indices, const auto& references)
 	{
 		for (UINT index : indices)
 		{
 			if (const auto found = references.find(index); found != references.end())
-			{
-				changed.insert(changed.end(), found->second.begin(), found->second.end());
-			}
+				for (UINT command : found->second) markCommand(command);
 		}
 	};
+	for (UINT index : commands) markCommand(index);
+	for (UINT material : materials) _materialGeneration.at(material) = _changeGeneration;
 	append(instances, _instances);
 	append(transforms, _transforms);
 	append(materials, _materials);
-	std::sort(changed.begin(), changed.end());
-	changed.erase(std::unique(changed.begin(), changed.end()), changed.end());
-	for (UINT index : changed)
+	for (UINT index : _changedCommands)
 	{
 		const auto current = ReadInput(slot, index);
 		auto& old = _inputs.at(index);
@@ -419,7 +433,8 @@ void SceneLocalShadows::UpdateCasters(UINT slot)
 			continue;
 		}
 		const bool materialDirty =
-		    std::find(materials.begin(), materials.end(), current.Instance.MaterialIndex) != materials.end();
+		    current.Instance.MaterialIndex < _materialGeneration.size() &&
+		    _materialGeneration[current.Instance.MaterialIndex] == _changeGeneration;
 		if (!materialDirty && current.DeformationRevision == old.DeformationRevision &&
 		    std::memcmp(&current.Command, &old.Command, sizeof(current.Command)) == 0 &&
 		    std::memcmp(&current.Instance, &old.Instance, sizeof(current.Instance)) == 0 &&

@@ -528,9 +528,8 @@ void SceneReflections::AppendRemote(Graph& primary, std::vector<ID3D12Resource*>
 
         const auto textureInput = [&](GDX12Texture& texture) {
             auto* native = texture.GetResource()->D3DResource.Get();
-            auto found = std::find(primaryBindings.begin(), primaryBindings.end(), native);
-            if (found != primaryBindings.end())
-                return Id(found - primaryBindings.begin());
+            const Id existing = primary.FindBinding(primaryBindings, native);
+            if (existing != Invalid) return existing;
             const auto state = texture.GetResource()->GetCurrentState();
             const Id source = NativeWork::ResourceFor(primary, primaryBindings, native, "probe texture input");
             primary.Resources[source].Initial = primary.Resources[source].Final = state;

@@ -1024,22 +1024,10 @@ void SceneEnvironment::Append(Graph& graph, std::vector<ID3D12Resource*>& bindin
 				access.Required = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
 			}
 			auto* native = resource->D3DResource.Get();
-			const auto found = std::find(bindings.begin(), bindings.end(), native);
-			access.Resource = Id(found - bindings.begin());
-			if (found == bindings.end())
-			{
-				D3D12_HEAP_PROPERTIES heap{};
-				D3D12_HEAP_FLAGS flags{};
-				ThrowIfFailed(native->GetHeapProperties(&heap, &flags));
-				const bool upload = heap.Type == D3D12_HEAP_TYPE_UPLOAD;
-				graph.Resources.push_back({work.Name + " resource " + std::to_string(access.Resource),
-				                           upload ? State(D3D12_RESOURCE_STATE_GENERIC_READ) : 0,
-				                           upload ? State(D3D12_RESOURCE_STATE_GENERIC_READ) : 0,
-				                           (native->GetDesc().Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0,
-				                           !upload && native->GetDesc().Dimension == D3D12_RESOURCE_DIMENSION_BUFFER,
-				                           upload ? Heap::Upload : Heap::Default});
-				bindings.push_back(native);
-			}
+			access.Resource = graph.FindBinding(bindings, native);
+			if (access.Resource == Invalid)
+				access.Resource = NativeWork::ResourceFor(graph, bindings, native,
+					work.Name + " resource " + std::to_string(bindings.size()));
 			operation.Accesses.push_back(access);
 		}
 		_operations.push_back(Id(graph.Operations.size()));

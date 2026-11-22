@@ -96,6 +96,7 @@
     <ClCompile Include="src\Graph\QueueSubmission.cpp" />
 
     <ClInclude Include="src\Graph\QueueSubmission.h" />
+    <ClInclude Include="src\Graph\GraphResourceInfo.h" />
 
     <ClCompile Include="src\Graph\RenderGraphRecorder.cpp" />
     <ClCompile Include="src\Techniques\SceneGeometry.cpp" />

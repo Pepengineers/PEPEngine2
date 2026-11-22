@@ -1068,9 +1068,8 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 		{
 			auto& resource = *texture->GetResource();
 			auto* native = resource.D3DResource.Get();
-			const auto found = std::find(primaryBindings.begin(), primaryBindings.end(), native);
-			Id id = Id(found - primaryBindings.begin());
-			if (found == primaryBindings.end())
+			Id id = primary.FindBinding(primaryBindings, native);
+			if (id == Invalid)
 			{
 				id = NativeWork::ResourceFor(primary, primaryBindings, native, "shadow material texture");
 				primary.Resources[id].Initial = primary.Resources[id].Final = resource.GetCurrentState();

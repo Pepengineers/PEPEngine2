@@ -46,6 +46,7 @@ private:
 	void CollectDeviceFeatures();
 
 	ComPtr<IDXGIAdapter4> _adapter;
+	LUID _adapterLuid{};
 	ComPtr<ID3D12Device14> _device;
 	ComPtr<ID3D12Device14> _proxyDevice;
 	ComPtr<D3D12MA::Allocator> _allocator;

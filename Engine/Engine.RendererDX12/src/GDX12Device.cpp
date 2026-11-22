@@ -88,6 +88,7 @@ void GDX12Device::CollectDeviceFeatures()
     DXGI_ADAPTER_DESC1 adapterDesc;
     ThrowIfFailed(_adapter->GetDesc1(&adapterDesc));
 
+    _adapterLuid = adapterDesc.AdapterLuid;
     _specs.Name = WStringToString(adapterDesc.Description);
     _specs.DedicatedVideoMemory = adapterDesc.DedicatedVideoMemory;
     _specs.DedicatedSystemMemory = adapterDesc.DedicatedSystemMemory;
@@ -105,6 +106,7 @@ void GDX12Device::Reset()
     _proxyDevice.Reset();
     _device.Reset();
     _adapter.Reset();
+    _adapterLuid = {};
     _isInitialized = false;
 }
 
@@ -146,13 +148,7 @@ const DeviceSpecs& GDX12Device::GetDeviceFeatures()
 
 LUID GDX12Device::GetAdapterLuid() const
 {
-    LUID luid = {};
-    if (!_adapter) { return luid; }
-
-    DXGI_ADAPTER_DESC1 adapterDesc = {};
-    ThrowIfFailed(_adapter->GetDesc1(&adapterDesc));
-
-    return adapterDesc.AdapterLuid;
+    return _adapterLuid;
 }
 
 const bool GDX12Device::IsInitialized()

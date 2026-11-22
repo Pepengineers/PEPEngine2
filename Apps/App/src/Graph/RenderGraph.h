@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 #include <ostream>
+#include <unordered_map>
+struct ID3D12Resource;
 namespace BistroRender {
 using Id = uint32_t;
 using State = uint32_t; // D3D12 legacy resource-state bits; CPU tests need no device.
@@ -40,6 +42,17 @@ struct Graph {
     Id Device = 0;
     bool FrameBoundary = true;
     Queue TerminalQueue = Queue::Direct;
+    // Physical bindings are append-only while this graph is being built.
+    std::unordered_map<ID3D12Resource*, Id> BindingIds;
+    size_t IndexedBindings = 0;
+    Id FindBinding(const std::vector<ID3D12Resource*>& bindings, ID3D12Resource* resource) {
+        while (IndexedBindings < bindings.size()) {
+            BindingIds.try_emplace(bindings[IndexedBindings], Id(IndexedBindings));
+            ++IndexedBindings;
+        }
+        const auto found = BindingIds.find(resource);
+        return found == BindingIds.end() ? Invalid : found->second;
+    }
 };
 struct Barrier { Id Resource; State Before, After; bool Uav = false; };
 struct Packet {

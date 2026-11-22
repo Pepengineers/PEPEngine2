@@ -138,7 +138,7 @@ void SceneTextureInspector::AppendReadback(const Input& input, UINT slot, bool f
 	const auto catalog = inspector.Collect(graph, bindings, backBuffer, true);
 	const auto found = std::find_if(catalog.begin(), catalog.end(),
 	    [&](const Source& source) { return source.Name == _readbackName; });
-	if (found == catalog.end() || std::find(bindings.begin(), bindings.end(), found->Resource) == bindings.end())
+	if (found == catalog.end() || graph.FindBinding(bindings, found->Resource) == Invalid)
 	{
 		if (finalAttempt && !_loggedMissing)
 		{

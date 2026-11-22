@@ -430,20 +430,17 @@ void SceneGeometry::Freeze(UINT index, UINT camera, std::vector<GDX12SkinningWor
 	s.SkinBindings.clear();
 	s.SkinDeclarations.clear();
 	s.SkinIds.clear();
+	std::unordered_map<ID3D12Resource*, Id> skinIds;
 	for (const auto& work : s.Skin)
 	{
 		std::array<Id, 5> ids{};
 		for (UINT j = 0; j < 5; ++j)
 		{
 			auto* resource = work.Resources[j].Get();
-			const auto found = std::find(s.SkinBindings.begin(), s.SkinBindings.end(), resource);
-			if (found != s.SkinBindings.end())
+			const auto [found, inserted] = skinIds.try_emplace(resource, SkinResourceBegin + Id(s.SkinBindings.size()));
+			ids[j] = found->second;
+			if (inserted)
 			{
-				ids[j] = SkinResourceBegin + Id(found - s.SkinBindings.begin());
-			}
-			else
-			{
-				ids[j] = SkinResourceBegin + Id(s.SkinBindings.size());
 				s.SkinBindings.push_back(resource);
 				const State initial = j == 0 ? State(D3D12_RESOURCE_STATE_GENERIC_READ) : 0;
 				s.SkinDeclarations.push_back({"skin input " + std::to_string(ids[j]), initial, initial, j == 1, j != 0,

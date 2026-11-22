@@ -144,6 +144,9 @@ class SceneLocalShadows
 	std::vector<Node> _nodes;
 	UINT _staticRoot = UINT_MAX, _dynamicRoot = UINT_MAX;
 	std::vector<Input> _inputs;
+	std::vector<UINT> _changedCommands;
+	std::vector<UINT> _commandGeneration, _materialGeneration;
+	UINT _changeGeneration = 0;
 	std::vector<GDX12RenderPrimitive> _grass;
 	std::vector<std::pair<GDX12LocalShadowKey, Id>> _placements;
 	std::vector<GDX12LocalShadowKey> _latestPlacements;

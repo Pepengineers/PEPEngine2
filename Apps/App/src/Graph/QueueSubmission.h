@@ -1,5 +1,6 @@
 #pragma once
 #include "RenderGraph.h"
+#include "GraphResourceInfo.h"
 #include "Engine.RendererDX12/GDX12Device.h"
 #include "Engine.RendererDX12/GDX12DeviceFactory.h"
 #include <array>
@@ -40,7 +41,7 @@ public:
     bool Complete(CompletionToken) const;
     void NotifyOnCompletion(CompletionToken, HANDLE event) const;
     void Wait(CompletionToken) const; // drain/retirement only; never version selection
-    void ValidateResource(Id, ID3D12Resource*) const;
+    GraphResourceInfo ValidateResource(Id, ID3D12Resource*) const;
 private:
     friend class Executor;
     struct Timeline {
@@ -55,6 +56,7 @@ private:
         std::unique_ptr<GDX12Device> Owned;
         GDX12Device& Device;
         ComPtr<ID3D12Device> Identity;
+        ComPtr<IUnknown> ComIdentity;
         std::array<Timeline, 3> Queues;
     };
     void Check() const;

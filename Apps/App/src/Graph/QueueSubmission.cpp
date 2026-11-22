@@ -43,6 +43,7 @@ ComPtr<ID3D12Fence> OpenFence(ID3D12Device& source, ID3D12Fence& fence, ID3D12De
 QueueSubmission::DeviceContext::DeviceContext(GDX12Device& device, std::unique_ptr<GDX12Device> owned)
     : Owned(std::move(owned)), Device(device), Identity(device.GetDevice())
 {
+    ThrowIfFailed(Identity.As(&ComIdentity));
     Queues[0].Queue = device.GetCommandQueue();
     for (auto queue : {Queue::Compute, Queue::Copy})
     {
@@ -225,14 +226,12 @@ void QueueSubmission::Wait(CompletionToken token) const {
     // Polling also observes removal of the OTHER device behind a shared wait.
     while(!Complete(token)) std::this_thread::sleep_for(std::chrono::milliseconds(1));
 }
-void QueueSubmission::ValidateResource(Id id,ID3D12Resource* resource) const {
-    if(!resource) throw std::invalid_argument("unbound resource");
-    ComPtr<ID3D12Device> owner;
-    ThrowIfFailed(resource->GetDevice(IID_PPV_ARGS(&owner)));
-    ComPtr<IUnknown> a,b;
-    ThrowIfFailed(owner.As(&a)); ThrowIfFailed(Device(id).GetDevice().As(&b));
-    if(a.Get()!=b.Get() || !Equal(owner->GetAdapterLuid(),Device(id).GetAdapterLuid()))
+GraphResourceInfo QueueSubmission::ValidateResource(Id id, ID3D12Resource* resource) const {
+    const auto info = GraphResourceInfo::Read(resource);
+    const auto& device = Device(id);
+    if (info.Owner != _devices[id]->ComIdentity.Get() || !Equal(info.Adapter, device.GetAdapterLuid()))
         throw std::invalid_argument("resource bound to wrong physical device/incarnation");
+    return info;
 }
 CompletionToken QueueSubmission::Submit(Id device,BistroRender::Queue target,
     const std::vector<ID3D12CommandList*>& lists,const std::vector<CompletionToken>& waits,GDX12CommandList* external) {

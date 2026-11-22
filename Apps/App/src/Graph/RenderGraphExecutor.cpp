@@ -242,20 +242,16 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 	}
 	for (size_t i = 0; i < resources.size(); ++i)
 	{
-		_submissions->ValidateResource(_deviceId, resources[i]);
-		D3D12_HEAP_PROPERTIES heap{};
-		D3D12_HEAP_FLAGS flags{};
-		ThrowIfFailed(resources[i]->GetHeapProperties(&heap, &flags));
-		const auto desc = resources[i]->GetDesc();
-		if ((desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS) != 0 || heap.Type == D3D12_HEAP_TYPE_CUSTOM)
+		const auto info = _submissions->ValidateResource(_deviceId, resources[i]);
+		if ((info.Flags & D3D12_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS) != 0 || info.Heap == D3D12_HEAP_TYPE_CUSTOM)
 		{
 			throw std::invalid_argument("simultaneous-access textures/custom heaps require an explicit decay contract");
 		}
-		if (heap.Type != HeapType(schedule.Memory[i]))
+		if (info.Heap != HeapType(schedule.Memory[i]))
 		{
 			throw std::invalid_argument("physical resource heap contract mismatch");
 		}
-		const bool decays = desc.Dimension == D3D12_RESOURCE_DIMENSION_BUFFER && heap.Type == D3D12_HEAP_TYPE_DEFAULT;
+		const bool decays = info.Dimension == D3D12_RESOURCE_DIMENSION_BUFFER && info.Heap == D3D12_HEAP_TYPE_DEFAULT;
 		if (decays != schedule.Decays[i])
 		{
 			throw std::invalid_argument("physical buffer decay contract mismatch");

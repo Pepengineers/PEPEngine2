@@ -1,5 +1,6 @@
 #pragma once
 #include "Graph/RenderGraph.h"
+#include "Graph/GraphResourceInfo.h"
 #include "Engine.RendererDX12/GDX12Resource.h"
 #include "Engine.RendererDX12/GDX12CommandList.h"
 #include "Engine.RendererDX12/GDX12DescriptorHeap.h"
@@ -20,27 +21,19 @@ struct NativeWork
 	static Id ResourceFor(Graph& graph, std::vector<ID3D12Resource*>& bindings, ID3D12Resource* resource,
 	                      const std::string& name)
 	{
-		const auto found = std::find(bindings.begin(), bindings.end(), resource);
-		if (found != bindings.end())
-		{
-			return Id(found - bindings.begin());
-		}
+		const Id existing = graph.FindBinding(bindings, resource);
+		if (existing != Invalid) return existing;
 		if (!resource || bindings.size() != graph.Resources.size())
-		{
 			throw std::logic_error("Invalid native technique resource: " + name);
-		}
-		D3D12_HEAP_PROPERTIES heap{};
-		ThrowIfFailed(resource->GetHeapProperties(&heap, nullptr));
-		const State initial = heap.Type == D3D12_HEAP_TYPE_UPLOAD     ? State(D3D12_RESOURCE_STATE_GENERIC_READ)
-		                      : heap.Type == D3D12_HEAP_TYPE_READBACK ? State(D3D12_RESOURCE_STATE_COPY_DEST)
-		                                                              : 0;
-		const auto shape = resource->GetDesc();
+		const auto info = GraphResourceInfo::Read(resource);
+		const State initial = info.Heap == D3D12_HEAP_TYPE_UPLOAD ? State(D3D12_RESOURCE_STATE_GENERIC_READ)
+                            : info.Heap == D3D12_HEAP_TYPE_READBACK ? State(D3D12_RESOURCE_STATE_COPY_DEST) : 0;
 		const Id id = Id(bindings.size());
 		graph.Resources.push_back(
-		    {name, initial, initial, (shape.Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0,
-		     heap.Type == D3D12_HEAP_TYPE_DEFAULT && shape.Dimension == D3D12_RESOURCE_DIMENSION_BUFFER,
-		     heap.Type == D3D12_HEAP_TYPE_UPLOAD     ? Heap::Upload
-		     : heap.Type == D3D12_HEAP_TYPE_READBACK ? Heap::Readback
+		    {name, initial, initial, (info.Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0,
+		     info.Heap == D3D12_HEAP_TYPE_DEFAULT && info.Dimension == D3D12_RESOURCE_DIMENSION_BUFFER,
+		     info.Heap == D3D12_HEAP_TYPE_UPLOAD     ? Heap::Upload
+		     : info.Heap == D3D12_HEAP_TYPE_READBACK ? Heap::Readback
 		                                             : Heap::Default});
 		bindings.push_back(resource);
 		return id;
@@ -52,21 +45,17 @@ struct NativeWork
 	{
 		auto* native = resource.D3DResource.Get();
 		if (!native || bindings.size() != graph.Resources.size() ||
-		    native->GetDesc().Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D ||
 		    State(resource.GetCurrentState()) != published)
 		{
 			throw std::logic_error("Invalid published texture import");
 		}
-		D3D12_HEAP_PROPERTIES heap{};
-		ThrowIfFailed(native->GetHeapProperties(&heap, nullptr));
-		if (heap.Type != D3D12_HEAP_TYPE_DEFAULT)
+		const auto info = GraphResourceInfo::Read(native);
+		if (info.Heap != D3D12_HEAP_TYPE_DEFAULT || info.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D)
+			throw std::logic_error("Published texture import requires a DEFAULT 2D texture");
+		const Id existing = graph.FindBinding(bindings, native);
+		if (existing != Invalid)
 		{
-			throw std::logic_error("Published texture import requires a DEFAULT texture");
-		}
-		const auto found = std::find(bindings.begin(), bindings.end(), native);
-		if (found != bindings.end())
-		{
-			const Id id = Id(found - bindings.begin());
+			const Id id = existing;
 			const auto& declaration = graph.Resources.at(id);
 			if (declaration.Initial != published || declaration.Final != published || declaration.Decays)
 			{
