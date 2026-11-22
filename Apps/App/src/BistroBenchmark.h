@@ -1095,13 +1095,15 @@ private:
 
     void CompletePlacementLeg(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline)
     {
+        const bool reachedEnd = _elapsed >= LegWarmup() + _window.End - _preroll;
+        const bool covered = BistroBenchmarkData::CoversWindow(_frames, _window.Begin, _window.End);
         if (_trialReason.empty() && RenderConfig(console) != _trialRequested)
             _trialReason = "render settings changed during measurement";
-        if (_trialReason.empty() && !BistroBenchmarkData::CoversWindow(_frames, _window.Begin, _window.End))
+        if (_trialReason.empty() && (!reachedEnd || !covered))
             _trialReason = "incomplete route coverage";
         WritePlacementWaits(pipeline);
         WriteLeg(_trialReason.empty() ? "completed" : _trialReason.c_str());
-        if (_trialReason.empty()) ++_trialCompletedPasses;
+        if (reachedEnd && covered) ++_trialCompletedPasses;
         for (const auto& frame : _frames)
         {
             ++_trialFrames;
