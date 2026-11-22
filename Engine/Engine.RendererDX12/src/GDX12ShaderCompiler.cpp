@@ -1,5 +1,6 @@
 #include "Engine.RendererDX12/GDX12ShaderCompiler.h"
 #include "Engine.Core/Logging/Logger.h"
+#include "Common/ConsoleVariables.h"
 
 #include "Engine.RendererDX12/GDX12Device.h"
 
@@ -8,6 +9,13 @@
 
 #include <dxc/dxcapi.h>
 #include <dxc/d3d12shader.h>
+
+namespace
+{
+    AutoConsoleVariable<bool> OptimizeShaders(L"r.Shaders.Optimize", true,
+        L"Optimize runtime DXC shaders. Set to 0 before startup for shader debugging.",
+        EConsoleVariableFlags::ReadOnly);
+}
 
 GDX12ShaderCompiler* GDX12ShaderCompiler::_instance = nullptr;
 
@@ -63,7 +71,8 @@ std::string GDX12ShaderCompiler::GetShaderTargetForModel(GDX12Device* device, co
 
 ComPtr<ID3DBlob> GDX12ShaderCompiler::CompileShaderDXC(const std::wstring& filename, const D3D_SHADER_MACRO* defines, const std::string& entrypoint, const std::string& shaderType)
 {
-    Log::Info("Shader", "Compiling ", filename, " [", entrypoint, ", ", shaderType, ']');
+    const bool optimize = OptimizeShaders.GetValue();
+    Log::Info("Shader", "Compiling ", filename, " [", entrypoint, ", ", shaderType, optimize ? ", -O3]" : ", -Od]");
     ComPtr<IDxcBlobEncoding> sourceBlob;
     ThrowIfFailed(_dxcUtils->LoadFile(filename.c_str(), nullptr, &sourceBlob));
 
@@ -92,7 +101,7 @@ ComPtr<ID3DBlob> GDX12ShaderCompiler::CompileShaderDXC(const std::wstring& filen
     arguments.push_back(L"../");
 
     arguments.push_back(L"-Zi");    // Generate debug information
-    arguments.push_back(L"-O3"); // max optimization
+    arguments.push_back(optimize ? L"-O3" : L"-Od");
 
     if (defines)
     {
