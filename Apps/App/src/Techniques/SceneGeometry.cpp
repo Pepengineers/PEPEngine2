@@ -627,12 +627,8 @@ void SceneGeometry::AppendWorldCanvases(Graph& graph, UINT index, const std::vec
 	s.CanvasOperation = Id(graph.Operations.size());
 	graph.Operations.push_back(std::move(operation));
 }
-Schedule SceneGeometry::Plan(UINT index, const AppendTechnique& append, const AppendTechnique& prelude,
-                             bool singleDirect, const AppendTechnique& afterInteraction,
-                             const AppendTechnique& afterDepth, const AppendDepthNormals& afterDepthNormals)
+Graph SceneGeometry::BuildBasePlan(Slot& s)
 {
-	auto& s = _slots.at(index);
-	s.PlannedBindings.clear();
 	Graph g;
 	for (UINT i = 0; i < 8; ++i)
 	{
@@ -787,6 +783,33 @@ Schedule SceneGeometry::Plan(UINT index, const AppendTechnique& append, const Ap
 			g.Operations[op].Accesses.push_back({s.FrameIds[i], Mode::Read, frameRead});
 		}
 	}
+	return g;
+}
+std::shared_ptr<const Schedule> SceneGeometry::Plan(UINT index, const AppendTechnique& append, const AppendTechnique& prelude,
+                             bool singleDirect, const AppendTechnique& afterInteraction,
+                             const AppendTechnique& afterDepth, const AppendDepthNormals& afterDepthNormals)
+{
+	auto& s = _slots.at(index);
+	s.PlannedBindings.clear();
+	UINT uploadMask = 0;
+	for (UINT i = 0; i < 4; ++i)
+		if (s.Buffers[i].Upload) uploadMask |= 1u << i;
+	auto& base = _basePlan;
+	// Skin IDs encode the first use (and hence the heap/state declaration) of each input.
+	if (base.Template.Operations.empty() || base.UploadMask != uploadMask || base.Batched != bool(s.Batches) ||
+	    base.DepthNormals != s.DepthNormals || base.SkinIds != s.SkinIds)
+	{
+		base.Template = BuildBasePlan(s);
+		base.UploadMask = uploadMask;
+		base.Batched = bool(s.Batches);
+		base.DepthNormals = s.DepthNormals;
+		base.SkinIds = s.SkinIds;
+		base.BatchIds = s.BatchIds;
+		base.FrameIds = s.FrameIds;
+	}
+	s.BatchIds = base.BatchIds;
+	s.FrameIds = base.FrameIds;
+	Graph g = base.Template;
 	GeometryTarget depthTarget;
 	depthTarget.View = {s.DepthNormals ? GDX12GeometryStage::DepthNormals : GDX12GeometryStage::Depth, _common.CameraView * _common.CameraProjection,
 	                    _common.CameraView.Invert().Translation(), s.Camera};
@@ -959,7 +982,12 @@ Schedule SceneGeometry::Plan(UINT index, const AppendTechnique& append, const Ap
 		}
 		reordered.Operations.push_back(std::move(op));
 	}
-	auto schedule = Compile(reordered, singleDirect);
+	// Cache only logical declarations. Bindings and recording callbacks are rebuilt for this frame.
+	if (s.CompiledSchedule && s.SingleDirect == singleDirect && s.CompiledOrder == order &&
+	    s.CompiledGraph.Operations == reordered.Operations && s.CompiledGraph.Resources == reordered.Resources)
+		return s.CompiledSchedule;
+	auto compiled = std::make_shared<Schedule>(Compile(reordered, singleDirect));
+	auto& schedule = *compiled;
 	for (auto& packet : schedule.Packets)
 	{
 		if (packet.Operation != Invalid)
@@ -978,7 +1006,11 @@ Schedule SceneGeometry::Plan(UINT index, const AppendTechnique& append, const Ap
 		if (s.DepthNormalsReady == Invalid || ready >= gbuffer || gbuffer == schedule.Packets.end())
 			throw std::logic_error("DepthNormals publication must precede the scene G-buffer");
 	}
-	return schedule;
+	s.CompiledGraph = std::move(reordered);
+	s.CompiledOrder = std::move(order);
+	s.SingleDirect = singleDirect;
+	s.CompiledSchedule = std::move(compiled);
+	return s.CompiledSchedule;
 }
 void SceneGeometry::AppendVegetationView(Graph& graph, std::vector<ID3D12Resource*>& bindings, UINT slot,
                                     const GeometryTarget& target)

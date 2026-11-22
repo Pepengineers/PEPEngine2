@@ -19,8 +19,17 @@ struct Resource {
     // Upload/readback heaps have fixed states and must leave this false.
     bool Decays = false;
     Heap Memory = Heap::Default;
+    bool operator==(const Resource& rhs) const {
+        return Initial == rhs.Initial && Final == rhs.Final && Unordered == rhs.Unordered &&
+               Decays == rhs.Decays && Memory == rhs.Memory && Name == rhs.Name;
+    }
 };
-struct Access { Id Resource; Mode Usage; State Required; };
+struct Access {
+    Id Resource; Mode Usage; State Required;
+    bool operator==(const Access& rhs) const {
+        return Resource == rhs.Resource && Usage == rhs.Usage && Required == rhs.Required;
+    }
+};
 // Each operation is one packet, containing one or more independently recorded lists.
 // Accesses describe the boundary of the entire packet. Internal changes must be
 // explicit operations or a strict recording-local scope restored to the packet
@@ -35,6 +44,11 @@ struct Operation {
     // ring allocation. Resources and packet boundaries are still plan-owned.
     bool OwnerRecording = false;
     Queue Target = Queue::Direct;
+    bool operator==(const Operation& rhs) const {
+        return Target == rhs.Target && Lists == rhs.Lists && SideEffect == rhs.SideEffect &&
+               OwnerRecording == rhs.OwnerRecording && Name == rhs.Name &&
+               Dependencies == rhs.Dependencies && Accesses == rhs.Accesses;
+    }
 };
 // Resource IDs are local to Device; shared allocations bind separate local handles.
 struct Graph {

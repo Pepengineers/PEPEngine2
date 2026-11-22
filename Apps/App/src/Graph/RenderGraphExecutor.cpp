@@ -285,6 +285,14 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 	{
 		throw std::invalid_argument("prefix/suffix must be DIRECT lists");
 	}
+	std::vector<bool> endBatch(schedule.Packets.size(), false);
+	for (const auto& wait : waits)
+		if (wait.Packet) endBatch[wait.Packet - 1] = true;
+	for (const auto& exchange : exchanges)
+	{
+		endBatch[exchange.Export] = true;
+		if (exchange.Import != Invalid) endBatch[exchange.Import - 1] = true;
+	}
 	std::array<size_t, 3> counts{};
 	for (Id i = 0; i < schedule.Packets.size(); ++i)
 	{
@@ -299,6 +307,12 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 			if (dep >= i)
 			{
 				throw std::invalid_argument("non-topological packet dependency");
+			}
+			if (schedule.Packets[dep].Target != p.Target)
+			{
+				endBatch[i - 1] = true;
+				// The terminal joins whole queues and needs no intermediate signals.
+				if (i + 1 < schedule.Packets.size()) endBatch[dep] = true;
 			}
 		}
 		const auto validateBarriers = [&](const std::vector<Barrier>& barriers)
@@ -425,6 +439,8 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 	bool submitted = false;
 	uint64_t prefixFence = 0;
 	std::array<bool, 3> queueStarted{};
+	Id batchBegin = 0;
+	std::vector<CompletionToken> dependencies;
 	try
 	{
 		for (Id i = 0; i < packets.size(); ++i)
@@ -442,12 +458,11 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 			{
 				slot.Poisoned = true;
 				submitted = true;
-				_submissions->Submit(_deviceId, Queue::Direct, {}, {}, prefix);
+				_submissions->Submit(_deviceId, Queue::Direct, nullptr, 0, {}, prefix);
 				slot.Fences[0] = prefixFence = prefix->FenceValue;
 				slot.Poisoned = false;
 			}
 			const auto target = schedule.Packets[i].Target;
-			std::vector<CompletionToken> dependencies;
 			// Only published fences enter native waits; failed recording cannot
 			// strand another queue behind a token that will never be signalled.
 			if (schedule.FrameBoundary && target != Queue::Direct && !queueStarted[QueueIndex(target)])
@@ -466,11 +481,13 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 			}
 			for (auto dep : schedule.Packets[i].Dependencies)
 			{
+				if (schedule.Packets[dep].Target == target) continue;
 				if (!_tokens[dep])
 				{
 					throw std::logic_error("dependency has no submitted completion token");
 				}
-				if (schedule.Packets[dep].Target != target)
+				if (dependencies.empty() || dependencies.back().Target != _completions[dep].Target ||
+				    dependencies.back().Value != _completions[dep].Value)
 					dependencies.push_back(_completions[dep]);
 			}
 			for (const auto& wait : waits)
@@ -486,12 +503,21 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 					if (!remoteCompletions[j]) throw std::logic_error("cross-device packet did not return a completion");
 					dependencies.push_back(remoteCompletions[j]);
 				}
+			// Cap recording latency before the first execute on long runs of ready work.
+			const auto count = i - batchBegin + 1;
+			if (!endBatch[i] && count < 8 && i + 1 < packets.size() && schedule.Packets[i + 1].Target == target)
+				continue;
 			slot.Poisoned = true;
 			submitted = true;
-			const auto token = _submissions->Submit(_deviceId, target, packets[i], dependencies);
+			const auto token = _submissions->Submit(_deviceId, target, packets.data() + batchBegin, count, dependencies);
 			slot.Fences[QueueIndex(target)] = token.Value;
-			_tokens[i] = token.Value;
-			_completions[i] = token;
+			for (Id packet = batchBegin; packet <= i; ++packet)
+			{
+				_tokens[packet] = token.Value;
+				_completions[packet] = token;
+			}
+			batchBegin = i + 1;
+			dependencies.clear();
 			slot.Poisoned = false;
 			for (size_t j = 0; j < exchanges.size(); ++j)
 				if (i == exchanges[j].Export)
@@ -501,7 +527,7 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 		{
 			slot.Poisoned = true;
 			submitted = true;
-			_submissions->Submit(_deviceId, Queue::Direct, {}, {}, suffix);
+			_submissions->Submit(_deviceId, Queue::Direct, nullptr, 0, {}, suffix);
 			slot.Fences[0] = suffix->FenceValue;
 			slot.Poisoned = false;
 		}

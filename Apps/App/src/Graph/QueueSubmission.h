@@ -62,7 +62,7 @@ private:
     void Check() const;
     const Timeline& Resolve(CompletionToken) const;
     ID3D12Fence* CompletionFence(CompletionToken) const;
-    CompletionToken Submit(Id, BistroRender::Queue, const std::vector<ID3D12CommandList*>&,
+    CompletionToken Submit(Id, BistroRender::Queue, const std::vector<ID3D12CommandList*>* packets, size_t count,
         const std::vector<CompletionToken>&, GDX12CommandList* external = nullptr);
     const std::vector<DeviceDesc> _adapters;
     const int _primaryIndex;

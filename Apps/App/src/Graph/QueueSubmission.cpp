@@ -234,16 +234,20 @@ GraphResourceInfo QueueSubmission::ValidateResource(Id id, ID3D12Resource* resou
     return info;
 }
 CompletionToken QueueSubmission::Submit(Id device,BistroRender::Queue target,
-    const std::vector<ID3D12CommandList*>& lists,const std::vector<CompletionToken>& waits,GDX12CommandList* external) {
+    const std::vector<ID3D12CommandList*>* packets,size_t count,const std::vector<CompletionToken>& waits,GDX12CommandList* external) {
     std::lock_guard<std::mutex> lock(_mutex); Check();
     Device(device); auto& t=_devices[device]->Queues[Index(target)];
-    if((lists.empty() && !external) || lists.size()>UINT_MAX)
+    if (!count && !external)
         throw std::invalid_argument("empty/oversized packet submission");
-    for(auto* list:lists) {
-        ComPtr<ID3D12Device> owner; ThrowIfFailed(list->GetDevice(IID_PPV_ARGS(&owner)));
-        ComPtr<IUnknown> a,b;
-        ThrowIfFailed(owner.As(&a)); ThrowIfFailed(Device(device).GetDevice().As(&b));
-        if(a.Get()!=b.Get()) throw std::invalid_argument("foreign command list device");
+    for (size_t i = 0; i < count; ++i) {
+        const auto& lists = packets[i];
+        if (lists.empty() || lists.size() > UINT_MAX) throw std::invalid_argument("invalid packet size");
+        for(auto* list:lists) {
+            ComPtr<ID3D12Device> owner; ThrowIfFailed(list->GetDevice(IID_PPV_ARGS(&owner)));
+            ComPtr<IUnknown> a,b;
+            ThrowIfFailed(owner.As(&a)); ThrowIfFailed(Device(device).GetDevice().As(&b));
+            if(a.Get()!=b.Get()) throw std::invalid_argument("foreign command list device");
+        }
     }
     for (auto token : waits) {
         const auto& producer = Resolve(token);
@@ -268,7 +272,11 @@ CompletionToken QueueSubmission::Submit(Id device,BistroRender::Queue target,
         uint64_t value=0;
         if(external) { t.Queue->ExecuteCommandList(external); value=external->FenceValue; }
         else {
-            t.Queue->GetCommandQueue()->ExecuteCommandLists(UINT(lists.size()),lists.data());
+            // Separate execute calls preserve the resource decay boundary of each packet.
+            for (size_t i = 0; i < count; ++i) {
+                const auto& lists = packets[i];
+                t.Queue->GetCommandQueue()->ExecuteCommandLists(UINT(lists.size()),lists.data());
+            }
             value=t.Queue->Signal();
         }
         if(t.Shared) ThrowIfFailed(t.Queue->GetCommandQueue()->Signal(t.Shared.Get(),value));

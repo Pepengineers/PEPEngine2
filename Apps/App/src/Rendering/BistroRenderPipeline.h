@@ -57,8 +57,8 @@ class BistroRenderPipeline final : public IRenderPipeline
 	uint64_t ExecuteFrame(RenderPipelineContext&, GDX12CommandList*,
 	                      const std::function<void(GDX12CommandList*)>&) override;
 	void FramePresented() override;
-	void WriteExecution(std::ostream& output) const override { _schedule.Write(output); }
-	const BistroRender::Schedule& LastSchedule() const { return _schedule; }
+	void WriteExecution(std::ostream& output) const override { _schedule->Write(output); }
+	const BistroRender::Schedule& LastSchedule() const { return *_schedule; }
 	bool HasRemoteCloudPicture() const { return _cloudPicture->IsRemote(); }
 	void PauseIndependentClocks();
 
@@ -71,7 +71,7 @@ class BistroRenderPipeline final : public IRenderPipeline
 	std::unique_ptr<BistroRender::ScenePostUI> _post;
 	std::unique_ptr<BistroRender::SceneCloudPicture> _cloudPicture;
 	std::unique_ptr<BistroRender::Executor> _executor;
-	BistroRender::Schedule _schedule;
+	std::shared_ptr<const BistroRender::Schedule> _schedule = std::make_shared<BistroRender::Schedule>();
 	double _animationTime = 0;
 	uint64_t _frameNumber = 0;
 	std::array<BistroRender::Id, 5> _reportedDevices{

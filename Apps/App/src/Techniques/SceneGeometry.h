@@ -58,7 +58,7 @@ class SceneGeometry
 	using AppendTechnique = std::function<void(Graph&, std::vector<ID3D12Resource*>&)>;
 	using AppendDepthNormals = std::function<void(Graph&, std::vector<ID3D12Resource*>&, Id ready)>;
 	void AppendWorldCanvases(Graph&, UINT slot, const std::vector<CanvasRead>&);
-	Schedule Plan(UINT slot, const AppendTechnique& append = {}, const AppendTechnique& prelude = {},
+	std::shared_ptr<const Schedule> Plan(UINT slot, const AppendTechnique& append = {}, const AppendTechnique& prelude = {},
 	              bool singleDirect = true, const AppendTechnique& afterInteraction = {},
 	              const AppendTechnique& afterDepth = {}, const AppendDepthNormals& afterDepthNormals = {});
 	const std::vector<ID3D12Resource*>& PlannedResources(UINT slot) const { return _slots.at(slot).PlannedBindings; }
@@ -107,6 +107,10 @@ class SceneGeometry
 	};
 	struct Slot
 	{
+		Graph CompiledGraph;
+		std::vector<Id> CompiledOrder;
+		bool SingleDirect = false;
+		std::shared_ptr<const Schedule> CompiledSchedule;
 		NativeWork LindenWork;
 		LindenDisplayedPose LindenPose{};
 		std::shared_ptr<const LindenMesh> Linden;
@@ -141,6 +145,16 @@ class SceneGeometry
 		UINT Batches = 0, InstanceCount = 0;
 		std::array<Id, 5> BatchIds{};
 	};
+	struct BasePlan
+	{
+		Graph Template;
+		std::vector<std::array<Id, 5>> SkinIds;
+		UINT UploadMask = 0;
+		bool Batched = false, DepthNormals = false;
+		std::array<Id, 5> BatchIds{};
+		std::array<Id, 2> FrameIds{};
+	} _basePlan;
+	static Graph BuildBasePlan(Slot&);
 	void AppendSkinImports(Graph&, Slot&);
 	std::vector<std::pair<UINT, UINT>> ChangedVertexRanges(uint64_t since) const;
 	void RecordUploads(const Slot&, UINT bucket, ID3D12GraphicsCommandList*) const;

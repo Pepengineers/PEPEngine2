@@ -241,7 +241,8 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 			graph.Operations.back().Dependencies.push_back(ready);
 	};
 	_schedule = _geometry->Plan(slot, append, prelude, singleDirect, afterInteraction, afterDepth, afterDepthNormals);
-	_executor->Reserve(_schedule);
+	const auto& schedule = *_schedule;
+	_executor->Reserve(schedule);
 	const auto record = [&](BistroRender::Id op, uint32_t list, ID3D12GraphicsCommandList* commands)
 	{
 		if (!_cloudPicture->Record(op, commands) && !_environment->Record(op, commands) &&
@@ -250,24 +251,24 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 			_geometry->Record(slot, op, list, commands);
 		}
 	};
-	auto waits = _cloudPicture->Waits(_schedule);
-	_environment->AddAtmosphereWaits(_schedule, waits);
-	water.AddWaits(_schedule, waits);
-	grass.AddWindWaits(_schedule, waits);
+	auto waits = _cloudPicture->Waits(schedule);
+	_environment->AddAtmosphereWaits(schedule, waits);
+	water.AddWaits(schedule, waits);
+	grass.AddWindWaits(schedule, waits);
 	std::vector<BistroRender::Executor::PacketExchange> exchanges;
-	_post->AddPosterExchanges(_schedule, waits, exchanges);
-	particles.AddExchanges(_schedule, waits, exchanges);
-	if (auto ao = _lighting->AOExchange(_schedule)) exchanges.push_back(std::move(*ao));
-	_lighting->AddProbeExchanges(_schedule, waits, exchanges);
-	_lighting->Transparency().AddExchange(_schedule, exchanges);
-	_post->AddPostExchange(_schedule, exchanges);
+	_post->AddPosterExchanges(schedule, waits, exchanges);
+	particles.AddExchanges(schedule, waits, exchanges);
+	if (auto ao = _lighting->AOExchange(schedule)) exchanges.push_back(std::move(*ao));
+	_lighting->AddProbeExchanges(schedule, waits, exchanges);
+	_lighting->Transparency().AddExchange(schedule, exchanges);
+	_post->AddPostExchange(schedule, exchanges);
 	uint64_t completion;
 	try
 	{
-		_lighting->SubmitLightGrid(_schedule, waits);
-		_post->SubmitHud(_schedule, waits);
-		_geometry->SubmitSkinning(slot, _schedule, waits);
-		completion = _executor->Execute(_schedule, _geometry->PlannedResources(slot), record, prefix, nullptr, nullptr, waits,
+		_lighting->SubmitLightGrid(schedule, waits);
+		_post->SubmitHud(schedule, waits);
+		_geometry->SubmitSkinning(slot, schedule, waits);
+		completion = _executor->Execute(schedule, _geometry->PlannedResources(slot), record, prefix, nullptr, nullptr, waits,
 		                                exchanges);
 		_post->Textures().ReadbackSubmitted(0, slot);
 	}
@@ -332,12 +333,12 @@ void BistroRenderPipeline::FramePresented()
 	_lighting->Water().Presented(_frameNumber, _executor->Completions());
 	_lighting->Particles().Presented(_frameNumber);
 	_lighting->AOPresented(_frameNumber, _executor->Completions());
-	_lighting->LightGridPresented(_frameNumber, _schedule, _executor->Completions());
+	_lighting->LightGridPresented(_frameNumber, *_schedule, _executor->Completions());
 	if (_reportedDepthNormals || !_geometry->PrepassNormals(_executorSlot)) return;
 	_reportedDepthNormals = true;
-	for (size_t i = 0; i < _schedule.Packets.size(); ++i)
+	for (size_t i = 0; i < _schedule->Packets.size(); ++i)
 	{
-		const auto& name = _schedule.Packets[i].Name;
+		const auto& name = _schedule->Packets[i].Name;
 		if (name.find("DepthNormals") != std::string::npos || name == BistroRender::GBufferOperationName ||
 		    name == "particle simulation from depth prepass" || name == "opaque particles frustum cull" ||
 		    name == "particle simulation from interaction field" || name == "opaque particles G-buffer (read-only depth)" ||
