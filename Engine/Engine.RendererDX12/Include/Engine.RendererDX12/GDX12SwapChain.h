@@ -14,11 +14,12 @@ class GDX12SwapChain : public IRenderPassLink
 public:
     GDX12SwapChain(GDX12Device* device, HWND hwnd,
         DXGI_FORMAT format, UINT bufferCount, UINT width, UINT height, 
-        GDX12DescriptorHeap* rtvHeap);
+        GDX12DescriptorHeap* rtvHeap, bool applySettings = false);
     ~GDX12SwapChain();
 
     void Resize(UINT width, UINT height);
     bool Present();
+    GDX12Device& Device() const { return *_device; }
     bool NeedsPresentationReset() const;
     void BeginFrame(RenderPipelineCommonData&);
     void SetFrameGenerationSuspended(bool);

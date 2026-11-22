@@ -10,13 +10,13 @@
 #include <Engine.Core/Logging/Logger.h>
 
 GDX12SwapChain::GDX12SwapChain(GDX12Device* device, const HWND hwnd,
-    const DXGI_FORMAT format, const UINT bufferCount, const UINT width, const UINT height, GDX12DescriptorHeap* rtvHeap)
+    const DXGI_FORMAT format, const UINT bufferCount, const UINT width, const UINT height, GDX12DescriptorHeap* rtvHeap, bool applySettings)
     : _device(device), _hwnd(hwnd),
     _format(format), _bufferCount(bufferCount), _currentBufferIndex(0),
     _width(width), _height(height), _rtvHeap(rtvHeap), bVSyncEnabled(false)
 {
     _frameGeneration = std::make_unique<GDX12FrameGeneration>(_device);
-    CreatePresentation(false);
+    CreatePresentation(applySettings);
 }
 
 void GDX12SwapChain::CreatePresentation(const bool applySettings)

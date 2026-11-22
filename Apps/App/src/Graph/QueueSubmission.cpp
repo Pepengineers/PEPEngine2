@@ -133,6 +133,7 @@ QueueSubmission::~QueueSubmission() {
     // A failed Signal leaves unknown in-flight work. Quarantine every connected queue and fence.
     try { Check(); } catch(...) { _quarantined.store(true); }
     if(!_quarantined.load()) return;
+    for (auto& [route, fence] : _peerFences) fence.Detach();
     for (auto& device : _devices) if (device)
     {
         device->Identity.Detach();
@@ -153,9 +154,12 @@ GDX12Device& QueueSubmission::Device(Id id) const {
     return context->Device;
 }
 QueueSubmission::TransferBuffer QueueSubmission::CreateTransferBuffer(Id remote, uint64_t bytes) const {
-    if (!remote || !bytes) throw std::invalid_argument("invalid cross-adapter buffer");
-    auto* primary = Device(0).GetDevice().Get();
-    auto* secondary = Device(remote).GetDevice().Get();
+    return CreateTransferBuffer(0, remote, bytes);
+}
+QueueSubmission::TransferBuffer QueueSubmission::CreateTransferBuffer(Id first, Id second, uint64_t bytes) const {
+    if (first == second || !bytes) throw std::invalid_argument("invalid cross-adapter buffer");
+    auto* primary = Device(first).GetDevice().Get();
+    auto* secondary = Device(second).GetDevice().Get();
     const auto desc = CD3DX12_RESOURCE_DESC::Buffer(bytes, D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER);
     const auto a = primary->GetResourceAllocationInfo(0, 1, &desc);
     const auto b = secondary->GetResourceAllocationInfo(0, 1, &desc);
@@ -174,7 +178,7 @@ QueueSubmission::TransferBuffer QueueSubmission::CreateTransferBuffer(Id remote,
     CloseHandle(handle);
     ThrowIfFailed(opened);
     for (Id id = 0; id < 2; ++id) {
-        const auto device = id == 0 ? 0 : remote;
+        const auto device = id == 0 ? first : second;
         ThrowIfFailed(Device(device).GetDevice()->CreatePlacedResource(buffer.Heaps[id].Get(), 0, &desc,
             D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&buffer.Resources[id])));
         ValidateResource(device, buffer.Resources[id].Get());
@@ -243,9 +247,12 @@ CompletionToken QueueSubmission::Submit(Id device,BistroRender::Queue target,
         if(a.Get()!=b.Get()) throw std::invalid_argument("foreign command list device");
     }
     for (auto token : waits) {
-        Resolve(token); // validate EVERY token before native mutation
+        const auto& producer = Resolve(token);
         if (device && token.Device && token.Device != device)
-            throw std::invalid_argument("wait between remote devices is unsupported");
+        {
+            auto& fence = _peerFences[{token.Device, device, Index(token.Target)}];
+            if (!fence) fence = OpenFence(*_devices[token.Device]->Identity.Get(), *producer.Shared.Get(), *_devices[device]->Identity.Get());
+        }
     }
     try {
         t.Poisoned=true;
@@ -253,7 +260,9 @@ CompletionToken QueueSubmission::Submit(Id device,BistroRender::Queue target,
             const auto& producer=Resolve(token);
             if(token.Device==device && token.Target==target) continue;
             auto* fence = token.Device == device ? producer.Queue->GetFence().Get() :
-                device == 0 ? producer.OnPrimary.Get() : _devices[device]->Queues[Index(token.Target)].PrimaryOnRemote.Get();
+                device == 0 ? producer.OnPrimary.Get() :
+                token.Device == 0 ? _devices[device]->Queues[Index(token.Target)].PrimaryOnRemote.Get() :
+                _peerFences.at({token.Device, device, Index(token.Target)}).Get();
             if(!fence) throw std::invalid_argument("missing cross-device fence handle");
             ThrowIfFailed(t.Queue->GetCommandQueue()->Wait(fence,token.Value));
         }

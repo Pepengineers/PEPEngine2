@@ -12,6 +12,9 @@ namespace
 {
 AutoConsoleVariable<int> AOAdapter(L"App.AO.Adapter", -1,
     L"Hardware GPU index for Bistro AO. -1 uses local AO. Remote grids: SSAO/CACAO full or half, HBAO half, XeGTAO full.");
+AutoConsoleVariable<int> PostAdapter(L"App.Post.Adapter", -1,
+    L"DXGI index for Bistro postprocessing and presentation. -1 uses the scene device.",
+    EConsoleVariableFlags::Default, [](int index) { return index >= -1; });
 AutoConsoleVariable<bool> AsyncQueues(L"App.Async.Queues", true,
                                       L"Place explicit local work on COMPUTE/COPY; false uses DIRECT.",
                                       EConsoleVariableFlags::Default);
@@ -43,6 +46,21 @@ void BistroRenderPipeline::Initialize(RenderPipelineContext& c, const std::vecto
 	_lighting->SetWaterRetirement([this] { _executor->Drain(); });
 	_environment->SetRetirement([this] { _executor->Drain(); });
 	Log::Info("Renderer", "Bistro packet renderer initialized; one rendering path");
+}
+
+void BistroRenderPipeline::UpdateFrameSettings(RenderPipelineContext& c)
+{
+	const auto& submit = _executor->Submissions();
+	const auto owner = submit->SelectAdapter(PostAdapter.GetValue());
+	if (!_post->UpdatePostOwner(c, submit, owner))
+	{
+		if (_post->NeedsResize()) DrainExecution();
+		return;
+	}
+	_bindings.PrimaryPasses = _post->Passes();
+	_bindings.PrimaryPasses.push_back(&_sceneFlags);
+	_bindings.Reconstruction = &_post->Reconstruction();
+	c.Resize();
 }
 
 void BistroRenderPipeline::PrepareMaterialBindings(RenderPipelineContext& c)
@@ -241,6 +259,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	if (auto ao = _lighting->AOExchange(_schedule)) exchanges.push_back(std::move(*ao));
 	_lighting->AddProbeExchanges(_schedule, waits, exchanges);
 	_lighting->Transparency().AddExchange(_schedule, exchanges);
+	_post->AddPostExchange(_schedule, exchanges);
 	uint64_t completion;
 	try
 	{
@@ -251,7 +270,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	}
 	catch (...)
 	{
-		try { _post->DrainHud(); }
+		try { _post->DrainHud(); _post->DrainPost(); }
 		catch (...) { OutputDebugStringA("Bistro HUD retirement failed; preserving the original exception.\n"); }
 		_post->Reconstruction().CancelRecording();
 		const auto& completions = _executor->Completions();
@@ -303,6 +322,7 @@ void BistroRenderPipeline::FramePresented()
 {
 	_cloudPicture->Presented();
 	_post->HudPresented();
+	_post->PostPresented();
 	_lighting->Transparency().Presented();
 	_lighting->Water().Presented(_frameNumber, _executor->Completions());
 	_lighting->Particles().Presented(_frameNumber);

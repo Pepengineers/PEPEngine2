@@ -14,7 +14,7 @@ class BistroRenderPipeline final : public IRenderPipeline
 	void PrepareMaterialBindings(RenderPipelineContext&) override;
 	void DrainExecution() override
 	{
-		if (_post) _post->DrainHud();
+		if (_post) { _post->DrainHud(); _post->DrainPost(); }
 		if (_executor)
 		{
 			_executor->Drain();
@@ -25,17 +25,7 @@ class BistroRenderPipeline final : public IRenderPipeline
 			_post->ReleasePresentation();
 		}
 	}
-	void UpdateFrameSettings(RenderPipelineContext& c) override
-	{
-		if (!(GetReconstructionSettings() == _post->Reconstruction().GetStatus().Requested) || _post->NeedsResize())
-		{
-			DrainExecution();
-		}
-		if (_post->Reconstruction().ApplySettings())
-		{
-			c.Resize();
-		}
-	}
+	void UpdateFrameSettings(RenderPipelineContext&) override;
 	void ResetWorldHistory() override
 	{
 		if (_post)

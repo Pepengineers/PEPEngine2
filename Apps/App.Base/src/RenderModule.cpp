@@ -55,6 +55,29 @@ RenderPipelineContext RenderModule::PipelineContext()
 
 void RenderPipelineContext::Resize() { Runtime.OnResize(); }
 
+void RenderPipelineContext::SetPresentationDevice(GDX12Device& device, GDX12DescriptorHeap& rtvs)
+{
+    if (BackBuffer && &BackBuffer->Device() == &device) return;
+    // The pipeline has drained scene and presentation work and released any back-buffer recordings.
+    Runtime._backBuffer.reset();
+    BackBuffer = nullptr;
+    const UINT width = Common.WindowWidth, height = Common.WindowHeight;
+    try
+    {
+        Runtime._backBuffer = std::make_unique<GDX12SwapChain>(&device, Runtime._window->GetWindowHandle(),
+            DXGI_FORMAT_R8G8B8A8_UNORM, 2, width, height, &rtvs, true);
+    }
+    catch (...)
+    {
+        Runtime.BuildBackBuffer();
+        BackBuffer = Runtime._backBuffer.get();
+        throw;
+    }
+    BackBuffer = Runtime._backBuffer.get();
+    Common.RequestHistoryReset = Common.ResetUpscalerHistory = true;
+    BackBuffer->BeginFrame(Common);
+}
+
 void RenderModule::RefreshPipelineFlags()
 {
     _primaryPipelineFlags = 0;
@@ -75,8 +98,8 @@ RenderModule::~RenderModule()
     if (_uiInitialized) Engine::UI::ShutdownUI();
 
     _primaryResources.GeometrySources.clear();
-    _pipeline.reset();
     _backBuffer.reset();
+    _pipeline.reset();
     GDX12ShaderCompiler::Shutdown();
     GDX12DeviceFactory::Reset();
     GDX12StreamlineSDK::Get().Shutdown();

@@ -1,6 +1,7 @@
 #include "ScenePostUI.h"
 #include "BistroInfoPanel.h"
 #include "BistroGameHUD.h"
+#include "Techniques/ProbeInputMirror.h"
 #include "App.Base/Modules/RenderModule.h"
 #include "App.Base/Modules/SceneManagerModule.h"
 #include "Engine.Core/BenchmarkEngine.h"
@@ -67,6 +68,64 @@ ComPtr<ID3D12PipelineState> CreateHealthBarPipeline(GDX12Device& device, GDX12Ro
 }
 }
 
+namespace
+{
+struct ScreenTransfer
+{
+	QueueSubmission::TransferBuffer Buffer;
+	D3D12_PLACED_SUBRESOURCE_FOOTPRINT Layout{};
+	UINT64 Bytes = 0;
+	Id From = Invalid, To = Invalid;
+
+	void Prepare(const QueueSubmission& submit, Id from, Id to, const D3D12_RESOURCE_DESC& desc)
+	{
+		if (Buffer.Resources[0] && From == from && To == to && Layout.Footprint.Width == desc.Width &&
+		    Layout.Footprint.Height == desc.Height && Layout.Footprint.Format == desc.Format) return;
+		D3D12_PLACED_SUBRESOURCE_FOOTPRINT target{};
+		UINT64 targetBytes = 0;
+		submit.Device(from).GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &Layout, nullptr, nullptr, &Bytes);
+		submit.Device(to).GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &target, nullptr, nullptr, &targetBytes);
+		if (!Bytes || Bytes == UINT64_MAX || Bytes != targetBytes || Layout.Offset != target.Offset ||
+		    Layout.Footprint.RowPitch != target.Footprint.RowPitch || Layout.Footprint.Format != target.Footprint.Format ||
+		    Layout.Footprint.Width != target.Footprint.Width || Layout.Footprint.Height != target.Footprint.Height ||
+		    Layout.Footprint.Depth != target.Footprint.Depth)
+			throw std::runtime_error("Screen transfer requires matching adapter footprints");
+		Buffer = submit.CreateTransferBuffer(from, to, Bytes);
+		From = from;
+		To = to;
+	}
+
+	Id Copy(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work, const char* name, GDX12Texture& image)
+	{
+		const bool exporting = graph.Device == From;
+		if (!exporting && graph.Device != To) throw std::logic_error("Screen transfer bound to the wrong device");
+		const CD3DX12_TEXTURE_COPY_LOCATION tex(image.GetResource()->D3DResource.Get(), 0u);
+		const CD3DX12_TEXTURE_COPY_LOCATION shared(Buffer.Resources[exporting ? 0 : 1].Get(), Layout);
+		const auto source = exporting ? tex : shared;
+		const auto dest = exporting ? shared : tex;
+		const auto read = NativeWork::ResourceFor(graph, bindings, source.pResource, name);
+		const auto write = NativeWork::ResourceFor(graph, bindings, dest.pResource, name);
+		return work.Add(graph, name,
+		    {{read, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE}, {write, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
+		    [source, dest](auto* cmd) { cmd->CopyTextureRegion(&dest, 0, 0, 0, &source, nullptr); });
+	}
+};
+
+void EnsureScreenTexture(std::unique_ptr<GDX12Texture>& image, GDX12DeviceResources& device, UINT width, UINT height)
+{
+	if (image && image->GetWidth() == width && image->GetHeight() == height) return;
+	image = std::make_unique<GDX12Texture>();
+	GDX12RenderHelpers::InitializeRenderTarget(*image, device, width, height, Engine::UI::OffscreenFormat, {0, 0, 0, 0});
+}
+}
+
+struct ScenePostUI::CapturedScreen
+{
+	std::shared_ptr<const Engine::UI::DrawData> Overlay, Game;
+	GDX12Texture* Preview = nullptr;
+	GameHUD::Bar Bar{};
+};
+
 struct ScenePostUI::HudRaster
 {
 	explicit HudRaster(GDX12DeviceResources& resources, GDX12Texture& atlas) : Resources(resources), Atlas(&atlas) {}
@@ -132,6 +191,7 @@ struct ScenePostUI::HudRaster
 
 	GDX12DeviceResources& Resources;
 	GDX12Texture* Atlas;
+	uint64_t AtlasRevision = 0;
 	std::unique_ptr<GDX12RootSignature> Root;
 	ComPtr<ID3D12PipelineState> Pipeline;
 };
@@ -142,14 +202,13 @@ struct ScenePostUI::RemoteHud
 	{
 		HudFrame Game;
 		std::unique_ptr<GDX12Texture> Layer;
-		QueueSubmission::TransferBuffer Transfer;
-		D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{};
+		ScreenTransfer Transfer;
 		Graph Plan;
 		NativeWork Work;
 		std::vector<ID3D12Resource*> Bindings;
 		Id Raster = Invalid;
 		CompletionToken RasterReady, Ready, Imported, Applied, Completed;
-		UINT64 Number = 0, Bytes = 0;
+		UINT64 Number = 0;
 		bool Overlay = false;
 	};
 
@@ -186,39 +245,10 @@ struct ScenePostUI::RemoteHud
 		AtlasRevision = source.Revision;
 	}
 
-	void PrepareLayer(Frame& frame, UINT width, UINT height)
+	void PrepareLayer(Frame& frame, Id display, UINT width, UINT height)
 	{
-		if (frame.Layer && frame.Layer->GetWidth() == width && frame.Layer->GetHeight() == height) return;
-		frame.Layer = std::make_unique<GDX12Texture>();
-		GDX12RenderHelpers::InitializeRenderTarget(*frame.Layer, Resources, width, height,
-		    Engine::UI::OffscreenFormat, {0, 0, 0, 0});
-		const auto desc = frame.Layer->GetResource()->D3DResource->GetDesc();
-		const auto& submit = *GPU.Submissions();
-		D3D12_PLACED_SUBRESOURCE_FOOTPRINT display{};
-		UINT64 displayBytes = 0;
-		Resources.Device->GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &frame.Footprint, nullptr, nullptr, &frame.Bytes);
-		submit.Device(0).GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &display, nullptr, nullptr, &displayBytes);
-		const auto& footprint = frame.Footprint;
-		if (!frame.Bytes || frame.Bytes == UINT64_MAX || displayBytes != frame.Bytes || display.Offset != footprint.Offset ||
-		    display.Footprint.RowPitch != footprint.Footprint.RowPitch || display.Footprint.Width != footprint.Footprint.Width ||
-		    display.Footprint.Height != footprint.Footprint.Height || display.Footprint.Depth != footprint.Footprint.Depth ||
-		    display.Footprint.Format != footprint.Footprint.Format)
-			throw std::runtime_error("Game HUD requires matching adapter texture footprints");
-		frame.Transfer = submit.CreateTransferBuffer(Owner, frame.Bytes);
-	}
-
-	Id Copy(Frame& frame, Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work,
-	        GDX12Texture& texture, bool exporting)
-	{
-		const CD3DX12_TEXTURE_COPY_LOCATION image(texture.GetResource()->D3DResource.Get(), 0u);
-		const CD3DX12_TEXTURE_COPY_LOCATION buffer(frame.Transfer.Resources[exporting ? 1 : 0].Get(), frame.Footprint);
-		const auto& source = exporting ? image : buffer;
-		const auto& dest = exporting ? buffer : image;
-		const Id read = NativeWork::ResourceFor(graph, bindings, source.pResource, "game HUD copy source");
-		const Id write = NativeWork::ResourceFor(graph, bindings, dest.pResource, "game HUD copy destination");
-		return work.Add(graph, exporting ? "owner export game HUD layer" : "GPU0 import game HUD layer",
-		    {{read, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE}, {write, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
-		    [source, dest](auto* cmd) { cmd->CopyTextureRegion(&dest, 0, 0, 0, &source, nullptr); });
+		EnsureScreenTexture(frame.Layer, Resources, width, height);
+		frame.Transfer.Prepare(*GPU.Submissions(), Owner, display, frame.Layer->GetResource()->D3DResource->GetDesc());
 	}
 
 	void Report(const Frame& frame)
@@ -231,8 +261,8 @@ struct ScenePostUI::RemoteHud
 		Height = frame.Layer->GetHeight();
 		Log::Info("RenderGraph", "Game HUD Exact completed frame=", frame.Number, " owner=", submit.AdapterLabel(Owner),
 		    " display=", submit.AdapterLabel(0), " dimensions=", Width, "x", Height,
-		    " format=RGBA8_UNORM premultiplied=1 sceneInputBytes=0 resultBytes=", frame.Bytes,
-		    " rowPitch=", frame.Footprint.Footprint.RowPitch, " ownerRasterFence=", frame.RasterReady.Value,
+		    " format=RGBA8_UNORM premultiplied=1 sceneInputBytes=0 resultBytes=", frame.Transfer.Bytes,
+		    " rowPitch=", frame.Transfer.Layout.Footprint.RowPitch, " ownerRasterFence=", frame.RasterReady.Value,
 		    " ownerExportFence=", frame.Ready.Value, " displayImportFence=", frame.Imported.Value,
 		    " displayCompositeFence=", frame.Applied.Value, " completedFrameFence=", frame.Completed.Value,
 		    " infoDebugAbove=", frame.Overlay);
@@ -248,6 +278,126 @@ struct ScenePostUI::RemoteHud
 	bool Reported = false;
 	UINT Width = 0, Height = 0;
 };
+
+struct ScenePostUI::RemotePost
+{
+	struct Frame
+	{
+		std::unique_ptr<ProbeInputMirror> Inputs;
+		std::array<GDX12Texture, 4> Views;
+		std::unique_ptr<GDX12Texture> Preview, ImportedHud, Output;
+		ScreenTransfer Hud, Inspector, Display;
+		Graph Plan;
+		std::vector<ID3D12Resource*> Bindings;
+		Id Export = Invalid, Import = Invalid, SceneImport = Invalid, HudImport = Invalid, InspectorImport = Invalid;
+		bool PeerHud = false, Presented = false;
+		CompletionToken SceneReady, Produced;
+		std::array<UINT64, 4> Bytes{};
+		UINT64 Number = 0, BundleBytes = 0, HudBytes = 0, UiBytes = 0;
+		Id HudOwner = Invalid;
+	};
+
+	RemotePost(RenderPipelineContext& c, const std::shared_ptr<QueueSubmission>& submit, Id id)
+	    : Owner(id), GPU(submit, id, UINT(c.Primary.FrameConstants.size()), 1), Frames(c.Primary.FrameConstants.size())
+	{
+		Resources.Initialize(&submit->Device(id));
+		Resources.SRV_UAV_Heap->UseTransientDescriptorTail();
+		RenderPipelineContext context{c.Runtime, Resources, c.Common, c.BackBuffer};
+		Stack.reset(new ScenePostUI(context, false));
+		for (auto& frame : Frames) frame.Inputs = std::make_unique<ProbeInputMirror>(*submit, id);
+	}
+
+	Id Owner;
+	Executor GPU;
+	GDX12DeviceResources Resources;
+	std::unique_ptr<ScenePostUI> Stack;
+	std::vector<Frame> Frames;
+	bool Direct = false, Reported = false;
+};
+
+GDX12ReconstructionPass& ScenePostUI::Reconstruction()
+{
+	return _remotePost ? _remotePost->Stack->_reconstruction : _reconstruction;
+}
+
+std::vector<GDX12RenderPass*> ScenePostUI::Passes()
+{
+	if (_remotePost) return _remotePost->Stack->Passes();
+	return {&_dof, &_blur, &_reconstruction, &_output};
+}
+
+void ScenePostUI::DrainPost()
+{
+	if (_remotePost) _remotePost->GPU.Drain();
+}
+
+bool ScenePostUI::UpdatePostOwner(RenderPipelineContext& c, const std::shared_ptr<QueueSubmission>& submit, Id owner)
+{
+	const auto settings = GetReconstructionSettings();
+	const auto fg = GetFrameGenerationProvider();
+	if (_requestedPost == Invalid && !owner && settings == _reconstruction.GetStatus().Requested)
+	{
+		_requestedPost = 0;
+		_postRequest = settings;
+		_postFgRequest = int(fg);
+		return false;
+	}
+	if (_requestedPost == owner && _postRequest == settings && _postFgRequest == int(fg)) return false;
+	_requestedPost = owner;
+	_postRequest = settings;
+	_postFgRequest = int(fg);
+	DrainHud();
+	c.Runtime.DrainFrameWork();
+	auto retired = std::move(_remotePost);
+	std::string reason;
+	if (owner)
+	{
+		auto remote = std::make_unique<RemotePost>(c, submit, owner);
+		const auto& reconstruction = remote->Stack->_reconstruction.GetStatus();
+		if (reconstruction.Effective != settings.Provider)
+			reason = "requested SR on post adapter: " + reconstruction.FallbackReason;
+		else
+		{
+			try
+			{
+				c.SetPresentationDevice(*remote->Resources.Device, *remote->Resources.RTVHeap);
+				remote->Direct = true;
+			}
+			catch (const DxException& failure)
+			{
+				reason = WStringToString(failure.ToString());
+			}
+			catch (const std::exception& failure)
+			{
+				reason = failure.what();
+			}
+			if (fg == GDX12FrameGenerationProvider::Off ||
+			    (remote->Direct && c.BackBuffer->GetFrameGeneration().GetStatus().Effective == fg))
+			{
+				remote->Stack->_swapchain = c.BackBuffer;
+				_remotePost = std::move(remote);
+			}
+			else if (remote->Direct)
+				reason = "requested FG on post adapter: " + c.BackBuffer->GetFrameGeneration().GetStatus().FallbackReason;
+			if (remote && remote->Direct)
+				c.SetPresentationDevice(*c.Primary.Device, *c.Primary.RTVHeap);
+		}
+	}
+	if (!_remotePost)
+	{
+		c.SetPresentationDevice(*c.Primary.Device, *c.Primary.RTVHeap);
+		_reconstruction.ApplySettings();
+		_reconstruction.QueryRenderTargetResolution();
+		_common.Upscaler = &_reconstruction;
+	}
+	_swapchain = c.BackBuffer;
+	_common.RequestHistoryReset = _common.ResetUpscalerHistory = true;
+	Log::Info("RenderGraph", "Bistro post placement scene=", submit->AdapterLabel(0),
+	    " post=", submit->AdapterLabel(_remotePost ? owner : 0),
+	    " presentation=", submit->AdapterLabel(_remotePost && _remotePost->Direct ? owner : 0),
+	    " reason=", reason.empty() ? "requested path" : reason);
+	return true;
+}
 
 void ScenePostUI::BeginPlan(Executor& primary, uint64_t frame)
 {
@@ -269,15 +419,19 @@ void ScenePostUI::SubmitHud(const Schedule& primary, std::vector<PacketWait>& wa
 	auto& frame = owner.Frames.at(slot);
 	const auto schedule = Compile(frame.Plan);
 	const Id raster = HudPacket(schedule, frame.Raster);
-	screen.HudImport = HudPacket(primary, screen.HudImport);
-	screen.HudComposite = HudPacket(primary, screen.HudComposite);
+	const bool displayOnScene = screen.HudImport != Invalid;
+	if (displayOnScene)
+	{
+		screen.HudImport = HudPacket(primary, screen.HudImport);
+		screen.HudComposite = HudPacket(primary, screen.HudComposite);
+	}
 	owner.GPU.Reserve(schedule);
 	owner.GPU.Execute(schedule, frame.Bindings, [&](Id op, UINT, auto* cmd) {
 		if (!frame.Work.Record(op, cmd)) throw std::logic_error("Missing owner game HUD work");
 	});
 	frame.RasterReady = owner.GPU.Completions().at(raster);
 	frame.Ready = owner.GPU.Completions().back();
-	waits.push_back({screen.HudImport, frame.Ready});
+	if (displayOnScene) waits.push_back({screen.HudImport, frame.Ready});
 }
 
 void ScenePostUI::DrainHud()
@@ -293,7 +447,7 @@ void ScenePostUI::HudSubmitted(const std::vector<CompletionToken>& completions)
 {
 	const UINT slot = _resources.CurrFrameConstantsIndex;
 	auto& screen = _slots.at(slot);
-	if (!screen.HudOwner || completions.empty()) return;
+	if (!screen.HudOwner || screen.HudImport == Invalid || completions.empty()) return;
 	auto& frame = screen.HudOwner->Frames.at(slot);
 	frame.Imported = completions.at(screen.HudImport);
 	frame.Applied = completions.at(screen.HudComposite);
@@ -317,7 +471,9 @@ std::optional<ScenePostUI::HudLayer> ScenePostUI::OwnerHudLayer() const
 	return HudLayer{screen.HudOwner->Owner, frame.Layer->GetResource()->D3DResource, frame.Ready};
 }
 
-ScenePostUI::ScenePostUI(RenderPipelineContext& c)
+ScenePostUI::ScenePostUI(RenderPipelineContext& c) : ScenePostUI(c, true) {}
+
+ScenePostUI::ScenePostUI(RenderPipelineContext& c, bool sceneOwner)
     : _resources(c.Primary), _common(c.Common), _swapchain(c.BackBuffer), _render(c.Runtime),
       _inspector(UINT(c.Primary.FrameConstants.size())),
       _slots(c.Primary.FrameConstants.size()),
@@ -328,7 +484,7 @@ ScenePostUI::ScenePostUI(RenderPipelineContext& c)
 	_blur.SetPassthroughWhenDisabled(true);
 	_reconstruction.Setup(&_resources, &_common);
 	_output.Setup(&_resources, &_common);
-	_posters = std::make_unique<BistroUIPosters>(c.Runtime,
+	if (sceneOwner) _posters = std::make_unique<BistroUIPosters>(c.Runtime,
 	                                             BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>(), true);
 }
 ScenePostUI::~ScenePostUI()
@@ -340,6 +496,7 @@ ScenePostUI::~ScenePostUI()
 }
 void ScenePostUI::ReleasePresentation()
 {
+	if (_remotePost) _remotePost->Stack->ReleasePresentation();
 	_gameOverlay.reset();
 	for (auto& slot : _slots)
 	{
@@ -348,7 +505,7 @@ void ScenePostUI::ReleasePresentation()
 }
 bool ScenePostUI::NeedsResize() const
 {
-	return _blur.NeedsTileResize();
+	return _remotePost ? _remotePost->Stack->NeedsResize() : _blur.NeedsTileResize();
 }
 void ScenePostUI::PrepareMaterials(Executor& executor, uint64_t frame, double animationSeconds, GDX12Texture* cloudImage)
 {
@@ -360,7 +517,8 @@ void ScenePostUI::Reset()
 }
 void ScenePostUI::Resize()
 {
-	_reconstruction.QueryRenderTargetResolution();
+	if (_remotePost) _remotePost->Stack->Resize();
+	else _reconstruction.QueryRenderTargetResolution();
 	_pendingExports = {};
 	_publishedInputs.clear();
 	_pendingPublished.clear();
@@ -546,6 +704,125 @@ Id ScenePostUI::AppendReconstruction(Graph& graph, std::vector<ID3D12Resource*>&
 	    },
 	    std::move(dependencies), target);
 }
+ScenePostUI::CapturedScreen ScenePostUI::CaptureScreen(Graph& graph, std::vector<ID3D12Resource*>& bindings,
+    ID3D12Resource* backBuffer)
+{
+	const auto hud = GameHUD::Enabled.GetValue() && ImGui::GetCurrentContext();
+	GameHUD::Bar bar{};
+	if (hud)
+	{
+		if (!_gameOverlay)
+			_gameOverlay = std::make_unique<ImDrawList>(ImGui::GetDrawListSharedData());
+		bar = GameHUD::Draw(*_gameOverlay, _common.GameTimer ? _common.GameTimer->TotalTime() : 0.f,
+		                   BistroInfoPanel::Height(ImGui::GetIO().DisplaySize.x));
+	}
+	auto* preview = _inspector.Append(graph, bindings, _work, *_resources.Device, _resources.CurrFrameConstantsIndex,
+	    backBuffer, _common.ActiveCameraNearPlane, _common.ActiveCameraFarPlane);
+	auto overlay = Engine::UI::CaptureScreenFrame();
+	return {std::move(overlay), hud ? Engine::UI::CaptureScreenOverlay(*_gameOverlay) : nullptr, preview, bar};
+}
+
+void ScenePostUI::EnsureHudSource()
+{
+	if (_resources.TextureReplicaLoaders.find(HudAtlasName) != _resources.TextureReplicaLoaders.end()) return;
+	const auto path = std::filesystem::path(ASSETS_FOLDER) / "Textures/UI/BistroDemoHUD.png";
+	_render.SetTextureReplicaSource(HudAtlasName, Engine::Core::ETextureType::Color, [path](auto&) {
+		return Engine::Core::AssetManager::GetInstance().LoadTexture(path);
+	});
+}
+
+ScenePostUI::HudRaster& ScenePostUI::LocalHud(GDX12DeviceResources& atlasSources)
+{
+	if (&atlasSources != &_resources)
+	{
+		const auto& source = atlasSources.TextureReplicaLoaders.at(HudAtlasName);
+		if (!_localHud || _localHud->AtlasRevision != source.Revision)
+		{
+			auto* atlas = source.Load(_resources);
+			if (!_localHud) _localHud = std::make_unique<HudRaster>(_resources, *atlas);
+			else _localHud->Atlas = atlas;
+			_localHud->AtlasRevision = source.Revision;
+		}
+	}
+	else if (!_localHud)
+	{
+		auto* texture = _render.GetTextureByName(HudAtlasName);
+		if (!texture)
+		{
+			const auto* asset = Engine::Core::AssetManager::GetInstance().LoadTexture(
+			    std::filesystem::path(ASSETS_FOLDER) / "Textures/UI/BistroDemoHUD.png");
+			if (!asset) throw std::runtime_error("Missing Bistro demo HUD atlas");
+			texture = _render.CreateTexture(HudAtlasName, asset, Engine::Core::ETextureType::Color);
+		}
+		if (!texture || !texture->PrimaryDeviceTexture) throw std::runtime_error("Cannot create Bistro demo HUD atlas");
+		_localHud = std::make_unique<HudRaster>(_resources, *texture->PrimaryDeviceTexture);
+	}
+	return *_localHud;
+}
+
+void ScenePostUI::PrepareRemoteHud(Id owner, Id display, UINT width, UINT height, const CapturedScreen& captured)
+{
+	EnsureHudSource();
+	const UINT slot = _resources.CurrFrameConstantsIndex;
+	auto& screen = _slots.at(slot);
+	if (!_remoteHud || _remoteHud->Owner != owner)
+		_remoteHud = std::shared_ptr<RemoteHud>(new RemoteHud(_hudSubmissions, owner, UINT(_slots.size())), RemoteHud::Retire);
+	screen.HudOwner = _remoteHud;
+	auto& remote = *screen.HudOwner;
+	if (!remote.GPU.TryBegin(slot)) remote.GPU.Begin(slot);
+	auto& frame = remote.Frames.at(slot);
+	frame.Game.RasterOwner.reset();
+	remote.RefreshAtlas(_resources.TextureReplicaLoaders.at(HudAtlasName));
+	frame.Game.Draw = captured.Game;
+	frame.Plan = {};
+	frame.Plan.Device = owner;
+	frame.Plan.FrameBoundary = false;
+	frame.Bindings.clear();
+	frame.Work.Commands.clear();
+	frame.RasterReady = frame.Ready = frame.Imported = frame.Applied = frame.Completed = {};
+	frame.Number = _hudFrame;
+	frame.Overlay = bool(captured.Overlay);
+	remote.PrepareLayer(frame, display, width, height);
+	frame.Raster = remote.Raster->Append(frame.Plan, frame.Bindings, frame.Work, frame.Game, *frame.Layer,
+	    remote.Renderer, captured.Bar);
+	frame.Transfer.Copy(frame.Plan, frame.Bindings, frame.Work, "owner export game HUD layer", *frame.Layer);
+}
+
+Id ScenePostUI::CompositeScreen(Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12Texture* target,
+    GDX12Texture* layer, Id ready, GDX12Texture* preview, const std::shared_ptr<const Engine::UI::DrawData>& overlay,
+    bool hasGame)
+{
+	if (!overlay && !hasGame) return ready;
+	const auto resource = [](GDX12Texture* texture) { return texture->GetResource(); };
+	auto& screen = _slots.at(_resources.CurrFrameConstantsIndex);
+	if (!_composite) _composite = std::make_unique<Engine::UI::ScreenComposite>(*_resources.Device);
+	if (overlay)
+	{
+		if (!_screen)
+			_screen = std::make_unique<Engine::UI::OffscreenRenderer>(*_resources.Device, UINT(2 * _slots.size()), true);
+		std::vector<std::pair<GDX12Resource*, Mode>> accesses{{resource(layer), hasGame ? Mode::ReadWrite : Mode::Write}};
+		std::vector<Engine::UI::TextureBinding> textures;
+		if (preview)
+		{
+			auto* atlas = resource(preview);
+			accesses.emplace_back(atlas, Mode::Read);
+			textures.push_back({SceneTextureInspector::AtlasId, atlas->D3DResource, preview->GetFormat()});
+		}
+		ready = Packet(graph, bindings, "Information and debug UI raster", std::move(accesses),
+		    [this, &screen, hasGame, layer, overlay, textures = std::move(textures)](auto* cmd)
+		    {
+			    screen.RasterOwner = _screen->TryRecord(*cmd, layer->GetResource()->D3DResource, overlay, textures, !hasGame);
+			    if (!screen.RasterOwner) throw std::logic_error("Screen UI backend slot is still in flight");
+		    }, {ready}, layer);
+	}
+	return Packet(graph, bindings, "Engine.UI screen composition",
+	    {{resource(layer), Mode::Read}, {resource(target), Mode::ReadWrite}},
+	    [this, &screen, layer, target](auto* cmd)
+	    {
+		    screen.CompositeOwner = _composite->Record(*cmd, layer->GetResource()->D3DResource, target->GetResource()->D3DResource);
+	    }, {ready}, target);
+}
+
 void ScenePostUI::AppendScreen(Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12Texture* target,
                                const std::function<void(GDX12CommandList*)>& finish, Id dependency)
 {
@@ -556,19 +833,11 @@ void ScenePostUI::AppendScreen(Graph& graph, std::vector<ID3D12Resource*>& bindi
 	screen.Game.RasterOwner.reset();
 	screen.CompositeOwner.reset();
 	screen.HudImport = screen.HudComposite = Invalid;
-	const auto hud = GameHUD::Enabled.GetValue() && ImGui::GetCurrentContext();
-	GameHUD::Bar bar{};
-	if (hud)
-	{
-		if (!_gameOverlay)
-			_gameOverlay = std::make_unique<ImDrawList>(ImGui::GetDrawListSharedData());
-		bar = GameHUD::Draw(*_gameOverlay, _common.GameTimer ? _common.GameTimer->TotalTime() : 0.f,
-		                   BistroInfoPanel::Height(ImGui::GetIO().DisplaySize.x));
-	}
-	auto* preview = _inspector.Append(graph, bindings, _work, *_resources.Device, slot,
-	    resource(target)->D3DResource.Get(), _common.ActiveCameraNearPlane, _common.ActiveCameraFarPlane);
-	screen.Draw = Engine::UI::CaptureScreenFrame();
-	screen.Game.Draw = hud ? Engine::UI::CaptureScreenOverlay(*_gameOverlay) : nullptr;
+	const auto captured = CaptureScreen(graph, bindings, resource(target)->D3DResource.Get());
+	const auto bar = captured.Bar;
+	auto* preview = captured.Preview;
+	screen.Draw = captured.Overlay;
+	screen.Game.Draw = captured.Game;
 	const Id owner = screen.Game.Draw ? _hudSubmissions->SelectAdapter(HudAdapter.GetValue()) : 0;
 	if (!owner)
 	{
@@ -592,93 +861,23 @@ void ScenePostUI::AppendScreen(Graph& graph, std::vector<ID3D12Resource*>& bindi
 		Id raster = dependency;
 		if (owner)
 		{
-			if (!_remoteHud || _remoteHud->Owner != owner)
-			{
-				const auto path = std::filesystem::path(ASSETS_FOLDER) / "Textures/UI/BistroDemoHUD.png";
-				if (_resources.TextureReplicaLoaders.find(HudAtlasName) == _resources.TextureReplicaLoaders.end())
-					_render.SetTextureReplicaSource(HudAtlasName, Engine::Core::ETextureType::Color, [path](auto&) {
-						return Engine::Core::AssetManager::GetInstance().LoadTexture(path);
-					});
-				_remoteHud = std::shared_ptr<RemoteHud>(
-				    new RemoteHud(_hudSubmissions, owner, UINT(_slots.size())), RemoteHud::Retire);
-			}
-			screen.HudOwner = _remoteHud;
-			auto& remote = *screen.HudOwner;
-			// A successful primary frame has already joined this work at the HUD import.
-			if (!remote.GPU.TryBegin(slot)) remote.GPU.Begin(slot);
-			auto& frame = remote.Frames.at(slot);
-			frame.Game.RasterOwner.reset();
-			remote.RefreshAtlas(_resources.TextureReplicaLoaders.at(HudAtlasName));
-			frame.Game.Draw = screen.Game.Draw;
-			frame.Plan = {};
-			frame.Plan.Device = owner;
-			frame.Plan.FrameBoundary = false;
-			frame.Bindings.clear();
-			frame.Work.Commands.clear();
-			frame.RasterReady = frame.Ready = frame.Imported = frame.Applied = frame.Completed = {};
-			frame.Number = _hudFrame;
-			frame.Overlay = bool(screen.Draw);
-			remote.PrepareLayer(frame, width, height);
-			frame.Raster = remote.Raster->Append(frame.Plan, frame.Bindings, frame.Work, frame.Game, *frame.Layer,
-			    remote.Renderer, bar);
-			remote.Copy(frame, frame.Plan, frame.Bindings, frame.Work, *frame.Layer, true);
-			raster = screen.HudImport = remote.Copy(frame, graph, bindings, _work, *screen.Target, false);
+			PrepareRemoteHud(owner, 0, width, height, captured);
+			auto& frame = screen.HudOwner->Frames.at(slot);
+			raster = screen.HudImport = frame.Transfer.Copy(graph, bindings, _work, "GPU0 import game HUD layer", *screen.Target);
 			graph.Operations[raster].Dependencies.push_back(dependency);
 		}
 		else if (screen.Game.Draw)
-		{
-			if (!_localHud)
-			{
-				auto* texture = _render.GetTextureByName(HudAtlasName);
-				if (!texture)
-				{
-					const auto* asset = Engine::Core::AssetManager::GetInstance().LoadTexture(
-					    std::filesystem::path(ASSETS_FOLDER) / "Textures/UI/BistroDemoHUD.png");
-					if (!asset) throw std::runtime_error("Missing Bistro demo HUD atlas");
-					texture = _render.CreateTexture(HudAtlasName, asset, Engine::Core::ETextureType::Color);
-				}
-				if (!texture || !texture->PrimaryDeviceTexture) throw std::runtime_error("Cannot create Bistro demo HUD atlas");
-				_localHud = std::make_unique<HudRaster>(_resources, *texture->PrimaryDeviceTexture);
-			}
-			raster = _localHud->Append(graph, bindings, _work, screen.Game, *screen.Target, *_screen, bar, {dependency});
-		}
-		if (screen.Draw)
-		{
-			const bool hasGame = bool(screen.Game.Draw);
-			std::vector<std::pair<GDX12Resource*, Mode>> overlayAccesses{
-			    {resource(screen.Target.get()), hasGame ? Mode::ReadWrite : Mode::Write}};
-			std::vector<Engine::UI::TextureBinding> overlayTextures;
-			if (preview)
-			{
-				auto* atlas = resource(preview);
-				overlayAccesses.emplace_back(atlas, Mode::Read);
-				overlayTextures.push_back({SceneTextureInspector::AtlasId, atlas->D3DResource, preview->GetFormat()});
-			}
-			raster = Packet(graph, bindings, "Information and debug UI raster", std::move(overlayAccesses),
-			    [this, &screen, hasGame, overlayTextures = std::move(overlayTextures)](auto* cmd)
-			    {
-				    screen.RasterOwner = _screen->TryRecord(*cmd, screen.Target->GetResource()->D3DResource,
-				        screen.Draw, overlayTextures, !hasGame);
-				    if (!screen.RasterOwner) throw std::logic_error("Screen UI backend slot is still in flight");
-			    }, {raster}, screen.Target.get());
-		}
-		screenId = Packet(
-		    graph, bindings, "Engine.UI screen composition",
-		    {{resource(screen.Target.get()), Mode::Read}, {resource(target), Mode::ReadWrite}},
-		    [this, &screen, target](auto* cmd)
-		    {
-			    screen.CompositeOwner = _composite->Record(*cmd, screen.Target->GetResource()->D3DResource,
-			                                               target->GetResource()->D3DResource);
-		    },
-		    {raster}, target);
+			raster = LocalHud(_resources).Append(graph, bindings, _work, screen.Game, *screen.Target, *_screen, bar, {dependency});
+		screenId = CompositeScreen(graph, bindings, target, screen.Target.get(), raster, preview,
+		    screen.Draw, bool(screen.Game.Draw));
 		if (owner) screen.HudComposite = screenId;
 	}
 	Packet(graph, bindings, "frame end / PRESENT handoff", {{resource(target), Mode::ReadWrite}}, finish, {screenId},
 	       nullptr, D3D12_RESOURCE_STATE_PRESENT);
 }
-void ScenePostUI::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12Texture* hdr, GDX12Texture* depth,
+Id ScenePostUI::AppendStack(Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12Texture* hdr, GDX12Texture* depth,
                          GDX12Texture* motion, GDX12Texture* featureMotion, GDX12Texture* target,
-                         const std::function<void(GDX12CommandList*)>& finish)
+                         std::vector<Id> dependencies)
 {
 	if (!hdr || !depth || !motion || !target || hdr->GetWidth() != depth->GetWidth() ||
 	    hdr->GetHeight() != depth->GetHeight() || hdr->GetWidth() != motion->GetWidth() ||
@@ -687,7 +886,6 @@ void ScenePostUI::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, G
 		throw std::invalid_argument("Ordinary post requires matching HDR/depth/motion grids");
 	}
 	_dof.SetInputs({hdr, depth});
-	std::vector<Id> dependencies;
 	if (_dof.IsActive())
 	{
 		if (!_dof._output.IsInitialized())
@@ -703,7 +901,7 @@ void ScenePostUI::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, G
 		dependencies.push_back(Packet(
 		    graph, bindings, "DoF SDK DIRECT recording boundary",
 		    {{hdr->GetResource(), Mode::Read}, {depth->GetResource(), Mode::Read}, {dof->GetResource(), Mode::Write}},
-		    [this](auto* cmd) { _dof.RecordCommands(cmd); }));
+		    [this](auto* cmd) { _dof.RecordCommands(cmd); }, dependencies));
 		hdr = dof;
 	}
 	else
@@ -722,9 +920,236 @@ void ScenePostUI::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, G
 	}
 	const auto output =
 	    AppendReconstruction(graph, bindings, hdr, depth, motion, featureMotion, target, std::move(dependencies));
-	const auto fg = AppendFrameGeneration(graph, bindings, depth, output);
-	AppendScreen(graph, bindings, target, finish, fg);
+	return AppendFrameGeneration(graph, bindings, depth, output);
 }
+void ScenePostUI::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12Texture* hdr,
+    GDX12Texture* depth, GDX12Texture* motion, GDX12Texture* featureMotion, GDX12Texture* target,
+    const std::function<void(GDX12CommandList*)>& finish)
+{
+	if (_remotePost)
+		AppendRemotePost(graph, bindings, hdr, depth, motion, featureMotion, target, finish);
+	else
+	{
+		const auto output = AppendStack(graph, bindings, hdr, depth, motion, featureMotion, target);
+		AppendScreen(graph, bindings, target, finish, output);
+	}
+}
+
+void ScenePostUI::AppendRemotePost(Graph& scene, std::vector<ID3D12Resource*>& sceneBindings, GDX12Texture* hdr,
+    GDX12Texture* depth, GDX12Texture* motion, GDX12Texture* featureMotion, GDX12Texture* target,
+    const std::function<void(GDX12CommandList*)>& finish)
+{
+	auto& owner = *_remotePost;
+	auto& stack = *owner.Stack;
+	const UINT slot = _resources.CurrFrameConstantsIndex;
+	if (!owner.GPU.TryBegin(slot)) owner.GPU.Begin(slot);
+	owner.Resources.CurrFrameConstantsIndex = slot;
+	const UINT cameraIndex = _common.ActiveCameraCBufferIndex;
+	auto& camera = *owner.Resources.FrameConstants.at(slot)->CameraCB;
+	if (camera.GetElementCount() <= cameraIndex) camera.Resize(cameraIndex + 1);
+	camera.CopyData(cameraIndex, _resources.FrameConstants.at(slot)->CameraCB->GetCPUData()[cameraIndex]);
+	stack.BeginPlan(owner.GPU, _hudFrame);
+
+	auto& frame = owner.Frames.at(slot);
+	frame.Plan = {};
+	frame.Plan.Device = owner.Owner;
+	frame.Bindings.clear();
+	frame.Export = frame.Import = frame.SceneImport = frame.HudImport = frame.InspectorImport = Invalid;
+	frame.PeerHud = frame.Presented = false;
+	frame.Number = _hudFrame;
+	frame.SceneReady = frame.Produced = {};
+	frame.Bytes = {};
+	frame.HudBytes = frame.UiBytes = 0;
+	frame.HudOwner = Invalid;
+	const auto native = [](GDX12Texture* texture) { return texture->GetResource()->D3DResource.Get(); };
+	const std::array sources{hdr, depth, motion, featureMotion};
+	std::unordered_set<ID3D12Resource*> live;
+	for (auto* source : sources) if (source) live.insert(native(source));
+	frame.Inputs->Begin();
+	frame.Inputs->RetireUnused(live, [](auto*) {});
+	std::array<GDX12Texture*, 4> inputs{};
+	for (UINT i = 0; i < sources.size(); ++i)
+	{
+		auto* source = sources[i];
+		if (!source) continue;
+		const auto id = NativeWork::ResourceFor(scene, sceneBindings, native(source), "Bistro post scene input");
+		auto* copy = frame.Inputs->Mirror(scene, sceneBindings, native(source), id, true);
+		frame.Bytes[i] = frame.Inputs->PendingTransferBytes(native(source));
+		auto& view = frame.Views[i];
+		if (!view.IsInitialized() || native(&view) != copy)
+		{
+			GDX12TextureDesc desc;
+			desc.Width = source->GetWidth();
+			desc.Height = source->GetHeight();
+			desc.Format = source->GetFormat();
+			desc.SRVDesc = source->ShaderViewDescription();
+			desc.SRV_UAV_Heap = owner.Resources.SRV_UAV_Heap.get();
+			desc.SRVHeapIndex = view.IsInitialized() ? view.GetSRV()->HeapIndex
+			    : desc.SRV_UAV_Heap->GetAvailableIndex(SceneDescriptorStart);
+			desc.ExternalResource = ComPtr<ID3D12Resource>(copy);
+			view.Initialize(desc);
+		}
+		inputs[i] = &view;
+	}
+	frame.BundleBytes = frame.Inputs->TransferBytes();
+	frame.Export = frame.Inputs->AppendExport(scene, sceneBindings, _work, Queue::Direct);
+	scene.Operations[frame.Export].Name = "GPU0 export current-frame Bistro post inputs";
+	frame.SceneImport = frame.Inputs->AppendImport(frame.Plan, frame.Bindings, stack._work);
+	frame.Plan.Operations[frame.SceneImport].Name = "owner import current-frame Bistro post inputs";
+
+	const UINT width = target->GetWidth(), height = target->GetHeight();
+	auto* output = target;
+	if (!owner.Direct)
+	{
+		EnsureScreenTexture(frame.Output, owner.Resources, width, height);
+		output = frame.Output.get();
+	}
+	const Id post = stack.AppendStack(frame.Plan, frame.Bindings, inputs[0], inputs[1], inputs[2], inputs[3], output,
+	    {frame.SceneImport});
+
+	if (!owner.Direct)
+	{
+		frame.Display.Prepare(*_hudSubmissions, owner.Owner, 0, native(output)->GetDesc());
+		frame.Display.Copy(frame.Plan, frame.Bindings, stack._work, "owner export display color", *output);
+		frame.Import = frame.Display.Copy(scene, sceneBindings, _work, "GPU0 import display color", *target);
+		scene.Operations[frame.Import].Dependencies.push_back(frame.Export);
+		AppendScreen(scene, sceneBindings, target, finish, frame.Import);
+		if (_slots.at(slot).Game.Draw)
+		{
+			const auto& hud = _slots.at(slot).HudOwner;
+			frame.HudOwner = hud ? hud->Owner : 0;
+			if (hud) frame.HudBytes = hud->Frames.at(slot).Transfer.Bytes;
+		}
+		return;
+	}
+
+	const auto captured = CaptureScreen(scene, sceneBindings, native(target));
+	auto& sceneSlot = _slots.at(slot);
+	sceneSlot.Game.RasterOwner.reset();
+	sceneSlot.Game.Draw = captured.Game;
+	sceneSlot.HudImport = sceneSlot.HudComposite = Invalid;
+	const Id hudOwner = captured.Game ? _hudSubmissions->SelectAdapter(HudAdapter.GetValue()) : Invalid;
+	frame.HudOwner = hudOwner;
+	if (hudOwner == Invalid || hudOwner == owner.Owner || hudOwner == 0)
+	{
+		sceneSlot.HudOwner.reset();
+		_remoteHud.reset();
+	}
+	auto& screen = stack._slots.at(slot);
+	screen.Game.RasterOwner.reset();
+	screen.Game.Draw = captured.Game;
+	screen.RasterOwner.reset();
+	screen.CompositeOwner.reset();
+
+	Id ready = post;
+	GDX12Texture* preview = nullptr;
+	std::vector<Id> exports{frame.Export};
+	if (captured.Preview)
+	{
+		EnsureScreenTexture(frame.Preview, owner.Resources, captured.Preview->GetWidth(), captured.Preview->GetHeight());
+		frame.Inspector.Prepare(*_hudSubmissions, 0, owner.Owner, native(captured.Preview)->GetDesc());
+		exports.push_back(frame.Inspector.Copy(scene, sceneBindings, _work, "GPU0 export texture inspector atlas", *captured.Preview));
+		frame.InspectorImport = frame.Inspector.Copy(frame.Plan, frame.Bindings, stack._work,
+		    "display import texture inspector atlas", *frame.Preview);
+		frame.UiBytes = frame.Inspector.Bytes;
+		preview = frame.Preview.get();
+	}
+	if (captured.Game || captured.Overlay)
+	{
+		EnsureScreenTexture(screen.Target, owner.Resources, width, height);
+		if (hudOwner == owner.Owner)
+		{
+			EnsureHudSource();
+			if (!stack._screen)
+				stack._screen = std::make_unique<Engine::UI::OffscreenRenderer>(*owner.Resources.Device, UINT(2 * _slots.size()), true);
+			ready = stack.LocalHud(_resources).Append(frame.Plan, frame.Bindings, stack._work, screen.Game,
+			    *screen.Target, *stack._screen, captured.Bar, {post});
+		}
+		else if (hudOwner == 0)
+		{
+			EnsureScreenTexture(sceneSlot.Target, _resources, width, height);
+			if (!_screen)
+				_screen = std::make_unique<Engine::UI::OffscreenRenderer>(*_resources.Device, UINT(2 * _slots.size()), true);
+			LocalHud(_resources).Append(scene, sceneBindings, _work, sceneSlot.Game, *sceneSlot.Target, *_screen, captured.Bar);
+			frame.Hud.Prepare(*_hudSubmissions, 0, owner.Owner, native(sceneSlot.Target.get())->GetDesc());
+			exports.push_back(frame.Hud.Copy(scene, sceneBindings, _work, "GPU0 export pure game HUD", *sceneSlot.Target));
+			frame.HudImport = frame.Hud.Copy(frame.Plan, frame.Bindings, stack._work, "display import game HUD layer", *screen.Target);
+			frame.HudBytes = frame.Hud.Bytes;
+		}
+		else if (hudOwner != Invalid)
+		{
+			PrepareRemoteHud(hudOwner, owner.Owner, width, height, captured);
+			auto& hud = sceneSlot.HudOwner->Frames.at(slot);
+			frame.PeerHud = true;
+			frame.HudImport = hud.Transfer.Copy(frame.Plan, frame.Bindings, stack._work, "display import peer game HUD layer", *screen.Target);
+			frame.HudBytes = hud.Transfer.Bytes;
+		}
+		ready = stack.CompositeScreen(frame.Plan, frame.Bindings, target, screen.Target.get(), ready, preview,
+		    captured.Overlay, bool(captured.Game));
+	}
+	stack.Packet(frame.Plan, frame.Bindings, "Bistro owner PRESENT handoff",
+	    {{target->GetResource(), Mode::ReadWrite}}, [](auto*) {}, {ready}, nullptr, D3D12_RESOURCE_STATE_PRESENT);
+	// The scene fence remains on GPU0 and covers its timer and every scene-side export.
+	frame.Export = Packet(scene, sceneBindings, "GPU0 scene and post inputs complete", {}, finish, std::move(exports));
+	scene.Operations[frame.Export].SideEffect = true;
+}
+
+void ScenePostUI::AddPostExchange(const Schedule& primary, std::vector<Executor::PacketExchange>& exchanges)
+{
+	if (!_remotePost) return;
+	auto& owner = *_remotePost;
+	const UINT slot = _resources.CurrFrameConstantsIndex;
+	auto& frame = owner.Frames.at(slot);
+	auto schedule = Compile(frame.Plan);
+	owner.GPU.Reserve(schedule);
+	const Id sceneImport = HudPacket(schedule, frame.SceneImport);
+	const Id hudImport = frame.HudImport == Invalid ? Invalid : HudPacket(schedule, frame.HudImport);
+	const Id inspectorImport = frame.InspectorImport == Invalid ? Invalid : HudPacket(schedule, frame.InspectorImport);
+	exchanges.push_back({HudPacket(primary, frame.Export), frame.Import == Invalid ? Invalid : HudPacket(primary, frame.Import),
+	    [this, &owner, &frame, schedule = std::move(schedule), slot, sceneImport, hudImport, inspectorImport](CompletionToken ready)
+	    {
+		    auto& stack = *owner.Stack;
+		    std::vector<PacketWait> waits{{sceneImport, ready}};
+		    if (hudImport != Invalid)
+			    waits.push_back({hudImport, frame.PeerHud ? _slots.at(slot).HudOwner->Frames.at(slot).Ready : ready});
+		    if (inspectorImport != Invalid) waits.push_back({inspectorImport, ready});
+		    owner.GPU.Execute(schedule, frame.Bindings, [&stack](Id operation, UINT, auto* cmd) {
+			    if (!stack.Record(operation, cmd)) throw std::logic_error("Missing Bistro owner post work");
+		    }, nullptr, nullptr, nullptr, waits);
+		    stack.Submitted(slot);
+		    frame.SceneReady = ready;
+		    return frame.Produced = owner.GPU.Completions().back();
+	    }});
+}
+
+void ScenePostUI::PostPresented()
+{
+	if (!_remotePost || _remotePost->Reported) return;
+	auto& owner = *_remotePost;
+	owner.Frames.at(_resources.CurrFrameConstantsIndex).Presented = true;
+	const auto& submit = *owner.GPU.Submissions();
+	const auto presented = std::find_if(owner.Frames.begin(), owner.Frames.end(), [&](const auto& frame) {
+		return frame.Presented && frame.Produced && submit.Complete(frame.Produced);
+	});
+	if (presented == owner.Frames.end()) return;
+	auto& frame = *presented;
+	owner.Reported = true;
+	const auto& status = owner.Stack->_reconstruction.GetStatus();
+	Log::Info("RenderGraph", "Bistro post Present S_OK frame=", frame.Number,
+	    " scene=", submit.AdapterLabel(0), " post=", submit.AdapterLabel(owner.Owner),
+	    " HUD=", frame.HudOwner == Invalid ? "disabled" : submit.AdapterLabel(frame.HudOwner),
+	    " swapchain=", submit.AdapterLabel(owner.Direct ? owner.Owner : 0),
+	    " provider=", int(status.Effective), " quality=", int(status.Requested.Quality),
+	    " FG=", int(_swapchain->GetFrameGeneration().GetStatus().Effective),
+	    " render=", frame.Views[0].GetWidth(), "x", frame.Views[0].GetHeight(),
+	    " display=", _common.WindowWidth, "x", _common.WindowHeight,
+	    " hdrBytes=", frame.Bytes[0], " depthBytes=", frame.Bytes[1], " motionBytes=", frame.Bytes[2],
+	    " featureMotionBytes=", frame.Bytes[3], " sceneBundleBytes=", frame.BundleBytes,
+	    " hudBytes=", frame.HudBytes, " inspectorBytes=", frame.UiBytes,
+	    " displayColorReturnBytes=", owner.Direct ? 0 : frame.Display.Bytes,
+	    " sceneFence=", frame.SceneReady.Value, " postFence=", frame.Produced.Value);
+}
+
 std::vector<CanvasRead> ScenePostUI::AppendPosters(Graph& graph, std::vector<ID3D12Resource*>& bindings)
 {
 	for (Id id = 0; id < bindings.size(); ++id)

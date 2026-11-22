@@ -911,7 +911,7 @@ Schedule SceneGeometry::Plan(UINT index, const AppendTechnique& append, const Ap
 		{
 			continue;
 		}
-		if (g.Operations[id].Accesses.empty())
+		if (g.Operations[id].Accesses.empty() && !g.Operations[id].SideEffect)
 		{
 			continue;
 		}

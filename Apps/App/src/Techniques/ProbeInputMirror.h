@@ -85,6 +85,7 @@ class ProbeInputMirror
         return mirror.Local.Get();
     }
 
+    UINT64 TransferBytes() const { return _bytes; }
     bool Contains(ID3D12Resource* source) const { return _mirrors.count(source) != 0; }
     bool PendingCopy(ID3D12Resource* source) const { return _pending.count(source) != 0; }
     UINT64 PendingTransferBytes(ID3D12Resource* source) const

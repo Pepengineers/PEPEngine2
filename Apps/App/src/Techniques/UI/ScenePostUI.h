@@ -18,8 +18,12 @@ class ScenePostUI
   public:
 	explicit ScenePostUI(RenderPipelineContext&);
 	~ScenePostUI();
-	GDX12ReconstructionPass& Reconstruction() { return _reconstruction; }
-	std::vector<GDX12RenderPass*> Passes() { return {&_dof, &_blur, &_reconstruction, &_output}; }
+	GDX12ReconstructionPass& Reconstruction();
+	std::vector<GDX12RenderPass*> Passes();
+	bool UpdatePostOwner(RenderPipelineContext&, const std::shared_ptr<QueueSubmission>&, Id);
+	void DrainPost();
+	void AddPostExchange(const Schedule&, std::vector<Executor::PacketExchange>&);
+	void PostPresented();
 	bool NeedsResize() const;
 	void BeginPlan(Executor&, uint64_t frame);
 	void SubmitHud(const Schedule&, std::vector<PacketWait>&);
@@ -38,7 +42,7 @@ class ScenePostUI
 	{
 		_exports.at(slot) = _pendingExports;
 		_publishedInputs = _pendingPublished;
-		_reconstruction.Submitted();
+		if (!_remotePost) _reconstruction.Submitted();
 	}
 	void PrepareMaterials(Executor&, uint64_t frame, double animationSeconds, GDX12Texture* cloudImage);
 	void AddPosterExchanges(const Schedule& schedule, std::vector<PacketWait>& waits,
@@ -79,8 +83,22 @@ class ScenePostUI
 	Id Packet(Graph&, std::vector<ID3D12Resource*>&, const char*, std::vector<std::pair<GDX12Resource*, Mode>>,
 	          const std::function<void(GDX12CommandList*)>&, std::vector<Id> dependencies = {},
 	          GDX12Texture* renderTarget = nullptr, State textureState = D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
+	ScenePostUI(RenderPipelineContext&, bool sceneOwner);
+	struct CapturedScreen;
+	CapturedScreen CaptureScreen(Graph&, std::vector<ID3D12Resource*>&, ID3D12Resource*);
+	Id AppendStack(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* hdr, GDX12Texture* depth,
+	               GDX12Texture* motion, GDX12Texture* featureMotion, GDX12Texture* target, std::vector<Id> = {});
+	void AppendRemotePost(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture*, GDX12Texture*, GDX12Texture*,
+	                      GDX12Texture*, GDX12Texture*, const std::function<void(GDX12CommandList*)>&);
+	Id CompositeScreen(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture*, GDX12Texture*, Id,
+	                   GDX12Texture*, const std::shared_ptr<const Engine::UI::DrawData>&, bool);
+	struct RemotePost;
 	struct HudRaster;
 	struct RemoteHud;
+	void EnsureHudSource();
+	HudRaster& LocalHud(GDX12DeviceResources& atlasSources);
+	void PrepareRemoteHud(Id owner, Id display, UINT width, UINT height, const CapturedScreen&);
+
 	struct HudFrame
 	{
 		std::unique_ptr<GDX12Texture> HealthBar;
@@ -114,6 +132,10 @@ class ScenePostUI
 	std::unique_ptr<Engine::UI::OffscreenRenderer> _screen;
 	std::unique_ptr<Engine::UI::ScreenComposite> _composite;
 	std::vector<ScreenSlot> _slots;
+	std::unique_ptr<RemotePost> _remotePost;
+	Id _requestedPost = Invalid;
+	GDX12ReconstructionSettings _postRequest{};
+	int _postFgRequest = -1;
 	NativeWork _work;
 	std::vector<std::array<GDX12ResourceHandle, 2>> _exports;
 	std::array<GDX12ResourceHandle, 2> _pendingExports;

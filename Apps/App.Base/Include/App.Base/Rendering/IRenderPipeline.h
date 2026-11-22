@@ -17,6 +17,7 @@ struct RenderPipelineContext
     GDX12SwapChain* BackBuffer;
 
     void Resize();
+    void SetPresentationDevice(GDX12Device&, GDX12DescriptorHeap&);
 };
 
 struct RenderPipelineBindings

@@ -6,6 +6,8 @@
 #include <memory>
 #include <mutex>
 #include <atomic>
+#include <map>
+#include <tuple>
 class GDX12CommandQueue;
 class GDX12CommandList;
 namespace BistroRender {
@@ -33,6 +35,7 @@ public:
         std::array<ComPtr<ID3D12Resource>, 2> Resources;
     };
     TransferBuffer CreateTransferBuffer(Id remote, uint64_t bytes) const;
+    TransferBuffer CreateTransferBuffer(Id first, Id second, uint64_t bytes) const;
     void CheckHealth() const;
     bool Complete(CompletionToken) const;
     void NotifyOnCompletion(CompletionToken, HANDLE event) const;
@@ -64,6 +67,7 @@ private:
     std::vector<std::string> _adapterLabels;
     std::vector<std::unique_ptr<DeviceContext>> _devices;
     std::vector<bool> _unavailable;
+    std::map<std::tuple<Id, Id, size_t>, ComPtr<ID3D12Fence>> _peerFences;
     uint64_t _incarnation;
     mutable std::mutex _mutex;
     mutable std::atomic<bool> _quarantined{false};
