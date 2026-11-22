@@ -122,6 +122,7 @@ class SceneGeometry
 	void BufferFor(Buffer&, UINT64 bytes, UINT stride, bool upload = false);
 	GDX12DeviceResources& _resources;
 	std::vector<Slot> _slots;
+	uint64_t _vertexDeformationRevision = 0;
 	std::unique_ptr<GDX12RootSignature> _cullRoot, _clearRoot, _drawRoot;
 	std::unique_ptr<SceneGrass> _grass;
 	LindenSimulation _lindenSimulation;

@@ -282,11 +282,11 @@ void SceneLocalShadows::Invalidate(const Caster& caster, bool listsChanged)
 	}
 }
 
-void SceneLocalShadows::InvalidateGrass(const GDX12RenderPrimitive& grass)
+bool SceneLocalShadows::InvalidateGrass(const GDX12RenderPrimitive& grass)
 {
 	if (!grass.Visible || !grass.CastsShadows || !grass.InstanceCount)
 	{
-		return;
+		return false;
 	}
 	for (auto& slot : _slots)
 	{
@@ -305,11 +305,13 @@ void SceneLocalShadows::InvalidateGrass(const GDX12RenderPrimitive& grass)
 			}
 		}
 	}
+	return true;
 }
 
 void SceneLocalShadows::UpdateGrass(const std::vector<GDX12RenderPrimitive>& grass)
 {
 	bool receiversChanged = _grass.size() != grass.size();
+	bool castersChanged = false;
 	for (size_t i = 0; i < (std::max)(_grass.size(), grass.size()); ++i)
 	{
 		const auto* before = i < _grass.size() ? &_grass[i] : nullptr;
@@ -320,11 +322,11 @@ void SceneLocalShadows::UpdateGrass(const std::vector<GDX12RenderPrimitive>& gra
 		}
 		if (before)
 		{
-			InvalidateGrass(*before);
+			castersChanged |= InvalidateGrass(*before);
 		}
 		if (after)
 		{
-			InvalidateGrass(*after);
+			castersChanged |= InvalidateGrass(*after);
 		}
 		receiversChanged |= !before || !after || before->Visible != after->Visible ||
 		                    before->InstanceCount != after->InstanceCount ||
@@ -334,6 +336,10 @@ void SceneLocalShadows::UpdateGrass(const std::vector<GDX12RenderPrimitive>& gra
 	if (receiversChanged)
 	{
 		++_grassReceiverRevision;
+	}
+	if (castersChanged)
+	{
+		++_grassCasterRevision;
 	}
 }
 
@@ -707,6 +713,7 @@ void SceneLocalShadows::PackJob::Execute(size_t)
 	}
 	if (Frame->NextSlice + additional > Frame->Slices)
 	{
+		++Frame->LayoutRevision;
 		Frame->NextSlice = 0;
 		for (auto& cached : Frame->Cache)
 		{
@@ -816,6 +823,7 @@ UINT SceneLocalShadows::UpdateLights(Slot& frame)
 	}
 	if (!sameLights)
 	{
+		++frame.LayoutRevision;
 		frame.Cache.clear();
 		frame.Cache.resize(frame.Lights.size());
 		frame.NextSlice = 0;
@@ -866,6 +874,7 @@ void SceneLocalShadows::Freeze(UINT slot, const std::vector<GDX12RenderPrimitive
 	frame.AllReceivers = allReceivers;
 	frame.SceneRevision = _sceneRevision;
 	frame.GrassReceiverRevision = _grassReceiverRevision;
+	frame.GrassCasterRevision = _grassCasterRevision;
 	PrepareAtlas(frame, (std::min)(slices, UINT(D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION)));
 	UpdateCamera(frame);
 	frame.Ready = frame.Cull.Schedule(*_common.Jobs, frame.Lights.size(), 1);

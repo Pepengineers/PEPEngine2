@@ -107,7 +107,8 @@ class SceneLocalShadows
 		GDX12Texture Atlas;
 		std::vector<std::unique_ptr<GDX12Descriptor>> Dsvs;
 		UINT Resolution = 0, Slices = 0, NextSlice = 0;
-		uint64_t SceneRevision = 0, GrassReceiverRevision = 0;
+		uint64_t SceneRevision = 0, GrassReceiverRevision = 0, GrassCasterRevision = 0;
+		uint64_t LayoutRevision = 0;
 		NativeWork Work;
 	};
 	static void DrawShadowViews(ID3D12GraphicsCommandList* cmd, const Slot& frame, ID3D12CommandSignature* signature,
@@ -119,7 +120,7 @@ class SceneLocalShadows
 	UINT BuildNode(UINT first, UINT count, UINT parent = UINT_MAX);
 	void Refit(UINT caster);
 	void Invalidate(const Caster&, bool listsChanged);
-	void InvalidateGrass(const GDX12RenderPrimitive&);
+	bool InvalidateGrass(const GDX12RenderPrimitive&);
 	void UpdateGrass(const std::vector<GDX12RenderPrimitive>&);
 	void UpdateCasters(UINT slot);
 	void Gather(UINT node, const GDX12LocalLightConstants&, const std::array<GDX12LocalShadowFrustum, 6>&,
@@ -146,6 +147,7 @@ class SceneLocalShadows
 	bool _staticOnly = false;
 	uint64_t _sceneRevision = 0, _geometryRevision = 0, _meshRevision = 0, _textureRevision = 0;
 	uint64_t _grassReceiverRevision = 0;
+	uint64_t _grassCasterRevision = 0;
 	std::unique_ptr<GDX12RootSignature> _root;
 	ComPtr<ID3D12PipelineState> _opaqueDraw, _maskedDraw;
 	ComPtr<ID3D12CommandSignature> _signature;

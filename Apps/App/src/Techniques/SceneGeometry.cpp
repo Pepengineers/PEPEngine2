@@ -360,6 +360,7 @@ void SceneGeometry::Freeze(UINT index, UINT camera, std::vector<GDX12SkinningWor
 		s.Geometry.Indices = {_emptyIndices->GetGPUVirtualAddress(), EmptyGeometryBytes, DXGI_FORMAT_R32_UINT};
 	}
 	s.Skin = std::move(skin);
+	if (!s.Skin.empty()) ++_vertexDeformationRevision;
 	s.Batches = _resources.SkeletalBatchCount;
 	s.InstanceCount = _resources.SkeletalInstanceCount;
 	if (s.Batches)

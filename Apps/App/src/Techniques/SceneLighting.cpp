@@ -102,10 +102,11 @@ struct SceneLighting::RemoteShadows
 	GDX12ShadowConstants PublishedSun{}, PendingSun{};
 	UINT PublishedSunMask = 0, PendingSunMask = 0;
 	uint64_t PublishedLocalPlacement = 0, PublishedSunPlacement = 0;
-	uint64_t PendingSceneRevision = 0, PendingGrassRevision = 0;
+	uint64_t PublishedLocalLayout = 0, PendingLocalLayout = 0;
+	uint64_t PendingSceneRevision = 0, PendingGrassCasterRevision = 0;
 	UINT Count = 0;
 	UINT SunMask = 0, NearMask = 0;
-	uint64_t MeshRevision = UINT64_MAX, TextureRevision = UINT64_MAX;
+	uint64_t MeshRevision = UINT64_MAX, VertexDeformationRevision = UINT64_MAX, TextureRevision = UINT64_MAX;
 	bool Reported = false, Pending = false, Async = false;
 };
 
@@ -386,7 +387,7 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 	const auto localCompatible = [&](const RemoteShadows& remote, const GDX12LocalLightConstants& light)
 	{
 		const auto it = remote.PublishedLights.find(light.EntityId);
-		return remote.PublishedLocalPlacement == _localPlacementEpoch &&
+		return remote.PublishedLocalPlacement == _localPlacementEpoch && remote.PublishedLocalLayout == source.LayoutRevision &&
 		       remote.PublishedLocalAtlas.Get() == localAtlas.Get() && it != remote.PublishedLights.end() &&
 		       CompatibleLocalShadow(it->second, light);
 	};
@@ -415,7 +416,8 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 		}
 		if (!remote->Pending || !_submissions->Complete(remote->Produced)) continue;
 		remote->Pending = false;
-		const bool localReady = !remote->PendingSlices.empty() && remote->PendingLocalAtlas.Get() == localAtlas.Get() &&
+		const bool localReady = !remote->PendingSlices.empty() && remote->PendingLocalLayout == source.LayoutRevision &&
+		    remote->PendingLocalAtlas.Get() == localAtlas.Get() &&
 		    std::all_of(remote->PendingLights.begin(), remote->PendingLights.end(), [&](const auto& entry)
 		    {
 			    const auto current = std::lower_bound(source.Lights.begin(), source.Lights.end(), entry.first,
@@ -427,9 +429,12 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 		const bool sunReady = remote->PendingSunMask && owner == _sunOwner && SunShadowSync.GetValue() == 3 &&
 		    remote->PendingSunAtlas.Get() == sunAtlas.Get() && sunCompatible(*remote) &&
 		    std::memcmp(&remote->PendingSun, &sunSettings, sizeof(sunSettings)) == 0;
+		// A compatible snapshot can be displayed after a caster change, but it cannot validate the current cache.
+		const bool currentCasters = remote->PendingSceneRevision == source.SceneRevision &&
+		    remote->PendingGrassCasterRevision == source.GrassCasterRevision;
 		if (localReady)
 		{
-			if (remote->PendingSceneRevision == source.SceneRevision && remote->PendingGrassRevision == source.GrassReceiverRevision)
+			if (currentCasters)
 				for (const auto& [entity, light] : remote->PendingLights)
 				{
 					const auto current = std::lower_bound(source.Lights.begin(), source.Lights.end(), entity,
@@ -446,7 +451,7 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 			const Id imported = remote->SunTransfer->Import(primary, primaryBindings, _work, sun.Atlas);
 			if (remote->Import == Invalid) remote->Import = imported;
 			else primary.Operations[imported].Dependencies.push_back(remote->Import);
-			if (remote->PendingSceneRevision == source.SceneRevision && remote->PendingGrassRevision == source.GrassReceiverRevision)
+			if (currentCasters)
 				sun.DirtyCascades &= ~remote->PendingSunMask;
 		}
 		if (localReady || sunReady) importing.insert(lane);
@@ -513,7 +518,7 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 		    std::all_of(batch.begin(), batch.end(), [&](const auto& view) { return localCompatible(remote, source.Lights[view.Light]); });
 		remote.Async = latest;
 		remote.PendingSceneRevision = source.SceneRevision;
-		remote.PendingGrassRevision = source.GrassReceiverRevision;
+		remote.PendingGrassCasterRevision = source.GrassCasterRevision;
 		remote.PendingSlices.clear();
 		remote.PendingLights.clear();
 		remote.PendingSunMask = 0;
@@ -583,8 +588,10 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 		auto mesh = scene.Geometry;
 		const auto meshRevision = _resources.GeometryBuffer->GetMeshCacheRevision();
 		const bool meshChanged = remote.MeshRevision != meshRevision;
+		const bool verticesChanged = meshChanged || remote.VertexDeformationRevision != geometry._vertexDeformationRevision;
 		remote.MeshRevision = meshRevision;
-		mesh.VertexResource = mirror(SceneVertices, meshChanged || !scene.Skin.empty());
+		remote.VertexDeformationRevision = geometry._vertexDeformationRevision;
+		mesh.VertexResource = mirror(SceneVertices, verticesChanged);
 		mesh.IndexResource = mirror(SceneIndices, meshChanged);
 		mesh.Vertices.BufferLocation = mesh.VertexResource->GetGPUVirtualAddress();
 		mesh.Indices.BufferLocation = mesh.IndexResource->GetGPUVirtualAddress();
@@ -670,6 +677,7 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 			if (latest)
 			{
 				remote.PendingLocalAtlas = localAtlas;
+				remote.PendingLocalLayout = source.LayoutRevision;
 				remote.PendingSlices = std::move(to);
 				for (const auto& view : batch)
 				{
@@ -681,10 +689,12 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 			{
 				remote.Import = remote.Transfer->Append(primary, primaryBindings, _work, localAtlas.Get(), std::move(to), false);
 				source.RemoteViews.insert(source.RemoteViews.end(), batch.begin(), batch.end());
-				if (remote.PublishedLocalAtlas.Get() != localAtlas.Get() || remote.PublishedLocalPlacement != _localPlacementEpoch)
+				if (remote.PublishedLocalAtlas.Get() != localAtlas.Get() || remote.PublishedLocalPlacement != _localPlacementEpoch ||
+				    remote.PublishedLocalLayout != source.LayoutRevision)
 					remote.PublishedLights.clear();
 				remote.PublishedLocalAtlas = localAtlas;
 				remote.PublishedLocalPlacement = _localPlacementEpoch;
+				remote.PublishedLocalLayout = source.LayoutRevision;
 				const auto latestOwner = owners.find({owner, true});
 				for (const auto& view : batch)
 				{
