@@ -71,7 +71,7 @@ inline constexpr Placement Placements[]{
 inline constexpr size_t AO = 0, Wind = 4, Post = 12, HUD = 13;
 
 enum Level { Off, Medium, High, Epic };
-enum Profile { Performance, Quality, Profiles };
+enum Profile { Performance, Quality };
 inline constexpr double Threshold[]{60, 28};
 inline constexpr const char* ProfileName[]{"Performance", "Quality"};
 
@@ -106,15 +106,15 @@ struct Trial
     Config Settings;
     std::string Source;
     bool Full = false;
-    unsigned ProfileMask = (1u << Profiles) - 1;
 };
 
 class Search
 {
 public:
+    explicit Search(Profile profile = Performance) : _profile(profile) {}
+
     void Start(ConsoleModule& console, Size original, Size screen, std::vector<int> adapters, bool remote)
     {
-        *this = Search{};
         _adapters = std::move(adapters);
         _remote = remote;
         const auto limit = std::max(original.second,
@@ -238,35 +238,23 @@ public:
         if (queue.empty()) return {};
         auto trial = std::move(queue.front());
         queue.pop_front();
-        trial.ProfileMask = _scheduled.at(trial.Settings);
         return trial;
     }
 
     std::optional<Trial> NextFinal()
     {
-        const auto remote = RemotePhase();
-        for (unsigned offset = 0; offset < Profiles; ++offset)
+        const auto* incumbent = Best(Upscaled());
+        const Result* best = nullptr;
+        for (const auto& [candidate, result] : _short)
         {
-            const unsigned p = (_nextFinalProfile + offset) % Profiles;
-            const auto profile = Profile(p);
-            const auto* incumbent = Best(profile, Upscaled());
-            const Result* best = nullptr;
-            for (const auto& [candidate, result] : _short)
-            {
-                if (!(result.second & (1u << p)) || !result.first.Valid || (remote && !result.first.Remote) ||
-                    _fullSettings.count(candidate))
-                    continue;
-                const bool dominated = std::any_of(_short.begin(), _short.end(), [&](const auto& other)
-                    { return (other.second.second & (1u << p)) && Dominates(other.second.first, result.first); });
-                if (dominated && result.first.Fps >= Threshold[p]) continue;
-                if (!best || Better(result.first, *best, profile)) best = &result.first;
-            }
-            if (best && (!incumbent || Better(*best, *incumbent, profile) || best->Fps >= Threshold[p] * .96))
-            {
-                _nextFinalProfile = (p + 1) % Profiles;
-                return Make(best->Settings, std::string(ProfileName[p]) + " finalist of trial " + std::to_string(best->Id), true);
-            }
+            if ((RemotePhase() && !result.Remote) || _fullSettings.count(candidate)) continue;
+            const bool dominated = std::any_of(_short.begin(), _short.end(), [&](const auto& other)
+                { return Dominates(other.second, result); });
+            if (dominated && result.Fps >= Threshold[_profile]) continue;
+            if (!best || Better(result, *best)) best = &result;
         }
+        if (best && (!incumbent || Better(*best, *incumbent) || best->Fps >= Threshold[_profile] * .96))
+            return Make(best->Settings, "finalist of trial " + std::to_string(best->Id), true);
         return {};
     }
 
@@ -284,57 +272,41 @@ public:
             ++_rejected[Upscaled()];
             return;
         }
-        _short.emplace(trial.Settings, std::make_pair(result, trial.ProfileMask));
-        for (unsigned p = 0; p < Profiles; ++p)
-        {
-            if (!(trial.ProfileMask & (1u << p))) continue;
-            auto& probe = _nearest[Upscaled()][p];
-            if (!probe || Better(result, *probe, Profile(p))) probe = result;
-            Expand(trial, result, Profile(p), csv);
-        }
+        _short.emplace(trial.Settings, result);
+        auto& probe = _nearest[Upscaled()];
+        if (!probe || Better(result, *probe)) probe = result;
+        Expand(trial, result, csv);
     }
 
     void Report(BistroBenchmarkData::Csv& csv, std::string_view reason) const
     {
         for (bool upscaled : {false, true})
-            for (unsigned p = 0; p < Profiles; ++p)
+        {
+            const auto prefix = std::string(upscaled ? "Upscaled." : "Native.") + ProfileName[_profile] + ".";
+            ReportResult(csv, prefix, Best(upscaled));
+            if (const auto& probe = _nearest[upscaled]; probe)
             {
-                const auto profile = Profile(p);
-                const auto prefix = std::string(upscaled ? "Upscaled." : "Native.") + ProfileName[p] + ".";
-                ReportResult(csv, prefix, Best(profile, upscaled), profile);
-                if (const auto& probe = _nearest[upscaled][p]; probe)
-                {
-                    csv.Config(prefix + "ProbeTrial", std::to_string(probe->Id));
-                    csv.Config(prefix + "ProbeFPS", BistroBenchmarkData::Csv::Number(probe->Fps));
-                }
-                csv.Config(prefix + "RejectedProbes", std::to_string(_rejected[upscaled]));
-                csv.Config(prefix + "StopReason", reason);
+                csv.Config(prefix + "ProbeTrial", std::to_string(probe->Id));
+                csv.Config(prefix + "ProbeFPS", BistroBenchmarkData::Csv::Number(probe->Fps));
             }
+            csv.Config(prefix + "RejectedProbes", std::to_string(_rejected[upscaled]));
+            csv.Config(prefix + "StopReason", reason);
+        }
     }
 
     bool Upscaled() const { return (_phase & 1u) != 0; }
     bool RemotePhase() const { return _remote; }
 
 private:
-    Trial Make(const Config& config, std::string source, bool full, unsigned mask = (1u << Profiles) - 1)
+    Trial Make(const Config& config, std::string source, bool full)
     {
-        return {++_nextId, config, std::move(source), full, mask};
+        return {++_nextId, config, std::move(source), full};
     }
 
-    void Schedule(const Config& config, const std::string& source, unsigned mask, bool priority = false)
+    void Schedule(const Config& config, const std::string& source, bool priority = false)
     {
-        auto& scheduled = _scheduled[config];
-        const auto fresh = mask & ~scheduled;
-        if (!fresh) return;
-        const bool enqueued = scheduled != 0;
-        scheduled |= fresh;
-        if (enqueued)
-        {
-            const auto previous = _short.find(config);
-            if (previous != _short.end()) previous->second.second |= fresh;
-            return;
-        }
-        auto trial = Make(config, source, false, fresh);
+        if (!_scheduled.insert(config).second) return;
+        auto trial = Make(config, source, false);
         if (priority) _priority.push_back(std::move(trial));
         else _pending.push_back(std::move(trial));
     }
@@ -343,16 +315,16 @@ private:
     {
         if (!RemotePhase())
         {
-            Schedule(config, "full-quality ladder", 3);
+            Schedule(config, "full-quality ladder");
             return;
         }
         for (auto adapter : _adapters)
         {
             auto next = config;
             next.Owners[Post] = adapter;
-            Schedule(next, "post placement", 3);
+            Schedule(next, "post placement");
             next.Owners[HUD] = adapter;
-            Schedule(next, "post and HUD placement", 3);
+            Schedule(next, "post and HUD placement");
         }
         if (postOnly) return;
         std::vector<std::array<int, std::size(Placements)>> seeds;
@@ -376,19 +348,18 @@ private:
         {
             auto next = config;
             next.Owners = owners;
-            Schedule(next, "single or coupled placement", 3);
+            Schedule(next, "single or coupled placement");
         }
     }
 
-    void Expand(const Trial& trial, const Result& result, Profile profile, BistroBenchmarkData::Csv& csv)
+    void Expand(const Trial& trial, const Result& result, BistroBenchmarkData::Csv& csv)
     {
         const auto& config = trial.Settings;
         const auto source = std::to_string(trial.Id);
-        const auto mask = 1u << profile;
-        const auto threshold = Threshold[profile];
+        const auto threshold = Threshold[_profile];
         const auto enqueue = [&](const Config& next, const char* reason, bool priority = false)
         {
-            Schedule(next, std::string(reason) + " / trial " + source, mask, priority);
+            Schedule(next, std::string(reason) + " / trial " + source, priority);
         };
         auto next = config;
         if (result.ThresholdFps < threshold)
@@ -408,7 +379,7 @@ private:
                         next.Resolution = _sizes.size() - 1;
                         enqueue(next, "effect removal after minimum resolution", true);
                     }
-                csv.Config("Trial." + source + "." + ProfileName[profile] + ".RemovalEvidence",
+                csv.Config("Trial." + source + "." + ProfileName[_profile] + ".RemovalEvidence",
                     BistroBenchmarkData::Csv::Number(result.ThresholdFps) + " FPS at " + std::to_string(result.Output.second) + "p");
             }
         }
@@ -419,7 +390,7 @@ private:
                 next = config;
                 ++next.Resolution;
                 enqueue(next, "higher output");
-                if (profile == Performance)
+                if (_profile == Performance)
                     for (size_t i = 0; i < std::size(Techniques); ++i)
                     {
                         if (config.Levels[i] != High || _values[i][Medium] == _values[i][High]) continue;
@@ -476,9 +447,9 @@ private:
         return high > medium;
     }
 
-    static bool Better(const Result& a, const Result& b, Profile profile)
+    bool Better(const Result& a, const Result& b) const
     {
-        const auto threshold = Threshold[profile];
+        const auto threshold = Threshold[_profile];
         const bool meetsA = a.Fps >= threshold, meetsB = b.Fps >= threshold;
         if (meetsA != meetsB) return meetsA;
         const auto count = [](const Result& r, Level level)
@@ -495,7 +466,7 @@ private:
         {
             const auto high = count(r, High);
             const auto epic = count(r, Epic);
-            const bool resolutionFirst = profile == Performance && HighMajority(r.Settings, r.Activity);
+            const bool resolutionFirst = _profile == Performance && HighMajority(r.Settings, r.Activity);
             const auto pixels = uint64_t(r.Output.first) * r.Output.second;
             return std::tuple{resolutionFirst, resolutionFirst ? pixels : 0, high, pixels, epic,
                 uint64_t(r.Render.first) * r.Render.second, r.Fps, -r.P95};
@@ -520,20 +491,20 @@ private:
         return strict;
     }
 
-    const Result* Best(Profile profile, bool upscaled) const
+    const Result* Best(bool upscaled) const
     {
         const Result* best = nullptr;
         for (const auto& result : _confirmed)
             if (bool(result.Settings.Provider) == upscaled && result.Remote == _remote &&
-                (!best || Better(result, *best, profile)))
+                (!best || Better(result, *best)))
                 best = &result;
         return best;
     }
 
-    static void ReportResult(BistroBenchmarkData::Csv& csv, const std::string& prefix, const Result* r, Profile p)
+    void ReportResult(BistroBenchmarkData::Csv& csv, const std::string& prefix, const Result* r) const
     {
-        csv.Config(prefix + "Status", !r || r->Fps < Threshold[p] ? "not found during search" :
-            p == Quality && r->Fps < 30 ? "confirmed within tolerance" : "confirmed");
+        csv.Config(prefix + "Status", !r || r->Fps < Threshold[_profile] ? "not found during search" :
+            _profile == Quality && r->Fps < 30 ? "confirmed within tolerance" : "confirmed");
         if (!r) return;
         csv.Config(prefix + "Trial", std::to_string(r->Id));
         csv.Config(prefix + "Output", std::to_string(r->Output.first) + "x" + std::to_string(r->Output.second));
@@ -543,8 +514,9 @@ private:
     }
 
     unsigned _phase = 0;
+    Profile _profile;
     bool _remote = false;
-    unsigned _nextFinalProfile = 0, _probeIndex = 0;
+    unsigned _probeIndex = 0;
     size_t _nextId = 0;
     int _preferredProvider = 0, _preferredPreset = 0;
     std::string _windAlgorithm;
@@ -554,11 +526,11 @@ private:
     std::vector<Size> _sizes;
     std::array<std::array<int, 4>, std::size(Techniques)> _values{};
     std::deque<Trial> _pending, _priority;
-    std::map<Config, unsigned> _scheduled;
-    std::map<Config, std::pair<Result, unsigned>> _short;
+    std::set<Config> _scheduled;
+    std::map<Config, Result> _short;
     std::set<Config> _fullSettings;
     std::vector<Result> _confirmed;
-    std::array<std::array<std::optional<Result>, Profiles>, 2> _nearest;
+    std::array<std::optional<Result>, 2> _nearest;
     std::array<unsigned, 2> _rejected{};
 };
 }

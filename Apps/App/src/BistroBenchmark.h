@@ -252,7 +252,9 @@ public:
             ImGui::BeginDisabled(_active || _action != Action::None);
             if (multiGPU)
             {
-                if (ImGui::Button("Search profiles##multigpu")) Request(Action::MultiGPU);
+                if (ImGui::Button("Performance##multigpu")) Request(Action::MultiGPU, BistroPlacement::Performance);
+                ImGui::SameLine();
+                if (ImGui::Button("Quality##multigpu")) Request(Action::MultiGPU, BistroPlacement::Quality);
                 ImGui::SameLine();
                 if (ImGui::Button("Run current##multigpu")) Request(Action::PlacementRun);
                 if (ImGui::IsItemHovered()) ImGui::SetTooltip("Measure the current placement along the full route.");
@@ -268,7 +270,13 @@ public:
                     ImGui::SetTooltip("%u full flights, about %.0f minutes. Saves the fastest layout as local startup defaults.",
                         Cases, Cases * (Warmup + FlightSeconds.GetValue()) / 60.);
                 ImGui::SameLine();
-                if (ImGui::Button("Profiles##single")) Request(Action::SingleGPU);
+                if (ImGui::Button("Profiles##single")) ImGui::OpenPopup("Single GPU profile");
+                if (ImGui::BeginPopup("Single GPU profile"))
+                {
+                    if (ImGui::Selectable("Performance")) Request(Action::SingleGPU, BistroPlacement::Performance);
+                    if (ImGui::Selectable("Quality")) Request(Action::SingleGPU, BistroPlacement::Quality);
+                    ImGui::EndPopup();
+                }
             }
             ImGui::EndDisabled();
             const auto& output = _output[multiGPU];
@@ -285,7 +293,10 @@ public:
             ImGui::Text("%s | %.1fs", StageName(), SecondsSince(_started));
         if (_search) DrawRunName(PlacementName(_mask).c_str());
         if (_stage == Stage::Placement)
-            DrawRunName((_trial.Source + " | Trial " + std::to_string(_trial.Id)).c_str());
+        {
+            const auto prefix = _manualPlacement ? std::string{} : std::string(BistroPlacement::ProfileName[_placementProfile]) + " | ";
+            DrawRunName((prefix + _trial.Source + " | Trial " + std::to_string(_trial.Id)).c_str());
+        }
         const double pass = LegWarmup() + _window.End - _preroll;
         const double flightProgress = std::clamp(_elapsed / pass, 0., 1.);
         const auto progress = _stage == Stage::Exhaustive ? (_mask + flightProgress) / Cases : flightProgress;
@@ -567,7 +578,7 @@ private:
     double LegWarmup() const { return Warmup + _window.AdditionalWarmup; }
     bool Measuring() const { return _elapsed >= LegWarmup() + _window.Begin - _preroll; }
 
-    void Request(Action action)
+    void Request(Action action, BistroPlacement::Profile profile = BistroPlacement::Performance)
     {
         _requestedAt = Clock::now();
         _action = action;
@@ -588,6 +599,7 @@ private:
         static_assert(names.size() == Techniques.size());
         std::string result;
         for (size_t i = 0; i < names.size(); ++i)
+        _placementProfile = profile;
             if (mask & (1u << i)) result += (result.empty() ? "COMPUTE: " : " + ") + std::string(names[i]);
         return result.empty() ? "Benchmark groups on DIRECT" : result;
     }
@@ -705,7 +717,7 @@ private:
         _placementFinals = false;
         _placementWindow = nullptr;
         _placementPhysics = {};
-        _placementSearch = {};
+        _placementSearch = BistroPlacement::Search(_placementProfile);
         _trial = {};
         _placementWaitsOpen = false;
         const auto adapters = pipeline.BenchmarkSubmissions().BenchmarkAdapterIndices();
@@ -725,6 +737,11 @@ private:
             _placementRestore = {};
             _placementRestore.length = sizeof(_placementRestore);
             if (!GetWindowPlacement(window.GetWindowHandle(), &_placementRestore))
+        if (!manual)
+        {
+            _csv.Config("Profile", BistroPlacement::ProfileName[_placementProfile]);
+            _csv.Config("MinimumFps", Csv::Number(BistroPlacement::Threshold[_placementProfile]));
+        }
                 throw std::runtime_error("Cannot save Bistro window placement");
             _placementWindow = &window;
             _placementOriginal = {width, height};
@@ -790,7 +807,6 @@ private:
         _trialPrefix = "Trial." + std::to_string(_trial.Id) + ".";
         _csv.Config(_trialPrefix + "Source", _trial.Source);
         _csv.Config(_trialPrefix + "Scope", _trial.Full ? "full route" : "common windows");
-        _csv.Config(_trialPrefix + "Profiles", std::to_string(_trial.ProfileMask));
         if (!_manualPlacement)
         {
             if (!first) Apply(console, _placementSearch.Patch(_trial.Settings));
@@ -908,8 +924,8 @@ private:
         if (_trialReason.empty() && !_trial.Full && ++_placementWindowIndex == _windows.size() && _trialSeconds > 0)
         {
             const double fps = _trialFrames / _trialSeconds;
-            for (double threshold : BistroPlacement::Threshold)
-                if (std::abs(fps - threshold) <= threshold * .04) _trialWindowCount = _placementPhysics.size();
+            const auto threshold = BistroPlacement::Threshold[_placementProfile];
+            if (std::abs(fps - threshold) <= threshold * .04) _trialWindowCount = _placementPhysics.size();
         }
         if (_trialReason.empty() && !_trial.Full && _placementWindowIndex < _trialWindowCount)
         {
@@ -1990,6 +2006,7 @@ private:
     std::array<unsigned, 4> _activity{};
     Stats _baseline{};
     Stats _sweepBest{};
+    BistroPlacement::Profile _placementProfile = BistroPlacement::Performance;
     unsigned _sweepBestMask = 0;
     std::optional<unsigned> _startupDefault;
     Measurements _reference{}, _measurements{};
