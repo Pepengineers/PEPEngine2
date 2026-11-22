@@ -11,9 +11,9 @@ namespace BistroRender::GameHUD
 {
 inline AutoConsoleVariable<bool> Enabled(L"Render.UI.Game.Enabled", true,
     L"Show the simulated game HUD in Bistro.");
-inline AutoConsoleVariable<int> Quality(L"Render.UI.Game.Quality", 0,
-    L"Game HUD detail level: 0, 1 or 2.", EConsoleVariableFlags::Default,
-    [](int value) { return value >= 0 && value <= 2; });
+enum class HUDQuality { Low, Medium, High, Count };
+inline AutoConsoleVariable<HUDQuality> Quality(L"Render.UI.Game.Quality", HUDQuality::Low,
+    L"Game HUD health bar particle detail.");
 inline constexpr auto Atlas = Engine::UI::UITextureId(0x42495354524f4855ull);
 inline constexpr auto HealthBar = Engine::UI::UITextureId(0x4249535452485042ull);
 
@@ -61,11 +61,11 @@ inline Bar Draw(ImDrawList& list, float time, float bottomInset)
 
     const float animatedCount = 1.f + 4.99f * (.5f + .5f * std::sin(time * .29f));
     const unsigned highSparks = unsigned(9100.438f * animatedCount);
-    const int quality = Quality.GetValue();
+    const auto quality = Quality.GetValue();
     unsigned sparks = unsigned(animatedCount);
-    if (quality == 1)
+    if (quality == HUDQuality::Medium)
         sparks = std::max(7000u, highSparks / 2);
-    else if (quality == 2)
+    else if (quality == HUDQuality::High)
         sparks = highSparks;
     list.AddRect(barStart, barEnd, border, 3);
     char hp[16];

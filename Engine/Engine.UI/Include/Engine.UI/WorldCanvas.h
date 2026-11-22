@@ -6,7 +6,7 @@
 namespace Engine::UI
 {
     enum class CanvasId : std::uint64_t { Invalid = 0 };
-    enum class CanvasQuality { Low = 0, Medium = 1, Count };
+    enum class CanvasQuality { Low = 0, Medium = 1, High, Epic, Count };
     enum class CanvasStyle { Neon, Graffiti, Image };
     inline constexpr UITextureId CanvasEffectTextureId{1};
 

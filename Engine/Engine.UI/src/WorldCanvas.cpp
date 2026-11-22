@@ -18,7 +18,7 @@ namespace Engine::UI
     namespace
     {
         AutoConsoleVariable<CanvasQuality> QualitySetting(L"Render.UI.Quality", CanvasQuality::Low,
-            L"World canvas GPU workload: 0 Low, 1 Medium.");
+            L"World canvas raster resolution and effect detail.");
 
         class CanvasContextScope
         {
@@ -53,17 +53,23 @@ namespace Engine::UI
         constexpr auto limit = D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION;
         if (!logicalSize.Width || !logicalSize.Height || logicalSize.Width > limit || logicalSize.Height > limit)
             throw std::invalid_argument("Canvas requires a nonempty D3D12 texture grid");
-        if (quality != CanvasQuality::Low && quality != CanvasQuality::Medium)
-            throw std::invalid_argument("Unknown canvas quality");
-        const bool medium = quality == CanvasQuality::Medium;
-        const CanvasSize raster = medium
-            ? CanvasSize{DivideUp(logicalSize.Width * 4, 3), DivideUp(logicalSize.Height * 4, 3)}
-            : logicalSize;
+        struct Tier { UINT ScaleNumerator, ScaleDenominator, EffectDivisor, Stars, BlurRadius; };
+        static constexpr Tier tiers[] = {
+            {1, 1, 4, 20, 2}, // Low
+            {4, 3, 3, 40, 5}, // Medium
+            {3, 2, 2, 60, 6}, // High
+            {2, 1, 2, 80, 8}, // Epic
+        };
+        static_assert(std::size(tiers) == static_cast<size_t>(CanvasQuality::Count));
+        const auto index = static_cast<size_t>(quality);
+        if (index >= std::size(tiers)) throw std::invalid_argument("Unknown canvas quality");
+        const auto& tier = tiers[index];
+        const CanvasSize raster{DivideUp(logicalSize.Width * tier.ScaleNumerator, tier.ScaleDenominator),
+            DivideUp(logicalSize.Height * tier.ScaleNumerator, tier.ScaleDenominator)};
         if (raster.Width > limit || raster.Height > limit)
             throw std::invalid_argument("Canvas quality exceeds the D3D12 texture size limit");
-        const UINT divisor = medium ? 3 : 4;
-        return {raster, {DivideUp(raster.Width, divisor), DivideUp(raster.Height, divisor)},
-            medium ? 40u : 20u, medium ? 5u : 2u};
+        return {raster, {DivideUp(raster.Width, tier.EffectDivisor), DivideUp(raster.Height, tier.EffectDivisor)},
+            tier.Stars, tier.BlurRadius};
     }
 
     struct WorldCanvas::Impl
@@ -348,7 +354,7 @@ namespace Engine::UI
         const auto id = static_cast<std::uint64_t>(frame.Id);
         const EffectConstants constants{grid.Width, grid.Height, static_cast<UINT>(id ^ (id >> 32)), profile.Stars,
             static_cast<float>(std::fmod(frame.TimeSeconds, 240.0)), profile.BlurRadius, static_cast<UINT>(frame.Style)};
-        const UINT variant = static_cast<UINT>(frame.Quality);
+        const UINT variant = frame.Quality == CanvasQuality::Low ? 0 : 1;
         commands.SetDescriptorHeaps({&heap});
         commands.SetComputeRootSignature(state.Root.get());
         commands.GetCommandList()->SetComputeRoot32BitConstants(0, sizeof(constants) / sizeof(UINT), &constants, 0);

@@ -1,5 +1,5 @@
 #include "App.Base/App.h"
-#include "BistroUICanvases.h"
+#include "Techniques/UI/BistroUICanvases.h"
 #include "Common/ConsoleVariables.h"
 #include "Engine.RendererDX12/GDX12CommandList.h"
 #include "Engine.RendererDX12/GDX12CommandQueue.h"
@@ -47,21 +47,34 @@ static Fixtures BuildFixtures()
         "Odd canvas size was rounded incorrectly");
 
     auto& quality = ConsoleModule{}.FindConsoleVariable(L"Render.UI.Quality");
-    Require(quality.GetType() == EConsoleVariableType::Enumeration && quality.GetEnumCount() == 2 &&
-        quality.GetEnumValueName(0) == "Low" && quality.GetEnumValueName(1) == "Medium",
-        "Canvas quality CVar is not a two-value enum");
-    Require(GetCanvasQuality() == CanvasQuality::Low && !quality.SetFromString("2"),
+    Require(quality.GetType() == EConsoleVariableType::Enumeration && quality.GetEnumCount() == 4 &&
+        quality.GetEnumValueName(0) == "Low" && quality.GetEnumValueName(1) == "Medium" &&
+        quality.GetEnumValueName(2) == "High" && quality.GetEnumValueName(3) == "Epic",
+        "Canvas quality CVar is not a four-value enum");
+    Require(GetCanvasQuality() == CanvasQuality::Low && !quality.SetFromString("4"),
         "Invalid UI quality accepted or seed did not select Low");
+    Require(quality.SetFromString("2") && GetCanvasProfile({768, 512}, GetCanvasQuality()).RasterSize == CanvasSize{1152, 768} &&
+        quality.SetFromString("3") && GetCanvasProfile({768, 512}, GetCanvasQuality()).RasterSize == CanvasSize{1536, 1024} &&
+        quality.SetFromString("0"), "High and Epic must select their supersampled canvas sizes");
+    const auto& hud = ConsoleModule{}.FindConsoleVariable(L"Render.UI.Game.Quality");
+    Require(hud.GetEnumCount() == 3 && hud.GetEnumValueName(0) == "Low" && hud.GetEnumValueName(1) == "Medium" &&
+        hud.GetEnumValueName(2) == "High", "Game HUD quality must expose its presets to the settings editor");
 
-    BistroUICanvases::Posters posters;
+    const auto& first = BistroUICanvases::Posters[0];
+    const auto& second = BistroUICanvases::Posters[1];
+    WorldCanvas atrium(first.Id, first.Title, first.Style), terrace(second.Id, second.Title, second.Style);
+    const auto buildFrames = [&](double time) -> FramePair {
+        return {atrium.BuildFrame(first.Size, time, GetCanvasQuality()),
+            terrace.BuildFrame(second.Size, time + 1, GetCanvasQuality())};
+    };
     auto* activeContext = ImGui::GetCurrentContext();
     Fixtures fixtures;
-    fixtures.Low = posters.BuildFrames(0.0);
-    fixtures.Animated = posters.BuildFrames(4.0);
+    fixtures.Low = buildFrames(0.0);
+    fixtures.Animated = buildFrames(4.0);
     Require(quality.SetFromString("1"), "Cannot select Medium");
-    fixtures.Medium = posters.BuildFrames(0.0);
+    fixtures.Medium = buildFrames(0.0);
     Require(quality.SetFromString("0"), "Cannot return to Low");
-    const auto reverted = posters.BuildFrames(0.0);
+    const auto reverted = buildFrames(0.0);
     Require(ImGui::GetCurrentContext() == activeContext, "Display-only layout changed the current ImGui context");
 
     Require(fixtures.Low[0]->Id == BistroUICanvases::Atrium && fixtures.Low[1]->Id == BistroUICanvases::Terrace &&
