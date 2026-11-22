@@ -114,7 +114,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	particles.BeginSimulation(_geometry->InteractionField(), depth, *_executor, submissions->SelectAdapter(BistroRender::SceneParticles::SecondaryAdapter()),
 	    world && !world->IsPaused() ? world->GetTimeScale() : 0.f, transparencyOwner != 0);
 	particles.PrepareOpaque(*_geometry, slot);
-	_post->BeginPlan();
+	_post->BeginPlan(*_executor, _frameNumber);
 	auto& textures = _post->Textures();
 	using View = BistroRender::SceneTextureInspector::View;
 	const bool inspect = Engine::UI::DebugUIVisible();
@@ -244,6 +244,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	uint64_t completion;
 	try
 	{
+		_post->SubmitHud(_schedule, waits);
 		_geometry->SubmitSkinning(slot, _schedule, waits);
 		completion = _executor->Execute(_schedule, _geometry->PlannedResources(slot), record, prefix, nullptr, nullptr, waits,
 		                                exchanges);
@@ -287,6 +288,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	_lighting->AOSubmitted(_executor->Completions());
 	_lighting->ProbesSubmitted(_executor->Completions());
 	_lighting->Transparency().Submitted(_executor->Completions());
+	_post->HudSubmitted(_executor->Completions());
 	_post->PostersSubmitted(_frameNumber, _executor->Completions());
 	_post->Submitted(slot);
 	_environment->Submitted(completion);
@@ -298,6 +300,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 void BistroRenderPipeline::FramePresented()
 {
 	_cloudPicture->Presented();
+	_post->HudPresented();
 	_lighting->Transparency().Presented();
 	_lighting->Water().Presented(_frameNumber, _executor->Completions());
 	_lighting->Particles().Presented(_frameNumber);

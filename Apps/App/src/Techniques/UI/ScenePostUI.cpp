@@ -5,6 +5,7 @@
 #include "App.Base/Modules/SceneManagerModule.h"
 #include "Engine.Core/BenchmarkEngine.h"
 #include "Engine.Core/AssetManager.h"
+#include "Engine.Core/Logging/Logger.h"
 #include "Engine.RendererDX12/GDX12CommandList.h"
 #include "Engine.RendererDX12/GDX12Device.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
@@ -21,6 +22,20 @@ namespace BistroRender
 {
 namespace
 {
+AutoConsoleVariable<int> HudAdapter(L"App.UI.Game.Adapter", -1,
+    L"DXGI index for Bistro's game HUD. -1 renders locally.", EConsoleVariableFlags::Default,
+    [](int index) { return index >= -1; });
+
+constexpr char HudAtlasName[] = "BistroDemoHUD";
+
+Id HudPacket(const Schedule& schedule, Id operation)
+{
+	const auto it = std::find_if(schedule.Packets.begin(), schedule.Packets.end(),
+	    [operation](const auto& packet) { return packet.Operation == operation; });
+	if (it == schedule.Packets.end()) throw std::logic_error("Missing game HUD packet");
+	return Id(it - schedule.Packets.begin());
+}
+
 ComPtr<ID3D12PipelineState> CreateHealthBarPipeline(GDX12Device& device, GDX12RootSignature& root)
 {
 	auto& compiler = GDX12ShaderCompiler::GetInstance();
@@ -49,6 +64,231 @@ ComPtr<ID3D12PipelineState> CreateHealthBarPipeline(GDX12Device& device, GDX12Ro
 	ThrowIfFailed(device.GetDevice()->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&pipeline)));
 	return pipeline;
 }
+}
+
+struct ScenePostUI::HudRaster
+{
+	explicit HudRaster(GDX12DeviceResources& resources, GDX12Texture& atlas) : Resources(resources), Atlas(atlas) {}
+
+	Id Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work, HudFrame& frame,
+	          GDX12Texture& target, Engine::UI::OffscreenRenderer& renderer, const GameHUD::Bar& bar,
+	          std::vector<Id> dependencies = {})
+	{
+		const auto id = [&](GDX12Texture& texture, const char* name) {
+			return NativeWork::ResourceFor(graph, bindings, texture.GetResource()->D3DResource.Get(), name);
+		};
+		const State read = D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE;
+		const State renderTarget = D3D12_RESOURCE_STATE_RENDER_TARGET;
+		auto* atlas = Atlas.GetResource();
+		const Id atlasId = NativeWork::ImportReadOnlyTexture(graph, bindings, *atlas, read, "game HUD atlas");
+		std::vector<Access> accesses{{id(target, "game HUD target"), Mode::Write, renderTarget},
+		                            {atlasId, Mode::Read, read}};
+		std::vector<Engine::UI::TextureBinding> textures{{GameHUD::Atlas, atlas->D3DResource, Atlas.GetFormat()}};
+		if (bar.Sparks)
+		{
+			if (!Pipeline)
+			{
+				GDX12RootSignatureDesc root;
+				root.Constants = {5};
+				Root = std::make_unique<GDX12RootSignature>(Resources.Device, root);
+				Pipeline = CreateHealthBarPipeline(*Resources.Device, *Root);
+			}
+			const UINT width = UINT(std::ceil(bar.Width)), height = UINT(std::ceil(bar.Height));
+			if (!frame.HealthBar || frame.HealthBar->GetWidth() != width || frame.HealthBar->GetHeight() != height)
+			{
+				frame.HealthBar = std::make_unique<GDX12Texture>();
+				GDX12RenderHelpers::InitializeRenderTarget(*frame.HealthBar, Resources, width, height,
+				    Engine::UI::OffscreenFormat, {0, 0, 0, 0});
+			}
+			auto* barTarget = frame.HealthBar.get();
+			const Id barId = id(*barTarget, "game HUD health bar");
+			const Id sparks = work.Add(graph, "Game HUD health bar (GPU sparks)",
+			    {{barId, Mode::Write, renderTarget}}, [this, bar, barTarget](auto* cmd)
+			    {
+				    const auto rtv = barTarget->GetRTV()->CPUHandle;
+				    const auto viewport = barTarget->GetViewport();
+				    const auto scissor = barTarget->GetScissorRect();
+				    cmd->SetGraphicsRootSignature(Root->GetRootSignature().Get());
+				    cmd->SetPipelineState(Pipeline.Get());
+				    cmd->SetGraphicsRoot32BitConstants(Root->GetBRootParamIndex(0), 5, &bar, 0);
+				    cmd->RSSetViewports(1, &viewport);
+				    cmd->RSSetScissorRects(1, &scissor);
+				    cmd->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
+				    cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+				    cmd->DrawInstanced(3, 1 + bar.Sparks, 0, 0);
+			    });
+			dependencies.push_back(sparks);
+			accesses.push_back({barId, Mode::Read, read});
+			textures.push_back({GameHUD::HealthBar, barTarget->GetResource()->D3DResource, Engine::UI::OffscreenFormat});
+		}
+		return work.AddOwned(graph, "Game HUD raster", std::move(accesses), bindings,
+		    [&frame, &target, &renderer, textures = std::move(textures)](auto* cmd)
+		    {
+			    frame.RasterOwner = renderer.TryRecord(*cmd, target.GetResource()->D3DResource, frame.Draw, textures);
+			    if (!frame.RasterOwner) throw std::logic_error("Game HUD backend slot is still in flight");
+		    }, "Game HUD cannot submit private queue signals", std::move(dependencies));
+	}
+
+	GDX12DeviceResources& Resources;
+	GDX12Texture& Atlas;
+	std::unique_ptr<GDX12RootSignature> Root;
+	ComPtr<ID3D12PipelineState> Pipeline;
+};
+
+struct ScenePostUI::RemoteHud
+{
+	struct Frame
+	{
+		HudFrame Game;
+		std::unique_ptr<GDX12Texture> Layer;
+		QueueSubmission::TransferBuffer Transfer;
+		D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{};
+		Graph Plan;
+		NativeWork Work;
+		std::vector<ID3D12Resource*> Bindings;
+		Id Raster = Invalid;
+		CompletionToken RasterReady, Ready, Imported, Applied, Completed;
+		UINT64 Number = 0, Bytes = 0;
+		bool Overlay = false;
+	};
+
+	RemoteHud(const std::shared_ptr<QueueSubmission>& submit, Id owner, UINT slots)
+	    : Owner(owner), GPU(submit, owner, slots, 1), Frames(slots),
+	      Renderer(submit->Device(owner), slots, true)
+	{
+		auto& device = submit->Device(owner);
+		Resources.Device = &device;
+		Resources.SRV_UAV_Heap = std::make_shared<GDX12DescriptorHeap>(&device,
+		    D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, Texture2D_StartIndex + 1, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
+		Resources.RTVHeap = std::make_unique<GDX12DescriptorHeap>(&device,
+		    D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 2 * slots, D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
+	}
+
+	~RemoteHud()
+	{
+		try { GPU.Drain(); } catch (...) {}
+	}
+
+	void PrepareLayer(Frame& frame, UINT width, UINT height)
+	{
+		if (frame.Layer && frame.Layer->GetWidth() == width && frame.Layer->GetHeight() == height) return;
+		frame.Layer = std::make_unique<GDX12Texture>();
+		GDX12RenderHelpers::InitializeRenderTarget(*frame.Layer, Resources, width, height,
+		    Engine::UI::OffscreenFormat, {0, 0, 0, 0});
+		const auto desc = frame.Layer->GetResource()->D3DResource->GetDesc();
+		const auto& submit = *GPU.Submissions();
+		D3D12_PLACED_SUBRESOURCE_FOOTPRINT display{};
+		UINT64 displayBytes = 0;
+		Resources.Device->GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &frame.Footprint, nullptr, nullptr, &frame.Bytes);
+		submit.Device(0).GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &display, nullptr, nullptr, &displayBytes);
+		const auto& footprint = frame.Footprint;
+		if (!frame.Bytes || frame.Bytes == UINT64_MAX || displayBytes != frame.Bytes || display.Offset != footprint.Offset ||
+		    display.Footprint.RowPitch != footprint.Footprint.RowPitch || display.Footprint.Width != footprint.Footprint.Width ||
+		    display.Footprint.Height != footprint.Footprint.Height || display.Footprint.Depth != footprint.Footprint.Depth ||
+		    display.Footprint.Format != footprint.Footprint.Format)
+			throw std::runtime_error("Game HUD requires matching adapter texture footprints");
+		frame.Transfer = submit.CreateTransferBuffer(Owner, frame.Bytes);
+	}
+
+	Id Copy(Frame& frame, Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work,
+	        GDX12Texture& texture, bool exporting)
+	{
+		const CD3DX12_TEXTURE_COPY_LOCATION image(texture.GetResource()->D3DResource.Get(), 0u);
+		const CD3DX12_TEXTURE_COPY_LOCATION buffer(frame.Transfer.Resources[exporting ? 1 : 0].Get(), frame.Footprint);
+		const auto& source = exporting ? image : buffer;
+		const auto& dest = exporting ? buffer : image;
+		const Id read = NativeWork::ResourceFor(graph, bindings, source.pResource, "game HUD copy source");
+		const Id write = NativeWork::ResourceFor(graph, bindings, dest.pResource, "game HUD copy destination");
+		return work.Add(graph, exporting ? "owner export game HUD layer" : "GPU0 import game HUD layer",
+		    {{read, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE}, {write, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
+		    [source, dest](auto* cmd) { cmd->CopyTextureRegion(&dest, 0, 0, 0, &source, nullptr); });
+	}
+
+	void Report(const Frame& frame)
+	{
+		const auto& submit = *GPU.Submissions();
+		if (!frame.Applied || !frame.Completed || !submit.Complete(frame.Completed) ||
+		    (Reported && Width == frame.Layer->GetWidth() && Height == frame.Layer->GetHeight())) return;
+		Reported = true;
+		Width = frame.Layer->GetWidth();
+		Height = frame.Layer->GetHeight();
+		Log::Info("RenderGraph", "Game HUD Exact completed frame=", frame.Number, " owner=", submit.AdapterLabel(Owner),
+		    " display=", submit.AdapterLabel(0), " dimensions=", Width, "x", Height,
+		    " format=RGBA8_UNORM premultiplied=1 sceneInputBytes=0 resultBytes=", frame.Bytes,
+		    " rowPitch=", frame.Footprint.Footprint.RowPitch, " ownerRasterFence=", frame.RasterReady.Value,
+		    " ownerExportFence=", frame.Ready.Value, " displayImportFence=", frame.Imported.Value,
+		    " displayCompositeFence=", frame.Applied.Value, " completedFrameFence=", frame.Completed.Value,
+		    " infoDebugAbove=", frame.Overlay);
+	}
+
+	Id Owner;
+	Executor GPU;
+	GDX12DeviceResources Resources;
+	std::vector<Frame> Frames;
+	Engine::UI::OffscreenRenderer Renderer;
+	std::unique_ptr<HudRaster> Raster;
+	bool Reported = false;
+	UINT Width = 0, Height = 0;
+};
+
+void ScenePostUI::BeginPlan(Executor& primary, uint64_t frame)
+{
+	HudPresented();
+	_hudSubmissions = primary.Submissions();
+	_hudFrame = frame;
+	_inspector.BeginPlan();
+	_work.Commands.clear();
+	_pendingExports = {};
+	_pendingPublished = _publishedInputs;
+}
+
+void ScenePostUI::SubmitHud(const Schedule& primary, std::vector<PacketWait>& waits)
+{
+	const UINT slot = _resources.CurrFrameConstantsIndex;
+	auto& screen = _slots.at(slot);
+	if (!screen.HudOwner) return;
+	auto& owner = *screen.HudOwner;
+	auto& frame = owner.Frames.at(slot);
+	const auto schedule = Compile(frame.Plan);
+	const Id raster = HudPacket(schedule, frame.Raster);
+	screen.HudImport = HudPacket(primary, screen.HudImport);
+	screen.HudComposite = HudPacket(primary, screen.HudComposite);
+	owner.GPU.Begin(slot);
+	owner.GPU.Reserve(schedule);
+	owner.GPU.Execute(schedule, frame.Bindings, [&](Id op, UINT, auto* cmd) {
+		if (!frame.Work.Record(op, cmd)) throw std::logic_error("Missing owner game HUD work");
+	});
+	frame.RasterReady = owner.GPU.Completions().at(raster);
+	frame.Ready = owner.GPU.Completions().back();
+	waits.push_back({screen.HudImport, frame.Ready});
+}
+
+void ScenePostUI::HudSubmitted(const std::vector<CompletionToken>& completions)
+{
+	const UINT slot = _resources.CurrFrameConstantsIndex;
+	auto& screen = _slots.at(slot);
+	if (!screen.HudOwner || completions.empty()) return;
+	auto& frame = screen.HudOwner->Frames.at(slot);
+	frame.Imported = completions.at(screen.HudImport);
+	frame.Applied = completions.at(screen.HudComposite);
+	frame.Completed = completions.back();
+}
+
+void ScenePostUI::HudPresented()
+{
+	const UINT slot = _resources.CurrFrameConstantsIndex;
+	auto& screen = _slots.at(slot);
+	if (screen.HudOwner) screen.HudOwner->Report(screen.HudOwner->Frames.at(slot));
+}
+
+std::optional<ScenePostUI::HudLayer> ScenePostUI::OwnerHudLayer() const
+{
+	const UINT slot = _resources.CurrFrameConstantsIndex;
+	const auto& screen = _slots.at(slot);
+	if (!screen.HudOwner) return std::nullopt;
+	const auto& frame = screen.HudOwner->Frames.at(slot);
+	if (!frame.Ready) return std::nullopt;
+	return HudLayer{screen.HudOwner->Owner, frame.Layer->GetResource()->D3DResource, frame.Ready};
 }
 
 ScenePostUI::ScenePostUI(RenderPipelineContext& c)
@@ -101,6 +341,9 @@ void ScenePostUI::Resize()
 	_exports.clear();
 	_exports.resize(_resources.FrameConstants.size());
 	_resize = true;
+	if (_remoteHud)
+		for (auto& frame : _remoteHud->Frames)
+			frame.Game.RasterOwner.reset();
 	_slots.clear();
 	_slots.resize(_resources.FrameConstants.size());
 	// Rebind new scene inputs before resizing the existing persistent passes.
@@ -281,27 +524,14 @@ void ScenePostUI::AppendScreen(Graph& graph, std::vector<ID3D12Resource*>& bindi
                                const std::function<void(GDX12CommandList*)>& finish, Id dependency)
 {
 	const auto resource = [](GDX12Texture* texture) { return texture->GetResource(); };
-	auto& screen = _slots.at(_resources.CurrFrameConstantsIndex);
+	const UINT slot = _resources.CurrFrameConstantsIndex;
+	auto& screen = _slots.at(slot);
 	screen.RasterOwner.reset();
-	screen.GameRasterOwner.reset();
+	screen.Game.RasterOwner.reset();
 	screen.CompositeOwner.reset();
-	const bool hud = GameHUD::Enabled.GetValue() && ImGui::GetCurrentContext();
+	screen.HudImport = screen.HudComposite = Invalid;
+	const auto hud = GameHUD::Enabled.GetValue() && ImGui::GetCurrentContext();
 	GameHUD::Bar bar{};
-	if (hud && !_hudAtlas)
-	{
-		auto* texture = _render.GetTextureByName("BistroDemoHUD");
-		if (!texture)
-		{
-			const auto* asset = Engine::Core::AssetManager::GetInstance().LoadTexture(
-			    std::filesystem::path(ASSETS_FOLDER) / "Textures/UI/BistroDemoHUD.png");
-			if (!asset)
-				throw std::runtime_error("Missing Bistro demo HUD atlas");
-			texture = _render.CreateTexture("BistroDemoHUD", asset, Engine::Core::ETextureType::Color);
-		}
-		if (!texture || !texture->PrimaryDeviceTexture)
-			throw std::runtime_error("Cannot create Bistro demo HUD atlas");
-		_hudAtlas = texture->PrimaryDeviceTexture;
-	}
 	if (hud)
 	{
 		if (!_gameOverlay)
@@ -309,89 +539,87 @@ void ScenePostUI::AppendScreen(Graph& graph, std::vector<ID3D12Resource*>& bindi
 		bar = GameHUD::Draw(*_gameOverlay, _common.GameTimer ? _common.GameTimer->TotalTime() : 0.f,
 		                   BistroInfoPanel::Height(ImGui::GetIO().DisplaySize.x));
 	}
-	auto* preview = _inspector.Append(graph, bindings, _work, *_resources.Device, _resources.CurrFrameConstantsIndex,
+	auto* preview = _inspector.Append(graph, bindings, _work, *_resources.Device, slot,
 	    resource(target)->D3DResource.Get(), _common.ActiveCameraNearPlane, _common.ActiveCameraFarPlane);
 	screen.Draw = Engine::UI::CaptureScreenFrame();
-	screen.GameDraw = hud ? Engine::UI::CaptureScreenOverlay(*_gameOverlay) : nullptr;
-	Id screenId = dependency;
-	if (screen.Draw || screen.GameDraw)
+	screen.Game.Draw = hud ? Engine::UI::CaptureScreenOverlay(*_gameOverlay) : nullptr;
+	const Id owner = screen.Game.Draw ? _hudSubmissions->SelectAdapter(HudAdapter.GetValue()) : 0;
+	if (!owner)
 	{
-		if (!_screen)
-		{
+		screen.HudOwner.reset();
+		_remoteHud.reset();
+	}
+	Id screenId = dependency;
+	if (screen.Draw || screen.Game.Draw)
+	{
+		if (!_screen && (screen.Draw || !owner))
 			_screen = std::make_unique<Engine::UI::OffscreenRenderer>(*_resources.Device, UINT(2 * _slots.size()), true);
+		if (!_composite)
 			_composite = std::make_unique<Engine::UI::ScreenComposite>(*_resources.Device);
-		}
-		if (!screen.Target)
+		const UINT width = target->GetWidth(), height = target->GetHeight();
+		if (!screen.Target || screen.Target->GetWidth() != width || screen.Target->GetHeight() != height)
 		{
 			screen.Target = std::make_unique<GDX12Texture>();
-			GDX12RenderHelpers::InitializeRenderTarget(*screen.Target, _resources, _common.WindowWidth,
-			                                           _common.WindowHeight, Engine::UI::OffscreenFormat, {0, 0, 0, 0});
-		}
-		std::vector<std::pair<GDX12Resource*, Mode>> accesses{{resource(screen.Target.get()), Mode::Write}};
-		std::vector<Engine::UI::TextureBinding> hudTextures;
-		std::vector<Id> rasterDependencies{dependency};
-		if (screen.GameDraw)
-		{
-			auto* atlas = resource(_hudAtlas);
-			NativeWork::ImportReadOnlyTexture(graph, bindings, *atlas, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE,
-			                                  "game HUD atlas");
-			accesses.emplace_back(atlas, Mode::Read);
-			hudTextures.push_back({GameHUD::Atlas, atlas->D3DResource, _hudAtlas->GetFormat()});
-		}
-		if (bar.Sparks)
-		{
-			if (!_healthBarPipeline)
-			{
-				GDX12RootSignatureDesc root;
-				root.Constants = {5};
-				_healthBarRoot = std::make_unique<GDX12RootSignature>(_resources.Device, root);
-				_healthBarPipeline = CreateHealthBarPipeline(*_resources.Device, *_healthBarRoot);
-			}
-			const UINT width = UINT(std::ceil(bar.Width)), height = UINT(std::ceil(bar.Height));
-			if (!screen.HealthBar || screen.HealthBar->GetWidth() != width || screen.HealthBar->GetHeight() != height)
-			{
-				screen.HealthBar = std::make_unique<GDX12Texture>();
-				GDX12RenderHelpers::InitializeRenderTarget(*screen.HealthBar, _resources, width, height,
-				                                           Engine::UI::OffscreenFormat, {0, 0, 0, 0});
-			}
-			auto* barTarget = screen.HealthBar.get();
-			auto* barResource = resource(barTarget);
-			rasterDependencies.push_back(Packet(
-			    graph, bindings, "Game HUD health bar (GPU sparks)", {{barResource, Mode::Write}},
-			    [this, bar, barTarget](auto* commands)
-			    {
-				    auto* cmd = commands->GetCommandList().Get();
-				    const auto rtv = barTarget->GetRTV()->CPUHandle;
-				    const auto viewport = barTarget->GetViewport();
-				    const auto scissor = barTarget->GetScissorRect();
-				    cmd->SetGraphicsRootSignature(_healthBarRoot->GetRootSignature().Get());
-				    cmd->SetPipelineState(_healthBarPipeline.Get());
-				    cmd->SetGraphicsRoot32BitConstants(_healthBarRoot->GetBRootParamIndex(0), 5, &bar, 0);
-				    cmd->RSSetViewports(1, &viewport);
-				    cmd->RSSetScissorRects(1, &scissor);
-				    cmd->OMSetRenderTargets(1, &rtv, FALSE, nullptr);
-				    cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-				    cmd->DrawInstanced(3, 1 + bar.Sparks, 0, 0);
-			    },
-			    {}, barTarget));
-			accesses.emplace_back(barResource, Mode::Read);
-			hudTextures.push_back({GameHUD::HealthBar, barResource->D3DResource, Engine::UI::OffscreenFormat});
+			GDX12RenderHelpers::InitializeRenderTarget(*screen.Target, _resources, width, height,
+			                                           Engine::UI::OffscreenFormat, {0, 0, 0, 0});
 		}
 		Id raster = dependency;
-		if (screen.GameDraw)
+		if (owner)
 		{
-			raster = Packet(graph, bindings, "Game HUD raster", std::move(accesses),
-			    [this, &screen, hudTextures = std::move(hudTextures)](auto* cmd)
-			    {
-				    screen.GameRasterOwner = _screen->TryRecord(*cmd, screen.Target->GetResource()->D3DResource,
-				        screen.GameDraw, hudTextures);
-				    if (!screen.GameRasterOwner) throw std::logic_error("Game HUD backend slot is still in flight");
-			    }, std::move(rasterDependencies), screen.Target.get());
+			if (!_remoteHud || _remoteHud->Owner != owner)
+			{
+				const auto path = std::filesystem::path(ASSETS_FOLDER) / "Textures/UI/BistroDemoHUD.png";
+				if (_resources.TextureReplicaLoaders.find(HudAtlasName) == _resources.TextureReplicaLoaders.end())
+					_render.SetTextureReplicaSource(HudAtlasName, Engine::Core::ETextureType::Color, [path](auto&) {
+						return Engine::Core::AssetManager::GetInstance().LoadTexture(path);
+					});
+				auto remote = std::make_shared<RemoteHud>(_hudSubmissions, owner, UINT(_slots.size()));
+				auto* atlas = _resources.TextureReplicaLoaders.at(HudAtlasName)(remote->Resources);
+				remote->Raster = std::make_unique<HudRaster>(remote->Resources, *atlas);
+				_remoteHud = std::move(remote);
+			}
+			screen.HudOwner = _remoteHud;
+			auto& remote = *screen.HudOwner;
+			auto& frame = remote.Frames.at(slot);
+			frame.Game.RasterOwner.reset();
+			frame.Game.Draw = screen.Game.Draw;
+			frame.Plan = {};
+			frame.Plan.Device = owner;
+			frame.Plan.FrameBoundary = false;
+			frame.Bindings.clear();
+			frame.Work.Commands.clear();
+			frame.RasterReady = frame.Ready = frame.Imported = frame.Applied = frame.Completed = {};
+			frame.Number = _hudFrame;
+			frame.Overlay = bool(screen.Draw);
+			remote.PrepareLayer(frame, width, height);
+			frame.Raster = remote.Raster->Append(frame.Plan, frame.Bindings, frame.Work, frame.Game, *frame.Layer,
+			    remote.Renderer, bar);
+			remote.Copy(frame, frame.Plan, frame.Bindings, frame.Work, *frame.Layer, true);
+			raster = screen.HudImport = remote.Copy(frame, graph, bindings, _work, *screen.Target, false);
+			graph.Operations[raster].Dependencies.push_back(dependency);
+		}
+		else if (screen.Game.Draw)
+		{
+			if (!_localHud)
+			{
+				auto* texture = _render.GetTextureByName(HudAtlasName);
+				if (!texture)
+				{
+					const auto* asset = Engine::Core::AssetManager::GetInstance().LoadTexture(
+					    std::filesystem::path(ASSETS_FOLDER) / "Textures/UI/BistroDemoHUD.png");
+					if (!asset) throw std::runtime_error("Missing Bistro demo HUD atlas");
+					texture = _render.CreateTexture(HudAtlasName, asset, Engine::Core::ETextureType::Color);
+				}
+				if (!texture || !texture->PrimaryDeviceTexture) throw std::runtime_error("Cannot create Bistro demo HUD atlas");
+				_localHud = std::make_unique<HudRaster>(_resources, *texture->PrimaryDeviceTexture);
+			}
+			raster = _localHud->Append(graph, bindings, _work, screen.Game, *screen.Target, *_screen, bar, {dependency});
 		}
 		if (screen.Draw)
 		{
+			const bool hasGame = bool(screen.Game.Draw);
 			std::vector<std::pair<GDX12Resource*, Mode>> overlayAccesses{
-			    {resource(screen.Target.get()), screen.GameDraw ? Mode::ReadWrite : Mode::Write}};
+			    {resource(screen.Target.get()), hasGame ? Mode::ReadWrite : Mode::Write}};
 			std::vector<Engine::UI::TextureBinding> overlayTextures;
 			if (preview)
 			{
@@ -400,10 +628,10 @@ void ScenePostUI::AppendScreen(Graph& graph, std::vector<ID3D12Resource*>& bindi
 				overlayTextures.push_back({SceneTextureInspector::AtlasId, atlas->D3DResource, preview->GetFormat()});
 			}
 			raster = Packet(graph, bindings, "Information and debug UI raster", std::move(overlayAccesses),
-			    [this, &screen, overlayTextures = std::move(overlayTextures)](auto* cmd)
+			    [this, &screen, hasGame, overlayTextures = std::move(overlayTextures)](auto* cmd)
 			    {
 				    screen.RasterOwner = _screen->TryRecord(*cmd, screen.Target->GetResource()->D3DResource,
-				        screen.Draw, overlayTextures, !screen.GameDraw);
+				        screen.Draw, overlayTextures, !hasGame);
 				    if (!screen.RasterOwner) throw std::logic_error("Screen UI backend slot is still in flight");
 			    }, {raster}, screen.Target.get());
 		}
@@ -416,6 +644,7 @@ void ScenePostUI::AppendScreen(Graph& graph, std::vector<ID3D12Resource*>& bindi
 			                                               target->GetResource()->D3DResource);
 		    },
 		    {raster}, target);
+		if (owner) screen.HudComposite = screenId;
 	}
 	Packet(graph, bindings, "frame end / PRESENT handoff", {{resource(target), Mode::ReadWrite}}, finish, {screenId},
 	       nullptr, D3D12_RESOURCE_STATE_PRESENT);

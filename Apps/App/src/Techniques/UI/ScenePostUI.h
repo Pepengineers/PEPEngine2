@@ -21,13 +21,18 @@ class ScenePostUI
 	GDX12ReconstructionPass& Reconstruction() { return _reconstruction; }
 	std::vector<GDX12RenderPass*> Passes() { return {&_dof, &_blur, &_reconstruction, &_output}; }
 	bool NeedsResize() const;
-	void BeginPlan()
+	void BeginPlan(Executor&, uint64_t frame);
+	void SubmitHud(const Schedule&, std::vector<PacketWait>&);
+	void HudSubmitted(const std::vector<CompletionToken>&);
+	void HudPresented();
+	struct HudLayer
 	{
-		_inspector.BeginPlan();
-		_work.Commands.clear();
-		_pendingExports = {};
-		_pendingPublished = _publishedInputs;
-	}
+		Id Owner;
+		GDX12ResourceHandle Texture;
+		CompletionToken Ready;
+	};
+	// Finished pure game HUD, in COMMON after Ready. Available through this primary frame slot.
+	std::optional<HudLayer> OwnerHudLayer() const;
 	void Submitted(UINT slot)
 	{
 		_exports.at(slot) = _pendingExports;
@@ -73,21 +78,33 @@ class ScenePostUI
 	Id Packet(Graph&, std::vector<ID3D12Resource*>&, const char*, std::vector<std::pair<GDX12Resource*, Mode>>,
 	          const std::function<void(GDX12CommandList*)>&, std::vector<Id> dependencies = {},
 	          GDX12Texture* renderTarget = nullptr, State textureState = D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
+	struct HudRaster;
+	struct RemoteHud;
+	struct HudFrame
+	{
+		std::unique_ptr<GDX12Texture> HealthBar;
+		std::shared_ptr<const Engine::UI::DrawData> Draw;
+		std::shared_ptr<const void> RasterOwner;
+	};
 	struct ScreenSlot
 	{
-		std::unique_ptr<GDX12Texture> Target, HealthBar;
-		std::shared_ptr<const Engine::UI::DrawData> Draw, GameDraw;
-		std::shared_ptr<const void> RasterOwner, GameRasterOwner, CompositeOwner;
+		std::unique_ptr<GDX12Texture> Target;
+		HudFrame Game;
+		std::shared_ptr<const Engine::UI::DrawData> Draw;
+		std::shared_ptr<const void> RasterOwner, CompositeOwner;
+		std::shared_ptr<RemoteHud> HudOwner;
+		Id HudImport = Invalid, HudComposite = Invalid;
 	};
 	GDX12DeviceResources& _resources;
 	RenderPipelineCommonData& _common;
 	GDX12SwapChain* _swapchain;
 	RenderModule& _render;
 	SceneTextureInspector _inspector;
-	GDX12Texture* _hudAtlas = nullptr;
 	std::unique_ptr<ImDrawList> _gameOverlay;
-	std::unique_ptr<GDX12RootSignature> _healthBarRoot;
-	ComPtr<ID3D12PipelineState> _healthBarPipeline;
+	std::unique_ptr<HudRaster> _localHud;
+	std::shared_ptr<RemoteHud> _remoteHud;
+	std::shared_ptr<QueueSubmission> _hudSubmissions;
+	uint64_t _hudFrame = 0;
 	GDX12DepthOfFieldPass _dof;
 	GDX12MotionBlurPass _blur;
 	GDX12ReconstructionPass _reconstruction;
