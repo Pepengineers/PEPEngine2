@@ -133,7 +133,7 @@ namespace Engine::UI
                         ImGui::TextWrapped("Startup hardware index (0, 1, ...). -1 is only valid for technique settings.");
                     }
                 }
-                else if (Name == L"App.CloudPicture.Adapter" || Name == L"App.AO.Adapter" ||
+                else if (Name == L"App.UI.GameHUD.Adapter" || Name == L"App.CloudPicture.Adapter" || Name == L"App.AO.Adapter" ||
                     Name == L"App.Particles.Adapter" || Name == L"App.Water.Adapter" || Name == L"App.Grass.Wind.Adapter" ||
                     Name == L"App.Sky.SkyView.Adapter" || Name == L"App.Sky.AerialPerspective.Adapter" || canvasAdapter)
                     DrawAdapter(variable);

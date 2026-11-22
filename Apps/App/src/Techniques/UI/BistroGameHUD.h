@@ -9,10 +9,10 @@
 
 namespace BistroRender::GameHUD
 {
-inline AutoConsoleVariable<bool> Enabled(L"Render.UI.Game.Enabled", true,
+inline AutoConsoleVariable<bool> Enabled(L"Render.UI.GameHUD.Enabled", true,
     L"Show the simulated game HUD in Bistro.");
 enum class HUDQuality { Low, Medium, High, Count };
-inline AutoConsoleVariable<HUDQuality> Quality(L"Render.UI.Game.Quality", HUDQuality::Low,
+inline AutoConsoleVariable<HUDQuality> Quality(L"Render.UI.GameHUD.Quality", HUDQuality::Low,
     L"Game HUD health bar particle detail.");
 inline constexpr auto Atlas = Engine::UI::UITextureId(0x42495354524f4855ull);
 inline constexpr auto HealthBar = Engine::UI::UITextureId(0x4249535452485042ull);
