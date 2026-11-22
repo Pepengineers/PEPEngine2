@@ -35,6 +35,11 @@ class ShadowDepthTransfer
 		_buffer = submit.CreateTransferBuffer(owner, primaryBytes);
 	}
 
+	D3D12_TEXTURE_COPY_LOCATION OwnerSlice(UINT slice) const
+	{
+		return CD3DX12_TEXTURE_COPY_LOCATION(_buffer.Resources[1].Get(), _footprints.at(slice));
+	}
+
 	Id Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work, ID3D12Resource* depth,
 	          std::vector<UINT> slices, bool exporting) const
 	{

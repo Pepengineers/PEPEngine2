@@ -29,6 +29,26 @@ public:
     void Prepare(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* rasterDepth, GDX12Texture* accum,
         GDX12Texture* reveal);
     void AppendWeighted(Graph&, std::vector<ID3D12Resource*>&);
+    struct RemoteRaster
+    {
+        RenderPipelineCommonData Common;
+        GDX12ParticlesPass Pass;
+        struct Source
+        {
+            std::array<GDX12Resource, 4> Buffers;
+            std::array<GDX12Descriptor, 3> Views;
+        };
+        std::vector<std::unique_ptr<Source>> Sources;
+        GDX12ParticleRenderFrame Frame;
+        std::vector<Access> Reads;
+    };
+    void AppendRemoteWeighted(Graph& primary, std::vector<ID3D12Resource*>& primaryBindings, Graph& remote,
+        std::vector<ID3D12Resource*>& remoteBindings, NativeWork& remoteWork, GDX12DeviceResources& owner,
+        GDX12Texture* accum, GDX12Texture* reveal, GDX12Texture* rasterDepth, Id cameraId,
+        D3D12_GPU_VIRTUAL_ADDRESS camera, const std::function<ID3D12Resource*(ID3D12Resource*)>& mirror,
+        RemoteRaster& particleRaster,
+        const std::function<ID3D12Resource*(GDX12Texture&)>& mirrorTexture);
+    void AppendRemoteComposite(Graph&, std::vector<ID3D12Resource*>&, NativeWork&, GDX12Texture* hdr, RemoteRaster&);
     void AppendComposite(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* hdr);
     GDX12Texture* MotionOutput() const { return _pass.MotionOutput(); }
     bool Record(Id id, ID3D12GraphicsCommandList* cmd) const { return _work.Record(id, cmd); }
@@ -54,8 +74,10 @@ private:
     void AppendOpaqueDraw(Graph&, std::vector<ID3D12Resource*>&, const SceneGeometry&, UINT,
         GDX12ParticlesPass::OpaqueStage);
     void AppendPreparation(Graph&, std::vector<ID3D12Resource*>&, bool opaque);
+    void AppendSimulationImports(Graph&, std::vector<ID3D12Resource*>&, bool opaque);
+    GDX12Resource* VisibilityReadback(UINT slot, bool opaque, GDX12Device&, Id owner);
     void Packet(Graph&, const std::vector<ID3D12Resource*>&, const char*, std::vector<Access>,
-        std::function<void(GDX12CommandList*)>, Queue target = Queue::Direct);
+        std::function<void(GDX12CommandList*)>, Queue target = Queue::Direct, NativeWork* work = nullptr);
     GDX12DeviceResources& _resources;
     RenderPipelineCommonData& _common;
     GDX12ParticlesPass _pass;
@@ -69,6 +91,7 @@ private:
     struct VisibilitySample
     {
         GDX12Resource Buffer;
+        Id Owner = 0;
         uint64_t Frame = 0;
         std::vector<std::pair<uint64_t, uint64_t>> Sources;
         bool Written = false;

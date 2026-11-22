@@ -108,6 +108,7 @@
     <ClCompile Include="src\Techniques\SceneProbePreview.cpp" />
     <ClCompile Include="src\Techniques\SceneLighting.cpp" />
     <ClCompile Include="src\Techniques\SceneTransparency.cpp" />
+    <ClCompile Include="src\Techniques\SceneTransparencyRemote.cpp" />
     <ClCompile Include="src\Techniques\SceneParticles.cpp" />
     <ClCompile Include="src\Techniques\Water\SceneWater.cpp" />
 

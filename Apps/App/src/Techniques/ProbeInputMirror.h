@@ -13,7 +13,18 @@ namespace BistroRender
 class ProbeInputMirror
 {
   public:
-    ProbeInputMirror(QueueSubmission& submit, Id remote) : _submit(submit), _remote(remote) {}
+    struct Image
+    {
+        ComPtr<ID3D12Resource> Source;
+        GDX12ResourceHandle Local;
+        std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> Footprints;
+        UINT64 Bytes = 0;
+        bool Initialized = false;
+    };
+
+    using Cache = std::unordered_map<ID3D12Resource*, Image>;
+    ProbeInputMirror(QueueSubmission& submit, Id remote, std::shared_ptr<Cache> cache = {})
+        : _submit(submit), _remote(remote), _cache(cache ? std::move(cache) : std::make_shared<Cache>()), _mirrors(*_cache) {}
 
     struct BufferPatch
     {
@@ -47,7 +58,7 @@ class ProbeInputMirror
 
     ID3D12Resource* Mirror(Graph& primary, std::vector<ID3D12Resource*>& bindings, ID3D12Resource* source,
                           Id primaryResource, bool refresh, std::vector<BufferPatch> patches = {},
-                          std::vector<BufferRange> ranges = {}, ID3D12Resource* baseline = nullptr)
+                          std::vector<BufferRange> ranges = {}, ID3D12Resource* baseline = nullptr, bool depthTarget = false)
     {
         if (_sealed || !source || primary.Device != 0 || bindings.at(primaryResource) != source)
             throw std::logic_error("Invalid probe input mirror source");
@@ -55,7 +66,7 @@ class ProbeInputMirror
         auto& mirror = entry->second;
         if (inserted)
         {
-            try { Initialize(mirror, source); }
+            try { Initialize(mirror, source, depthTarget); }
             catch (...) { _mirrors.erase(entry); throw; }
         }
         if ((refresh || !mirror.Initialized || !ranges.empty() || baseline) && !_pending.count(source))
@@ -85,6 +96,7 @@ class ProbeInputMirror
         return mirror.Local.Get();
     }
 
+    UINT64 TransferBytes() const { return _bytes; }
     bool Contains(ID3D12Resource* source) const { return _mirrors.count(source) != 0; }
     bool PendingCopy(ID3D12Resource* source) const { return _pending.count(source) != 0; }
     UINT64 PendingTransferBytes(ID3D12Resource* source) const
@@ -96,6 +108,16 @@ class ProbeInputMirror
     {
         const auto entry = _pending.find(source);
         return entry == _pending.end() ? 0 : entry->second.BaselineBytes;
+    }
+
+    // The slot is retired before its next planning pass. Release unusually large bootstrap staging.
+    void TrimBootstrapStaging()
+    {
+        if (_capacity > 64ull * 1024 * 1024 && _bytes < _capacity / 2)
+        {
+            _transfer = {};
+            _capacity = 0;
+        }
     }
 
     Id AppendExport(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work, Queue queue = Queue::Copy)
@@ -121,15 +143,6 @@ class ProbeInputMirror
     }
 
   private:
-    struct Image
-    {
-        ComPtr<ID3D12Resource> Source;
-        GDX12ResourceHandle Local;
-        std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> Footprints;
-        UINT64 Bytes = 0;
-        bool Initialized = false;
-    };
-
     struct Pending
     {
         Id Source;
@@ -195,7 +208,7 @@ class ProbeInputMirror
         return (bytes + alignmentMask) & ~alignmentMask;
     }
 
-    void Initialize(Image& mirror, ID3D12Resource* source)
+    void Initialize(Image& mirror, ID3D12Resource* source, bool depthTarget)
     {
         auto shape = source->GetDesc();
         auto* device = _submit.Device(_remote).GetDevice().Get();
@@ -203,13 +216,14 @@ class ProbeInputMirror
         {
             mirror.Bytes = shape.Width;
         }
-        else if (shape.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE2D && shape.SampleDesc.Count == 1)
+        else if ((shape.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE2D ||
+                  shape.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D) && shape.SampleDesc.Count == 1)
         {
             D3D12_FEATURE_DATA_FORMAT_INFO format{shape.Format};
             ThrowIfFailed(device->CheckFeatureSupport(D3D12_FEATURE_FORMAT_INFO, &format, sizeof(format)));
             if (format.PlaneCount != 1)
                 throw std::invalid_argument("Probe capture expects single-plane texture inputs");
-            const UINT count = UINT(shape.MipLevels) * shape.DepthOrArraySize;
+            const UINT count = UINT(shape.MipLevels) * (shape.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D ? 1u : shape.DepthOrArraySize);
             mirror.Footprints.resize(count);
             std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> local(count);
             UINT64 localBytes = 0;
@@ -234,7 +248,7 @@ class ProbeInputMirror
         }
         mirror.Source = source;
         shape.Alignment = 0;
-        shape.Flags = D3D12_RESOURCE_FLAG_NONE;
+        shape.Flags = depthTarget ? D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL : D3D12_RESOURCE_FLAG_NONE;
         mirror.Local = _submit.Device(_remote).CreateResource(D3D12_HEAP_TYPE_DEFAULT, shape,
                                                                D3D12_RESOURCE_STATE_COMMON, nullptr);
     }
@@ -328,7 +342,8 @@ class ProbeInputMirror
 
     QueueSubmission& _submit;
     Id _remote;
-    std::unordered_map<ID3D12Resource*, Image> _mirrors;
+    std::shared_ptr<Cache> _cache;
+    Cache& _mirrors;
     std::unordered_map<ID3D12Resource*, Pending> _pending;
     QueueSubmission::TransferBuffer _transfer;
     UINT64 _capacity = 0;

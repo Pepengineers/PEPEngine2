@@ -57,28 +57,47 @@ class SunShadowTileTransfer
 		for (UINT cascade = 0; cascade < 4; ++cascade)
 			if (mask & (1u << cascade)) _tiles.push_back(cascade);
 		const UINT count = UINT(_tiles.size());
-		if (_resolution == resolution && _count == count) return;
+		const bool resized = _resolution != resolution || _count != count;
+		if (!resized && _ownerReaders.expired()) return;
+		_ownerReaders.reset();
 		_resolution = resolution;
 		_count = count;
 		auto desc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R32_TYPELESS, resolution, resolution, UINT16(count), 1);
-		_primaryTiles = _submit.Device(0).CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc, D3D12_RESOURCE_STATE_COMMON);
+		if (resized)
+		{
+			_primaryTiles = _submit.Device(0).CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc, D3D12_RESOURCE_STATE_COMMON);
+			D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
+			srv.Format = DXGI_FORMAT_R32_FLOAT;
+			srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+			srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+			srv.Texture2DArray.ArraySize = count;
+			srv.Texture2DArray.MipLevels = 1;
+			_srv.InitAsSRV(_primaryTiles.Get(), &srv, &_primaryHeap, _srv.HeapIndex == UINT_MAX
+			    ? _primaryHeap.GetAvailableIndex(SceneDescriptorStart) : _srv.HeapIndex);
+			_transfer = std::make_unique<ShadowDepthTransfer>(_submit, _owner, resolution, count);
+		}
 		desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 		_ownerTiles = _submit.Device(_owner).CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc, D3D12_RESOURCE_STATE_COMMON);
-		D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
-		srv.Format = DXGI_FORMAT_R32_FLOAT;
-		srv.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
-		srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-		srv.Texture2DArray.ArraySize = count;
-		srv.Texture2DArray.MipLevels = 1;
-		_srv.InitAsSRV(_primaryTiles.Get(), &srv, &_primaryHeap, _srv.HeapIndex == UINT_MAX
-		    ? _primaryHeap.GetAvailableIndex(SceneDescriptorStart) : _srv.HeapIndex);
 		D3D12_UNORDERED_ACCESS_VIEW_DESC uav{};
 		uav.Format = DXGI_FORMAT_R32_FLOAT;
 		uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
 		uav.Texture2DArray.ArraySize = count;
 		_uav.InitAsUAV(_ownerTiles.Get(), nullptr, &uav, &_ownerHeap, _uav.HeapIndex == UINT_MAX
 		    ? _ownerHeap.GetAvailableIndex(SceneDescriptorStart) : _uav.HeapIndex);
-		_transfer = std::make_unique<ShadowDepthTransfer>(_submit, _owner, resolution, count);
+	}
+
+	std::shared_ptr<const GDX12ResourceHandle> ReadOwnerTiles()
+	{
+		if (auto previous = _ownerReaders.lock()) return previous;
+		auto retained = std::make_shared<const GDX12ResourceHandle>(_ownerTiles);
+		_ownerReaders = retained;
+		return retained;
+	}
+	UINT OwnerSlice(UINT cascade) const
+	{
+		const auto it = std::find(_tiles.begin(), _tiles.end(), cascade);
+		if (it == _tiles.end()) throw std::logic_error("Missing packed owner sun tile");
+		return UINT(it - _tiles.begin());
 	}
 
 	void Export(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work, GDX12Texture& atlas)
@@ -169,6 +188,7 @@ class SunShadowTileTransfer
 	std::shared_ptr<GDX12RootSignature> _packRoot, _publishRoot;
 	ComPtr<ID3D12PipelineState> _pack, _publish;
 	GDX12ResourceHandle _primaryTiles, _ownerTiles;
+	std::weak_ptr<const GDX12ResourceHandle> _ownerReaders;
 	GDX12Descriptor _srv, _uav;
 	std::unique_ptr<ShadowDepthTransfer> _transfer;
 	std::vector<UINT> _tiles;

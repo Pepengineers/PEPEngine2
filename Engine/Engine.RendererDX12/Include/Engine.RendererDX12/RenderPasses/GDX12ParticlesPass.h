@@ -12,7 +12,8 @@ public:
     GDX12ParticlesPass();
     ~GDX12ParticlesPass() override;
     void Initialize() override;
-    void BeginFrame(GDX12Texture* depth, const GDX12ParticleRenderFrame& frame);
+    void BeginFrame(GDX12Texture* depth, const GDX12ParticleRenderFrame& frame,
+        D3D12_GPU_VIRTUAL_ADDRESS camera = 0, const GDX12ParticlesPass* display = nullptr);
     enum class OpaqueStage : UINT { Combined, DepthNormals, GBuffer };
     bool InitializeOpaque(const std::array<GDX12Texture*, 5>& gbuffer, bool depthNormals);
     // Configure before BeginFrame; merged fluid depth is an SRV/UAV, not a DSV.

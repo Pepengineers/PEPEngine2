@@ -19,10 +19,8 @@ Texture2D<float4> OpaqueTexture : register(t0);
 Texture2D<float4> AccumTexture : register(t1);
 Texture2D<float> RevealageTexture : register(t2);
 
-float4 PS(VSOutput input) : SV_TARGET
+float4 OpaqueColor(float2 uv)
 {
-    float2 uv = input.TexCoord;
-    
     float4 opaqueColor = OpaqueTexture.Sample(samPointClamp, uv);
 #ifndef SKIP_OPAQUE_AERIAL
     float depth = OpaqueDepth.SampleLevel(samPointClamp, uv, 0);
@@ -33,13 +31,31 @@ float4 PS(VSOutput input) : SV_TARGET
             length(world.xyz / world.w - CBCamera.CameraLocation));
     }
 #endif
+    return opaqueColor;
+}
+
+float4 ResolveLayerPS(VSOutput input) : SV_TARGET
+{
+    float2 uv = input.TexCoord;
     float4 accumColor = AccumTexture.Sample(samPointClamp, uv);
     float revealage = saturate(RevealageTexture.Sample(samPointClamp, uv));
     
     float coverage = 1.0 - revealage;
     float3 transparentColor = accumColor.rgb / max(accumColor.a, 0.00001f);
-    float3 finalColor = opaqueColor.rgb * revealage + transparentColor * coverage;
-    float finalAlpha = coverage + opaqueColor.a * revealage;
-    
-    return float4(finalColor, finalAlpha);
+    return float4(transparentColor * coverage, revealage);
+}
+
+float4 ApplyLayer(float4 opaque, float4 layer)
+{
+    return float4(layer.rgb + opaque.rgb * layer.a, (1.0 - layer.a) + opaque.a * layer.a);
+}
+
+float4 ApplyLayerPS(VSOutput input) : SV_TARGET
+{
+    return ApplyLayer(OpaqueColor(input.TexCoord), AccumTexture.Sample(samPointClamp, input.TexCoord));
+}
+
+float4 PS(VSOutput input) : SV_TARGET
+{
+    return ApplyLayer(OpaqueColor(input.TexCoord), ResolveLayerPS(input));
 }

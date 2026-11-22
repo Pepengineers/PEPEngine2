@@ -102,6 +102,7 @@ struct SceneLighting::ShadowPublication
 	std::map<UINT, LocalLight> Lights;
 	std::shared_ptr<ShadowDepthTransfer> Local;
 	std::shared_ptr<SunShadowTileTransfer> Sun;
+	std::shared_ptr<const GDX12ResourceHandle> OwnerLocalDepth;
 	GDX12ResourceHandle LocalDepth;
 	bool LocalStaged = false, SunStaged = false;
 };
@@ -135,6 +136,7 @@ struct SceneLighting::RemoteShadows
 	std::shared_ptr<SunShadowTileTransfer> SunTransfer;
 	std::array<GDX12Descriptor, 4> SceneViews;
 	std::shared_ptr<ShadowDepthTransfer> Transfer;
+	std::weak_ptr<const GDX12ResourceHandle> LocalDepthReaders;
 	std::shared_ptr<ShadowPublication> Publication;
 	Graph Plan;
 	NativeWork Work;
@@ -437,6 +439,31 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 	const auto sunAtlas = sun.Atlas.GetResource()->D3DResource;
 	const auto sunSettings = _resources.ShadowSettings;
 	auto& frame = _frames.at(_slot);
+	const bool newTransparencyOwner = frame.TransparencyShadowOwner != _transparencyShadowOwner;
+	frame.TransparencyShadowOwner = _transparencyShadowOwner;
+	frame.TransparencyShadowImports.clear();
+	if (newTransparencyOwner || frame.LatestLocalAtlas.Get() != localAtlas.Get() ||
+	    frame.LocalShadowLayout != source.LayoutRevision)
+		frame.TransparencyLocal.clear();
+	if (newTransparencyOwner || frame.LatestSunAtlas.Get() != sunAtlas.Get())
+		frame.TransparencySun.fill({});
+	const auto localCopy = [&](const std::shared_ptr<const GDX12ResourceHandle>& image,
+	                           UINT from, UINT to)
+	{
+		frame.TransparencyLocal[to] = {CD3DX12_TEXTURE_COPY_LOCATION(image->Get(), from),
+		    0, 0, to, source.Resolution, source.Resolution, image};
+	};
+	const auto sunCopy = [&](SunShadowTileTransfer& transfer, UINT cascade)
+	{
+		const auto size = _resources.ShadowQuality.SunResolution;
+		const auto tile = SunShadowRegion(cascade, size);
+		const auto image = transfer.ReadOwnerTiles();
+		frame.TransparencySun[cascade] = {CD3DX12_TEXTURE_COPY_LOCATION(image->Get(), transfer.OwnerSlice(cascade)),
+		    tile.X, tile.Y, 0, size, size, image};
+	};
+	for (UINT tile = 0; tile < frame.TransparencySun.size(); ++tile)
+		if (_sunOwner != _transparencyShadowOwner || !(_sunRemoteMask & (1u << tile)))
+			frame.TransparencySun[tile] = {};
 	// Begin has retired this primary slot. Other slots retain the publications they read.
 	const UINT completed = frame.CrossSlotShadows & ~_reportedCrossSlotShadows;
 	if (completed && frame.ShadowConsumer && _submissions->Complete(frame.ShadowConsumer))
@@ -571,10 +598,22 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 			const auto& publication = faces[face];
 			if (currentCasters(*publication)) current[i] |= 1u << face;
 			auto& order = frame.LocalShadowOrders[light.EntityId][face];
-			if (order == publication->Order) continue;
+			if (!frame.TransparencyShadowOwner && order == publication->Order) continue;
 			const auto& tiles = publication->Lights.at(light.EntityId).Faces;
 			const auto tile = std::find_if(tiles.begin(), tiles.end(), [=](const auto& entry) { return entry.second == face; });
 			if (tile == tiles.end()) throw std::logic_error("Missing published local shadow face");
+			const UINT destination = light.ShadowFirstSlice + face;
+			if (publication->Owner == _transparencyShadowOwner)
+			{
+				if (publication->OwnerLocalDepth)
+					localCopy(publication->OwnerLocalDepth, tile->first, destination);
+				else
+					frame.TransparencyLocal[destination] = {publication->Local->OwnerSlice(tile->first),
+					    0, 0, destination, source.Resolution, source.Resolution, publication->Local};
+			}
+			else
+				frame.TransparencyLocal.erase(destination);
+			if (order == publication->Order) continue;
 			imports[publication.get()].emplace_back(tile->first, light.ShadowFirstSlice + face);
 			order = publication->Order;
 			frame.ShadowReads.push_back(publication);
@@ -599,6 +638,8 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 			const UINT bit = 1u << tile;
 			if (!(_sunRemoteMask & bit)) continue;
 			const auto& publication = _latestSunShadows[tile];
+			if (publication->Owner == _transparencyShadowOwner)
+				sunCopy(*publication->Sun, tile);
 			if (frame.SunShadowOrders[tile] != publication->Order)
 			{
 				sunImports[publication.get()] |= bit;
@@ -644,6 +685,7 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 			views[{owner, latest}].push_back(view);
 		return true;
 	}), source.Views.end());
+	for (const auto& view : source.Views) frame.TransparencyLocal.erase(view.Slice);
 	const UINT sunUpdate = sun.Update & _sunRemoteMask;
 	const std::pair<Id, bool> sunLane{_sunOwner, sunAvailable};
 	const bool orderSun = sunUpdate && (!sunAvailable || !busy(_sunOwner));
@@ -700,7 +742,11 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 		auto& pass = *remote.Local;
 		auto& target = pass._slots.front();
 		remote.Resources.ShadowQuality.LocalResolution = source.Resolution;
-		pass.PrepareAtlas(target, UINT(batch.size()));
+		if (!latest)
+			for (const auto& view : batch) frame.TransparencyLocal.erase(view.Slice);
+		const bool replaceDepth = !batch.empty() && !remote.LocalDepthReaders.expired();
+		if (replaceDepth) remote.LocalDepthReaders.reset();
+		if (!batch.empty()) pass.PrepareAtlas(target, UINT(batch.size()), replaceDepth);
 		target.Lights = source.Lights;
 		target.Views.clear();
 		target.Packed.clear();
@@ -901,6 +947,15 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 		{
 			remote.Transfer = std::make_shared<ShadowDepthTransfer>(*_submissions, owner, source.Resolution, UINT(batch.size()));
 			remote.Transfer->Append(graph, bindings, work, target.Atlas.GetResource()->D3DResource.Get(), std::move(from), true);
+			if (owner == _transparencyShadowOwner)
+			{
+				// The owner scratch atlas may be repacked before a later WBOIT frame consumes this version.
+				auto image = std::make_shared<const GDX12ResourceHandle>(target.Atlas.GetResource()->D3DResource);
+				remote.LocalDepthReaders = image;
+				if (publishLocal) remote.Publication->OwnerLocalDepth = image;
+				if (!latest)
+					for (UINT i = 0; i < to.size(); ++i) localCopy(image, i, to[i]);
+			}
 			if (publishLocal)
 			{
 				auto& publication = *remote.Publication;
@@ -956,6 +1011,12 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 			}
 			if (!latest)
 			{
+				for (UINT tile = 0; tile < frame.TransparencySun.size(); ++tile)
+					if (remote.SunMask & (1u << tile))
+					{
+						if (owner == _transparencyShadowOwner) sunCopy(*remote.SunTransfer, tile);
+						else frame.TransparencySun[tile] = {};
+					}
 				const Id imported = remote.SunTransfer->Import(primary, primaryBindings, _work, sun.Atlas);
 				if (remote.Import == Invalid) remote.Import = imported;
 				else primary.Operations[imported].Dependencies.push_back(remote.Import);
@@ -968,7 +1029,21 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 						frame.SunShadowOrders[tile] = publishSun ? remote.Publication->Order : 0;
 			}
 		}
+		if (!latest && owner == _transparencyShadowOwner && remote.Import != Invalid)
+			frame.TransparencyShadowImports.push_back(remote.Import);
 	}
+}
+
+SceneLighting::OwnerShadowInputs SceneLighting::ShadowInputs(Id owner) const
+{
+	OwnerShadowInputs inputs;
+	const auto& frame = _frames.at(_slot);
+	if (!owner || owner != frame.TransparencyShadowOwner) return inputs;
+	for (const auto& tile : frame.TransparencySun)
+		if (tile.Lifetime) inputs.Sun.push_back(tile);
+	for (const auto& [slice, copy] : frame.TransparencyLocal) inputs.Local.push_back(copy);
+	inputs.PrimaryDependencies = frame.TransparencyShadowImports;
+	return inputs;
 }
 
 void SceneLighting::AddShadowExchanges(const Schedule& primary, std::vector<Executor::PacketExchange>& exchanges)

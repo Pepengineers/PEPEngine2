@@ -9,6 +9,8 @@ class GDX12WBOITCompositionPass : public GDX12RenderPass
 {
 public:
 
+    enum class Mode { Compose, ResolveLayer, ApplyLayer };
+    void SetMode(Mode mode) { _mode = mode; }
     void SetApplyOpaqueAerialPerspective(bool apply) { _applyOpaqueAerialPerspective = apply; }
 	GDX12WBOITCompositionPass(GDX12WBOITCompositionPass* reuse = nullptr,
         GDX12WBOITTransparencyPass* front = nullptr) : IN_OpaqueScene(nullptr), IN_TransparencyAccum(nullptr),
@@ -43,7 +45,8 @@ public:
 		auto& shaderCompiler = GDX12ShaderCompiler::GetInstance();
 		_compositionVS = shaderCompiler.CompileShader(_resources->Device, SHADERS_FOLDER "FullScreenVS.hlsl", nullptr, "VS", "vs");
 		const D3D_SHADER_MACRO frontDefines[] = { { "SKIP_OPAQUE_AERIAL", "1" }, { nullptr, nullptr } };
-		_compositionPS = shaderCompiler.CompileShader(_resources->Device, SHADERS_FOLDER "CompositionPass.hlsl", _applyOpaqueAerialPerspective ? nullptr : frontDefines, "PS", "ps");
+		_compositionPS = shaderCompiler.CompileShader(_resources->Device, SHADERS_FOLDER "CompositionPass.hlsl", _applyOpaqueAerialPerspective ? nullptr : frontDefines,
+            _mode == Mode::Compose ? "PS" : _mode == Mode::ResolveLayer ? "ResolveLayerPS" : "ApplyLayerPS", "ps");
 
 		// Root Signatures
 		GDX12RootSignatureDesc RSDesc1;
@@ -103,6 +106,7 @@ public:
 private:
     friend class BistroRender::SceneLighting;
     friend class BistroRender::SceneTransparency;
+    Mode _mode = Mode::Compose;
     bool _applyOpaqueAerialPerspective = true;
     struct Link final : IRenderPassLink
     {

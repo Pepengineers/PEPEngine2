@@ -35,7 +35,12 @@ public:
     void SetAtmosphereEnabled(bool enabled) { _atmosphereEnabled = enabled; }
 	void Initialize() override
 	{
-		IN_DepthStencil = _inputs[0];
+		InitializeRaster(_inputs[0]);
+	}
+
+	void InitializeRaster(IRenderPassLink* depth)
+	{
+		IN_DepthStencil = depth;
         UpdateReadOnlyDepth();
 
         if (!_reuse)

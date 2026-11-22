@@ -94,6 +94,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	const auto slot = c.Primary.CurrFrameConstantsIndex;
 	_executorSlot = slot;
 	const auto& submissions = _executor->Submissions();
+	_lighting->SetTransparencyShadowOwner(_lighting->Transparency().Begin(submissions, *_lighting, slot, _frameNumber));
 	auto skin = c.Runtime.FreezeSkeletalMeshes([&](int requested)
 	{
 		const auto owner = submissions->SelectAdapter(requested);
@@ -152,6 +153,8 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 			textures.Name("Environment.CloudPicture", _cloudPicture->Image());
 		}
 		particles.AppendOpaque(graph, resources, *_geometry, slot);
+		// In the combined path opaque particles finish writing depth with their G-buffer draw.
+		if (!_geometry->PrepassNormals(slot)) _lighting->Transparency().ExportPrepassDepth(graph, resources, depth);
 		if (!earlyEnvironment)
 		{
 			_environment->Append(graph, resources);
@@ -206,6 +209,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	{
 		particles.AppendSimulation(graph, resources, ParticleInputs::Depth, depth);
 		particles.AppendOpaquePrepass(graph, resources, *_geometry, slot);
+		if (_geometry->PrepassNormals(slot)) _lighting->Transparency().ExportPrepassDepth(graph, resources, depth);
 	};
 	const auto afterDepthNormals = [&](auto& graph, auto& resources, BistroRender::Id ready)
 	{
@@ -236,6 +240,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	particles.AddExchanges(_schedule, waits, exchanges);
 	if (auto ao = _lighting->AOExchange(_schedule)) exchanges.push_back(std::move(*ao));
 	_lighting->AddProbeExchanges(_schedule, waits, exchanges);
+	_lighting->Transparency().AddExchange(_schedule, exchanges);
 	uint64_t completion;
 	try
 	{
@@ -264,6 +269,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 				particles.Submitted(completions);
 				_lighting->AOSubmitted(completions);
 				_lighting->ProbesSubmitted(completions);
+				_lighting->Transparency().Submitted(completions);
 			}
 		}
 		catch (...)
@@ -280,6 +286,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	particles.Submitted(_executor->Completions());
 	_lighting->AOSubmitted(_executor->Completions());
 	_lighting->ProbesSubmitted(_executor->Completions());
+	_lighting->Transparency().Submitted(_executor->Completions());
 	_post->PostersSubmitted(_frameNumber, _executor->Completions());
 	_post->Submitted(slot);
 	_environment->Submitted(completion);
@@ -291,6 +298,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 void BistroRenderPipeline::FramePresented()
 {
 	_cloudPicture->Presented();
+	_lighting->Transparency().Presented();
 	_lighting->Water().Presented(_frameNumber, _executor->Completions());
 	_lighting->Particles().Presented(_frameNumber);
 	_lighting->AOPresented(_frameNumber, _executor->Completions());

@@ -1,41 +1,22 @@
 #include "SceneTransparency.h"
 #include "SceneReflections.h"
-#include "Common/GameTimer.h"
+#include "WboitMeshDraw.h"
 
 namespace BistroRender
 {
-SceneTransparency::SceneTransparency(GDX12DeviceResources& resources, RenderPipelineCommonData& common)
-    : _resources(resources), _common(common), _frames(resources.FrameConstants.size()), _particles(resources, common),
-      _water(resources, common)
-{
-	for (auto& frame : _frames)
-	{
-		frame.Draw.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
-		frame.Draw.SetUnbatchedDraws(true);
-		frame.Draw.SetAtmosphereEnabled(true);
-		frame.Compose.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
-		frame.Compose.SetApplyOpaqueAerialPerspective(true);
-	}
-}
-SceneTransparency::~SceneTransparency()
-{
-	for (auto& frame : _frames)
-	{
-		frame.Compose.ClearDenendencies();
-		frame.Draw.ClearDenendencies();
-	}
-}
 GDX12Texture* SceneTransparency::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, SceneGeometry& geometry,
                                         UINT slot, GDX12Texture* hdr, GDX12Texture* sun, GDX12Texture* local,
                                         SceneEnvironment& environment, SceneReflections& reflections)
 {
 	_work.Commands.clear();
 	auto& frame = _frames.at(slot);
+	if (_remote) AppendRemote(graph, bindings, geometry, slot, frame, hdr, sun, local, environment, reflections);
 	_water.AppendDraw(graph, bindings, hdr, geometry._slots.at(slot).Dsv.CPUHandle);
 	if (_opaqueContinuation)
 	{
 		hdr = _opaqueContinuation(graph, bindings, hdr, _water.Depth(), _water.Motion());
 	}
+	if (_remote) return ApplyRemote(graph, bindings, geometry, slot, frame, hdr, environment);
 	return AppendPhase(graph, bindings, geometry, slot, frame, hdr, sun, local, environment, reflections);
 }
 GDX12Texture* SceneTransparency::AppendPhase(Graph& graph, std::vector<ID3D12Resource*>& bindings,
@@ -140,41 +121,9 @@ GDX12Texture* SceneTransparency::AppendPhase(Graph& graph, std::vector<ID3D12Res
 	const UINT draws = scene.Draws;
 	auto* args = scene.Buffers[6].Data.Get();
 	auto* count = scene.Buffers[7].Data.Get();
-	_work.Add(graph, "mesh transparency All clear/draw", std::move(accesses),
-	          [=](auto* cmd)
-	          {
-		          const float zero[4]{}, one[4]{1, 1, 1, 1};
-		          cmd->ClearRenderTargetView(targets[0], zero, 0, nullptr);
-		          cmd->ClearRenderTargetView(targets[1], one, 0, nullptr);
-		          cmd->SetDescriptorHeaps(1, &heap);
-		          cmd->SetGraphicsRootSignature(root->GetRootSignature().Get());
-		          cmd->SetPipelineState(pipeline);
-		          cmd->SetGraphicsRootConstantBufferView(root->GetBRootParamIndex(1), main);
-		          cmd->SetGraphicsRootConstantBufferView(root->GetBRootParamIndex(2), camera);
-		          cmd->SetGraphicsRootConstantBufferView(root->GetBRootParamIndex(3), shadow);
-		          cmd->SetGraphicsRootConstantBufferView(root->GetBRootParamIndex(4), sky);
-		          for (UINT i = 0; i < srvs.size(); ++i)
-		          {
-			          cmd->SetGraphicsRootDescriptorTable(root->GetTRootParamIndex(i), srvs[i]);
-		          }
-		          for (UINT i = 0; i < atmosphere.size(); ++i)
-		          {
-			          cmd->SetGraphicsRootDescriptorTable(root->GetTRootParamIndex(11 + i), atmosphere[i]);
-		          }
-		          cmd->SetGraphicsRootDescriptorTable(root->GetTRootParamIndex(16), textures);
-		          cmd->SetGraphicsRootShaderResourceView(root->GetGeometryRootParamIndex(),
-		                                                 geom.Vertices.BufferLocation);
-		          cmd->RSSetViewports(1, &viewport);
-		          cmd->RSSetScissorRects(1, &rect);
-		          cmd->OMSetRenderTargets(UINT(targets.size()), targets.data(), FALSE, &depth);
-		          cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-		          cmd->IASetVertexBuffers(0, 1, &geom.Vertices);
-		          cmd->IASetIndexBuffer(&geom.Indices);
-		          if (draws)
-		          {
-			          cmd->ExecuteIndirect(signature, draws, args, 0, count, 0);
-		          }
-	          });
+	WboitMeshDraw mesh{root, pipeline, signature, heap, main, camera, shadow, sky, srvs, atmosphere, textures, geom,
+	              depth, viewport, rect, targets, draws, args, count};
+	_work.Add(graph, "mesh transparency All clear/draw", std::move(accesses), mesh);
 	_particles.AppendWeighted(graph, bindings);
 	auto* composeRoot = compose._compositionRS.get();
 	auto* composePipeline = compose._compositionPSO.Get();

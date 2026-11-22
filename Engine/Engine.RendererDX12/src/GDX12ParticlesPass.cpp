@@ -8,6 +8,7 @@ using namespace ParticleResources;
 struct GDX12ParticlesPass::State
 {
     bool ReadOnlyDepth = false;
+    bool TransmittanceTarget = false;
     UINT Capacity = 0;
     bool Sorted = false;
     bool Mesh = false;
@@ -15,6 +16,7 @@ struct GDX12ParticlesPass::State
     bool WasEnabled = false;
     bool ResetMotion = true;
     bool MotionEnabled = true;
+    D3D12_GPU_VIRTUAL_ADDRESS Camera = 0;
     UINT ConstantCount = 0;
     std::vector<std::unique_ptr<Buffer<EmitterConstants>>> Constants;
     std::unique_ptr<GDX12RootSignature> Root, SortRoot;
@@ -97,6 +99,9 @@ struct GDX12ParticlesPass::State
             blend.DestBlend = mode == 2 ? D3D12_BLEND_INV_SRC_ALPHA : D3D12_BLEND_ONE;
             blend.SrcBlendAlpha = mode == 0 || mode == 3 ? D3D12_BLEND_ONE : D3D12_BLEND_ZERO;
             blend.DestBlendAlpha = D3D12_BLEND_ONE;
+            // The remote layer stores T in alpha. SortedAlpha multiplies T by (1 - opacity); additive preserves T.
+            if (!gbuffer && TransmittanceTarget && mode == 2)
+                blend.DestBlendAlpha = D3D12_BLEND_INV_SRC_ALPHA;
             desc.SampleMask = UINT_MAX;
             desc.SampleDesc.Count = 1;
             desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
@@ -238,12 +243,11 @@ struct GDX12ParticlesPass::State
         }
     }
 
-    void Draw(GDX12CommandList* commands, GDX12DeviceResources* resources, RenderPipelineCommonData* common, const UINT mode)
+    void Draw(GDX12CommandList* commands, GDX12DeviceResources* resources, const UINT mode)
     {
         commands->SetGraphicsRootSignature(Root.get());
         commands->SetDescriptorHeaps({ resources->SRV_UAV_Heap.get() });
-        auto& frame = resources->FrameConstants[resources->CurrFrameConstantsIndex];
-        commands->SetGraphicsRootConstantBufferView(1, frame->CameraCB->GetElementAddress(common->ActiveCameraCBufferIndex));
+        commands->SetGraphicsRootConstantBufferView(1, Camera);
         const UINT region = mode < 3 ? mode : mode - 1;
         const UINT blend = mode < 3 ? mode : mode - 3;
         const UINT parameters[] = { region * Capacity, blend, Capacity, ResetMotion };
@@ -277,7 +281,8 @@ void GDX12ParticlesPass::Initialize()
         throw std::invalid_argument("Particles require HDR WBOIT accumulation/revealage");
 }
 
-void GDX12ParticlesPass::BeginFrame(GDX12Texture* depth, const GDX12ParticleRenderFrame& frame)
+void GDX12ParticlesPass::BeginFrame(GDX12Texture* depth, const GDX12ParticleRenderFrame& frame,
+    D3D12_GPU_VIRTUAL_ADDRESS camera, const GDX12ParticlesPass* display)
 {
     _resources->ParticleMotion = nullptr;
     const auto global = GetParticleSettings();
@@ -305,11 +310,15 @@ void GDX12ParticlesPass::BeginFrame(GDX12Texture* depth, const GDX12ParticleRend
     {
         _state = std::make_unique<State>();
         _state->ReadOnlyDepth = _readOnlyDepth;
+        _state->TransmittanceTarget = display != nullptr;
         _state->Initialize(_resources);
     }
     auto& state = *_state;
     state.Active = true;
-    state.ResetMotion = frame.ResetMotion || !state.WasEnabled || state.MotionEnabled != _motionOutputEnabled;
+    state.ResetMotion = display ? display->_state->ResetMotion :
+        frame.ResetMotion || !state.WasEnabled || state.MotionEnabled != _motionOutputEnabled;
+    state.Camera = camera ? camera : _resources->FrameConstants.at(_resources->CurrFrameConstantsIndex)
+        ->CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex);
     state.MotionEnabled = _motionOutputEnabled;
     if (!state.WasEnabled) _commonData->ResetUpscalerHistory = true;
     state.WasEnabled = true;
@@ -341,6 +350,9 @@ void GDX12ParticlesPass::BeginFrame(GDX12Texture* depth, const GDX12ParticleRend
     }
     const UINT width = depth->GetWidth();
     const UINT height = depth->GetHeight();
+    if (display && state.MotionTexture && (state.MotionTexture->GetWidth() != width ||
+        state.MotionTexture->GetHeight() != height))
+        state.MotionTexture.reset(); // The caller has retired this owner slot.
     const UINT slot = _resources->CurrFrameConstantsIndex;
     auto* depthResource = depth->GetResource()->D3DResource.Get();
     if (state.ReadOnlyDepth && state.DepthResources.at(slot) != depthResource)
@@ -435,8 +447,7 @@ void GDX12ParticlesPass::PrepareRenderData(GDX12CommandList* commands,
     GDX12_SCOPED_EVENT(commands, "GPU particles", Colors::Orange);
     commands->SetComputeRootSignature(state.Root.get());
     commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
-    auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
-    commands->SetComputeRootConstantBufferView(1, frame->CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex));
+    commands->SetComputeRootConstantBufferView(1, state.Camera);
     UAV(commands, *state.Draws);
     UAV(commands, *state.Counts);
     UAV(commands, *state.Indices);
@@ -496,11 +507,11 @@ void GDX12ParticlesPass::DrawOpaque(GDX12CommandList* commands, GDX12Texture* de
     commands->SetScissorRect(depth->GetScissorRect());
     commands->GetCommandList()->OMSetRenderTargets(targetCount, targets, FALSE, &dsv);
     commands->SetPipelineState(state.Opaque[index]);
-    state.Draw(commands, _resources, _commonData, 0);
+    state.Draw(commands, _resources, 0);
     if (state.Mesh)
     {
         commands->SetPipelineState(state.MeshOpaque[index]);
-        state.Draw(commands, _resources, _commonData, 3);
+        state.Draw(commands, _resources, 3);
     }
 }
 
@@ -525,11 +536,11 @@ void GDX12ParticlesPass::DrawWeightedAndMotion(GDX12CommandList* commands)
     commands->SetGraphicsRootSignature(state.Root.get());
     commands->SetGraphicsSRV(3, depth->GetSRV()->GPUHandle);
     commands->SetPipelineState(state.Weighted);
-    state.Draw(commands, _resources, _commonData, 0);
+    state.Draw(commands, _resources, 0);
     if (state.Mesh)
     {
         commands->SetPipelineState(state.MeshWeighted);
-        state.Draw(commands, _resources, _commonData, 3);
+        state.Draw(commands, _resources, 3);
     }
     if (!state.MotionEnabled) return;
     commands->ResourceBarrier({ state.MotionTexture->GetResource()->GetRenderTargetBarrier() });
@@ -537,11 +548,11 @@ void GDX12ParticlesPass::DrawWeightedAndMotion(GDX12CommandList* commands)
     commands->GetCommandList()->OMSetRenderTargets(1, &motionTarget, FALSE, state.ReadOnlyDepth ? &dsv : nullptr);
     commands->ClearRenderTargetView(state.MotionTexture.get());
     commands->SetPipelineState(state.Motion);
-    for (UINT mode = 0; mode < 3; ++mode) state.Draw(commands, _resources, _commonData, mode);
+    for (UINT mode = 0; mode < 3; ++mode) state.Draw(commands, _resources, mode);
     if (state.Mesh)
     {
         commands->SetPipelineState(state.MeshMotion);
-        for (UINT mode = 3; mode < 5; ++mode) state.Draw(commands, _resources, _commonData, mode);
+        for (UINT mode = 3; mode < 5; ++mode) state.Draw(commands, _resources, mode);
     }
     commands->ResourceBarrier({ state.MotionTexture->GetResource()->GetSRVBarrier() });
     _resources->ParticleMotion = state.MotionTexture.get();
@@ -567,14 +578,14 @@ void GDX12ParticlesPass::Composite(GDX12CommandList* commands, GDX12Texture* hdr
     if (state.Sorted)
     {
         commands->SetPipelineState(state.Alpha);
-        state.Draw(commands, _resources, _commonData, 2);
+        state.Draw(commands, _resources, 2);
     }
     commands->SetPipelineState(state.Additive);
-    state.Draw(commands, _resources, _commonData, 1);
+    state.Draw(commands, _resources, 1);
     if (state.Mesh)
     {
         commands->SetPipelineState(state.MeshAdditive);
-        state.Draw(commands, _resources, _commonData, 4);
+        state.Draw(commands, _resources, 4);
     }
 }
 

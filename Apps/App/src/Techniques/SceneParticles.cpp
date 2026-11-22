@@ -44,6 +44,20 @@ auto SnapshotResources(const GDX12ParticleRenderSource& source)
 	return std::array{source.Particles, source.Alive, source.Counters, source.Arguments};
 }
 
+void BindSourceSRV(GDX12ParticleRenderSource& source, size_t field, ID3D12Resource* buffer,
+                   GDX12Descriptor& descriptor, GDX12DescriptorHeap* heap)
+{
+	const UINT64 width = buffer->GetDesc().Width;
+	D3D12_SHADER_RESOURCE_VIEW_DESC view{};
+	view.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+	view.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+	view.Buffer.NumElements = field == 2 ? UINT(width / sizeof(UINT)) : source.Emitter.MaxParticles;
+	view.Buffer.StructureByteStride = UINT(width / view.Buffer.NumElements);
+	descriptor.InitAsSRV(buffer, &view, heap, descriptor.HeapIndex == UINT_MAX
+	    ? heap->GetAvailableIndex(SceneDescriptorStart) : descriptor.HeapIndex);
+	source.SRVs[field] = descriptor.GPUHandle;
+}
+
 State BoundaryState(ID3D12Resource* resource)
 {
 	const auto desc = resource->GetDesc();
@@ -220,14 +234,7 @@ struct SceneParticles::Remote
 				resource.D3DResource = primary.Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc, D3D12_RESOURCE_STATE_COMMON);
 				bytes += width;
 				if (field >= dest.Views.size()) continue;
-				D3D12_SHADER_RESOURCE_VIEW_DESC view{};
-				view.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-				view.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
-				view.Buffer.NumElements = field == 2 ? UINT(width / sizeof(UINT)) : source.Emitter.MaxParticles;
-				view.Buffer.StructureByteStride = UINT(width / view.Buffer.NumElements);
-				auto& descriptor = dest.Views[field];
-				descriptor.InitAsSRV(resource.D3DResource.Get(), &view, heap, heap->GetAvailableIndex(SceneDescriptorStart));
-				dest.Bindings.SRVs[field] = descriptor.GPUHandle;
+				BindSourceSRV(dest.Bindings, field, resource.D3DResource.Get(), dest.Views[field], heap);
 			}
 		}
 		for (auto& slot : Ring) slot.Transfer = Submit->CreateTransferBuffer(DeviceId, bytes);
@@ -918,7 +925,7 @@ SceneParticles::~SceneParticles()
 }
 void SceneParticles::Packet(Graph& graph, const std::vector<ID3D12Resource*>& bindings, const char* name,
                             std::vector<Access> accesses, std::function<void(GDX12CommandList*)> record,
-                            Queue target)
+                            Queue target, NativeWork* work)
 {
 	std::vector<Access> unique;
 	for (auto access : accesses)
@@ -941,7 +948,7 @@ void SceneParticles::Packet(Graph& graph, const std::vector<ID3D12Resource*>& bi
 			}
 		}
 	}
-	_work.AddOwned(graph, name, std::move(unique), bindings, std::move(record),
+	(work ? *work : _work).AddOwned(graph, name, std::move(unique), bindings, std::move(record),
 	               "Particle packets cannot submit private signals", {}, target);
 }
 int SceneParticles::SecondaryAdapter() { return Adapter.GetValue(); }
@@ -972,7 +979,8 @@ void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, 
 			const UINT visible = counts[i + 1] - counts[i];
 			if (std::find(_visibleSources.begin(), _visibleSources.end(), id) != _visibleSources.end()) continue;
 			if (sample.Frame <= 12 || visible)
-				Log::Info("RenderGraph", "Particles MGPU visible GPU0 frame=", sample.Frame, " shown=", version,
+				Log::Info("RenderGraph", "Particles MGPU visible owner=", primary.Submissions()->AdapterLabel(sample.Owner),
+				    " frame=", sample.Frame, " shown=", version,
 				    " id=", id, " remoteDrawElements=", visible);
 			if (visible) _visibleSources.push_back(id);
 		}
@@ -1327,6 +1335,16 @@ void SceneParticles::AppendPreparation(Graph& graph, std::vector<ID3D12Resource*
 	    ResourceAccess(graph, bindings, &_resources.FrameConstants.at(slot)->CameraCB->GetResource(), Mode::Read);
 	std::vector<Access> preparation{camera};
 	AddAccesses(graph, bindings, preparation, _pass.NativePreparationAccesses(_renderFrame, opaque));
+	AppendSimulationImports(graph, bindings, opaque);
+	auto* readback = VisibilityReadback(slot, opaque, *_resources.Device, graph.Device);
+	if (readback) preparation.push_back(ResourceAccess(graph, bindings, readback, Mode::Write, CopyDest));
+	Packet(graph, bindings, opaque ? "opaque particles frustum cull" : "transparent particles cull and global sort",
+	       std::move(preparation), [this, opaque, readback](auto* cmd) {
+		       _pass.PrepareRenderData(cmd, _renderFrame, opaque, readback, _firstRemote);
+	       });
+}
+void SceneParticles::AppendSimulationImports(Graph& graph, std::vector<ID3D12Resource*>& bindings, bool opaque)
+{
 	for (size_t i = 0; i < _remote.size(); ++i)
 	{
 		auto& lane = _remote[i];
@@ -1334,7 +1352,9 @@ void SceneParticles::AppendPreparation(Graph& graph, std::vector<ID3D12Resource*
 		if (lane.Solver && interaction == opaque)
 			lane.Import = lane.Solver->AppendImport(_work, graph, bindings);
 	}
-	GDX12Resource* readback = nullptr;
+}
+GDX12Resource* SceneParticles::VisibilityReadback(UINT slot, bool opaque, GDX12Device& device, Id owner)
+{
 	auto& sample = _visibilitySamples.at(slot)[opaque];
 	if (LogSnapshots.GetValue() && std::any_of(_renderFrame.Sources.begin() + _firstRemote, _renderFrame.Sources.end(),
 	    [&](const auto& source) {
@@ -1351,17 +1371,14 @@ void SceneParticles::AppendPreparation(Graph& graph, std::vector<ID3D12Resource*
 			    ? _remoteVersions[i - _firstRemote] : 0);
 		}
 		const UINT64 bytes = (sample.Sources.size() + 1) * sizeof(UINT);
-		if (!buffer.D3DResource || buffer.D3DResource->GetDesc().Width < bytes)
-			buffer.D3DResource = _resources.Device->CreateResource(D3D12_HEAP_TYPE_READBACK,
+		if (sample.Owner != owner || !buffer.D3DResource || buffer.D3DResource->GetDesc().Width < bytes)
+			buffer.D3DResource = device.CreateResource(D3D12_HEAP_TYPE_READBACK,
 			    CD3DX12_RESOURCE_DESC::Buffer(bytes), D3D12_RESOURCE_STATE_COPY_DEST);
-		preparation.push_back(ResourceAccess(graph, bindings, &buffer, Mode::Write, CopyDest));
-		readback = &buffer;
+		sample.Owner = owner;
 		sample.Written = true;
+		return &buffer;
 	}
-	Packet(graph, bindings, opaque ? "opaque particles frustum cull" : "transparent particles cull and global sort",
-	       std::move(preparation), [this, opaque, readback](auto* cmd) {
-		       _pass.PrepareRenderData(cmd, _renderFrame, opaque, readback, _firstRemote);
-	       });
+	return nullptr;
 }
 std::vector<Access> SceneParticles::DrawReads(Graph& graph, std::vector<ID3D12Resource*>& bindings, bool opaque)
 {
@@ -1414,6 +1431,7 @@ void SceneParticles::AppendWeighted(Graph& graph, std::vector<ID3D12Resource*>& 
 	Packet(graph, bindings, "particle weighted-alpha append", std::move(accesses),
 	       [this](auto* cmd) { _pass.DrawWeightedAndMotion(cmd); });
 }
+
 void SceneParticles::AppendComposite(Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12Texture* hdr)
 {
 	if (_drawReads.empty()) return;
@@ -1423,5 +1441,86 @@ void SceneParticles::AppendComposite(Graph& graph, std::vector<ID3D12Resource*>&
 	    ResourceAccess(graph, bindings, hdr->GetResource(), Mode::ReadWrite, D3D12_RESOURCE_STATE_RENDER_TARGET));
 	Packet(graph, bindings, "global SortedAlpha/additive HDR particles", std::move(accesses),
 	       [this, hdr](auto* cmd) { _pass.Composite(cmd, hdr); });
+}
+
+void SceneParticles::AppendRemoteWeighted(Graph& primary, std::vector<ID3D12Resource*>& primaryBindings,
+    Graph& remote, std::vector<ID3D12Resource*>& bindings, NativeWork& work, GDX12DeviceResources& owner,
+    GDX12Texture* accum, GDX12Texture* reveal, GDX12Texture* depth, Id cameraId, D3D12_GPU_VIRTUAL_ADDRESS camera,
+    const std::function<ID3D12Resource*(ID3D12Resource*)>& mirror, RemoteRaster& raster,
+    const std::function<ID3D12Resource*(GDX12Texture&)>& mirrorTexture)
+{
+	_drawReads.clear();
+	raster.Reads.clear();
+	raster.Pass.Setup(&owner, &raster.Common);
+	raster.Pass.SetReadOnlyDepthEnabled(false);
+	raster.Pass.SetMotionOutputEnabled(_pass.MotionOutput() != nullptr);
+	if (!HasDrawSources(false) || _pass.NativeRasterAccesses(false).empty())
+	{
+		raster.Pass.BeginFrame(depth, {});
+		return;
+	}
+	AppendSimulationImports(primary, primaryBindings, false);
+	raster.Frame = _renderFrame;
+	raster.Sources.resize(raster.Frame.Sources.size());
+	const State cameraRead = remote.Resources.at(cameraId).Memory == Heap::Upload ? D3D12_RESOURCE_STATE_GENERIC_READ
+	    : D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
+	const Access cameraAccess{cameraId, Mode::Read, cameraRead};
+	raster.Reads = {cameraAccess, ResourceAccess(remote, bindings, depth->GetResource(), Mode::Read)};
+	auto* heap = owner.SRV_UAV_Heap.get();
+	for (size_t i = 0; i < raster.Frame.Sources.size(); ++i)
+	{
+		auto& source = raster.Frame.Sources[i];
+		if (source.Emitter.Blend == ParticleBlend::Opaque) continue;
+		auto& entry = raster.Sources[i];
+		if (!entry) entry = std::make_unique<RemoteRaster::Source>();
+		const auto inputs = SnapshotResources(source);
+		for (size_t field = 0; field < inputs.size(); ++field)
+		{
+			auto* local = mirror(inputs[field]->D3DResource.Get());
+			entry->Buffers[field].D3DResource = ComPtr<ID3D12Resource>(local);
+			if (field < entry->Views.size()) BindSourceSRV(source, field, local, entry->Views[field], heap);
+		}
+		source.Particles = &entry->Buffers[0];
+		source.Alive = &entry->Buffers[1];
+		source.Counters = &entry->Buffers[2];
+		source.Arguments = &entry->Buffers[3];
+		if (source.Emitter.Texture)
+		{
+			auto* atlas = source.Emitter.Texture->PrimaryDeviceTexture;
+			if (!atlas) throw std::logic_error("Particle atlas has no primary texture");
+			const Id id = NativeWork::ResourceFor(remote, bindings, mirrorTexture(*atlas), "WBOIT particle atlas");
+			raster.Reads.push_back({id, Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
+		}
+	}
+	raster.Pass.SetInputs({depth, accum, reveal});
+	raster.Pass.Initialize();
+	raster.Pass.BeginFrame(depth, raster.Frame, camera, &_pass);
+	std::vector<Access> preparation{cameraAccess};
+	AddAccesses(remote, bindings, preparation, raster.Pass.NativePreparationAccesses(raster.Frame, false));
+	auto* readback = VisibilityReadback(_resources.CurrFrameConstantsIndex, false, *owner.Device, remote.Device);
+	if (readback) preparation.push_back(ResourceAccess(remote, bindings, readback, Mode::Write, CopyDest));
+	Packet(remote, bindings, "owner transparent particle cull and global sort", std::move(preparation),
+	       [&raster, readback, firstRemote = _firstRemote](auto* cmd)
+	       { raster.Pass.PrepareRenderData(cmd, raster.Frame, false, readback, firstRemote); }, Queue::Direct, &work);
+	auto weighted = raster.Reads;
+	AddAccesses(remote, bindings, weighted, raster.Pass.NativeRasterAccesses(true));
+	for (auto* target : {accum, reveal})
+		weighted.push_back(ResourceAccess(remote, bindings, target->GetResource(), Mode::ReadWrite,
+		                                  D3D12_RESOURCE_STATE_RENDER_TARGET));
+	Packet(remote, bindings, "owner weighted particles and transparent particle motion", std::move(weighted),
+	       [&raster](auto* cmd) { raster.Pass.DrawWeightedAndMotion(cmd); }, Queue::Direct, &work);
+	_resources.ParticleMotion = _pass.MotionOutput();
+}
+
+void SceneParticles::AppendRemoteComposite(Graph& remote, std::vector<ID3D12Resource*>& bindings,
+    NativeWork& work, GDX12Texture* hdr, RemoteRaster& raster)
+{
+	if (raster.Reads.empty()) return;
+	auto accesses = raster.Reads;
+	AddAccesses(remote, bindings, accesses, raster.Pass.NativeRasterAccesses(false));
+	accesses.push_back(ResourceAccess(remote, bindings, hdr->GetResource(), Mode::ReadWrite,
+	                                  D3D12_RESOURCE_STATE_RENDER_TARGET));
+	Packet(remote, bindings, "owner SortedAlpha and additive HDR particles", std::move(accesses),
+	       [&raster, hdr](auto* cmd) { raster.Pass.Composite(cmd, hdr); }, Queue::Direct, &work);
 }
 } // namespace BistroRender
