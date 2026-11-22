@@ -187,13 +187,19 @@ GDX12SkinningWork GDX12Skinning::Freeze(GDX12SkinMesh& mesh,UINT slot,const std:
     auto& upload=*mesh.PaletteUploads.at(slot);
     if(palette.size()!=upload.GetElementCount()) throw std::invalid_argument("Skin palette size changed");
     upload.CopyData(0,palette.data(),UINT(palette.size()));
-    return {_rootSignature,_pipeline,{upload.GetResource().D3DResource.Get(),mesh.Palettes.at(slot)->GetResource().D3DResource.Get(),
-        mesh.Source->Vertices->GetResource().D3DResource.Get(),mesh.Source->Ranges->GetResource().D3DResource.Get(),
-        mesh.Source->Influences->GetResource().D3DResource.Get()},mesh.VertexCount,mesh.OutputVertex,UINT(palette.size())};
+    return {_rootSignature, _pipeline, {upload.GetResource().D3DResource, mesh.Palettes.at(slot)->GetResource().D3DResource,
+        mesh.Source->Vertices->GetResource().D3DResource, mesh.Source->Ranges->GetResource().D3DResource,
+        mesh.Source->Influences->GetResource().D3DResource}, mesh.VertexCount, mesh.OutputVertex, UINT(palette.size())};
 }
-void GDX12SkinningWork::Record(ID3D12GraphicsCommandList* list,D3D12_GPU_VIRTUAL_ADDRESS output) const {
+
+void GDX12SkinningWork::RecordPalette(ID3D12GraphicsCommandList* list) const
+{
+    list->CopyBufferRegion(Resources[1].Get(), 0, Resources[0].Get(), 0, PaletteBytes());
+}
+
+void GDX12SkinningWork::Record(ID3D12GraphicsCommandList* list, D3D12_GPU_VIRTUAL_ADDRESS output, UINT firstVertex) const {
     list->SetComputeRootSignature(Root.Get()); list->SetPipelineState(Pipeline.Get());
-    const UINT constants[]={VertexCount,OutputVertex,BoneCount}; list->SetComputeRoot32BitConstants(0,3,constants,0);
+    const UINT constants[]={VertexCount,firstVertex,BoneCount}; list->SetComputeRoot32BitConstants(0,3,constants,0);
     for(UINT i=0;i<3;++i) list->SetComputeRootShaderResourceView(i+1,Resources[i+2]->GetGPUVirtualAddress());
     list->SetComputeRootShaderResourceView(4,Resources[1]->GetGPUVirtualAddress());
     list->SetComputeRootUnorderedAccessView(5,output);

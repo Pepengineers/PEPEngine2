@@ -133,6 +133,8 @@ struct SceneLighting::RemoteShadows
 	std::vector<ID3D12Resource*> Bindings;
 	Id Export = Invalid, Import = Invalid, Input = Invalid;
 	CompletionToken Produced, Imported, Consumer;
+	std::shared_ptr<GDX12ResourceHandle> SkinInput;
+	UINT64 LocalSkinBytes = 0;
 	std::vector<UINT> Lights;
 	UINT Count = 0;
 	UINT SunMask = 0, NearMask = 0;
@@ -746,7 +748,22 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 		const bool verticesChanged = meshChanged || remote.VertexDeformationRevision != geometry._vertexDeformationRevision;
 		remote.MeshRevision = meshRevision;
 		remote.VertexDeformationRevision = geometry._vertexDeformationRevision;
-		mesh.VertexResource = mirror(SceneVertices, verticesChanged);
+		std::vector<ProbeInputMirror::BufferPatch> patches;
+		remote.LocalSkinBytes = 0;
+		const auto skin = scene.RemoteSkin.find(owner);
+		if (skin != scene.RemoteSkin.end() && !skin->second.Ranges.empty())
+		{
+			remote.SkinInput = skin->second.Output;
+			for (const auto& range : skin->second.Ranges)
+			{
+				const auto bytes = range.Work.VertexBytes();
+				patches.push_back({remote.SkinInput->Get(), UINT64(range.FirstVertex) * sizeof(Vertex),
+				    UINT64(range.Work.OutputVertex) * sizeof(Vertex), bytes});
+				remote.LocalSkinBytes += bytes;
+			}
+		}
+		mesh.VertexResource = remote.Mirror.Mirror(primary, primaryBindings, mesh.VertexResource,
+		    SceneVertices, verticesChanged, std::move(patches));
 		mesh.IndexResource = mirror(SceneIndices, meshChanged);
 		mesh.Vertices.BufferLocation = mesh.VertexResource->GetGPUVirtualAddress();
 		mesh.Indices.BufferLocation = mesh.IndexResource->GetGPUVirtualAddress();
@@ -940,6 +957,19 @@ void SceneLighting::ShadowImportsSubmitted(const std::vector<CompletionToken>& c
 		if (remote.Import == Invalid) continue;
 		remote.Imported = completions.at(remote.Import);
 		remote.Consumer = completions.back();
+	}
+}
+
+void SceneLighting::RetireShadowSkinInputs(UINT slot)
+{
+	for (auto& [lane, entry] : _frames.at(slot).ShadowOwners)
+	{
+		auto& remote = *entry;
+		if (!remote.SkinInput || !remote.Produced || !_submissions->Complete(remote.Produced)) continue;
+		if (_reportedShadowSkinOwners.insert(lane.first).second)
+			Log::Info("RenderGraph", "Shadow owner reused local Exact skinning GPU=", _submissions->AdapterLabel(lane.first),
+			    " slot=", slot, " vertexBytes=", remote.LocalSkinBytes, " shadowFence=", remote.Produced.Value);
+		remote.SkinInput.reset();
 	}
 }
 

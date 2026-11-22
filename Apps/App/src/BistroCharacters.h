@@ -25,6 +25,12 @@ namespace BistroCharacters
     inline AutoConsoleVariable<int> PresetFoxCount(L"App.Fox.PresetCount", -1,
         L"Fox count override, -1 inherits startup count. Restart Bistro to apply.",
         EConsoleVariableFlags::Default, [](int value) { return value >= -1 && value <= 5; });
+    inline AutoConsoleVariable<int> NPCSkinningAdapter(L"App.NPC.Skinning.Adapter", -1,
+        L"DXGI skinning adapter for Bistro people at spawn. -1 uses GPU0.",
+        EConsoleVariableFlags::ReadOnly, [](int value) { return value >= -1; });
+    inline AutoConsoleVariable<int> FoxSkinningAdapter(L"App.Fox.Skinning.Adapter", -1,
+        L"DXGI skinning adapter for Bistro foxes at spawn. -1 uses GPU0.",
+        EConsoleVariableFlags::ReadOnly, [](int value) { return value >= -1; });
 
     inline int GetCount(bool fox)
     {
@@ -143,6 +149,7 @@ namespace BistroCharacters
                     entity.AddComponent<NameComponent>((fox ? "BistroFox" : "BistroNPC") + std::to_string(character));
                     entity.AddComponent<TransformComponent>(network.Position(route), Vector3::Zero, Vector3(fox ? 0.55f : 2.4f));
                     auto& skeletal = entity.AddComponent<SkeletalMeshRenderComponent>(handle);
+                    skeletal.SetSkinningAdapter(fox ? FoxSkinningAdapter.GetValue() : NPCSkinningAdapter.GetValue());
                     skeletal.SetClip(clip);
                     skeletal.SetLooping(true);
                     skeletal.SetTimeSeconds(std::uniform_real_distribution<double>(0, source->GetClips()[clip].DurationSeconds)(random));

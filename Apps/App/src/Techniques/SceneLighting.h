@@ -16,6 +16,7 @@ class SceneLighting
 	SceneLighting(GDX12DeviceResources&, RenderPipelineCommonData&);
 	~SceneLighting();
 	void Freeze(SceneGeometry&, UINT slot, const std::shared_ptr<QueueSubmission>&, Id aoDevice);
+	void RetireShadowSkinInputs(UINT slot);
 	Id AOExecutionDevice() const { return _frames.at(_slot).AO->ExecutionDevice(); }
 	std::optional<Executor::PacketExchange> AOExchange(const Schedule& schedule)
 	{
@@ -126,6 +127,7 @@ class SceneLighting
 	UINT _sunRemoteMask = 0;
 	int _sunSync = 1;
 	uint64_t _localPlacementEpoch = 0, _sunPlacementEpoch = 0;
+	std::unordered_set<Id> _reportedShadowSkinOwners;
 	bool _initialized = false;
 	bool _pendingReset = false;
 	GDX12SSRSettings _ssrSettings{};

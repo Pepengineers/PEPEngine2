@@ -62,6 +62,8 @@ void BistroRenderPipeline::PrepareMaterialBindings(RenderPipelineContext& c)
 	++_frameNumber;
 	const UINT slot = c.Primary.CurrFrameConstantsIndex;
 	_executor->Begin(slot);
+	_geometry->RetireSkinning(slot, *_executor->Submissions());
+	_lighting->RetireShadowSkinInputs(slot);
 	_post->Textures().RetireReadback(slot);
 	_animationTime += (std::max)(0.0, double(c.Common.GameTimer->DeltaTime()));
 	_cloudPicture->Prepare(slot, _animationTime);
@@ -91,12 +93,17 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 {
 	const auto slot = c.Primary.CurrFrameConstantsIndex;
 	_executorSlot = slot;
-	_geometry->Freeze(slot, c.Common.ActiveCameraCBufferIndex, c.Runtime.FreezeSkeletalMeshes());
+	const auto& submissions = _executor->Submissions();
+	auto skin = c.Runtime.FreezeSkeletalMeshes([&](int requested)
+	{
+		const auto owner = submissions->SelectAdapter(requested);
+		return std::make_pair(owner, &submissions->Device(owner));
+	});
+	_geometry->Freeze(slot, c.Common.ActiveCameraCBufferIndex, std::move(skin), submissions);
 	const auto scenes = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
 	const auto* world = scenes->GetWorld();
 	const double delta = c.Common.GameTimer ? c.Common.GameTimer->DeltaTime() : 0;
 	_environment->Freeze(world && !world->IsPaused() ? delta * world->GetTimeScale() : 0, *_executor, _frameNumber);
-	const auto& submissions = _executor->Submissions();
 	_lighting->Freeze(*_geometry, slot, submissions, submissions->SelectAdapter(_aoAdapter));
 	auto& particles = _lighting->Particles();
 	auto& water = _lighting->Water();
@@ -232,6 +239,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	uint64_t completion;
 	try
 	{
+		_geometry->SubmitSkinning(slot, _schedule, waits);
 		completion = _executor->Execute(_schedule, _geometry->PlannedResources(slot), record, prefix, nullptr, nullptr, waits,
 		                                exchanges);
 	}
@@ -248,6 +256,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 		_post->Reconstruction().CancelRecording();
 		throw;
 	}
+	_geometry->SkinningSubmitted(slot, _frameNumber, _executor->Completions().back());
 	_cloudPicture->Submitted(_executor->Completions());
 	_environment->AtmosphereSubmitted(_frameNumber, _executor->Completions());
 	water.Submitted(_executor->Completions());

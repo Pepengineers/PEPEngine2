@@ -17,6 +17,7 @@ class BistroRenderPipeline final : public IRenderPipeline
 		if (_executor)
 		{
 			_executor->Drain();
+			_geometry->DrainSkinning();
 		}
 		if (_post)
 		{

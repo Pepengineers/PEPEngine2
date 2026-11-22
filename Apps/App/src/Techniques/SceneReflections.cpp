@@ -1,6 +1,7 @@
 #include "SceneReflections.h"
 #include "ProbeInputMirror.h"
 #include "ProbeTransfer.h"
+#include "ShadowGeometry.h"
 #include "Engine.Core/Logging/Logger.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Common/GameTimer.h"
@@ -94,6 +95,7 @@ struct SceneReflections::Remote
     CompletionToken LastWork;
     Id PrimaryExport = Invalid, RemoteImport = Invalid;
     uint64_t EnvironmentRevision = UINT64_MAX, TextureRevision = UINT64_MAX, MeshRevision = UINT64_MAX;
+    uint64_t VertexDeformationRevision = UINT64_MAX;
     bool RefreshMaterialTextures = false;
     bool WorkPlanned = false;
 };
@@ -484,9 +486,11 @@ void SceneReflections::AppendRemote(Graph& primary, std::vector<ID3D12Resource*>
         in.Geometry = scene.Geometry;
         const auto meshRevision = _resources.GeometryBuffer->GetMeshCacheRevision();
         const bool meshChanged = remote.MeshRevision != meshRevision;
+        const bool verticesChanged = meshChanged || remote.VertexDeformationRevision != geometry._vertexDeformationRevision;
         remote.MeshRevision = meshRevision;
-        in.Geometry.VertexResource = mirror(18, meshChanged || !scene.Skin.empty());
-        in.Geometry.IndexResource = mirror(19, meshChanged);
+        remote.VertexDeformationRevision = geometry._vertexDeformationRevision;
+        in.Geometry.VertexResource = mirror(SceneVertices, verticesChanged);
+        in.Geometry.IndexResource = mirror(SceneIndices, meshChanged);
         in.Vertex = bind(in.Geometry.VertexResource);
         in.Index = bind(in.Geometry.IndexResource);
         in.Geometry.Vertices.BufferLocation = in.Geometry.VertexResource->GetGPUVirtualAddress();

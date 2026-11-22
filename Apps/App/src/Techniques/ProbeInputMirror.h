@@ -15,6 +15,12 @@ class ProbeInputMirror
   public:
     ProbeInputMirror(QueueSubmission& submit, Id remote) : _submit(submit), _remote(remote) {}
 
+    struct BufferPatch
+    {
+        ID3D12Resource* Source;
+        UINT64 SourceOffset, DestinationOffset, Bytes;
+    };
+
     void Begin()
     {
         _pending.clear();
@@ -39,7 +45,7 @@ class ProbeInputMirror
     }
 
     ID3D12Resource* Mirror(Graph& primary, std::vector<ID3D12Resource*>& bindings, ID3D12Resource* source,
-                          Id primaryResource, bool refresh)
+                          Id primaryResource, bool refresh, std::vector<BufferPatch> patches = {})
     {
         if (_sealed || !source || primary.Device != 0 || bindings.at(primaryResource) != source)
             throw std::logic_error("Invalid probe input mirror source");
@@ -50,13 +56,29 @@ class ProbeInputMirror
             try { Initialize(mirror, source); }
             catch (...) { _mirrors.erase(entry); throw; }
         }
-        if ((refresh || !mirror.Initialized) && !_pending.count(source))
+        if ((refresh || !mirror.Initialized || !patches.empty()) && !_pending.count(source))
         {
             const UINT64 offset = Align(_bytes);
-            if (offset > UINT64_MAX - mirror.Bytes)
+            if (!patches.empty() && source->GetDesc().Dimension != D3D12_RESOURCE_DIMENSION_BUFFER)
+                throw std::invalid_argument("Owner-local input patches require a buffer");
+            std::sort(patches.begin(), patches.end(), [](const auto& a, const auto& b)
+                { return a.DestinationOffset < b.DestinationOffset; });
+            UINT64 end = 0, localBytes = 0;
+            for (const auto& patch : patches)
+            {
+                const auto shape = patch.Source->GetDesc();
+                if (!patch.Bytes || patch.DestinationOffset < end || patch.DestinationOffset > mirror.Bytes ||
+                    patch.Bytes > mirror.Bytes - patch.DestinationOffset || shape.Dimension != D3D12_RESOURCE_DIMENSION_BUFFER ||
+                    patch.SourceOffset > shape.Width || patch.Bytes > shape.Width - patch.SourceOffset)
+                    throw std::invalid_argument("Invalid owner-local mirror patch");
+                end = patch.DestinationOffset + patch.Bytes;
+                localBytes += patch.Bytes;
+            }
+            const UINT64 transferBytes = mirror.Bytes - localBytes;
+            if (offset > UINT64_MAX - transferBytes)
                 throw std::overflow_error("Probe input transfer exceeds buffer size range");
-            _pending.emplace(source, Pending{primaryResource, offset});
-            _bytes = offset + mirror.Bytes;
+            _pending.emplace(source, Pending{primaryResource, offset, std::move(patches)});
+            _bytes = offset + transferBytes;
         }
         return mirror.Local.Get();
     }
@@ -100,6 +122,7 @@ class ProbeInputMirror
     {
         Id Source;
         UINT64 Offset;
+        std::vector<BufferPatch> Patches;
     };
 
     static UINT64 Align(UINT64 bytes)
@@ -160,11 +183,12 @@ class ProbeInputMirror
             throw std::logic_error("Probe input transfer uses the wrong graph device");
         _sealed = true;
         if (_pending.empty()) return Invalid;
-        if (_bytes > _capacity)
+        const UINT64 bytes = (std::max)(UINT64(1), _bytes);
+        if (bytes > _capacity)
         {
-            auto replacement = _submit.CreateTransferBuffer(_remote, _bytes);
+            auto replacement = _submit.CreateTransferBuffer(_remote, bytes);
             std::swap(_transfer, replacement);
-            _capacity = _bytes;
+            _capacity = bytes;
         }
         auto* shared = _transfer.Resources[importing ? 1 : 0].Get();
         constexpr State copySource = D3D12_RESOURCE_STATE_COPY_SOURCE;
@@ -176,6 +200,7 @@ class ProbeInputMirror
             ID3D12Resource* Resource;
             const Image* Mirror;
             UINT64 Offset;
+            std::vector<BufferPatch> Patches;
         };
         std::vector<Copy> copies;
         for (const auto& [source, item] : _pending)
@@ -186,7 +211,15 @@ class ProbeInputMirror
             const Resource& declaration = graph.Resources.at(id);
             const State read = declaration.Memory == Heap::Upload ? D3D12_RESOURCE_STATE_GENERIC_READ : copySource;
             accesses.push_back({id, importing ? Mode::Write : Mode::Read, importing ? copyDest : read});
-            copies.push_back({resource, &mirror, item.Offset});
+            copies.push_back({resource, &mirror, item.Offset, item.Patches});
+            if (importing)
+                for (const auto& patch : item.Patches)
+                {
+                    const Id patchId = NativeWork::ResourceFor(graph, bindings, patch.Source, "owner-local deformed vertices");
+                    if (std::none_of(accesses.begin(), accesses.end(), [patchId](const auto& access)
+                        { return access.Resource == patchId; }))
+                        accesses.push_back({patchId, Mode::Read, copySource});
+                }
             if (importing) mirror.Initialized = true;
         }
         return work.Add(graph, importing ? "probe owner import scene inputs" : "GPU0 export probe scene inputs",
@@ -196,8 +229,23 @@ class ProbeInputMirror
                 const auto& footprints = copy.Mirror->Footprints;
                 if (footprints.empty())
                 {
-                    if (importing) cmd->CopyBufferRegion(copy.Resource, 0, shared, copy.Offset, copy.Mirror->Bytes);
-                    else cmd->CopyBufferRegion(shared, copy.Offset, copy.Resource, 0, copy.Mirror->Bytes);
+                    UINT64 resourceOffset = 0, sharedOffset = copy.Offset;
+                    const auto copyShared = [&](UINT64 end)
+                    {
+                        const UINT64 bytes = end - resourceOffset;
+                        if (!bytes) return;
+                        if (importing) cmd->CopyBufferRegion(copy.Resource, resourceOffset, shared, sharedOffset, bytes);
+                        else cmd->CopyBufferRegion(shared, sharedOffset, copy.Resource, resourceOffset, bytes);
+                        sharedOffset += bytes;
+                    };
+                    for (const auto& patch : copy.Patches)
+                    {
+                        copyShared(patch.DestinationOffset);
+                        if (importing)
+                            cmd->CopyBufferRegion(copy.Resource, patch.DestinationOffset, patch.Source, patch.SourceOffset, patch.Bytes);
+                        resourceOffset = patch.DestinationOffset + patch.Bytes;
+                    }
+                    copyShared(copy.Mirror->Bytes);
                     continue;
                 }
                 for (UINT subresource = 0; subresource < footprints.size(); ++subresource)

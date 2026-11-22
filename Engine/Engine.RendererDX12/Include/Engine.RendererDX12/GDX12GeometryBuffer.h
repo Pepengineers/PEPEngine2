@@ -64,17 +64,20 @@ public:
     D3D12_GPU_VIRTUAL_ADDRESS GetVertexAddress() const
     { return _vertexBuffer ? _vertexBuffer->D3DResource->GetGPUVirtualAddress() : 0; }
     // Freeze on the render owner after geometry preparation and before recording.
-    // The caller retains the geometry owner through its submission fence.
+    // Retain the allocations even if the live geometry buffer grows after recording.
     struct RecordingBinding {
         D3D12_VERTEX_BUFFER_VIEW Vertices;
         D3D12_INDEX_BUFFER_VIEW Indices;
         ID3D12Resource* VertexResource;
         ID3D12Resource* IndexResource;
+        GDX12ResourceHandle VertexAllocation, IndexAllocation;
     };
     RecordingBinding FreezeRecordingBinding() const {
         return {_vertexBuffer ? _vertexBufferView : D3D12_VERTEX_BUFFER_VIEW{}, _indexBuffer ? _indexBufferView : D3D12_INDEX_BUFFER_VIEW{},
             _vertexBuffer ? _vertexBuffer->D3DResource.Get() : nullptr,
-            _indexBuffer ? _indexBuffer->D3DResource.Get() : nullptr};
+            _indexBuffer ? _indexBuffer->D3DResource.Get() : nullptr,
+            _vertexBuffer ? _vertexBuffer->D3DResource : GDX12ResourceHandle{},
+            _indexBuffer ? _indexBuffer->D3DResource : GDX12ResourceHandle{}};
     }
 
 private:

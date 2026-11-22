@@ -5,6 +5,7 @@
 #include "ShadowGeometry.h"
 #include "Common/ConsoleVariables.h"
 #include "Engine.Core/BenchmarkEngine.h"
+#include "Engine.Core/Logging/Logger.h"
 #include "App.Base/Modules/SceneManagerModule.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.RendererDX12/GDX12ShaderCompiler.h"
@@ -226,7 +227,8 @@ void SceneGeometry::Resize(UINT width, UINT height)
 		                      s.ReadDepth.HeapIndex == UINT_MAX ? heap->GetAvailableIndex() : s.ReadDepth.HeapIndex);
 	}
 }
-void SceneGeometry::Freeze(UINT index, UINT camera, std::vector<GDX12SkinningWork> skin)
+void SceneGeometry::Freeze(UINT index, UINT camera, std::vector<GDX12SkinningWork> skin,
+                           const std::shared_ptr<QueueSubmission>& submit)
 {
 	auto& s = _slots.at(index);
 	auto& f = *_resources.FrameConstants.at(index);
@@ -359,8 +361,41 @@ void SceneGeometry::Freeze(UINT index, UINT camera, std::vector<GDX12SkinningWor
 		s.Geometry.IndexResource = _emptyIndices.Get();
 		s.Geometry.Indices = {_emptyIndices->GetGPUVirtualAddress(), EmptyGeometryBytes, DXGI_FORMAT_R32_UINT};
 	}
-	s.Skin = std::move(skin);
-	if (!s.Skin.empty()) ++_vertexDeformationRevision;
+	s.Skin.clear();
+	for (auto& [owner, remote] : s.RemoteSkin)
+	{
+		remote.Ranges.clear();
+		remote.VertexCount = 0;
+	}
+	if (!skin.empty()) ++_vertexDeformationRevision;
+	for (auto& work : skin)
+	{
+		if ((UINT64(work.OutputVertex) + work.VertexCount) * sizeof(Vertex) > s.Geometry.Vertices.SizeInBytes)
+			throw std::logic_error("Skinning range exceeds the frozen vertex buffer");
+		if (!work.Owner)
+		{
+			s.Skin.push_back(std::move(work));
+			continue;
+		}
+		auto& remote = s.RemoteSkin.try_emplace(work.Owner, submit, work.Owner).first->second;
+		remote.Ranges.push_back({std::move(work), remote.VertexCount});
+		remote.VertexCount += remote.Ranges.back().Work.VertexCount;
+	}
+	for (auto& [owner, remote] : s.RemoteSkin)
+	{
+		if (remote.Ranges.empty()) continue;
+		const UINT64 bytes = UINT64(remote.VertexCount) * sizeof(Vertex);
+		// A pending Latest shadow can still read this slot's old owner-local output.
+		if (!remote.Output || remote.Output.use_count() > 1 || (*remote.Output)->GetDesc().Width < bytes)
+			remote.Output = std::make_shared<GDX12ResourceHandle>(submit->Device(owner).CreateResource(
+			    D3D12_HEAP_TYPE_DEFAULT, CD3DX12_RESOURCE_DESC::Buffer(bytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS),
+			    D3D12_RESOURCE_STATE_COMMON));
+		if (remote.TransferBytes < bytes)
+		{
+			remote.Transfer = submit->CreateTransferBuffer(owner, bytes);
+			remote.TransferBytes = bytes;
+		}
+	}
 	s.Batches = _resources.SkeletalBatchCount;
 	s.InstanceCount = _resources.SkeletalInstanceCount;
 	if (s.Batches)
@@ -386,7 +421,8 @@ void SceneGeometry::Freeze(UINT index, UINT camera, std::vector<GDX12SkinningWor
 		std::array<Id, 5> ids{};
 		for (UINT j = 0; j < 5; ++j)
 		{
-			const auto found = std::find(s.SkinBindings.begin(), s.SkinBindings.end(), work.Resources[j]);
+			auto* resource = work.Resources[j].Get();
+			const auto found = std::find(s.SkinBindings.begin(), s.SkinBindings.end(), resource);
 			if (found != s.SkinBindings.end())
 			{
 				ids[j] = SkinResourceBegin + Id(found - s.SkinBindings.begin());
@@ -394,7 +430,7 @@ void SceneGeometry::Freeze(UINT index, UINT camera, std::vector<GDX12SkinningWor
 			else
 			{
 				ids[j] = SkinResourceBegin + Id(s.SkinBindings.size());
-				s.SkinBindings.push_back(work.Resources[j]);
+				s.SkinBindings.push_back(resource);
 				const State initial = j == 0 ? State(D3D12_RESOURCE_STATE_GENERIC_READ) : 0;
 				s.SkinDeclarations.push_back({"skin input " + std::to_string(ids[j]), initial, initial, j == 1, j != 0,
 				                              j == 0 ? Heap::Upload : Heap::Default});
@@ -402,6 +438,128 @@ void SceneGeometry::Freeze(UINT index, UINT camera, std::vector<GDX12SkinningWor
 		}
 		s.SkinIds.push_back(ids);
 	}
+}
+
+void SceneGeometry::AppendSkinImports(Graph& graph, Slot& slot)
+{
+	slot.SkinImports.Commands.clear();
+	slot.SkinImport = Invalid;
+	std::vector<Access> accesses{{VertexResource, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}};
+	for (const auto& [owner, remote] : slot.RemoteSkin)
+	{
+		if (remote.Ranges.empty()) continue;
+		const Id shared = NativeWork::ResourceFor(graph, slot.PlannedBindings,
+		    remote.Transfer.Resources[0].Get(), "shared exact skinning output");
+		accesses.push_back({shared, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE});
+	}
+	if (accesses.size() == 1) return;
+	slot.SkinImport = slot.SkinImports.Add(graph, "GPU0 import exact skinning ranges", std::move(accesses),
+	    [&slot](auto* cmd)
+	    {
+		    for (const auto& [owner, remote] : slot.RemoteSkin)
+			    for (const auto& range : remote.Ranges)
+				    cmd->CopyBufferRegion(slot.Geometry.VertexResource, UINT64(range.Work.OutputVertex) * sizeof(Vertex),
+				        remote.Transfer.Resources[0].Get(), UINT64(range.FirstVertex) * sizeof(Vertex),
+				        range.Work.VertexBytes());
+	    }, {}, Queue::Copy);
+}
+
+void SceneGeometry::SubmitSkinning(UINT index, const Schedule& primary, std::vector<PacketWait>& waits)
+{
+	auto& slot = _slots.at(index);
+	if (slot.SkinImport == Invalid) return;
+	const auto imported = std::find_if(primary.Packets.begin(), primary.Packets.end(),
+	    [&](const auto& packet) { return packet.Operation == slot.SkinImport; });
+	if (imported == primary.Packets.end()) throw std::logic_error("Missing Exact skinning import");
+	for (auto& [owner, remote] : slot.RemoteSkin)
+	{
+		if (remote.Ranges.empty()) continue;
+		Graph graph;
+		graph.Device = owner;
+		graph.FrameBoundary = false;
+		graph.TerminalQueue = Queue::Copy;
+		std::vector<ID3D12Resource*> bindings;
+		auto* output = remote.Output->Get();
+		auto* transfer = remote.Transfer.Resources[1].Get();
+		const auto bind = [&](ID3D12Resource* resource, const char* name)
+		{ return NativeWork::ResourceFor(graph, bindings, resource, name); };
+		const Id vertices = bind(output, "owner-local deformed vertices");
+		const Id shared = bind(transfer, "shared exact skinning output");
+		Operation palette{"owner skin palette uploads"}, skin{"owner skin deformation"};
+		palette.Target = Queue::Copy;
+		skin.Target = Queue::Compute;
+		skin.Accesses.push_back({vertices, Mode::Write, UnorderedAccess});
+		for (const auto& range : remote.Ranges)
+		{
+			const auto& resources = range.Work.Resources;
+			const Id upload = bind(resources[0].Get(), "owner palette upload");
+			const Id pose = bind(resources[1].Get(), "owner palette");
+			palette.Accesses.push_back({upload, Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
+			palette.Accesses.push_back({pose, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST});
+			for (UINT i = 1; i < resources.size(); ++i)
+			{
+				const Id input = bind(resources[i].Get(), "owner skin input");
+				if (std::none_of(skin.Accesses.begin(), skin.Accesses.end(),
+				    [input](const auto& access) { return access.Resource == input; }))
+					skin.Accesses.push_back({input, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE});
+			}
+		}
+		Operation exportRanges{"owner export exact skinning ranges",
+		    {{vertices, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE}, {shared, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}}};
+		exportRanges.Target = Queue::Copy;
+		graph.Operations = {std::move(palette), std::move(skin), std::move(exportRanges)};
+		const auto schedule = Compile(graph);
+		remote.GPU.Begin(0);
+		remote.GPU.Reserve(schedule);
+		remote.GPU.Execute(schedule, bindings, [&](Id operation, UINT, auto* cmd)
+		{
+			if (operation == 0)
+				for (const auto& range : remote.Ranges) range.Work.RecordPalette(cmd);
+			else if (operation == 1)
+				for (const auto& range : remote.Ranges)
+					range.Work.Record(cmd, output->GetGPUVirtualAddress(), range.FirstVertex);
+			else
+				cmd->CopyBufferRegion(transfer, 0, output, 0, UINT64(remote.VertexCount) * sizeof(Vertex));
+		});
+		waits.push_back({Id(imported - primary.Packets.begin()), remote.GPU.Completions().back()});
+	}
+}
+
+void SceneGeometry::SkinningSubmitted(UINT index, uint64_t order, CompletionToken consumer)
+{
+	auto& slot = _slots.at(index);
+	slot.SkinOrder = order;
+	slot.SkinConsumer = slot.SkinImport == Invalid ? CompletionToken{} : consumer;
+}
+
+void SceneGeometry::RetireSkinning(UINT index, const QueueSubmission& submit)
+{
+	auto& slot = _slots.at(index);
+	if (!slot.SkinConsumer || !submit.Complete(slot.SkinConsumer)) return;
+	for (const auto& [owner, remote] : slot.RemoteSkin)
+	{
+		if (remote.Ranges.empty() || !_reportedSkinOwners.insert(owner).second) continue;
+		UINT64 paletteBytes = 0;
+		for (const auto& range : remote.Ranges)
+		{
+			const auto& work = range.Work;
+			paletteBytes += work.PaletteBytes();
+			Log::Info("RenderGraph", "Exact skinning order=", slot.SkinOrder, " instance=", work.Instance,
+			    " firstVertex=", work.OutputVertex, " vertexCount=", work.VertexCount,
+			    " paletteBytes=", work.PaletteBytes(), " returnedVertexBytes=", work.VertexBytes());
+		}
+		Log::Info("RenderGraph", "GPU0 completed Exact skinning geometry consumer order=", slot.SkinOrder,
+		    " slot=", index, " owner=", submit.AdapterLabel(owner), " consumer=", submit.AdapterLabel(0),
+		    " exportFence=", remote.GPU.Completions().back().Value, " frameFence=", slot.SkinConsumer.Value,
+		    " paletteBytes=", paletteBytes, " returnedVertexBytes=", UINT64(remote.VertexCount) * sizeof(Vertex));
+	}
+	slot.SkinConsumer = {};
+}
+
+void SceneGeometry::DrainSkinning()
+{
+	for (auto& slot : _slots)
+		for (auto& [owner, remote] : slot.RemoteSkin) remote.GPU.Drain();
 }
 void SceneGeometry::AppendWorldCanvases(Graph& graph, UINT index, const std::vector<CanvasRead>& textureReads)
 {
@@ -628,6 +786,7 @@ Schedule SceneGeometry::Plan(UINT index, const AppendTechnique& append, const Ap
 		gbufferTarget.View.ColorFormats[i] = Formats[i];
 	}
 	s.PlannedBindings = Resources(index);
+	AppendSkinImports(g, s);
 	const Id sceneDepth = DepthOperation + (s.Batches ? BatchingOperationCount : 0);
 	const Id sceneGBuffer = GBufferOperation + (s.Batches ? BatchingOperationCount : 0);
 	Id normals = Invalid;
@@ -709,6 +868,11 @@ Schedule SceneGeometry::Plan(UINT index, const AppendTechnique& append, const Ap
 	}
 	for (Id id = 0; id <= preludeBegin; ++id)
 	{
+		if (id == SceneUploadOperation && s.SkinImport != Invalid)
+		{
+			order.push_back(s.SkinImport);
+		}
+		if (id == s.SkinImport) continue;
 		if (id == firstGrassGBuffer)
 		{
 			order.push_back(sceneGBuffer);
@@ -937,7 +1101,7 @@ void SceneGeometry::Record(UINT index, Id op, UINT bucket, ID3D12GraphicsCommand
 		RecordGeometry(s, GeometryPass::WorldCanvas, cmd);
 		return;
 	}
-	if (s.LindenWork.Record(op, cmd) || _grass->Record(index, op, cmd))
+	if (s.SkinImports.Record(op, cmd) || s.LindenWork.Record(op, cmd) || _grass->Record(index, op, cmd))
 	{
 		return;
 	}
@@ -963,8 +1127,7 @@ void SceneGeometry::Record(UINT index, Id op, UINT bucket, ID3D12GraphicsCommand
 	{
 		for (const auto& skin : s.Skin)
 		{
-			cmd->CopyBufferRegion(skin.Resources[1], 0, skin.Resources[0], 0,
-			                      UINT64(skin.BoneCount) * sizeof(GDX12SkinPalette));
+			skin.RecordPalette(cmd);
 		}
 		return;
 	}
@@ -972,7 +1135,7 @@ void SceneGeometry::Record(UINT index, Id op, UINT bucket, ID3D12GraphicsCommand
 	{
 		for (const auto& skin : s.Skin)
 		{
-			skin.Record(cmd, s.Geometry.Vertices.BufferLocation);
+			skin.Record(cmd, s.Geometry.Vertices.BufferLocation, skin.OutputVertex);
 		}
 		return;
 	}

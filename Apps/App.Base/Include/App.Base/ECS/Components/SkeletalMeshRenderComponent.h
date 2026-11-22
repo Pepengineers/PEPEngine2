@@ -23,6 +23,13 @@ public:
     bool IsLooping() const { return _loop; }
     bool GetCastsShadows() const { return _castsShadows; }
     void SetCastsShadows(bool enabled) { _castsShadows = enabled; }
+    // A DXGI hardware index, or -1 for the renderer's primary GPU.
+    int GetSkinningAdapter() const { return _skinningAdapter; }
+    void SetSkinningAdapter(int adapter)
+    {
+        if (adapter < -1) throw std::invalid_argument("Invalid skinning adapter");
+        _skinningAdapter = adapter;
+    }
     const auto& GetLocalPose() const { return _localPose; }
     const auto& GetMaterials() const { return _materials; }
 
@@ -79,6 +86,7 @@ private:
     friend class RenderModule;
     Engine::Core::SceneHandle _scene;
     int _clip = -1;
+    int _skinningAdapter = -1;
     double _time = 0;
     double _speed = 1;
     double _rate = 0;

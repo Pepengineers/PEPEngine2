@@ -49,7 +49,12 @@ class SceneGeometry
 	GDX12ParticleInteractionField InteractionField() const { return _grass->InteractionField(); }
 
 	void Resize(UINT width, UINT height); // caller has drained all slots
-	void Freeze(UINT slot, UINT camera, std::vector<GDX12SkinningWork> skin);
+	void Freeze(UINT slot, UINT camera, std::vector<GDX12SkinningWork> skin,
+	            const std::shared_ptr<QueueSubmission>&);
+	void SubmitSkinning(UINT slot, const Schedule&, std::vector<PacketWait>&);
+	void SkinningSubmitted(UINT slot, uint64_t order, CompletionToken);
+	void RetireSkinning(UINT slot, const QueueSubmission&);
+	void DrainSkinning();
 	using AppendTechnique = std::function<void(Graph&, std::vector<ID3D12Resource*>&)>;
 	using AppendDepthNormals = std::function<void(Graph&, std::vector<ID3D12Resource*>&, Id ready)>;
 	void AppendWorldCanvases(Graph&, UINT slot, const std::vector<CanvasRead>&);
@@ -85,6 +90,21 @@ class SceneGeometry
 		UINT64 Bytes = 0;
 		GDX12Descriptor Srv, Uav;
 	};
+	struct RemoteSkinning
+	{
+		RemoteSkinning(const std::shared_ptr<QueueSubmission>& submit, Id owner) : GPU(submit, owner, 1, 1) {}
+		struct Range
+		{
+			GDX12SkinningWork Work;
+			UINT FirstVertex;
+		};
+		std::vector<Range> Ranges;
+		UINT VertexCount = 0;
+		std::shared_ptr<GDX12ResourceHandle> Output;
+		QueueSubmission::TransferBuffer Transfer;
+		UINT64 TransferBytes = 0;
+		Executor GPU;
+	};
 	struct Slot
 	{
 		NativeWork LindenWork;
@@ -111,11 +131,17 @@ class SceneGeometry
 		std::vector<ID3D12Resource*> SkinBindings;
 		std::vector<Resource> SkinDeclarations;
 		std::vector<std::array<Id, 5>> SkinIds;
+		std::map<Id, RemoteSkinning> RemoteSkin;
+		NativeWork SkinImports;
+		Id SkinImport = Invalid;
+		uint64_t SkinOrder = 0;
+		CompletionToken SkinConsumer;
 		std::unique_ptr<GDX12InstanceBatcher> Batcher;
 		GDX12ResourceHandle BatchCounter;
 		UINT Batches = 0, InstanceCount = 0;
 		std::array<Id, 5> BatchIds{};
 	};
+	void AppendSkinImports(Graph&, Slot&);
 	void RecordUploads(const Slot&, UINT bucket, ID3D12GraphicsCommandList*) const;
 	enum class GeometryPass { Depth, GBuffer, WorldCanvas };
 	void RecordGeometry(const Slot&, GeometryPass, ID3D12GraphicsCommandList*) const;
@@ -123,6 +149,7 @@ class SceneGeometry
 	GDX12DeviceResources& _resources;
 	std::vector<Slot> _slots;
 	uint64_t _vertexDeformationRevision = 0;
+	std::unordered_set<Id> _reportedSkinOwners;
 	std::unique_ptr<GDX12RootSignature> _cullRoot, _clearRoot, _drawRoot;
 	std::unique_ptr<SceneGrass> _grass;
 	LindenSimulation _lindenSimulation;

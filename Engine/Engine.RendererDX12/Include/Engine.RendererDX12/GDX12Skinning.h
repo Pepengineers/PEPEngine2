@@ -34,9 +34,13 @@ bool GDX12SkeletalInstancingEnabled();
 struct GDX12SkinningWork {
     ComPtr<ID3D12RootSignature> Root;
     ComPtr<ID3D12PipelineState> Pipeline;
-    std::array<ID3D12Resource*,5> Resources{}; // palette upload/default, vertices/ranges/influences
-    UINT VertexCount=0, OutputVertex=0, BoneCount=0;
-    void Record(ID3D12GraphicsCommandList*, D3D12_GPU_VIRTUAL_ADDRESS output) const;
+    std::array<GDX12ResourceHandle, 5> Resources; // palette upload/default, vertices/ranges/influences
+    UINT VertexCount = 0, OutputVertex = 0, BoneCount = 0;
+    UINT Owner = 0, Instance = 0;
+    UINT64 PaletteBytes() const { return UINT64(BoneCount) * sizeof(GDX12SkinPalette); }
+    UINT64 VertexBytes() const { return UINT64(VertexCount) * sizeof(Vertex); }
+    void RecordPalette(ID3D12GraphicsCommandList*) const;
+    void Record(ID3D12GraphicsCommandList*, D3D12_GPU_VIRTUAL_ADDRESS output, UINT firstVertex) const;
 };
 
 class GDX12Skinning

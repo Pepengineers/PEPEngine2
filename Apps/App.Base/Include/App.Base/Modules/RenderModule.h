@@ -86,7 +86,8 @@ public:
 
     //Uploads Mesh geometry to GPU
     void SubmitMesh(const Mesh* mesh, MeshHandle handle);
-    std::vector<GDX12SkinningWork> FreezeSkeletalMeshes();
+    std::vector<GDX12SkinningWork> FreezeSkeletalMeshes(
+        const std::function<std::pair<UINT, GDX12Device*>(int)>& selectAdapter);
     void ReserveInstanceCapacity(UINT additionalInstances);
     void ReserveTransformCapacity(UINT additionalTransforms);
 
@@ -174,7 +175,8 @@ private:
         std::vector<Matrix> InverseBinds;
         DirectX::BoundingBox SourceBounds;
         DirectX::BoundingBox Bounds;
-        std::unique_ptr<GDX12SkinMesh> GPU;
+        UINT OutputVertex = 0, VertexCount = 0;
+        std::vector<std::unique_ptr<GDX12SkinMesh>> OwnerMeshes;
         std::vector<GDX12SkinPalette> Palette;
     };
     struct SkeletalState
@@ -189,6 +191,8 @@ private:
         bool NeedsSettle = false;
         bool Dispatch = false;
         bool Seen = false;
+        int RequestedAdapter = -1;
+        UINT SkinningOwner = UINT_MAX;
     };
     void PrepareSkeletalMeshes();
     void UpdateSkeletalPose(World& world, Entity entity, SkeletalMeshRenderComponent& component,
@@ -277,7 +281,7 @@ private:
         std::unordered_map<std::string, std::unique_ptr<GDX12Material>> Materials;
         std::vector<GDX12ResourceHandle> Uploads;
         std::map<std::pair<World*, Entity>, SkeletalState> SkeletalStates;
-        std::unique_ptr<GDX12Skinning> Skinning;
+        std::map<UINT, std::unique_ptr<GDX12Skinning>> Skinning;
         std::unique_ptr<GDX12SwapChain> BackBuffer;
         std::unique_ptr<IRenderPipeline> Pipeline;
     };

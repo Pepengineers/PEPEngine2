@@ -26,6 +26,17 @@ Editor/Benchmark application targets are not part of this renderer.
 `false` uses DIRECT. Scheduling is controlled by the graph, with no separate
 legacy per-technique async switches.
 
+### Skeletal deformation placement
+
+`App.NPC.Skinning.Adapter` and `App.Fox.Skinning.Adapter` select a DXGI hardware
+index in Startup.ini. Both default to `-1` (GPU0). Each skeletal component can
+also change its own owner with `SetSkinningAdapter`. Instancing batches draws
+while each independently animated pose keeps its own deformation order.
+
+A remote owner computes the current frame's pose, including previous positions
+for motion vectors. GPU0 imports only the changed vertex ranges before drawing.
+Shadows on the same owner can copy those ranges from the owner-local result.
+
 ### Shadow placement
 
 Bistro renders shadows on the primary adapter by default. `App.Shadows.Sun.Adapter`

@@ -43,13 +43,13 @@ void RenderModule::ReleaseSkeletalState(World& world, Entity entity)
     {
         _primaryResources.RemoveMeshPrimitive(part.Instance);
         _primaryResources.IndirectCommandsCache->CopyData(part.Instance, empty);
-        _primaryResources.GeometryBuffer->ReleaseSkinnedVertices(part.GPU->OutputVertex, part.GPU->VertexCount);
+        _primaryResources.GeometryBuffer->ReleaseSkinnedVertices(part.OutputVertex, part.VertexCount);
         _freeSkeletalInstances.push_back(part.Instance);
     }
     _skeletalStates.erase(it);
     _skeletalBatchDirty = true;
     ++_primaryResources.ReflectionDynamicRevision;
-    if (_skeletalStates.empty() && !_batchWorldRelease) _skinning.reset();
+    if (_skeletalStates.empty() && !_batchWorldRelease) _skinning.clear();
 }
 
 void RenderModule::PrepareSkeletalMeshes()
@@ -190,7 +190,6 @@ void RenderModule::PrepareSkeletalMeshes()
                         }
                     const auto extra = partCount > _freeSkeletalInstances.size() ? partCount - _freeSkeletalInstances.size() : 0;
                     if (extra > UINT_MAX - _instanceCount) throw std::overflow_error("Too many skeletal attachments");
-                    if (partCount && !_skinning) _skinning = std::make_unique<GDX12Skinning>(_primaryDevice.get());
                     EnsureInstanceCapacity(_instanceCount + static_cast<UINT>(extra));
                     // Upload source meshes first so they cannot consume the reserved output range.
                     _primaryResources.GeometryBuffer->ReserveSkinnedVertices(skinVertices);
@@ -237,9 +236,9 @@ void RenderModule::PrepareSkeletalMeshes()
                                     part.BoneNodes.push_back(index);
                                     part.InverseBinds.push_back(bone.InverseBind);
                                 }
-                                part.GPU = _skinning->CreateMesh(source, static_cast<UINT>(_primaryResources.FrameConstants.size()), handle, revision);
                                 part.Palette.resize(part.BoneNodes.size() + 1);
-                                part.GPU->OutputVertex = _primaryResources.GeometryBuffer->AllocateSkinnedVertices(part.GPU->VertexCount);
+                                part.VertexCount = static_cast<UINT>(source.Vertices.size());
+                                part.OutputVertex = _primaryResources.GeometryBuffer->AllocateSkinnedVertices(part.VertexCount);
                                 if (_freeSkeletalInstances.empty()) part.Instance = _instanceCount++;
                                 else
                                 {
@@ -268,6 +267,7 @@ void RenderModule::PrepareSkeletalMeshes()
             auto& state = _skeletalStates.at(key);
             _skeletalBatchDirty |= state.ComponentRevision != component._revision;
             state.Seen = true;
+            state.RequestedAdapter = component.GetSkinningAdapter();
             if (state.Parts.empty()) return;
             poses.Tasks.push_back({world, entity, &component, &state, scene});
         });
@@ -426,7 +426,7 @@ void RenderModule::UpdateSkeletalPose(World& world, Entity entity, SkeletalMeshR
         instance.MaterialIndex = part.Material;
         instance.ReflectionDynamic = 1;
         instance.CastsShadows = component.GetCastsShadows() ? 1u : 0u;
-        instance.SkinOutputVertex = part.GPU->OutputVertex;
+        instance.SkinOutputVertex = part.OutputVertex;
         instance.SkinBatch = part.Batch;
         instance.SkinBatchStart = part.BatchStart;
         instance.BoundingBoxCenter = part.Bounds.Center;
@@ -439,11 +439,36 @@ void RenderModule::UpdateSkeletalPose(World& world, Entity entity, SkeletalMeshR
 
 
 
-std::vector<GDX12SkinningWork> RenderModule::FreezeSkeletalMeshes() {
+std::vector<GDX12SkinningWork> RenderModule::FreezeSkeletalMeshes(
+    const std::function<std::pair<UINT, GDX12Device*>(int)>& selectAdapter)
+{
     std::vector<GDX12SkinningWork> result;
-    for(auto& [owner,state]:_skeletalStates) {
-        if(!state.Dispatch) continue;
-        for(auto& part:state.Parts) result.push_back(_skinning->Freeze(*part.GPU,_primaryResources.CurrFrameConstantsIndex,part.Palette));
+    auto& meshes = AssetManager::GetInstance().Meshes();
+    const auto slot = _primaryResources.CurrFrameConstantsIndex;
+    for (auto& [entity, state] : _skeletalStates)
+    {
+        if (state.Parts.empty()) continue;
+        const auto [owner, device] = selectAdapter(state.RequestedAdapter);
+        if (!state.Dispatch && state.SkinningOwner == owner) continue;
+        auto& skinning = _skinning[owner];
+        if (!skinning) skinning = std::make_unique<GDX12Skinning>(device);
+        for (auto& part : state.Parts)
+        {
+            if (part.OwnerMeshes.size() <= owner) part.OwnerMeshes.resize(size_t(owner) + 1);
+            auto& ownerMesh = part.OwnerMeshes[owner];
+            if (!ownerMesh)
+            {
+                const auto& source = meshes.GetMesh(part.Mesh)->GetSubMesh(part.SubMesh);
+                ownerMesh = skinning->CreateMesh(source, UINT(_primaryResources.FrameConstants.size()),
+                    part.Mesh, part.MeshRevision);
+                ownerMesh->OutputVertex = part.OutputVertex;
+            }
+            auto work = skinning->Freeze(*ownerMesh, slot, part.Palette);
+            work.Owner = owner;
+            work.Instance = part.Instance;
+            result.push_back(std::move(work));
+        }
+        state.SkinningOwner = owner;
     }
     return result;
 }
