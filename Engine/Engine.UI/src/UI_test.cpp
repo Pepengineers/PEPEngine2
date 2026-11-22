@@ -393,7 +393,8 @@ namespace Engine::UI
             {
                 if (command.UserCallback)
                 {
-                    if (command.UserCallback != ImDrawCallback_ResetRenderState)
+                    if (command.UserCallback != ImDrawCallback_ResetRenderState &&
+                        (!ImGui::GetCurrentContext() || command.UserCallback != ImGui::GetPlatformIO().DrawCallback_ResetRenderState))
                         throw std::invalid_argument("UI capture cannot defer custom ImGui callbacks");
                     command.TexRef = {};
                     command.UserCallbackData = nullptr;
@@ -623,17 +624,19 @@ namespace Engine::UI
         }
 
         DrawLists playback(captured.Lists.Data);
+        ImGuiContextScope scope(state.Context);
         playback.Data.FramebufferScale = {static_cast<float>(targetDesc.Width) / playback.Data.DisplaySize.x,
             static_cast<float>(targetDesc.Height) / playback.Data.DisplaySize.y};
         for (auto* drawList : playback.Data.CmdLists)
             for (auto& command : drawList->CmdBuffer)
-                if (!command.UserCallback)
+                if (command.UserCallback)
+                    command.UserCallback = ImGui::GetPlatformIO().DrawCallback_ResetRenderState;
+                else
                 {
                     const auto index = static_cast<UINT>(command.TexRef._TexID - 1);
                     command.TexRef = ImTextureRef(state.SrvHeap.GetGPUHandle(base + index).ptr);
                 }
 
-        ImGuiContextScope scope(state.Context);
         playback.Data.OwnerViewport = ImGui::GetMainViewport();
         for (const auto& upload : recording->Uploads)
         {

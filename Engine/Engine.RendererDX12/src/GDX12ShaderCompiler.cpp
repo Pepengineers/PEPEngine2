@@ -56,7 +56,7 @@ std::string GDX12ShaderCompiler::GetShaderTargetForModel(GDX12Device* device, co
     const auto model = device->GetDeviceFeatures().Features.HighestShaderModel();
     if (model < D3D_SHADER_MODEL_6_0)
         throw std::invalid_argument("Shader compilation requires Shader Model 6.0 or newer (DXC)");
-    // shortcut: bundled DXC 1.8 signs retail shaders through SM 6.8; raise with the compiler upgrade.
+    // Keep existing shader profiles when the driver exposes a newer shader model.
     const auto targetModel = (std::min)(model, D3D_SHADER_MODEL_6_8);
     return shaderType + "_6_" + std::to_string(targetModel & 0xF);
 }

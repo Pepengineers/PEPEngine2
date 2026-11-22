@@ -13,7 +13,7 @@ $valid = @'
     <ClCompile>
       <Optimization>MaxSpeed</Optimization><InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary><DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
-      <PreprocessorDefinitions>_DEBUG;_ITERATOR_DEBUG_LEVEL=2;JPH_ENABLE_ASSERTS;JPH_OBJECT_STREAM;JPH_DEBUG_RENDERER;JPH_PROFILE_ENABLED;JPH_FLOATING_POINT_EXCEPTIONS_ENABLED;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DEBUG;_ITERATOR_DEBUG_LEVEL=2;JPH_DEBUG;JPH_OBJECT_STREAM;JPH_DEBUG_RENDERER;JPH_PROFILE_ENABLED;JPH_FLOATING_POINT_EXCEPTIONS_ENABLED;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
   </ItemDefinitionGroup>
 </Project>
@@ -25,7 +25,7 @@ try {
         $valid.Replace('MaxSpeed', 'Disabled'),
         $valid.Replace('MultiThreadedDebugDLL', 'MultiThreadedDLL'),
         $valid.Replace('_ITERATOR_DEBUG_LEVEL=2', '_ITERATOR_DEBUG_LEVEL=0'),
-        $valid.Replace('JPH_ENABLE_ASSERTS;', ''),
+        $valid.Replace('JPH_DEBUG;', ''),
         $valid.Replace('</ClCompile>', '<BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks></ClCompile>'))) {
         [IO.File]::WriteAllText($path, $broken)
         $rejected = $false

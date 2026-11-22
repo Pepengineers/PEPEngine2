@@ -1,4 +1,5 @@
-param([string]$VisualStudioDirectory, [string]$SourceDirectory)
+param([string]$VisualStudioDirectory, [string]$SourceDirectory,
+    [ValidateSet('Debug', 'Release', 'Distribution')][string]$Configuration = 'Debug')
 $ErrorActionPreference = 'Stop'
 
 function Test-JoltDebugProject([string]$Path) {
@@ -12,7 +13,7 @@ function Test-JoltDebugProject([string]$Path) {
         throw "Jolt must retain symbols and Debug DLL CRT while using /O2 /Ob2 without /RTC: $Path"
     }
     $definitions = $compile.PreprocessorDefinitions -split ';'
-    foreach ($required in @('_DEBUG', '_ITERATOR_DEBUG_LEVEL=2', 'JPH_ENABLE_ASSERTS', 'JPH_OBJECT_STREAM',
+    foreach ($required in @('_DEBUG', '_ITERATOR_DEBUG_LEVEL=2', 'JPH_DEBUG', 'JPH_OBJECT_STREAM',
         'JPH_DEBUG_RENDERER', 'JPH_PROFILE_ENABLED', 'JPH_FLOATING_POINT_EXCEPTIONS_ENABLED')) {
         if ($required -notin $definitions) { throw "Jolt Debug is missing $required in $Path" }
     }
@@ -43,9 +44,9 @@ try {
     $configure = @('-S', "$SourceDirectory/Build", '-B', $build, '-G', 'Visual Studio 18 2026', '-A', 'x64', '-T', 'v145,host=x64',
         "-DCMAKE_GENERATOR_INSTANCE=$VisualStudioDirectory", '-DOVERRIDE_CXX_FLAGS=OFF',
         '-DCMAKE_CXX_FLAGS_DEBUG=/GS /O2 /Ob2 /D_DEBUG /D_ITERATOR_DEBUG_LEVEL=2',
-        '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDebugDLL', '-DUSE_STATIC_MSVC_RUNTIME_LIBRARY=OFF',
-        '-DJPH_BUILD_SHARED_LIBS=OFF', '-DINTERPROCEDURAL_OPTIMIZATION=OFF', '-DGENERATE_DEBUG_SYMBOLS=ON',
-        '-DUSE_ASSERTS=ON', '-DENABLE_OBJECT_STREAM=ON', '-DDEBUG_RENDERER_IN_DEBUG_AND_RELEASE=ON',
+        '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded$<$<CONFIG:Debug>:Debug>DLL', '-DUSE_STATIC_MSVC_RUNTIME_LIBRARY=OFF',
+        '-DJPH_BUILD_SHARED_LIBS=OFF', '-DENABLE_INSTALL=OFF', '-DINTERPROCEDURAL_OPTIMIZATION=OFF', '-DGENERATE_DEBUG_SYMBOLS=ON',
+        '-DUSE_ASSERTS=OFF', '-DENABLE_OBJECT_STREAM=ON', '-DDEBUG_RENDERER_IN_DEBUG_AND_RELEASE=ON',
         '-DPROFILER_IN_DEBUG_AND_RELEASE=ON', '-DFLOATING_POINT_EXCEPTIONS_ENABLED=ON',
         '-DTARGET_UNIT_TESTS=OFF', '-DTARGET_HELLO_WORLD=OFF', '-DTARGET_PERFORMANCE_TEST=OFF', '-DTARGET_SAMPLES=OFF', '-DTARGET_VIEWER=OFF',
         '-DJPH_USE_DX12=OFF', '-DJPH_USE_VK=OFF', '-DJPH_USE_MTL=OFF', '-DJPH_USE_CPU_COMPUTE=OFF',
@@ -54,10 +55,10 @@ try {
     # Always let CMake/MSBuild check their input dependencies, including changed source and compiler flags.
     & $cmake @configure
     if ($LASTEXITCODE) { throw "Jolt CMake configuration failed in $build" }
-    Test-JoltDebugProject (Join-Path $build 'Jolt.vcxproj')
-    & $cmake --build $build --config Debug --target Jolt -- /m:1 /nr:false /p:PreferredToolArchitecture=x64
-    if ($LASTEXITCODE) { throw "Optimized Debug Jolt build failed in $build" }
-    if (!(Test-Path "$build/Debug/Jolt.lib")) { throw "Jolt build produced no archive: $build/Debug/Jolt.lib" }
+    if ($Configuration -eq 'Debug') { Test-JoltDebugProject (Join-Path $build 'Jolt.vcxproj') }
+    & $cmake --build $build --config $Configuration --target Jolt -- /m:1 /nr:false /p:PreferredToolArchitecture=x64
+    if ($LASTEXITCODE) { throw "Jolt $Configuration build failed in $build" }
+    if (!(Test-Path "$build/$Configuration/Jolt.lib")) { throw "Jolt build produced no archive: $build/$Configuration/Jolt.lib" }
 }
 finally {
     if ($locked) { $mutex.ReleaseMutex() }

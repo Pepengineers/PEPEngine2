@@ -137,8 +137,8 @@ namespace Engine::UI
             const float pulse = 0.75f + 0.25f * std::sin(time * 3.2f);
             const ImU32 cyan = IM_COL32(70, 255, 245, static_cast<int>(220 + 35 * pulse));
             const ImU32 pink = IM_COL32(255, 30, 155, 255);
-            draw->AddRect({size.x * 0.035f, size.y * 0.06f}, {size.x * 0.965f, size.y * 0.94f}, pink, 7, 0, 3);
-            draw->AddRect({size.x * 0.05f, size.y * 0.085f}, {size.x * 0.95f, size.y * 0.915f}, cyan, 5, 0, 1);
+            draw->AddRect({size.x * 0.035f, size.y * 0.06f}, {size.x * 0.965f, size.y * 0.94f}, pink, 7, 3.0f);
+            draw->AddRect({size.x * 0.05f, size.y * 0.085f}, {size.x * 0.95f, size.y * 0.915f}, cyan, 5);
             text(state.Title.c_str(), size.y * 0.055f, {size.x * 0.085f, size.y * 0.15f}, cyan);
             char live[32];
             std::snprintf(live, sizeof(live), "LIVE %05.1f", time);

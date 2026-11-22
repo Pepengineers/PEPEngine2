@@ -5,5 +5,8 @@
     <ClCompile>
       <AdditionalIncludeDirectories>$(PEPExternalDirectXMeshInclude);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
+    <Link>
+      <AdditionalLibraryDirectories>$(PEPRepoRoot)External\External.Libraries\directxmesh\lib\$(Platform)\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+    </Link>
   </ItemDefinitionGroup>
 </Project>

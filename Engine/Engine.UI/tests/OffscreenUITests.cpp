@@ -193,7 +193,7 @@ static std::array<std::vector<Pixel>, 2> TestScreen(GDX12Device& device)
         ~Screen() { ShutdownUI(); if (Window) DestroyWindow(Window); }
     } screen;
     Require(screen.Window != nullptr, "Cannot create hidden Win32 UI fixture");
-    Initialize(screen.Window, &device, 2, OffscreenFormat);
+    Initialize(screen.Window, &device, 2, OffscreenFormat, GDX12DeviceFactory::GetDeviceDescriptors());
     ImGui::GetIO().IniFilename = nullptr;
     ImGui::GetIO().Fonts->AddFontDefaultVector();
 #ifdef _DEBUG

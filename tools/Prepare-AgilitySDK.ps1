@@ -10,14 +10,14 @@ function Get-FileSHA256([string]$filePath) {
     finally { $stream.Dispose(); $sha.Dispose() }
 }
 $repo = Split-Path $PSScriptRoot -Parent
-$version = '1.619.6'
+$version = '1.620.2'
 $dependencies = Join-Path $repo 'Build/Dependencies'
 $archive = Join-Path $dependencies "agility-$version.zip"
 $sdk = Join-Path $dependencies "AgilitySDK-$version"
 $binaries = Join-Path $sdk "build/native/bin/$($Architecture.ToLowerInvariant())"
 $runtime = @('D3D12Core.dll', 'd3d12SDKLayers.dll', 'D3D12StateObjectCompiler.dll')
 # Several application projects can request the same cache in a parallel build.
-$mutex = [Threading.Mutex]::new($false, 'Local\PEPEngine2.AgilitySDK.1.619.6')
+$mutex = [Threading.Mutex]::new($false, 'Local\PEPEngine2.AgilitySDK.1.620.2')
 $locked = $false
 try {
     $locked = $mutex.WaitOne(60000)
@@ -31,7 +31,7 @@ try {
         }
         $hash = Get-FileSHA256 $archive
         if ($hash -ne
-            '08F0489281401AA430FC37322D6C3FC98A8025175AACD714C10D562F4963F1E9') {
+            '70489669C2BBEAF318B62D72B0AC3E753D521387BFC848C9763791C4E920BFCC') {
             throw 'Agility SDK archive SHA256 mismatch'
         }
         New-Item -ItemType Directory -Force $sdk | Out-Null

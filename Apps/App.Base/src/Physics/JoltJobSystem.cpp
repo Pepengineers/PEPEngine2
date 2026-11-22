@@ -43,6 +43,13 @@ JPH::JobHandle JoltJobSystem::CreateJob(const char* name, JPH::ColorArg color,
     return handle;
 }
 
+void JoltJobSystem::CreateJobs(const char* name, JPH::ColorArg color, const JobFunction& function,
+    JobHandle* jobs, JPH::uint32 count, JPH::uint32 dependencies)
+{
+    for (JPH::uint32 i = 0; i < count; ++i)
+        jobs[i] = CreateJob(name, color, function, dependencies);
+}
+
 void JoltJobSystem::QueueJob(Job* job)
 {
     job->AddRef();
