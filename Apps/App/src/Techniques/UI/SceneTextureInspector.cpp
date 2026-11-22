@@ -19,7 +19,7 @@ namespace BistroRender
 {
 namespace
 {
-AutoConsoleVariable<bool> Enabled(L"Render.Debug.SceneTextures", false, L"Show the scene texture inspector in F1.");
+AutoConsoleVariable<bool> Enabled(L"Render.Debug.SceneTextures", false, L"Show the scene texture inspector (F8).");
 constexpr UINT Tile = 512;
 constexpr UINT TilesAcross = 3;
 constexpr UINT Capacity = 6;
@@ -61,6 +61,14 @@ View DefaultView(const D3D12_RESOURCE_DESC& desc, DXGI_FORMAT format)
 		return View::HDR;
 	return View::Color;
 }
+}
+
+bool SceneTextureInspector::Visible() { return Enabled.GetValue(); }
+
+void SceneTextureInspector::SetVisible(bool visible)
+{
+	if (Visible() != visible)
+		ConsoleModule{}.ApplyPatch({{std::wstring(Enabled.GetName()), visible ? "true" : "false"}});
 }
 
 SceneTextureInspector::SceneTextureInspector(UINT slots) : _slots(slots)
@@ -254,7 +262,7 @@ void SceneTextureInspector::RetireReadback(Id owner, UINT slot)
 SceneTextureInspector::Atlases SceneTextureInspector::Append(const Input& scene, const Input* post,
     UINT index, float nearPlane, float farPlane)
 {
-	if (!Enabled.GetValue() || !Engine::UI::DebugUIVisible())
+	if (!Visible() || !ImGui::GetCurrentContext())
 		return {};
 	auto catalog = Collect(scene.Plan, scene.Bindings, scene.BackBuffer);
 	if (post)
@@ -370,7 +378,7 @@ SceneTextureInspector::Atlases SceneTextureInspector::Append(const Input& scene,
 		}
 	}
 	ImGui::End();
-	if (!open) Enabled.SetValue(false);
+	if (!open) SetVisible(false);
 	return {AppendAtlas(scene, index, previews[0], nearPlane, farPlane, _channel, _depthRange),
 	        post ? post->Inspector.AppendAtlas(*post, index, previews[1], nearPlane, farPlane, _channel, _depthRange) : nullptr};
 }

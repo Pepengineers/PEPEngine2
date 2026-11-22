@@ -183,7 +183,10 @@ void BistroInfoPanel::Draw(RenderModule& render, BistroRenderPipeline& pipeline,
     const float margin = std::min(12.f, std::min(vp->Size.x, vp->Size.y) * .03f);
     const float width = std::min(_compact ? 410.f : 980.f, vp->Size.x - 2 * margin);
     const float height = vp->Size.y - 2 * margin;
-    ImGui::SetNextWindowPos({vp->Pos.x + vp->Size.x - margin, vp->Pos.y + margin}, ImGuiCond_Always, {1, 0});
+    if (_compact)
+        ImGui::SetNextWindowPos({vp->Pos.x + margin, vp->Pos.y + vp->Size.y - margin}, ImGuiCond_Always, {0, 1});
+    else
+        ImGui::SetNextWindowPos({vp->Pos.x + vp->Size.x - margin, vp->Pos.y + margin}, ImGuiCond_Always, {1, 0});
     ImGui::SetNextWindowSizeConstraints({width, 0}, {width, height});
     ImGui::SetNextWindowSize({width, _compact ? 0.f : std::min(680.f, height)});
     ImGui::SetNextWindowViewport(vp->ID);

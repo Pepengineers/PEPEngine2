@@ -42,7 +42,7 @@ public:
     Window* GetWindow() const;
     int Run();
     bool Initialize() override;
-    void CalculateFrameStats() const;
+    void CalculateFrameStats();
 
     LRESULT MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -72,6 +72,8 @@ protected:
 
     virtual bool OnKeyReleased(WPARAM) { return false; }
     virtual std::wstring StatusCaption() const { return {}; }
+    void RefreshWindowCaption() const;
+    std::wstring _frameTimingCaption;
     virtual void OnResize();
     virtual void OnPauseChanged(bool) {}
 

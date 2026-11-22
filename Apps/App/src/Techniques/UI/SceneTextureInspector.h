@@ -13,6 +13,8 @@ public:
 	enum class View : UINT { Color, Scalar, Depth, Normals, Motion, HDR };
 
 	explicit SceneTextureInspector(UINT slots);
+	static bool Visible();
+	static void SetVisible(bool visible);
 	bool NeedsReadback() const { return !_readbackName.empty(); }
 	bool NeedsReadback(std::string_view name) const { return _readbackName == name; }
 	struct Input

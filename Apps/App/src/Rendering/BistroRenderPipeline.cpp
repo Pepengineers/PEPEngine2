@@ -137,7 +137,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	_post->BeginPlan(*_executor, _frameNumber);
 	auto& textures = _post->Textures();
 	using View = BistroRender::SceneTextureInspector::View;
-	const bool inspect = Engine::UI::DebugUIVisible();
+	const bool inspect = BistroRender::SceneTextureInspector::Visible();
 	if ((inspect || textures.NeedsReadback()) && _geometry->PrepassNormals(slot))
 	{
 		textures.Name("Scene.Depth", depth, View::Depth);

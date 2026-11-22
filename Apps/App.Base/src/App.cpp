@@ -13,6 +13,7 @@
 
 #include <filesystem>
 #include <chrono>
+#include <cwchar>
 #include <string>
 
 #include "Engine.RendererDX12/GDX12StreamlineSDK.h"
@@ -39,7 +40,7 @@ namespace Private
 }
 
 
-void App::CalculateFrameStats() const
+void App::CalculateFrameStats()
 {
     // Code computes the average frames per second, and also the
     // average time it takes to render one frame. These stats
@@ -57,15 +58,10 @@ void App::CalculateFrameStats() const
         float Fps = static_cast<float>(FrameCount) / elapsed;
         float MsPerFrame = 1000.0f / Fps;
 
-        std::wstring FpsString = std::to_wstring(Fps);
-        std::wstring MsPerFrameString = std::to_wstring(MsPerFrame);
-
-        const auto status = StatusCaption();
-        std::wstring WindowText = status.empty() ? _window->GetWindowTitle() +
-            L"    fps: " + FpsString +
-            L"   mspf: " + MsPerFrameString : status;
-
-        SetWindowText(_window->GetWindowHandle(), WindowText.c_str());
+        wchar_t timing[64]{};
+        std::swprintf(timing, std::size(timing), L"%.1f FPS / %.1f ms", Fps, MsPerFrame);
+        _frameTimingCaption = timing;
+        RefreshWindowCaption();
 
         // Reset for next average.
         FrameCount = 0;
@@ -73,6 +69,15 @@ void App::CalculateFrameStats() const
     }
 }
 
+
+void App::RefreshWindowCaption() const
+{
+    auto title = _window->GetWindowTitle();
+    if (!_frameTimingCaption.empty()) title += L" | " + _frameTimingCaption;
+    const auto status = StatusCaption();
+    if (!status.empty()) title += L" | " + status;
+    SetWindowTextW(_window->GetWindowHandle(), title.c_str());
+}
 
 App* App::GetInstance()
 {

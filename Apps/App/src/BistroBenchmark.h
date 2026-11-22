@@ -253,7 +253,7 @@ public:
         return widen(StageName()) + L" | " + widen(Measuring() ? SectionName(Section(_routeTime)) : "Warmup") +
             L" | " + std::to_wstring(int(std::clamp(_elapsed / pass, 0., 1.) * 100)) + L"% | " +
             std::to_wstring(int(std::ceil(std::max(0., pass - _elapsed)))) +
-            L"s left in pass | Esc: cancel | F6: compact | F7: full";
+            L"s left in pass";
     }
 
     void DrawRouteStatus(bool detailed) const

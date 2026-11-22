@@ -244,13 +244,14 @@ class BistroApplication final : public App
 		if (_benchmark.Active() && (!_runActive || _legNumber != _benchmark.LegNumber()))
 		{
 			_info.Hide();
+			BistroRender::SceneTextureInspector::SetVisible(false);
 			_legNumber = _benchmark.LegNumber();
-			SetWindowTextW(GetWindow()->GetWindowHandle(), StatusCaption().c_str());
+			RefreshWindowCaption();
 		}
 		if (!_benchmark.Active() && _runActive)
 		{
 			_info.ShowFull();
-			SetWindowTextW(GetWindow()->GetWindowHandle(), GetWindow()->GetWindowTitle().c_str());
+			RefreshWindowCaption();
 		}
 		_runActive = _benchmark.Active();
 		Engine::UI::SetSettingsEditingEnabled(!_runActive);
@@ -293,12 +294,20 @@ class BistroApplication final : public App
   private:
 	std::wstring StatusCaption() const override
 	{
-		return _benchmark.Active() ? _benchmark.Caption() : std::wstring{};
+		std::wstring status;
+		if (_benchmark.Active()) status = _benchmark.Caption() + L" | Esc: cancel | ";
+		return status + L"F6: compact | F7: full | F8: textures";
 	}
 	bool OnKeyReleased(WPARAM key) override
 	{
 		if (key == VK_ESCAPE && _benchmark.Active()) { _benchmark.RequestCancel(); return true; }
 		if (key == VK_F6 || key == VK_F7) { _info.Toggle(key == VK_F6); return true; }
+		if (key == VK_F8)
+		{
+			using BistroRender::SceneTextureInspector;
+			SceneTextureInspector::SetVisible(!SceneTextureInspector::Visible());
+			return true;
+		}
 		return false;
 	}
 	bool _runActive = false;
