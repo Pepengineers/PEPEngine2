@@ -10,10 +10,12 @@
 #include <Engine.Core/Logging/Logger.h>
 
 GDX12SwapChain::GDX12SwapChain(GDX12Device* device, const HWND hwnd,
-    const DXGI_FORMAT format, const UINT bufferCount, const UINT width, const UINT height, GDX12DescriptorHeap* rtvHeap, bool applySettings)
-    : _device(device), _hwnd(hwnd),
-    _format(format), _bufferCount(bufferCount), _currentBufferIndex(0),
-    _width(width), _height(height), _rtvHeap(rtvHeap), bVSyncEnabled(false)
+    const DXGI_FORMAT format, const UINT bufferCount, const UINT width, const UINT height, bool applySettings)
+    : bVSyncEnabled(false), _device(device),
+    _rtvHeap(std::make_unique<GDX12DescriptorHeap>(device, D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
+        bufferCount, D3D12_DESCRIPTOR_HEAP_FLAG_NONE)),
+    _format(format), _bufferCount(bufferCount), _currentBufferIndex(0), _hwnd(hwnd),
+    _width(width), _height(height)
 {
     _frameGeneration = std::make_unique<GDX12FrameGeneration>(_device);
     CreatePresentation(applySettings);
@@ -68,7 +70,7 @@ void GDX12SwapChain::CreateBuffers()
         backBuffer = GDX12StreamlineSDK::Get().GetNativeResource(backBuffer);
 
         GDX12TextureDesc textureDesc;
-        textureDesc.RTVHeap = _rtvHeap;
+        textureDesc.RTVHeap = _rtvHeap.get();
         textureDesc.Width = _width;
         textureDesc.Height = _height;
         textureDesc.Format = _format;

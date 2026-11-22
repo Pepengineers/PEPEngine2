@@ -131,19 +131,21 @@ std::vector<SceneTextureInspector::Source> SceneTextureInspector::Collect(Graph&
 	return catalog;
 }
 
-void SceneTextureInspector::AppendReadback(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work,
-    GDX12Device& device, UINT slot, ID3D12Resource* backBuffer)
+void SceneTextureInspector::AppendReadback(const Input& input, UINT slot, bool finalAttempt)
 {
 	if (!NeedsReadback() || _readback.Buffer.Get()) return;
-	const auto catalog = Collect(graph, bindings, backBuffer, true);
+	const auto& [inspector, graph, bindings, work, device, backBuffer] = input;
+	const auto catalog = inspector.Collect(graph, bindings, backBuffer, true);
 	const auto found = std::find_if(catalog.begin(), catalog.end(),
 	    [&](const Source& source) { return source.Name == _readbackName; });
 	if (found == catalog.end() || std::find(bindings.begin(), bindings.end(), found->Resource) == bindings.end())
 	{
-		if (!_loggedMissing)
+		if (finalAttempt && !_loggedMissing)
+		{
 			Log::Warning("RenderGraph", "Scene texture readback waiting for ", _readbackName,
-			    " to appear in the GPU0 graph");
-		_loggedMissing = true;
+			    " to appear in the active render graphs");
+			_loggedMissing = true;
+		}
 		return;
 	}
 
@@ -165,6 +167,7 @@ void SceneTextureInspector::AppendReadback(Graph& graph, std::vector<ID3D12Resou
 	}
 	auto& capture = _readback;
 	capture.Slot = slot;
+	capture.Owner = graph.Device;
 	device.GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &capture.Layout, &capture.Rows,
 	                                          &capture.RowBytes, &capture.Bytes);
 	if (!capture.Bytes || capture.Bytes == UINT64_MAX)
@@ -183,10 +186,16 @@ void SceneTextureInspector::AppendReadback(Graph& graph, std::vector<ID3D12Resou
 	    }, {}, Queue::Copy);
 }
 
-void SceneTextureInspector::RetireReadback(UINT slot)
+void SceneTextureInspector::ReadbackSubmitted(Id owner, UINT slot)
 {
-	if (!_readback.Buffer.Get() || _readback.Slot != slot) return;
-	auto capture = std::move(_readback);
+	if (_readback.Owner == owner && _readback.Slot == slot) _readback.Submitted = true;
+}
+
+void SceneTextureInspector::RetireReadback(Id owner, UINT slot)
+{
+	if (!_readback.Buffer.Get() || _readback.Owner != owner || _readback.Slot != slot) return;
+	auto capture = std::exchange(_readback, {});
+	if (!capture.Submitted) return;
 	const auto name = std::move(_readbackName);
 	_readbackName.clear();
 	const auto path = Engine::Core::GetExecutableDirectory() / "Logs" / "SceneTexture.bin";
@@ -233,7 +242,7 @@ void SceneTextureInspector::RetireReadback(UINT slot)
 		Log::Warning("RenderGraph", "Cannot write scene texture readback file ", path.string());
 		return;
 	}
-	Log::Info("RenderGraph", "Scene texture readback name=", name, " slot=", slot,
+	Log::Info("RenderGraph", "Scene texture readback name=", name, " adapter=", owner, " slot=", slot,
 	    " format=", int(shape.Format), " size=", shape.Width, "x", shape.Height, "x", shape.Depth,
 	    " rowBytes=", capture.RowBytes, " rows=", capture.Rows, " path=", path.string());
 	if (shape.Format == DXGI_FORMAT_R32_FLOAT)
@@ -241,14 +250,26 @@ void SceneTextureInspector::RetireReadback(UINT slot)
 		    " below0.999=", belowOne, " nonFinite=", nonFinite, " outsideUnitRange=", outsideUnitRange);
 }
 
-GDX12Texture* SceneTextureInspector::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work,
-    GDX12Device& device, UINT index, ID3D12Resource* backBuffer, float nearPlane, float farPlane)
+SceneTextureInspector::Atlases SceneTextureInspector::Append(const Input& scene, const Input* post,
+    UINT index, float nearPlane, float farPlane)
 {
 	if (!Enabled.GetValue() || !Engine::UI::DebugUIVisible())
-		return nullptr;
-	const auto catalog = Collect(graph, bindings, backBuffer);
+		return {};
+	auto catalog = Collect(scene.Plan, scene.Bindings, scene.BackBuffer);
+	if (post)
+	{
+		auto postCatalog = post->Inspector.Collect(post->Plan, post->Bindings, post->BackBuffer);
+		for (auto& source : postCatalog)
+		{
+			if (std::none_of(catalog.begin(), catalog.end(), [&](const auto& item) { return item.Name == source.Name; }))
+			{
+				source.Atlas = 1;
+				catalog.push_back(std::move(source));
+			}
+		}
+	}
 	bool open = true;
-	std::vector<Source> previews;
+	std::array<std::vector<Source>, 2> previews;
 	ImGui::SetNextWindowSize({730, 610}, ImGuiCond_FirstUseEver);
 	ImGui::SetNextWindowPos({345, 86}, ImGuiCond_FirstUseEver);
 	if (ImGui::Begin("Scene Textures", &open))
@@ -316,13 +337,14 @@ GDX12Texture* SceneTextureInspector::Append(Graph& graph, std::vector<ID3D12Reso
 				ImGui::TextDisabled("%llu x %u", static_cast<unsigned long long>(desc.Width), desc.Height);
 				const float width = (std::max)(1.f, ImGui::GetContentRegionAvail().x);
 				const float height = width * float(desc.Height) / float(desc.Width);
-				const UINT tile = static_cast<UINT>(previews.size());
+				auto& atlas = previews[source->Atlas];
+				const UINT tile = static_cast<UINT>(atlas.size());
 				const float x = float(tile % TilesAcross);
 				const float y = float(tile / TilesAcross);
-				ImGui::Image(static_cast<ImTextureID>(AtlasId), {width, height},
+				ImGui::Image(static_cast<ImTextureID>(AtlasId(source->Atlas)), {width, height},
 				             {(x + 0.5f / Tile) / TilesAcross, (y + 0.5f / Tile) / 2},
 				             {(x + 1 - 0.5f / Tile) / TilesAcross, (y + 1 - 0.5f / Tile) / 2});
-				previews.push_back(*source);
+				atlas.push_back(*source);
 			}
 			ImGui::EndTable();
 		}
@@ -330,8 +352,16 @@ GDX12Texture* SceneTextureInspector::Append(Graph& graph, std::vector<ID3D12Reso
 	}
 	ImGui::End();
 	if (!open) Enabled.SetValue(false);
+	return {AppendAtlas(scene, index, previews[0], nearPlane, farPlane, _channel, _depthRange),
+	        post ? post->Inspector.AppendAtlas(*post, index, previews[1], nearPlane, farPlane, _channel, _depthRange) : nullptr};
+}
+
+GDX12Texture* SceneTextureInspector::AppendAtlas(const Input& input, UINT index, const std::vector<Source>& previews,
+    float nearPlane, float farPlane, int channel, float depthRange)
+{
 	if (previews.empty())
 		return nullptr;
+	const auto& [_, graph, bindings, work, device, backBuffer] = input;
 
 	if (!_pipeline)
 	{
@@ -377,11 +407,10 @@ GDX12Texture* SceneTextureInspector::Append(Graph& graph, std::vector<ID3D12Reso
 		const UINT descriptor = static_cast<UINT>(views.size()) + 1;
 		device.GetDevice()->CreateShaderResourceView(source.Resource, &desc, slot.Heap->GetCPUHandle(descriptor));
 		views.push_back(slot.Heap->GetGPUHandle(descriptor));
-		modes.push_back(_channel == 0 ? UINT(source.Visualization) : _channel == 1 ? 0 : UINT(_channel + 4));
+		modes.push_back(channel == 0 ? UINT(source.Visualization) : channel == 1 ? 0 : UINT(channel + 4));
 	}
 	struct Constants { UINT X, Y, Size, Mode; float Near, Far, Range; };
 	static_assert(sizeof(Constants) == 7 * sizeof(UINT));
-	const auto depthRange = _depthRange;
 	auto* heap = slot.Heap->GetHeap().Get();
 	const auto uav = slot.Atlas.GetUAV()->GPUHandle;
 	work.Add(graph, "debug scene texture previews", std::move(accesses),

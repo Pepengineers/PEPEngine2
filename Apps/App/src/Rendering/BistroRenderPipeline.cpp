@@ -82,7 +82,7 @@ void BistroRenderPipeline::PrepareMaterialBindings(RenderPipelineContext& c)
 	_executor->Begin(slot);
 	_geometry->RetireSkinning(slot, *_executor->Submissions());
 	_lighting->RetireShadowSkinInputs(slot);
-	_post->Textures().RetireReadback(slot);
+	_post->Textures().RetireReadback(0, slot);
 	_animationTime += (std::max)(0.0, double(c.Common.GameTimer->DeltaTime()));
 	_cloudPicture->Prepare(slot, _animationTime);
 	_post->PrepareMaterials(*_executor, _frameNumber, _animationTime, _cloudPicture->Image());
@@ -267,6 +267,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 		_geometry->SubmitSkinning(slot, _schedule, waits);
 		completion = _executor->Execute(_schedule, _geometry->PlannedResources(slot), record, prefix, nullptr, nullptr, waits,
 		                                exchanges);
+		_post->Textures().ReadbackSubmitted(0, slot);
 	}
 	catch (...)
 	{

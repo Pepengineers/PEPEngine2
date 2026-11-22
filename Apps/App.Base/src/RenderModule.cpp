@@ -55,7 +55,7 @@ RenderPipelineContext RenderModule::PipelineContext()
 
 void RenderPipelineContext::Resize() { Runtime.OnResize(); }
 
-void RenderPipelineContext::SetPresentationDevice(GDX12Device& device, GDX12DescriptorHeap& rtvs)
+void RenderPipelineContext::SetPresentationDevice(GDX12Device& device)
 {
     if (BackBuffer && &BackBuffer->Device() == &device) return;
     // The pipeline has drained scene and presentation work and released any back-buffer recordings.
@@ -64,18 +64,22 @@ void RenderPipelineContext::SetPresentationDevice(GDX12Device& device, GDX12Desc
     const UINT width = Common.WindowWidth, height = Common.WindowHeight;
     try
     {
-        Runtime._backBuffer = std::make_unique<GDX12SwapChain>(&device, Runtime._window->GetWindowHandle(),
-            DXGI_FORMAT_R8G8B8A8_UNORM, 2, width, height, &rtvs, true);
+        auto chain = std::make_unique<GDX12SwapChain>(&device, Runtime._window->GetWindowHandle(),
+            DXGI_FORMAT_R8G8B8A8_UNORM, 2, width, height, true);
+        chain->BeginFrame(Common);
+        Runtime._backBuffer = std::move(chain);
     }
     catch (...)
     {
-        Runtime.BuildBackBuffer();
-        BackBuffer = Runtime._backBuffer.get();
+        if (&device != Primary.Device)
+        {
+            Runtime.BuildBackBuffer();
+            BackBuffer = Runtime._backBuffer.get();
+        }
         throw;
     }
     BackBuffer = Runtime._backBuffer.get();
     Common.RequestHistoryReset = Common.ResetUpscalerHistory = true;
-    BackBuffer->BeginFrame(Common);
 }
 
 void RenderModule::RefreshPipelineFlags()
@@ -1006,7 +1010,7 @@ void RenderModule::BuildBackBuffer()
     _window->GetWindowSize(width, height);
 
     _backBuffer = std::make_unique<GDX12SwapChain>(_primaryDevice.get(), _window->GetWindowHandle(),
-        DXGI_FORMAT_R8G8B8A8_UNORM, 2, width, height, _primaryResources.RTVHeap.get());
+        DXGI_FORMAT_R8G8B8A8_UNORM, 2, width, height);
 
     _RPcommonData.WindowWidth = width;
     _RPcommonData.WindowHeight = height;

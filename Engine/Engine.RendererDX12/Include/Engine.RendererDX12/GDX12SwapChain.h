@@ -14,7 +14,7 @@ class GDX12SwapChain : public IRenderPassLink
 public:
     GDX12SwapChain(GDX12Device* device, HWND hwnd,
         DXGI_FORMAT format, UINT bufferCount, UINT width, UINT height, 
-        GDX12DescriptorHeap* rtvHeap, bool applySettings = false);
+        bool applySettings = false);
     ~GDX12SwapChain();
 
     void Resize(UINT width, UINT height);
@@ -49,7 +49,7 @@ private:
     GDX12Device* _device;
     ComPtr<IDXGISwapChain4> _proxySwapChain;
     ComPtr<IDXGISwapChain4> _swapChain;
-    GDX12DescriptorHeap* _rtvHeap;
+    std::unique_ptr<GDX12DescriptorHeap> _rtvHeap;
 
     DXGI_FORMAT _format;
     UINT _bufferCount;

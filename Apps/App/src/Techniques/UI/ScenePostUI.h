@@ -57,8 +57,8 @@ class ScenePostUI
 	SceneTextureInspector& Textures() { return _inspector; }
 	void AppendTextureReadback(Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12Texture& backBuffer)
 	{
-		_inspector.AppendReadback(graph, bindings, _work, *_resources.Device, _resources.CurrFrameConstantsIndex,
-		                         backBuffer.GetResource()->D3DResource.Get());
+		_inspector.AppendReadback({_inspector, graph, bindings, _work, *_resources.Device,
+		                           backBuffer.GetResource()->D3DResource.Get()}, _resources.CurrFrameConstantsIndex);
 	}
 	void ReleasePresentation();
 	void Resize(); // Caller drains the executor and the presentation queue first.
@@ -74,24 +74,25 @@ class ScenePostUI
 	bool Record(Id id, ID3D12GraphicsCommandList* cmd) const { return _work.Record(id, cmd); }
 
   private:
+	struct CapturedScreen;
 	Id AppendFrameGeneration(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* depth, Id dependency);
 	Id AppendReconstruction(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* hdr, GDX12Texture* depth,
 	                        GDX12Texture* motion, GDX12Texture* featureMotion, GDX12Texture* target,
 	                        std::vector<Id> dependencies = {});
 	void AppendScreen(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* target,
-	                  const std::function<void(GDX12CommandList*)>& finish, Id dependency);
+	                  const std::function<void(GDX12CommandList*)>& finish, Id dependency, const CapturedScreen&);
 	Id Packet(Graph&, std::vector<ID3D12Resource*>&, const char*, std::vector<std::pair<GDX12Resource*, Mode>>,
 	          const std::function<void(GDX12CommandList*)>&, std::vector<Id> dependencies = {},
 	          GDX12Texture* renderTarget = nullptr, State textureState = D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
 	ScenePostUI(RenderPipelineContext&, bool sceneOwner);
-	struct CapturedScreen;
-	CapturedScreen CaptureScreen(Graph&, std::vector<ID3D12Resource*>&, ID3D12Resource*);
+	CapturedScreen CaptureScreen(Graph&, std::vector<ID3D12Resource*>&, ID3D12Resource*,
+	                             const SceneTextureInspector::Input* post = nullptr);
 	Id AppendStack(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* hdr, GDX12Texture* depth,
 	               GDX12Texture* motion, GDX12Texture* featureMotion, GDX12Texture* target, std::vector<Id> = {});
 	void AppendRemotePost(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture*, GDX12Texture*, GDX12Texture*,
 	                      GDX12Texture*, GDX12Texture*, const std::function<void(GDX12CommandList*)>&);
 	Id CompositeScreen(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture*, GDX12Texture*, Id,
-	                   GDX12Texture*, const std::shared_ptr<const Engine::UI::DrawData>&, bool);
+	                   const SceneTextureInspector::Atlases&, const std::shared_ptr<const Engine::UI::DrawData>&, bool);
 	struct RemotePost;
 	struct HudRaster;
 	struct RemoteHud;

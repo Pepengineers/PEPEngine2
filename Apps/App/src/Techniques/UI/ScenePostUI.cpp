@@ -122,7 +122,7 @@ void EnsureScreenTexture(std::unique_ptr<GDX12Texture>& image, GDX12DeviceResour
 struct ScenePostUI::CapturedScreen
 {
 	std::shared_ptr<const Engine::UI::DrawData> Overlay, Game;
-	GDX12Texture* Preview = nullptr;
+	SceneTextureInspector::Atlases Previews{};
 	GameHUD::Bar Bar{};
 };
 
@@ -328,7 +328,11 @@ std::vector<GDX12RenderPass*> ScenePostUI::Passes()
 
 void ScenePostUI::DrainPost()
 {
-	if (_remotePost) _remotePost->GPU.Drain();
+	if (!_remotePost) return;
+	auto& owner = *_remotePost;
+	owner.GPU.Drain();
+	for (UINT slot = 0; slot < owner.Frames.size(); ++slot)
+		_inspector.RetireReadback(owner.Owner, slot);
 }
 
 bool ScenePostUI::UpdatePostOwner(RenderPipelineContext& c, const std::shared_ptr<QueueSubmission>& submit, Id owner)
@@ -342,15 +346,22 @@ bool ScenePostUI::UpdatePostOwner(RenderPipelineContext& c, const std::shared_pt
 		_postFgRequest = int(fg);
 		return false;
 	}
-	if (_requestedPost == owner && _postRequest == settings && _postFgRequest == int(fg)) return false;
+	const bool sameRequest = _requestedPost == owner && _postRequest == settings && _postFgRequest == int(fg);
+	std::string reason;
+	if (sameRequest)
+	{
+		if (!_remotePost || !_remotePost->Direct || fg == GDX12FrameGenerationProvider::Off) return false;
+		const auto& active = c.BackBuffer->GetFrameGeneration().GetStatus();
+		if (active.Requested != fg || active.Effective == fg) return false;
+		reason = "lost active FG on post adapter: " + active.FallbackReason;
+	}
 	_requestedPost = owner;
 	_postRequest = settings;
 	_postFgRequest = int(fg);
 	DrainHud();
 	c.Runtime.DrainFrameWork();
 	auto retired = std::move(_remotePost);
-	std::string reason;
-	if (owner)
+	if (owner && !sameRequest)
 	{
 		auto remote = std::make_unique<RemotePost>(c, submit, owner);
 		const auto& reconstruction = remote->Stack->_reconstruction.GetStatus();
@@ -360,15 +371,17 @@ bool ScenePostUI::UpdatePostOwner(RenderPipelineContext& c, const std::shared_pt
 		{
 			try
 			{
-				c.SetPresentationDevice(*remote->Resources.Device, *remote->Resources.RTVHeap);
+				c.SetPresentationDevice(*remote->Resources.Device);
 				remote->Direct = true;
 			}
 			catch (const DxException& failure)
 			{
+				if (!c.BackBuffer) throw;
 				reason = WStringToString(failure.ToString());
 			}
 			catch (const std::exception& failure)
 			{
+				if (!c.BackBuffer) throw;
 				reason = failure.what();
 			}
 			if (fg == GDX12FrameGenerationProvider::Off ||
@@ -380,12 +393,12 @@ bool ScenePostUI::UpdatePostOwner(RenderPipelineContext& c, const std::shared_pt
 			else if (remote->Direct)
 				reason = "requested FG on post adapter: " + c.BackBuffer->GetFrameGeneration().GetStatus().FallbackReason;
 			if (remote && remote->Direct)
-				c.SetPresentationDevice(*c.Primary.Device, *c.Primary.RTVHeap);
+				c.SetPresentationDevice(*c.Primary.Device);
 		}
 	}
 	if (!_remotePost)
 	{
-		c.SetPresentationDevice(*c.Primary.Device, *c.Primary.RTVHeap);
+		c.SetPresentationDevice(*c.Primary.Device);
 		_reconstruction.ApplySettings();
 		_reconstruction.QueryRenderTargetResolution();
 		_common.Upscaler = &_reconstruction;
@@ -705,7 +718,7 @@ Id ScenePostUI::AppendReconstruction(Graph& graph, std::vector<ID3D12Resource*>&
 	    std::move(dependencies), target);
 }
 ScenePostUI::CapturedScreen ScenePostUI::CaptureScreen(Graph& graph, std::vector<ID3D12Resource*>& bindings,
-    ID3D12Resource* backBuffer)
+    ID3D12Resource* backBuffer, const SceneTextureInspector::Input* post)
 {
 	const auto hud = GameHUD::Enabled.GetValue() && ImGui::GetCurrentContext();
 	GameHUD::Bar bar{};
@@ -716,10 +729,10 @@ ScenePostUI::CapturedScreen ScenePostUI::CaptureScreen(Graph& graph, std::vector
 		bar = GameHUD::Draw(*_gameOverlay, _common.GameTimer ? _common.GameTimer->TotalTime() : 0.f,
 		                   BistroInfoPanel::Height(ImGui::GetIO().DisplaySize.x));
 	}
-	auto* preview = _inspector.Append(graph, bindings, _work, *_resources.Device, _resources.CurrFrameConstantsIndex,
-	    backBuffer, _common.ActiveCameraNearPlane, _common.ActiveCameraFarPlane);
+	const auto previews = _inspector.Append({_inspector, graph, bindings, _work, *_resources.Device, backBuffer},
+	    post, _resources.CurrFrameConstantsIndex, _common.ActiveCameraNearPlane, _common.ActiveCameraFarPlane);
 	auto overlay = Engine::UI::CaptureScreenFrame();
-	return {std::move(overlay), hud ? Engine::UI::CaptureScreenOverlay(*_gameOverlay) : nullptr, preview, bar};
+	return {std::move(overlay), hud ? Engine::UI::CaptureScreenOverlay(*_gameOverlay) : nullptr, previews, bar};
 }
 
 void ScenePostUI::EnsureHudSource()
@@ -789,7 +802,8 @@ void ScenePostUI::PrepareRemoteHud(Id owner, Id display, UINT width, UINT height
 }
 
 Id ScenePostUI::CompositeScreen(Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12Texture* target,
-    GDX12Texture* layer, Id ready, GDX12Texture* preview, const std::shared_ptr<const Engine::UI::DrawData>& overlay,
+    GDX12Texture* layer, Id ready, const SceneTextureInspector::Atlases& previews,
+    const std::shared_ptr<const Engine::UI::DrawData>& overlay,
     bool hasGame)
 {
 	if (!overlay && !hasGame) return ready;
@@ -802,11 +816,13 @@ Id ScenePostUI::CompositeScreen(Graph& graph, std::vector<ID3D12Resource*>& bind
 			_screen = std::make_unique<Engine::UI::OffscreenRenderer>(*_resources.Device, UINT(2 * _slots.size()), true);
 		std::vector<std::pair<GDX12Resource*, Mode>> accesses{{resource(layer), hasGame ? Mode::ReadWrite : Mode::Write}};
 		std::vector<Engine::UI::TextureBinding> textures;
-		if (preview)
+		for (UINT i = 0; i < previews.size(); ++i)
 		{
+			auto* preview = previews[i];
+			if (!preview) continue;
 			auto* atlas = resource(preview);
 			accesses.emplace_back(atlas, Mode::Read);
-			textures.push_back({SceneTextureInspector::AtlasId, atlas->D3DResource, preview->GetFormat()});
+			textures.push_back({SceneTextureInspector::AtlasId(i), atlas->D3DResource, preview->GetFormat()});
 		}
 		ready = Packet(graph, bindings, "Information and debug UI raster", std::move(accesses),
 		    [this, &screen, hasGame, layer, overlay, textures = std::move(textures)](auto* cmd)
@@ -824,7 +840,7 @@ Id ScenePostUI::CompositeScreen(Graph& graph, std::vector<ID3D12Resource*>& bind
 }
 
 void ScenePostUI::AppendScreen(Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12Texture* target,
-                               const std::function<void(GDX12CommandList*)>& finish, Id dependency)
+    const std::function<void(GDX12CommandList*)>& finish, Id dependency, const CapturedScreen& captured)
 {
 	const auto resource = [](GDX12Texture* texture) { return texture->GetResource(); };
 	const UINT slot = _resources.CurrFrameConstantsIndex;
@@ -833,9 +849,7 @@ void ScenePostUI::AppendScreen(Graph& graph, std::vector<ID3D12Resource*>& bindi
 	screen.Game.RasterOwner.reset();
 	screen.CompositeOwner.reset();
 	screen.HudImport = screen.HudComposite = Invalid;
-	const auto captured = CaptureScreen(graph, bindings, resource(target)->D3DResource.Get());
 	const auto bar = captured.Bar;
-	auto* preview = captured.Preview;
 	screen.Draw = captured.Overlay;
 	screen.Game.Draw = captured.Game;
 	const Id owner = screen.Game.Draw ? _hudSubmissions->SelectAdapter(HudAdapter.GetValue()) : 0;
@@ -868,7 +882,7 @@ void ScenePostUI::AppendScreen(Graph& graph, std::vector<ID3D12Resource*>& bindi
 		}
 		else if (screen.Game.Draw)
 			raster = LocalHud(_resources).Append(graph, bindings, _work, screen.Game, *screen.Target, *_screen, bar, {dependency});
-		screenId = CompositeScreen(graph, bindings, target, screen.Target.get(), raster, preview,
+		screenId = CompositeScreen(graph, bindings, target, screen.Target.get(), raster, captured.Previews,
 		    screen.Draw, bool(screen.Game.Draw));
 		if (owner) screen.HudComposite = screenId;
 	}
@@ -931,7 +945,8 @@ void ScenePostUI::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, G
 	else
 	{
 		const auto output = AppendStack(graph, bindings, hdr, depth, motion, featureMotion, target);
-		AppendScreen(graph, bindings, target, finish, output);
+		AppendScreen(graph, bindings, target, finish, output,
+		    CaptureScreen(graph, bindings, target->GetResource()->D3DResource.Get()));
 	}
 }
 
@@ -943,6 +958,7 @@ void ScenePostUI::AppendRemotePost(Graph& scene, std::vector<ID3D12Resource*>& s
 	auto& stack = *owner.Stack;
 	const UINT slot = _resources.CurrFrameConstantsIndex;
 	if (!owner.GPU.TryBegin(slot)) owner.GPU.Begin(slot);
+	_inspector.RetireReadback(owner.Owner, slot);
 	owner.Resources.CurrFrameConstantsIndex = slot;
 	const UINT cameraIndex = _common.ActiveCameraCBufferIndex;
 	auto& camera = *owner.Resources.FrameConstants.at(slot)->CameraCB;
@@ -1006,6 +1022,24 @@ void ScenePostUI::AppendRemotePost(Graph& scene, std::vector<ID3D12Resource*>& s
 	}
 	const Id post = stack.AppendStack(frame.Plan, frame.Bindings, inputs[0], inputs[1], inputs[2], inputs[3], output,
 	    {frame.SceneImport});
+	const SceneTextureInspector::Input postTextures{stack._inspector, frame.Plan, frame.Bindings, stack._work,
+	    *owner.Resources.Device, native(output)};
+	_inspector.AppendReadback(postTextures, slot, false);
+	auto captured = CaptureScreen(scene, sceneBindings, native(target), &postTextures);
+	const UINT exportedAtlas = owner.Direct ? 0 : 1;
+	Id previewExport = Invalid;
+	if (auto* preview = captured.Previews[exportedAtlas])
+	{
+		auto& displayResources = owner.Direct ? owner.Resources : _resources;
+		auto& exportGraph = owner.Direct ? scene : frame.Plan;
+		auto& exportBindings = owner.Direct ? sceneBindings : frame.Bindings;
+		auto& exportWork = owner.Direct ? _work : stack._work;
+		EnsureScreenTexture(frame.Preview, displayResources, preview->GetWidth(), preview->GetHeight());
+		frame.Inspector.Prepare(*_hudSubmissions, exportGraph.Device, owner.Direct ? owner.Owner : 0, native(preview)->GetDesc());
+		previewExport = frame.Inspector.Copy(exportGraph, exportBindings, exportWork, "export texture inspector atlas", *preview);
+		captured.Previews[exportedAtlas] = frame.Preview.get();
+		frame.UiBytes = frame.Inspector.Bytes;
+	}
 
 	if (!owner.Direct)
 	{
@@ -1013,7 +1047,14 @@ void ScenePostUI::AppendRemotePost(Graph& scene, std::vector<ID3D12Resource*>& s
 		frame.Display.Copy(frame.Plan, frame.Bindings, stack._work, "owner export display color", *output);
 		frame.Import = frame.Display.Copy(scene, sceneBindings, _work, "GPU0 import display color", *target);
 		scene.Operations[frame.Import].Dependencies.push_back(frame.Export);
-		AppendScreen(scene, sceneBindings, target, finish, frame.Import);
+		if (previewExport != Invalid)
+		{
+			const Id previewImport = frame.Inspector.Copy(scene, sceneBindings, _work,
+			    "GPU0 import texture inspector atlas", *frame.Preview);
+			// The display import waits for the owner terminal fence, which also covers the atlas export.
+			scene.Operations[previewImport].Dependencies.push_back(frame.Import);
+		}
+		AppendScreen(scene, sceneBindings, target, finish, frame.Import, captured);
 		if (_slots.at(slot).Game.Draw)
 		{
 			const auto& hud = _slots.at(slot).HudOwner;
@@ -1023,7 +1064,6 @@ void ScenePostUI::AppendRemotePost(Graph& scene, std::vector<ID3D12Resource*>& s
 		return;
 	}
 
-	const auto captured = CaptureScreen(scene, sceneBindings, native(target));
 	auto& sceneSlot = _slots.at(slot);
 	sceneSlot.Game.RasterOwner.reset();
 	sceneSlot.Game.Draw = captured.Game;
@@ -1042,17 +1082,12 @@ void ScenePostUI::AppendRemotePost(Graph& scene, std::vector<ID3D12Resource*>& s
 	screen.CompositeOwner.reset();
 
 	Id ready = post;
-	GDX12Texture* preview = nullptr;
 	std::vector<Id> exports{frame.Export};
-	if (captured.Preview)
+	if (previewExport != Invalid)
 	{
-		EnsureScreenTexture(frame.Preview, owner.Resources, captured.Preview->GetWidth(), captured.Preview->GetHeight());
-		frame.Inspector.Prepare(*_hudSubmissions, 0, owner.Owner, native(captured.Preview)->GetDesc());
-		exports.push_back(frame.Inspector.Copy(scene, sceneBindings, _work, "GPU0 export texture inspector atlas", *captured.Preview));
+		exports.push_back(previewExport);
 		frame.InspectorImport = frame.Inspector.Copy(frame.Plan, frame.Bindings, stack._work,
 		    "display import texture inspector atlas", *frame.Preview);
-		frame.UiBytes = frame.Inspector.Bytes;
-		preview = frame.Preview.get();
 	}
 	if (captured.Game || captured.Overlay)
 	{
@@ -1084,7 +1119,7 @@ void ScenePostUI::AppendRemotePost(Graph& scene, std::vector<ID3D12Resource*>& s
 			frame.HudImport = hud.Transfer.Copy(frame.Plan, frame.Bindings, stack._work, "display import peer game HUD layer", *screen.Target);
 			frame.HudBytes = hud.Transfer.Bytes;
 		}
-		ready = stack.CompositeScreen(frame.Plan, frame.Bindings, target, screen.Target.get(), ready, preview,
+		ready = stack.CompositeScreen(frame.Plan, frame.Bindings, target, screen.Target.get(), ready, captured.Previews,
 		    captured.Overlay, bool(captured.Game));
 	}
 	stack.Packet(frame.Plan, frame.Bindings, "Bistro owner PRESENT handoff",
@@ -1116,6 +1151,7 @@ void ScenePostUI::AddPostExchange(const Schedule& primary, std::vector<Executor:
 		    owner.GPU.Execute(schedule, frame.Bindings, [&stack](Id operation, UINT, auto* cmd) {
 			    if (!stack.Record(operation, cmd)) throw std::logic_error("Missing Bistro owner post work");
 		    }, nullptr, nullptr, nullptr, waits);
+		    _inspector.ReadbackSubmitted(owner.Owner, slot);
 		    stack.Submitted(slot);
 		    frame.SceneReady = ready;
 		    return frame.Produced = owner.GPU.Completions().back();
