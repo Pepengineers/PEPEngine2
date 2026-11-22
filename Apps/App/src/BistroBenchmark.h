@@ -1149,17 +1149,6 @@ private:
 
     void CompletePlacementTrial(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline)
     {
-        for (const auto& [name, adapter] : _trialOwners) _csv.Config(_trialPrefix + name, adapter);
-        constexpr std::array transferNames{"PostSceneInputBytes", "PostHUDBytes", "PostInspectorBytes", "PostReturnBytes"};
-        for (size_t i = 0; i < transferNames.size(); ++i)
-            _csv.Config(_trialPrefix + transferNames[i], std::to_string(_trialTransferBytes[i]));
-        for (size_t i = 0; i < std::size(BistroPlacement::Techniques); ++i)
-        {
-            if (_trialResult.Activity[i])
-                _csv.Config(_trialPrefix + "ActiveTechnique", BistroPlacement::Techniques[i].Pass);
-        }
-        for (const auto& pass : _placementPasses) _csv.Config(_trialPrefix + "ActivePass", pass);
-        WritePlacementPublications();
         _trialResult.Remote = !_trialPublications.empty();
         if (!_manualPlacement && _multiGPU != _trialResult.Remote && _trialReason.empty())
             _trialReason = _multiGPU ? "no frame consumer observed on the requested placement" : "unexpected cross-GPU work";
@@ -1197,7 +1186,7 @@ private:
             _csv.Config(_trialPrefix + "FPSWithThresholdRecheck", Csv::Number(_trialResult.ThresholdFps));
         _csv.Config(_trialPrefix + "P95ms", Csv::Number(_trialResult.P95));
         _csv.Config(_trialPrefix + "WallSeconds", Csv::Number(SecondsSince(_trialStarted)));
-        WritePlacementTrialStatus(_trialResult.Valid ? "measured" : _trialReason, !_trialResult.Valid);
+        WritePlacementTrialReport(_trialResult.Valid ? "measured" : _trialReason);
         if (_manualPlacement)
         {
             Finish(world, console, pipeline, _trialResult.Valid ? "completed" : _trialReason.c_str());
@@ -1222,17 +1211,24 @@ private:
         NextPlacementTrial(world, console, pipeline);
     }
 
-    void WritePlacementPublications()
+    void WritePlacementTrialReport(std::string_view status)
     {
+        for (const auto& [name, adapter] : _trialOwners)
+            _csv.Config(_trialPrefix + name, adapter);
+        constexpr std::array transferNames{"PostSceneInputBytes", "PostHUDBytes", "PostInspectorBytes", "PostReturnBytes"};
+        for (size_t i = 0; i < transferNames.size(); ++i)
+            _csv.Config(_trialPrefix + transferNames[i], std::to_string(_trialTransferBytes[i]));
+        for (size_t i = 0; i < _trialResult.Activity.size(); ++i)
+            if (_trialResult.Activity[i])
+                _csv.Config(_trialPrefix + "ActiveTechnique", BistroPlacement::Techniques[i].Pass);
+        for (const auto& pass : _placementPasses)
+            _csv.Config(_trialPrefix + "ActivePass", pass);
         for (const auto& [role, adapter, consumer] : _trialPublications)
             _csv.Config(_trialPrefix + "ConsumedRemotePublication", role + " @ " + adapter + " -> " + consumer);
-    }
-
-    void WritePlacementTrialStatus(std::string_view status, bool partial)
-    {
         if (!_trialLastPass.empty()) _csv.Config(_trialPrefix + "LastPassCSV", _trialLastPass);
         _csv.Config(_trialPrefix + "CompletedPasses", std::to_string(_trialCompletedPasses));
-        _csv.Config(_trialPrefix + "Partial", partial ? "true" : "false");
+        const auto requiredPasses = _trial.Full ? 1u : _trialWindowCount;
+        _csv.Config(_trialPrefix + "Partial", _trialCompletedPasses < requiredPasses ? "true" : "false");
         _csv.Config(_trialPrefix + "Status", status);
         _trialPending = false;
     }
@@ -2032,9 +2028,8 @@ private:
             if (_stage == Stage::Placement)
             {
                 WritePlacementWaits(pipeline);
-                if (_legOpen) WritePlacementPublications();
                 WriteLeg(status);
-                if (_trialPending) WritePlacementTrialStatus(status, true);
+                if (_trialPending) WritePlacementTrialReport(status);
                 if (!_manualPlacement) _placementSearch.Report(_csv, status);
                 _csv.Config("StopReason", status);
                 _csv.Config("ElapsedSeconds", Csv::Number(SecondsSince(_started)));
