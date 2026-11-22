@@ -656,3 +656,14 @@ void BistroUIPosters::Submitted(uint64_t frame, const std::vector<CompletionToke
 {
     _impl->Submitted(frame, completions);
 }
+
+std::array<BistroRender::Id, BistroUIPosters::Count> BistroUIPosters::ExecutionDevices() const
+{
+    std::array<BistroRender::Id, Count> devices{};
+    for (const auto* surface : _impl->Surfaces())
+    {
+        const auto* frame = surface->Current;
+        devices[surface->Index] = frame ? (frame->Lane ? frame->Lane->Device : 0) : BistroRender::Invalid;
+    }
+    return devices;
+}

@@ -2,6 +2,7 @@
 
 
 #include <memory>
+#include <functional>
 
 #include "Common/GameTimer.h"
 #include "Common/Module.h"
@@ -27,6 +28,7 @@ public:
     void Uninitialize() override;
 
     void Step(World& world, float dt);
+    std::function<void()> CaptureReplayState(World& world);
 #ifdef _DEBUG
     void CollectCollisionTriangles(World& world, std::vector<DirectX::SimpleMath::Vector3>& statics,
         std::vector<DirectX::SimpleMath::Vector3>& moving) const;

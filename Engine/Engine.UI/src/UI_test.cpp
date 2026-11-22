@@ -34,6 +34,7 @@ namespace Engine::UI
         bool ScreenFrameReady = false;
         bool ApplicationUIInput = false;
         bool DebugReconstructionStatusVisible = true;
+        bool SettingsEditingEnabled = true;
 #ifdef _DEBUG
         bool DebugEnabled = true;
 #else
@@ -210,8 +211,10 @@ namespace Engine::UI
                 if (console.TryFindConsoleVariable(L"Render.Debug.SceneTextures", inspector))
                 {
                     bool enabled = inspector->GetBool();
+                    ImGui::BeginDisabled(!SettingsEditingEnabled);
                     if (ImGui::Checkbox("Scene textures", &enabled))
                         inspector->SetFromString(enabled ? "true" : "false");
+                    ImGui::EndDisabled();
                 }
                 static ImGuiTextFilter filter;
                 filter.Draw("Search", -90);
@@ -259,7 +262,9 @@ namespace Engine::UI
                     IConsoleVariable* variable = nullptr;
                     if (!editor.Name.empty() && console.TryFindConsoleVariable(editor.Name, variable))
                     {
+                        ImGui::BeginDisabled(!SettingsEditingEnabled);
                         editor.Draw(*variable);
+                        ImGui::EndDisabled();
                         if (editor.Name == L"App.Physics.Quality") DrawPhysicsQuality(console);
                     }
                     else
@@ -903,6 +908,7 @@ namespace Engine::UI
 
     void EnableApplicationUIInput() { ApplicationUIInput = true; }
     void SetDebugReconstructionStatusVisible(bool visible) { DebugReconstructionStatusVisible = visible; }
+    void SetSettingsEditingEnabled(bool enabled) { SettingsEditingEnabled = enabled; }
     void EnableDebugUI() { DebugEnabled = true; }
     bool DebugUIVisible() { return DebugEnabled && FrameBegun && Visible; }
 }

@@ -326,7 +326,8 @@ inline void CreateBistroParticles(World& world)
 	BistroParticles::Create(world, atlas);
 }
 
-inline void ConfigureBistroProps(SceneManagerModule& scenes, JobSystem& jobs)
+inline void ConfigureBistroProps(SceneManagerModule& scenes, JobSystem& jobs,
+    std::shared_ptr<BistroWaves::Controller>& activeWaves)
 {
 	scenes.OnWorldDestroyed.AddListener(
 	    [](World& world)
@@ -335,13 +336,14 @@ inline void ConfigureBistroProps(SceneManagerModule& scenes, JobSystem& jobs)
 		    world.SceneMeshFactory = {};
 	    });
 	scenes.OnWorldCreated.AddListener(
-	    [&jobs](World& world)
+	    [&jobs, &activeWaves](World& world)
 	    {
 		    const int quality = BistroPhysics::Quality.GetValue();
 		    BistroPhysics::EffectiveCategorized = true;
 		    const bool simulate = BistroPhysics::SimulationEnabled.GetValue();
 		    BistroPhysics::EffectiveQuality = simulate ? quality : 0;
 		    auto waves = std::make_shared<BistroWaves::Controller>();
+		    activeWaves = waves;
 		    world.BeforePhysicsStep = [&world, waves](float dt)
 		    {
 			    const auto phase = waves->GetTimeline().GetPhase();

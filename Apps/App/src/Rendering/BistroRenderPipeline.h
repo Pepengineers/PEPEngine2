@@ -6,6 +6,9 @@
 #include "Techniques/UI/ScenePostUI.h"
 #include "Techniques/SceneCloudPicture.h"
 #include "Common/GameTimer.h"
+#include <optional>
+
+namespace BistroWaves { class Controller; }
 
 class BistroRenderPipeline final : public IRenderPipeline
 {
@@ -60,6 +63,11 @@ class BistroRenderPipeline final : public IRenderPipeline
 	void WriteExecution(std::ostream& output) const override { _schedule->Write(output); }
 	const BistroRender::Schedule& LastSchedule() const { return *_schedule; }
 	bool HasRemoteCloudPicture() const { return _cloudPicture->IsRemote(); }
+	uint64_t PresentedFrames() const { return _presentedFrames; }
+	void SetBenchmarkTime(std::optional<double> seconds) { _benchmarkTime = seconds; }
+	void ResetBenchmarkClouds() { _environment->ResetClouds(); }
+	std::function<void()> CaptureBenchmarkPhysics(World&);
+	std::vector<std::pair<std::string, std::string>> BenchmarkAdapters() const;
 	void PauseIndependentClocks();
 
   private:
@@ -73,10 +81,14 @@ class BistroRenderPipeline final : public IRenderPipeline
 	std::unique_ptr<BistroRender::Executor> _executor;
 	std::shared_ptr<const BistroRender::Schedule> _schedule = std::make_shared<BistroRender::Schedule>();
 	double _animationTime = 0;
+	std::optional<double> _benchmarkTime;
+	std::shared_ptr<BistroWaves::Controller> _waves;
+	uint64_t _presentedFrames = 0;
 	uint64_t _frameNumber = 0;
 	std::array<BistroRender::Id, 5> _reportedDevices{
 	    BistroRender::Invalid, BistroRender::Invalid, BistroRender::Invalid, BistroRender::Invalid, BistroRender::Invalid};
 	int _aoAdapter = -1;
+	BistroRender::Id _transparencyOwner = 0;
 	UINT _executorSlot = 0;
 	bool _reportedDepthNormals = false;
 	bool _reportedLocalAO = false;

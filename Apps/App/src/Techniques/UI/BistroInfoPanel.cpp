@@ -30,25 +30,12 @@ void DrawQueues(const BistroRenderPipeline& pipeline)
     for (const auto& packet : pipeline.LastSchedule().Packets)
     {
         const std::string_view name = packet.Name;
-        size_t i;
-        if (Starts(name, "AO ") || Starts(name, "CACAO ") || Starts(name, "XeGTAO ") || Starts(name, "SSAO/"))
-            i = 0;
-        else if (Starts(name, "cached environment / ") || Starts(name, "camera environment / "))
-            i = 1;
-        else if (name == "GPU light grid masks")
-            i = 2;
-        else if (Starts(name, "particle simulation "))
-            i = 3;
-        else if (Starts(name, "water seed / ") || name == "water pack position and speed")
-            i = 4;
-        else if (name == "cloud picture generation" || name == "cloud picture GPU0 import")
-            i = Cloud;
-        else if (name == "Game HUD raster")
+        int i = BistroBenchmark::QueueGroup(name);
+        if (name == "Game HUD raster")
             i = 6;
         else if (Starts(name, "world-space canvases"))
             i = 7;
-        else
-            continue;
+        if (i < 0) continue;
         using BistroRender::Queue;
         queues[i] |= packet.Target == Queue::Compute ? Compute : packet.Target == Queue::Copy ? Copy : Direct;
     }

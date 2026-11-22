@@ -999,6 +999,10 @@ bool SceneEnvironment::AsyncComputeEnabled() const
 {
 	return AsyncEnvironment.GetValue();
 }
+std::array<Id, 2> SceneEnvironment::AtmosphereDevices() const
+{
+	return {_remoteSkyView ? _remoteSkyView->Device : 0, _remoteAerial ? _remoteAerial->Device : 0};
+}
 void SceneEnvironment::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings)
 {
 	if (graph.Resources.size() != bindings.size())

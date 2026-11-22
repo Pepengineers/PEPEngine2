@@ -458,6 +458,11 @@ void SceneLighting::DrainLightGrid()
 	if (_remoteGrid) _remoteGrid->GPU.Drain();
 }
 
+Id SceneLighting::LightGridDevice() const
+{
+	return _remoteGrid ? _remoteGrid->Owner : 0;
+}
+
 void SceneLighting::AppendGpuLightGrid(Graph& graph, std::vector<ID3D12Resource*>& bindings)
 {
 	const auto& frame = _frames.at(_slot);

@@ -34,6 +34,7 @@ public:
     void AddExchanges(const BistroRender::Schedule&, std::vector<BistroRender::PacketWait>&,
                       std::vector<BistroRender::Executor::PacketExchange>&);
     void Submitted(uint64_t frame, const std::vector<BistroRender::CompletionToken>&);
+    std::array<BistroRender::Id, Count> ExecutionDevices() const;
 
 private:
     struct Impl;

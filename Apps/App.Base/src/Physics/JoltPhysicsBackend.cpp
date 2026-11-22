@@ -17,6 +17,7 @@
 #include <Jolt/Core/IssueReporting.h>
 #include <Jolt/Core/TempAllocator.h>
 #include <Jolt/Physics/PhysicsSystem.h>
+#include <Jolt/Physics/StateRecorderImpl.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
@@ -440,6 +441,32 @@ JoltPhysicsBackend::JoltPhysicsBackend() = default;
 JoltPhysicsBackend::~JoltPhysicsBackend()
 {
     Uninitialize();
+}
+
+std::function<void()> JoltPhysicsBackend::CaptureReplayState()
+{
+    auto state = std::make_shared<JPH::StateRecorderImpl>();
+    _physicsSystem->SaveState(*state);
+    JPH::BodyIDVector bodies;
+    _physicsSystem->GetBodies(bodies);
+    std::vector<std::pair<JPH::BodyID, float>> speedLimits;
+    for (const auto id : bodies)
+    {
+        JPH::BodyLockRead lock(_physicsSystem->GetBodyLockInterface(), id);
+        if (lock.Succeeded() && lock.GetBody().IsDynamic())
+            speedLimits.emplace_back(id, lock.GetBody().GetMotionProperties()->GetMaxLinearVelocity());
+    }
+    return [this, state, speedLimits = std::move(speedLimits)]
+    {
+        state->Rewind();
+        if (!_physicsSystem->RestoreState(*state))
+            throw std::runtime_error("Cannot restore benchmark physics state");
+        for (const auto& [id, speed] : speedLimits)
+        {
+            JPH::BodyLockWrite lock(_physicsSystem->GetBodyLockInterface(), id);
+            if (lock.Succeeded()) lock.GetBody().GetMotionProperties()->SetMaxLinearVelocity(speed);
+        }
+    };
 }
 
 void JoltPhysicsBackend::Step(float dt)

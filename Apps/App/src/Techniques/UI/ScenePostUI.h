@@ -21,6 +21,7 @@ class ScenePostUI
 	GDX12ReconstructionPass& Reconstruction();
 	std::vector<GDX12RenderPass*> Passes();
 	bool UpdatePostOwner(RenderPipelineContext&, const std::shared_ptr<QueueSubmission>&, Id);
+	std::vector<std::pair<std::string, Id>> ExecutionDevices() const;
 	void DrainPost();
 	void AddPostExchange(const Schedule&, std::vector<Executor::PacketExchange>&);
 	void PostPresented();

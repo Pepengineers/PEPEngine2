@@ -148,6 +148,7 @@ namespace BistroWaves
         { _participants.erase(std::remove(_participants.begin(), _participants.end(), entity), _participants.end()); }
         size_t ParticipantCount() const { return _participants.size(); }
         const Timeline& GetTimeline() const { return _timeline; }
+        void RestoreTimeline(const Timeline& timeline) { _timeline = timeline; }
 
         void Tick(World& world, PhysicsModule& physics, float dt)
         {

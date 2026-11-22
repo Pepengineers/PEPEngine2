@@ -24,6 +24,7 @@ class SceneEnvironment
     }
     void Append(Graph&, std::vector<ID3D12Resource*>&);
     bool AsyncComputeEnabled() const;
+    std::array<Id, 2> AtmosphereDevices() const;
     bool Record(Id, ID3D12GraphicsCommandList*) const;
     void Submitted(uint64_t fence);
     void AddAtmosphereWaits(const Schedule&, std::vector<PacketWait>&);

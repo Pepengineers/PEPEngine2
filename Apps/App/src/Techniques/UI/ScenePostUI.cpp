@@ -320,6 +320,19 @@ GDX12ReconstructionPass& ScenePostUI::Reconstruction()
 	return _remotePost ? _remotePost->Stack->_reconstruction : _reconstruction;
 }
 
+std::vector<std::pair<std::string, Id>> ScenePostUI::ExecutionDevices() const
+{
+	const auto slot = _resources.CurrFrameConstantsIndex;
+	const auto& screen = _slots.at(slot);
+	const Id post = _remotePost ? _remotePost->Owner : 0;
+	const Id presentation = _remotePost && _remotePost->Direct ? post : 0;
+	const Id hud = _remotePost ? _remotePost->Frames.at(slot).HudOwner :
+	    screen.Game.Draw ? (screen.HudOwner ? screen.HudOwner->Owner : 0) : Invalid;
+	const auto posters = _posters->ExecutionDevices();
+	return {{"PostAdapter", post}, {"PresentationAdapter", presentation}, {"GameHUDAdapter", hud},
+	    {"AtriumCanvasAdapter", posters[0]}, {"TerraceCanvasAdapter", posters[1]}, {"CloudCanvasAdapter", posters[2]}};
+}
+
 std::vector<GDX12RenderPass*> ScenePostUI::Passes()
 {
 	if (_remotePost) return _remotePost->Stack->Passes();

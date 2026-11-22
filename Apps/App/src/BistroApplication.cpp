@@ -25,10 +25,27 @@
 #include <cmath>
 #include <unordered_map>
 #include <WindowsX.h>
+#include <shellapi.h>
 #include "Engine.UI/UI_test.h"
 
 namespace
 {
+#if !defined(_DEBUG) && !defined(DEBUG)
+bool SkipAutomaticBenchmark()
+{
+	if (BistroBenchmark::SkipBenchmark.GetValue()) return true;
+	int count = 0;
+	auto** args = CommandLineToArgvW(GetCommandLineW(), &count);
+	if (!args) return false;
+	const bool skip = std::any_of(args + 1, args + count, [](const wchar_t* arg)
+	{
+		return _wcsicmp(arg, L"-SkipBenchmark") == 0;
+	});
+	LocalFree(args);
+	return skip;
+}
+#endif
+
 struct BistroLocalShadowSettings
 {
 	explicit BistroLocalShadowSettings(const std::wstring& name)
@@ -197,11 +214,14 @@ class BistroApplication final : public App
 		_bistroBounds->UpdateEmitters(world);
 		BistroParticles::Update(world);
 		InitializeCamera(world);
-		_benchmark.Initialize(world);
+		_benchmark.Initialize(world, _bistroCharacters);
 		Engine::UI::EnableApplicationUIInput();
 		Engine::UI::SetDebugReconstructionStatusVisible(false);
 		IndirectCommandBuildSystem commands;
 		commands.Schedule(GetJobs(), world, 0).Complete();
+#if !defined(_DEBUG) && !defined(DEBUG)
+		_autoBenchmarkPending = !SkipAutomaticBenchmark();
+#endif
 		Log::Info("Bistro",
 		          "Loaded Bistro interior/exterior; fixed-step interior physics enabled; sun and local shadows");
 		return true;
@@ -209,7 +229,14 @@ class BistroApplication final : public App
 	void Update(const GameTimer& timer) override
 	{
 		auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
-		_benchmark.Update(world, *Locator.GetModule<ConsoleModule>());
+		auto render = Locator.GetModule<RenderModule>();
+		if (_autoBenchmarkPending && _bistroPipeline->PresentedFrames())
+		{
+			_autoBenchmarkPending = false;
+			_benchmark.RequestAutomatic();
+		}
+		_benchmark.Update(world, *Locator.GetModule<ConsoleModule>(), *render, *_bistroPipeline);
+		Engine::UI::SetSettingsEditingEnabled(!_benchmark.Active());
 		UpdateLocalShadowSettings(world);
 		_bistroReflections.Update(world, timer.DeltaTime());
 		const float sceneDelta = world.IsPaused() ? 0.f : timer.DeltaTime() * world.GetTimeScale();
@@ -220,25 +247,40 @@ class BistroApplication final : public App
 		_bistroBounds->UpdateEmitters(world);
 		BistroParticles::Update(world);
 		App::Update(timer);
-		auto render = Locator.GetModule<RenderModule>();
 		_bistroReflections.DrawBounds(world, *render);
 		_info.Draw(*render, *_bistroPipeline, _benchmark, timer.DeltaTime());
 	}
 	void Render(const GameTimer& timer) override
 	{
+		const auto presented = _bistroPipeline->PresentedFrames();
 		App::Render(timer);
 		if (_benchmark.Active())
-			_benchmark.FrameRendered(*Locator.GetModule<SceneManagerModule>()->GetWorld(), *Locator.GetModule<ConsoleModule>());
+			_benchmark.FrameRendered(*Locator.GetModule<SceneManagerModule>()->GetWorld(), *Locator.GetModule<ConsoleModule>(),
+			    *Locator.GetModule<RenderModule>(), *_bistroPipeline, _bistroPipeline->PresentedFrames() != presented);
 	}
 	int Run()
 	{
-		const auto result = App::Run();
-		if (_benchmark.Active())
-			_benchmark.Stop(*Locator.GetModule<SceneManagerModule>()->GetWorld(), *Locator.GetModule<ConsoleModule>());
-		return result;
+		try
+		{
+			const auto result = App::Run();
+			StopBenchmark();
+			return result;
+		}
+		catch (...)
+		{
+			StopBenchmark("error");
+			throw;
+		}
 	}
 
   private:
+	void StopBenchmark(const char* status = "cancelled")
+	{
+		if (_benchmark.Active())
+			_benchmark.Stop(*Locator.GetModule<SceneManagerModule>()->GetWorld(), *Locator.GetModule<ConsoleModule>(),
+			    *_bistroPipeline, status);
+		Engine::UI::SetSettingsEditingEnabled(true);
+	}
 	std::vector<DeviceDesc> _adapters;
 	Entity _skyEntity = InvalidEntity;
 	double _sunCyclePhase = 0;
@@ -247,6 +289,7 @@ class BistroApplication final : public App
 	BistroWater::Scene _bistroWater;
 	BistroReflections::Scene _bistroReflections{1, true};
 	BistroBenchmark _benchmark;
+	bool _autoBenchmarkPending = false;
 	BistroInfoPanel _info;
 	BistroRenderPipeline* _bistroPipeline = nullptr;
 	std::unique_ptr<BistroBounds::Scene> _bistroBounds;
@@ -322,7 +365,11 @@ class BistroApplication final : public App
 
 	void OnPauseChanged(bool paused) override
 	{
-		if (paused && _bistroPipeline) _bistroPipeline->PauseIndependentClocks();
+		if (paused && _bistroPipeline)
+		{
+			StopBenchmark();
+			_bistroPipeline->PauseIndependentClocks();
+		}
 	}
 
 	void OnMouseDown(WPARAM, int x, int y) override

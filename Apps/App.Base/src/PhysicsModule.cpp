@@ -2,6 +2,7 @@
 
 #include "App.Base/ECS/World.h"
 #include "App.Base/Physics/JoltPhysicsBackend.h"
+#include "App.Base/Systems/DynamicBodyUpdateSystem.h"
 
 #include "App.Base/Modules/SceneManagerModule.h"
 #include "Engine.Core/BenchmarkEngine.h"
@@ -64,6 +65,18 @@ bool PhysicsModule::RayCastStatic(World& world, const Vector3& origin, const Vec
 void PhysicsModule::Step(World& world, float dt)
 {
     if (auto* physics = GetPhysics(world); physics && !world.IsPaused()) physics->Step(dt);
+}
+
+std::function<void()> PhysicsModule::CaptureReplayState(World& world)
+{
+    auto* physics = GetPhysics(world);
+    if (!physics) throw std::logic_error("World has no physics backend");
+    return [this, &world, restore = physics->CaptureReplayState(), accumulator = world._physicsAccumulator]
+    {
+        restore();
+        world._physicsAccumulator = accumulator;
+        DynamicBodyUpdateSystem(*this).Tick(world, 0);
+    };
 }
 
 #ifdef _DEBUG

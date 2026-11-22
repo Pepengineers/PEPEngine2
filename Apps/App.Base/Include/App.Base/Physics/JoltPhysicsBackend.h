@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <functional>
 
 
 #include <App.Base/Physics/PhysicsTypes.h>
@@ -34,6 +35,7 @@ public:
     void Uninitialize();
 
     void Step(float dt);
+    std::function<void()> CaptureReplayState();
 #ifdef _DEBUG
     void CollectCollisionTriangles(std::vector<DirectX::SimpleMath::Vector3>& statics,
         std::vector<DirectX::SimpleMath::Vector3>& moving) const;

@@ -46,6 +46,7 @@ class SceneLighting
 		_frames.at(_slot).AO->AppendEarlyInputs(graph, bindings, ready);
 	}
 	void UpdateLightGridOwner(Executor& primary);
+	Id LightGridDevice() const;
 	void DrainLightGrid();
 	void AppendGpuLightGrid(Graph&, std::vector<ID3D12Resource*>&);
 	void SubmitLightGrid(const Schedule&, std::vector<PacketWait>&);

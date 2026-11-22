@@ -10,6 +10,7 @@
 #include <cmath>
 #include <vector>
 #include <numeric>
+#include <optional>
 
 namespace BistroCharacters
 {
@@ -49,6 +50,44 @@ namespace BistroCharacters
 
     public:
         explicit Scene(unsigned seed = std::random_device{}()) : _seed(seed) {}
+
+        std::function<void()> CaptureReplayState(World& world)
+        {
+            struct Character
+            {
+                Vector3 Position, Rotation;
+                double Animation;
+                std::optional<BistroInteractionSource> Influence;
+            };
+            auto& ecs = world.GetECS();
+            std::vector<Character> states;
+            states.reserve(_entities.size());
+            for (auto entity : _entities)
+            {
+                const auto& transform = ecs.Get<TransformComponent>(entity);
+                Character state{transform.Location, transform.Rotation,
+                    ecs.Get<SkeletalMeshRenderComponent>(entity).GetTimeSeconds(), {}};
+                if (ecs.Has<BistroInteractionSource>(entity))
+                    state.Influence = ecs.Get<BistroInteractionSource>(entity);
+                states.push_back(state);
+            }
+            return [this, &world, groups = _groups, states = std::move(states)]
+            {
+                _groups = groups;
+                auto& ecs = world.GetECS();
+                for (size_t i = 0; i < _entities.size(); ++i)
+                {
+                    const auto entity = _entities[i];
+                    const auto& state = states[i];
+                    auto& transform = ecs.Get<TransformComponent>(entity);
+                    transform.Location = state.Position;
+                    transform.Rotation = state.Rotation;
+                    transform.DirtyFlag = true;
+                    ecs.Get<SkeletalMeshRenderComponent>(entity).SetTimeSeconds(state.Animation);
+                    if (state.Influence) ecs.Get<BistroInteractionSource>(entity) = *state.Influence;
+                }
+            };
+        }
 
         void Update(World& world, float deltaSeconds, JobSystem& jobs, PhysicsModule* physics = nullptr,
             bool advanceWhilePaused = false)

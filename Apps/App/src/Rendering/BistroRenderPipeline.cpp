@@ -25,7 +25,7 @@ void BistroRenderPipeline::Initialize(RenderPipelineContext& c, const std::vecto
 {
 	c.Primary.SRV_UAV_Heap->UseTransientDescriptorTail();
 	_post = std::make_unique<BistroRender::ScenePostUI>(c);
-	ConfigureBistroProps(*BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>(), App::GetInstance()->GetJobs());
+	ConfigureBistroProps(*BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>(), App::GetInstance()->GetJobs(), _waves);
 	_cloudPicture = std::make_unique<BistroRender::SceneCloudPicture>(c);
 	_geometry = std::make_unique<BistroRender::SceneGeometry>(c);
 	_environment = std::make_unique<BistroRender::SceneEnvironment>(c.Primary, c.Common);
@@ -85,8 +85,9 @@ void BistroRenderPipeline::PrepareMaterialBindings(RenderPipelineContext& c)
 	_lighting->RetireShadowSkinInputs(slot);
 	_post->Textures().RetireReadback(0, slot);
 	_animationTime += (std::max)(0.0, double(c.Common.GameTimer->DeltaTime()));
-	_cloudPicture->Prepare(slot, _animationTime);
-	_post->PrepareMaterials(*_executor, _frameNumber, _animationTime, _cloudPicture->Image());
+	const auto animationTime = _benchmarkTime.value_or(_animationTime);
+	_cloudPicture->Prepare(slot, animationTime);
+	_post->PrepareMaterials(*_executor, _frameNumber, animationTime, _cloudPicture->Image());
 }
 
 void BistroRenderPipeline::RebuildExecution(RenderPipelineContext& c)
@@ -115,11 +116,11 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	const auto& submissions = _executor->Submissions();
 	auto skin = c.Runtime.FreezeSkeletalMeshes([&](int requested)
 	{
-		const auto owner = submissions->SelectAdapter(requested);
+		const auto owner = submissions->SelectAdapter(_benchmarkTime ? -1 : requested);
 		return std::make_pair(owner, &submissions->Device(owner));
 	});
 	_geometry->Freeze(slot, c.Common.ActiveCameraCBufferIndex, std::move(skin), submissions);
-	const auto transparencyOwner = _lighting->Transparency().Begin(submissions, slot, _frameNumber);
+	const auto transparencyOwner = _transparencyOwner = _lighting->Transparency().Begin(submissions, slot, _frameNumber);
 	const auto scenes = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
 	const auto* world = scenes->GetWorld();
 	const double delta = c.Common.GameTimer ? c.Common.GameTimer->DeltaTime() : 0;
@@ -328,6 +329,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 
 void BistroRenderPipeline::FramePresented()
 {
+	++_presentedFrames;
 	_cloudPicture->Presented();
 	_post->HudPresented();
 	_post->PostPresented();
@@ -350,6 +352,37 @@ void BistroRenderPipeline::FramePresented()
 		    name.find(" GPU0 import ") != std::string::npos || name == "XeGTAO denoise")
 			Log::Info("RenderGraph", "DepthNormals frame=", _frameNumber, " packet=", i, " ", name);
 	}
+}
+
+std::vector<std::pair<std::string, std::string>> BistroRenderPipeline::BenchmarkAdapters() const
+{
+	const auto& devices = *_executor->Submissions();
+	const auto [skyView, aerial] = _environment->AtmosphereDevices();
+	std::vector<std::pair<std::string, std::string>> adapters{
+	    {"SceneAdapter", devices.AdapterLabel(0)},
+	    {"AOAdapter", devices.AdapterLabel(_lighting->AOExecutionDevice())},
+	    {"SkyViewAdapter", devices.AdapterLabel(skyView)},
+	    {"AerialPerspectiveAdapter", devices.AdapterLabel(aerial)},
+	    {"LightGridAdapter", devices.AdapterLabel(_lighting->LightGridDevice())},
+	    {"ParticleAdapter", devices.AdapterLabel(_lighting->Particles().ExecutionDevice())},
+	    {"WaterAdapter", devices.AdapterLabel(_lighting->Water().ExecutionDevice())},
+	    {"CloudPictureAdapter", devices.AdapterLabel(_cloudPicture->ExecutionDevice())},
+	    {"GrassWindAdapter", devices.AdapterLabel(_geometry->Grass().WindExecutionDevice())},
+	    {"TransparencyAdapter", devices.AdapterLabel(_transparencyOwner)},
+	};
+	for (const auto& [name, id] : _post->ExecutionDevices())
+		adapters.emplace_back(name, id == BistroRender::Invalid ? "inactive" : devices.AdapterLabel(id));
+	return adapters;
+}
+
+std::function<void()> BistroRenderPipeline::CaptureBenchmarkPhysics(World& world)
+{
+	auto physics = BenchmarkEngine::GetLocator().GetModule<PhysicsModule>();
+	return [restore = physics->CaptureReplayState(world), waves = _waves, timeline = _waves->GetTimeline()]
+	{
+		restore();
+		waves->RestoreTimeline(timeline);
+	};
 }
 
 void BistroRenderPipeline::PauseIndependentClocks()

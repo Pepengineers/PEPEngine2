@@ -88,6 +88,7 @@ public:
 
 private:
     friend class App;
+    friend class PhysicsModule;
     double _physicsAccumulator = 0;
 
     SkySource _skySource = SkySource::Off;
