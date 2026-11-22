@@ -270,10 +270,29 @@ public:
     std::wstring Caption() const
     {
         const double pass = LegWarmup() + _window.End - _preroll;
+        const double passLeft = std::max(0., pass - _elapsed);
+        double runLeft = passLeft;
+        bool budgetEstimate = false;
+        if (_stage == Stage::Exhaustive)
+            runLeft += (Cases - _mask - 1) * (Warmup + Duration());
+        else if (_stage == Stage::Placement && !_manualPlacement)
+        {
+            runLeft = Seconds(Clock::now(), _placementDeadline);
+            budgetEstimate = true;
+        }
+        else if (TimedSearch())
+        {
+            runLeft = Remaining() - FinishReserve;
+            if (_stage == Stage::Final) runLeft = std::min(runLeft, passLeft);
+            else budgetEstimate = true;
+        }
+        const auto seconds = static_cast<uint64_t>(std::ceil(std::max(0., runLeft)));
+        const auto eta = std::to_wstring(seconds / 60) + (seconds % 60 < 10 ? L":0" : L":") + std::to_wstring(seconds % 60);
         const auto widen = [](std::string_view s) { return std::wstring(s.begin(), s.end()); };
-        return widen(StageName()) + L" | " + widen(Measuring() ? SectionName(Section(_routeTime)) : "Warmup") +
+        return (budgetEstimate ? L"Benchmark: up to " : L"Benchmark: ~") + eta + L" left | " +
+            widen(StageName()) + L" | " + widen(Measuring() ? SectionName(Section(_routeTime)) : "Warmup") +
             L" | " + std::to_wstring(int(std::clamp(_elapsed / pass, 0., 1.) * 100)) + L"% | " +
-            std::to_wstring(int(std::ceil(std::max(0., pass - _elapsed)))) +
+            std::to_wstring(int(std::ceil(passLeft))) +
             L"s left in pass";
     }
 
