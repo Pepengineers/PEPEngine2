@@ -156,10 +156,14 @@ std::vector<DeviceDesc> PrepareStartup()
 
 	ConsoleModule console;
 	std::vector<DeviceDesc> adapters;
-	console.InitializeWithOverlay({}, {}, [&] {
+	const auto queueDefaults = BistroBenchmark::DefaultsPath();
+	const auto overlay = std::filesystem::exists(queueDefaults) ? queueDefaults : std::filesystem::path{};
+	console.InitializeWithOverlay(overlay, {}, [&] {
 		adapters = GDX12DeviceFactory::GetDeviceDescriptors();
 		ValidateStartupAdapters(console, startup, adapters);
 	});
+	if (!overlay.empty())
+		Log::Info("BistroBenchmark", "Loaded startup queue defaults from ", overlay.u8string());
 	Log::Info("Bistro", "SCENE EXECUTOR; primary=", console.FindConsoleVariable(L"Render.PrimaryAdapter").GetInt(),
 	          "; App.Async.Queues=",
 	          console.FindConsoleVariable(L"App.Async.Queues").GetBool(),

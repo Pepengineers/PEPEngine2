@@ -16,6 +16,19 @@ namespace BistroBenchmarkData
 struct Frame { double RouteSeconds, Milliseconds, IntervalMs; size_t Section; unsigned Groups = 0; };
 struct Stats { size_t Count = 0; double Mean = 0, P95 = 0; };
 
+inline bool CoversWindow(const std::vector<Frame>& frames, double begin, double end)
+{
+    if (frames.size() < 3) return false;
+    // A presented frame must sample each second of the route, including the endpoints.
+    constexpr double MaxGap = 1;
+    for (const auto& frame : frames)
+    {
+        if (frame.RouteSeconds - begin > MaxGap) return false;
+        begin = frame.RouteSeconds;
+    }
+    return end - begin <= MaxGap;
+}
+
 inline Stats Measure(const std::vector<Frame>& frames, double begin, double end)
 {
     std::vector<double> samples;
@@ -55,7 +68,7 @@ public:
 
     template<class SectionName>
     void Leg(const char* stage, unsigned mask, const std::vector<Frame>& frames, double begin,
-        double end, double elapsed, const char* status, SectionName sectionName, unsigned round)
+        double end, double elapsed, const char* status, SectionName sectionName, unsigned round, bool fullFlight)
     {
         // Build the rows in memory, then append them in one write outside frame measurement.
         std::ostringstream output;
@@ -110,7 +123,8 @@ public:
             Write(output, row);
         }
         if (end >= intervalEnd()) emit();
-        Summary(output, stage, mask, sectionName(frames.empty() ? 0 : frames.front().Section), begin, end,
+        const char* summarySection = frames.empty() ? "" : fullFlight ? "Full route" : sectionName(frames.front().Section);
+        Summary(output, stage, mask, summarySection, begin, end,
             elapsed, Measure(frames, begin, end), status, round);
         _file << output.str();
         Check();

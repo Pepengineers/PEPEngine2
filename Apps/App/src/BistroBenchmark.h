@@ -26,6 +26,7 @@
 #include <bitset>
 #include <deque>
 #include <optional>
+#include <tuple>
 
 class BistroBenchmark
 {
@@ -162,15 +163,16 @@ class BistroBenchmark
         L"Flight duration excluding warmup, including five fixed painting stops.",
         EConsoleVariableFlags::Default,
         [](float seconds) { return std::isfinite(seconds) && seconds >= BistroBenchmarkRoute::TotalPaintingHoldSeconds + 1; }};
-    enum class Action { None, Automatic, Search, Run, Cancel };
-    enum class Stage { Run, Baseline, Repeat, Singles, Pairs, Neighbors, Elimination, Tiebreak, Final };
+    enum class Action { None, Automatic, Search, Run, Exhaustive, Cancel };
+    enum class Stage { Run, Baseline, Control, Repeat, Singles, Pairs, Neighbors, Elimination, Tiebreak, Final, Exhaustive };
     using Stats = BistroBenchmarkData::Stats;
     using Csv = BistroBenchmarkData::Csv;
     using Config = std::vector<std::pair<std::string, std::string>>;
-    struct Window { double Begin, End, Weight; };
+    struct Window { double Begin, End, Weight, AdditionalWarmup = 0; };
     using Windows = std::array<Window, 4>;
     using Measurements = std::array<Stats, 4>;
     using PhysicsStates = std::array<std::function<void()>, 4>;
+    struct Checkpoint { double Time; std::function<void()> Restore; };
     struct Probe
     {
         Window Range{};
@@ -197,6 +199,11 @@ public:
 
     bool Active() const { return _active; }
 
+    static std::filesystem::path DefaultsPath()
+    {
+        return ConsoleModule::GetDefaultConfigPath().parent_path() / "BistroQueueDefaults.ini";
+    }
+
     void RequestAutomatic() { if (!_active) Request(Action::Automatic); }
 
     static int QueueGroup(std::string_view name)
@@ -221,6 +228,7 @@ public:
     void Initialize(World& world, BistroCharacters::Scene& characters)
     {
         _characters = &characters;
+        if (std::filesystem::exists(DefaultsPath())) _startupDefault = CurrentMask(ConsoleModule{});
         world.GetECS().ForEach<NameComponent>([&](Entity entity, const NameComponent& name)
         {
             for (size_t leaf = 0; leaf < _doors.size(); ++leaf)
@@ -249,6 +257,12 @@ public:
             ImGui::SameLine();
             if (ImGui::Button(_font ? u8"\u041f\u0440\u043e\u0433\u043e\u043d" : "Run"))
                 Request(Action::Run);
+            ImGui::SameLine();
+            if (ImGui::Button(_font ? u8"\u041f\u043e\u043b\u043d\u044b\u0439 \u043f\u0435\u0440\u0435\u0431\u043e\u0440" : "Full sweep"))
+                Request(Action::Exhaustive);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("%u full flights, about %.0f minutes. Saves the fastest layout as local startup defaults.",
+                    Cases, Cases * (Warmup + FlightSeconds.GetValue()) / 60.);
             if (_font) ImGui::PopFont();
             if (!_message.empty()) DrawRunName(_message.c_str());
             if (!_savedPath.empty()) DrawRunName(_savedPath.c_str());
@@ -257,10 +271,15 @@ public:
 
         if (ImGui::SmallButton("Cancel")) _action = Action::Cancel;
         ImGui::SameLine();
-        ImGui::Text("%s | %.1fs", StageName(), SecondsSince(_started));
+        if (_stage == Stage::Exhaustive)
+            ImGui::Text("%s %u/%u | %.1fs", StageName(), _mask + 1, Cases, SecondsSince(_started));
+        else
+            ImGui::Text("%s | %.1fs", StageName(), SecondsSince(_started));
         if (_search) DrawRunName(PlacementName(_mask).c_str());
-        const double pass = Warmup + _window.End - _preroll;
-        ImGui::ProgressBar(float(std::clamp(_elapsed / pass, 0., 1.)), {-1, 0},
+        const double pass = LegWarmup() + _window.End - _preroll;
+        const double flightProgress = std::clamp(_elapsed / pass, 0., 1.);
+        const auto progress = _stage == Stage::Exhaustive ? (_mask + flightProgress) / Cases : flightProgress;
+        ImGui::ProgressBar(float(progress), {-1, 0},
             Measuring() ? SectionName(Section(_routeTime)) : "Warmup");
     }
 
@@ -272,7 +291,7 @@ public:
             if (action == Action::Cancel) { Stop(world, console, pipeline); return; }
             if (action != Action::None && !_active) Start(world, console, pipeline, action);
             if (!_active) return;
-            if (_search && Remaining() <= FinishReserve)
+            if (TimedSearch() && Remaining() <= FinishReserve)
             {
                 Finish(world, console, pipeline, "deadline", 0);
                 return;
@@ -280,11 +299,12 @@ public:
             if (_legDone) CompleteLeg(world, console, render, pipeline);
             if (!_active) return;
 
-            _routeTime = std::min(_window.End, _preroll + std::max(0., _elapsed - Warmup));
+            _routeTime = std::min(_window.End, _preroll + std::max(0., _elapsed - LegWarmup()));
             if (_stage == Stage::Baseline)
             {
                 CaptureWindows(world, pipeline, _windows, _windowPhysics);
                 CaptureWindows(world, pipeline, _extraWindows, _extraPhysics);
+                CaptureCheckpoint(world, pipeline);
             }
             if (_search) pipeline.SetBenchmarkTime(Warmup + _routeTime);
             const auto pose = Flight(float(_routeTime));
@@ -313,44 +333,51 @@ public:
         const auto now = Clock::now();
         try
         {
-            if (presented)
+            if (!presented)
             {
-                if (Measuring() && _routeTime < _window.End)
+                Finish(world, console, pipeline, "interrupted: frame not presented");
+                return;
+            }
+            if (Measuring() && _routeTime < _window.End)
+            {
+                if (!_legConfigured)
                 {
-                    if (!_legConfigured)
+                    const auto config = EffectiveConfig(render);
+                    if (!_configured)
                     {
-                        const auto config = EffectiveConfig(render);
-                        if (!_configured)
+                        WriteConfig(console, pipeline, config);
+                        if (!_search)
                         {
-                            WriteConfig(console, pipeline, config);
-                            if (!_search)
-                            {
-                                _searchConfig = RenderConfig(console);
-                                _effective = config;
-                            }
+                            _searchConfig = RenderConfig(console);
+                            _effective = config;
                         }
-                        if (_stage == Stage::Baseline) _effective = config;
-                        if (_search && config != _effective)
-                            throw std::runtime_error("Bistro benchmark display or reconstruction changed");
-                        _legConfigured = true;
                     }
-                    unsigned groups = 0;
+                    if (_stage == Stage::Baseline || (_stage == Stage::Exhaustive && _mask == 0))
+                        _effective = config;
+                    if (_search && config != _effective)
+                        throw std::runtime_error("Bistro benchmark display or reconstruction changed");
+                    _legConfigured = true;
+                }
+                unsigned groups = 0;
+                if (_stage == Stage::Baseline || _stage == Stage::Control || _roundNeedsControl)
+                {
+                    for (const auto& packet : pipeline.LastSchedule().Packets)
+                        if (const int group = QueueGroup(packet.Name); group >= 0)
+                            groups |= 1u << group;
+                    _legGroups |= groups;
                     if (_stage == Stage::Baseline)
                     {
-                        for (const auto& packet : pipeline.LastSchedule().Packets)
-                            if (const int group = QueueGroup(packet.Name); group >= 0)
-                                groups |= 1u << group;
                         _activity[Phase(_routeTime)] |= groups;
-                        CaptureActivity(world, pipeline, groups);
+                        CaptureActivity(groups);
                     }
-                    _frames.push_back({_routeTime, Seconds(_frameStart, now) * 1000,
-                        Seconds(_lastPresent, now) * 1000, Section(_routeTime), groups});
                 }
-                _lastPresent = now;
-                _elapsed = Seconds(_legStarted, now);
-                _legDone = _elapsed >= Warmup + _window.End - _preroll;
+                _frames.push_back({_routeTime, Seconds(_frameStart, now) * 1000,
+                    Seconds(_lastPresent, now) * 1000, Section(_routeTime), groups});
             }
-            if (_search && Remaining() <= FinishReserve)
+            _lastPresent = now;
+            _elapsed = Seconds(_legStarted, now);
+            _legDone = _elapsed >= LegWarmup() + _window.End - _preroll;
+            if (TimedSearch() && Remaining() <= FinishReserve)
                 Finish(world, console, pipeline, "deadline", 0);
         }
         catch (const std::exception& error) { Fail(world, console, pipeline, error.what()); }
@@ -491,6 +518,21 @@ private:
         return patch;
     }
 
+    static ConsoleVariablePatch EnabledPlacement(unsigned mask)
+    {
+        auto patch = Placement(mask);
+        patch.emplace_back(L"App.Async.Queues", "true");
+        return patch;
+    }
+
+    static unsigned CurrentMask(const ConsoleModule& console)
+    {
+        unsigned mask = 0;
+        for (size_t i = 0; i < Techniques.size(); ++i)
+            if (console.FindConsoleVariable(Techniques[i]).GetBool()) mask |= 1u << i;
+        return mask;
+    }
+
     static void Apply(ConsoleModule& console, const ConsoleVariablePatch& patch)
     {
         if (const auto result = console.ApplyPatch(patch); !result.Error.empty())
@@ -503,7 +545,9 @@ private:
     }
     static double SecondsSince(Clock::time_point begin) { return Seconds(begin, Clock::now()); }
     double Remaining() const { return Budget - SecondsSince(_started); }
-    bool Measuring() const { return _elapsed >= Warmup + _window.Begin - _preroll; }
+    bool TimedSearch() const { return _search && _stage != Stage::Exhaustive; }
+    double LegWarmup() const { return Warmup + _window.AdditionalWarmup; }
+    bool Measuring() const { return _elapsed >= LegWarmup() + _window.Begin - _preroll; }
 
     void Request(Action action)
     {
@@ -513,8 +557,9 @@ private:
 
     const char* StageName() const
     {
-        constexpr std::array names{"Run", "Baseline", "Baseline repeat", "Single transfers", "Combinations",
-            "Neighbor masks", "Elimination expansion", "Boundary recheck", "Finalist"};
+        if (_roundNeedsControl && (_stage == Stage::Tiebreak || _stage == Stage::Elimination)) return "Short window control";
+        constexpr std::array names{"Run", "Baseline", "Short window controls", "Control repeat", "Single transfers", "Combinations",
+            "Neighbor masks", "Elimination expansion", "Boundary recheck", "Finalist", "Full sweep"};
         return names.at(size_t(_stage));
     }
 
@@ -623,7 +668,9 @@ private:
             throw std::runtime_error("Both Bistro entrance door leaves are required");
         _started = _requestedAt;
         _search = action != Action::Run;
-        _stage = _search ? Stage::Baseline : Stage::Run;
+        _stage = action == Action::Exhaustive ? Stage::Exhaustive : _search ? Stage::Baseline : Stage::Run;
+        _sweepBest = {};
+        _sweepBestMask = 0;
         _message.clear();
         _savedPath.clear();
         _configured = false;
@@ -632,11 +679,14 @@ private:
         _seen = {};
         _scores = {};
         _ratings = {};
+        _reference = {};
         _activityProbes = {};
+        _checkpoints.clear();
         _round = 0;
         _coveredGroups = 0;
         _usedExpansions = {};
         _roundProbe = nullptr;
+        _roundNeedsControl = false;
         _observedMeanNoise = 0;
         _meanThreshold = .01;
         _p95Threshold = .02;
@@ -647,14 +697,13 @@ private:
         _windowPhysics = {};
         _extraPhysics = {};
         _legOpen = false;
-        _userMask = 0;
-        for (size_t i = 0; i < Techniques.size(); ++i)
-            if (console.FindConsoleVariable(Techniques[i]).GetBool()) _userMask |= 1u << i;
+        _userMask = CurrentMask(console);
         _mask = _search ? 0 : _userMask;
         SetFlightDuration(FlightSeconds.GetValue());
         SetWindows();
 
-        const auto directory = Engine::Core::GetExecutableDirectory() / "BenchmarkResults";
+        auto directory = Engine::Core::GetExecutableDirectory() / "BenchmarkResults";
+        if (_stage == Stage::Exhaustive) directory /= "Exhaustive";
         std::filesystem::create_directories(directory);
         const auto stamp = std::chrono::system_clock::now().time_since_epoch().count();
         const auto id = std::to_string(stamp) + "-" + std::to_string(GetCurrentProcessId()) + "-" + std::to_string(++_runId);
@@ -666,7 +715,8 @@ private:
 #else
         _csv.Config("Build", "Release");
 #endif
-        _csv.Config("Mode", action == Action::Automatic ? "automatic_search" : _search ? "manual_search" : "manual_run");
+        _csv.Config("Mode", action == Action::Exhaustive ? "exhaustive_search" :
+            action == Action::Automatic ? "automatic_search" : _search ? "manual_search" : "manual_run");
         _csv.Config("RouteVersion", "1");
         _csv.Config("RouteSeconds", Csv::Number(Duration()));
         _csv.Config("WarmupSeconds", Csv::Number(Warmup));
@@ -683,9 +733,8 @@ private:
         _active = true;
         if (_search)
         {
-            auto patch = Placement(0);
-            patch.insert(patch.end(), {{L"App.Async.Queues", "true"}, {L"Render.FrameGeneration.Provider", "0"},
-                {L"App.Sky.SunCycle.Enabled", "false"}});
+            auto patch = EnabledPlacement(0);
+            patch.insert(patch.end(), {{L"Render.FrameGeneration.Provider", "0"}, {L"App.Sky.SunCycle.Enabled", "false"}});
             for (const auto* variable : console.GetConsoleVariables(L"App."))
             {
                 const auto name = variable->GetName();
@@ -698,12 +747,13 @@ private:
             if (const auto result = console.ApplyPatch(patch, &_previous); !result.Error.empty())
                 throw std::runtime_error(result.Error);
             _searchConfig = SearchConfig(console);
-            if (Remaining() < Warmup + Duration() + FinishReserve)
+            if (TimedSearch() && Remaining() < Warmup + Duration() + FinishReserve)
             {
                 Finish(world, console, pipeline, "baseline does not fit", 0);
                 return;
             }
             _initialScene = CaptureScene(world, pipeline);
+            if (_stage == Stage::Baseline) _checkpoints.push_back({-Warmup, _initialScene});
         }
         BeginLeg(world, pipeline, {0, Duration(), 0});
     }
@@ -717,13 +767,14 @@ private:
         _legDone = false;
         _legOpen = true;
         _legConfigured = false;
+        _legGroups = 0;
         _frames.clear();
         auto& ecs = world.GetECS();
         ecs.Get<CameraComponent>(_camera).InvalidateHistory();
         ecs.Get<BistroInteractionSource>(_camera) = {};
         if (_search)
         {
-            if (_stage == Stage::Final) _initialScene();
+            if (_stage == Stage::Final || _stage == Stage::Exhaustive) _initialScene();
             else if (_stage != Stage::Baseline)
             {
                 const auto& restore = _roundProbe ? _roundProbe->Restore : _windowPhysics[_windowIndex];
@@ -762,16 +813,27 @@ private:
         };
     }
 
-    void CaptureActivity(World& world, BistroRenderPipeline& pipeline, unsigned groups)
+    void CaptureCheckpoint(World& world, BistroRenderPipeline& pipeline)
     {
-        std::function<void()> restore;
+        const double time = _elapsed - Warmup;
+        if (time - _checkpoints.back().Time < .5) return;
+        _checkpoints.push_back({time, CaptureScene(world, pipeline)});
+        while (_checkpoints.size() > 1 && _checkpoints[1].Time <= time - Warmup - 3.)
+            _checkpoints.pop_front();
+    }
+
+    void CaptureActivity(unsigned groups)
+    {
         for (size_t group = 0; group < Techniques.size(); ++group)
         {
             auto& probe = _activityProbes[group];
             if (!(groups & (1u << group)) || probe.Restore) continue;
-            if (!restore) restore = CaptureScene(world, pipeline);
             const auto begin = std::min(_routeTime, double(Duration()) - 1.5);
-            probe = {{begin, begin + 1.5, 0}, {}, 0, Phase(begin), restore};
+            const double entry = std::max(0., begin - 1.) - Warmup;
+            const auto checkpoint = std::find_if(_checkpoints.rbegin(), _checkpoints.rend(),
+                [entry](const auto& sample) { return sample.Time <= entry; });
+            if (checkpoint == _checkpoints.rend()) continue;
+            probe = {{begin, begin + 1.5, 0, entry - checkpoint->Time}, {}, 0, Phase(begin), checkpoint->Restore};
         }
     }
 
@@ -779,28 +841,23 @@ private:
     {
         if (!_legOpen) return;
         _legOpen = false;
-        const double end = std::clamp(_preroll + _elapsed - Warmup, _window.Begin, _window.End);
+        const double end = std::clamp(_preroll + _elapsed - LegWarmup(), _window.Begin, _window.End);
         _csv.Leg(StageName(), _mask, _frames, _window.Begin, end, _elapsed, status, SectionName,
-            _stage == Stage::Elimination || _stage == Stage::Tiebreak ? _round : 0);
+            _stage == Stage::Elimination || _stage == Stage::Tiebreak ? _round : 0,
+            _window.Begin == 0 && _window.End == Duration());
     }
 
     static bool Comparable(Stats stats) { return stats.Count >= 3 && stats.Mean > 0 && stats.P95 > 0; }
 
-    Measurements BaselineWindows(const Windows& windows)
+    void ReportBaselineWindows(const Windows& windows)
     {
-        Measurements result{};
-        for (size_t i = 0; i < windows.size(); ++i)
-        {
-            const auto& window = windows[i];
-            result[i] = BistroBenchmarkData::Measure(_frames, window.Begin, window.End);
-            _csv.Window("Baseline window", 0, SectionName(Section(window.Begin)), window.Begin, window.End, result[i]);
-        }
-        return result;
+        for (const auto& window : windows)
+            _csv.Window("Baseline window", 0, SectionName(Section(window.Begin)), window.Begin, window.End,
+                BistroBenchmarkData::Measure(_frames, window.Begin, window.End));
     }
 
-    void SetProbeReference(Probe& probe)
+    void SetProbeActivity(Probe& probe)
     {
-        probe.Reference = BistroBenchmarkData::Measure(_frames, probe.Range.Begin, probe.Range.End);
         for (const auto& frame : _frames)
             if (probe.Range.Begin <= frame.RouteSeconds && frame.RouteSeconds < probe.Range.End)
                 probe.Groups |= frame.Groups;
@@ -812,14 +869,14 @@ private:
         {
             auto& primary = _primaryProbes[phase];
             auto& extra = _extraProbes[phase];
-            primary = {_windows[phase], _reference[phase], 0, phase, _windowPhysics[phase]};
+            primary = {_windows[phase], {}, 0, phase, _windowPhysics[phase]};
             extra = {_extraWindows[phase], {}, 0, phase, _extraPhysics[phase]};
-            SetProbeReference(primary);
-            SetProbeReference(extra);
-            _coveredGroups |= primary.Groups;
+            SetProbeActivity(primary);
+            SetProbeActivity(extra);
         }
         for (auto& probe : _activityProbes)
-            if (probe.Restore) SetProbeReference(probe);
+            if (probe.Restore) SetProbeActivity(probe);
+        _checkpoints.clear();
     }
 
     void Report(std::string_view name, double value) { _csv.Config(name, Csv::Number(value)); }
@@ -915,7 +972,7 @@ private:
     static double ProbeCost(const Probe& probe)
     {
         const auto& w = probe.Range;
-        return Warmup + w.End - std::max(0., w.Begin - 1.);
+        return Warmup + w.AdditionalWarmup + w.End - std::max(0., w.Begin - 1.);
     }
 
     void NextProbe(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline)
@@ -942,6 +999,11 @@ private:
             _pending.clear();
             switch (_stage)
             {
+            case Stage::Control:
+                _stage = Stage::Repeat;
+                _seen.reset(0);
+                _pending.push_back(0);
+                break;
             case Stage::Repeat:
                 if (!_repeatComparable)
                 {
@@ -975,6 +1037,7 @@ private:
     void StartFinal(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline)
     {
         _roundProbe = nullptr;
+        _roundNeedsControl = false;
         const bool gain = !_ranked.empty() && _scores[_ranked.front()].value_or(0) > 0;
         if (!gain || Remaining() < _finalReserve)
         {
@@ -987,22 +1050,22 @@ private:
         BeginLeg(world, pipeline, {0, Duration(), 0});
     }
 
-    const Probe* BoundaryProbe(unsigned missing) const
+    Probe* BoundaryProbe(unsigned missing)
     {
         if (!missing)
         {
             for (size_t i = 0; i < _extraProbes.size(); ++i)
-                if (!_usedExpansions[i] && Comparable(_extraProbes[i].Reference)) return &_extraProbes[i];
+                if (!_usedExpansions[i] && _extraProbes[i].Restore) return &_extraProbes[i];
             return &_primaryProbes.back();
         }
-        const Probe* best = nullptr;
+        Probe* best = nullptr;
         size_t covered = 0;
-        const auto consider = [&](const auto& probes)
+        const auto consider = [&](auto& probes)
         {
-            for (const auto& probe : probes)
+            for (auto& probe : probes)
             {
                 const auto overlap = std::bitset<Techniques.size()>(probe.Groups & missing).count();
-                if (overlap > covered && Comparable(probe.Reference))
+                if (overlap > covered && probe.Restore)
                 {
                     best = &probe;
                     covered = overlap;
@@ -1016,10 +1079,32 @@ private:
 
     void StartRoundLeg(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline)
     {
-        _mask = _roundMasks[_roundIndex];
+        _roundNeedsControl = !Comparable(_roundProbe->Reference);
+        _mask = _roundNeedsControl ? 0 : _roundMasks[_roundIndex];
         _probeStarted = Clock::now();
         Apply(console, Placement(_mask));
         BeginLeg(world, pipeline, _roundProbe->Range);
+    }
+
+    bool TryBoundaryCheck(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline, unsigned missing)
+    {
+        const auto passing = _ranked[_cut - 1];
+        auto* probe = BoundaryProbe(missing);
+        if (!probe || !Fits((Comparable(probe->Reference) ? 2 : 3) * ProbeCost(*probe) + 1))
+        {
+            _csv.Decision(_round, passing, "recheck", probe ? "skipped: budget" : "skipped: no comparable active window");
+            return false;
+        }
+        _stage = Stage::Tiebreak;
+        _roundProbe = probe;
+        _roundMasks = {passing, _ranked[_cut]};
+        _roundIndex = 0;
+        _csv.Decision(_round, passing, "recheck", "scheduled");
+        _csv.Decision(_round, passing, "recheck_activity_mask", std::to_string(probe->Groups));
+        if (Comparable(probe->Reference))
+            _csv.Decision(_round, 0, "matched_control_mean_ms", Csv::Number(probe->Reference.Mean));
+        StartRoundLeg(world, console, pipeline);
+        return true;
     }
 
     void CutRound(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline)
@@ -1043,23 +1128,7 @@ private:
         _csv.Decision(_round, passing, "uncovered_mask", std::to_string(missing));
         _csv.Decision(_round, passing, "boundary_reason",
             missing ? (close ? "noise and uncovered activity" : "uncovered activity") : (close ? "noise" : "clear"));
-        if (missing || close)
-        {
-            const auto* probe = BoundaryProbe(missing);
-            if (probe && Fits(2 * ProbeCost(*probe) + 1))
-            {
-                _stage = Stage::Tiebreak;
-                _roundProbe = probe;
-                _roundMasks = {passing, dropping};
-                _roundIndex = 0;
-                _csv.Decision(_round, passing, "recheck", "scheduled");
-                _csv.Decision(_round, passing, "recheck_activity_mask", std::to_string(probe->Groups));
-                _csv.Decision(_round, passing, "recheck_baseline_mean_ms", Csv::Number(probe->Reference.Mean));
-                StartRoundLeg(world, console, pipeline);
-                return;
-            }
-            _csv.Decision(_round, passing, "recheck", probe ? "skipped: budget" : "skipped: no comparable active window");
-        }
+        if ((missing || close) && TryBoundaryCheck(world, console, pipeline, missing)) return;
         AdvanceRound(world, console, pipeline);
     }
 
@@ -1076,15 +1145,17 @@ private:
 
         for (size_t i = 0; i < _extraProbes.size(); ++i)
         {
-            const auto& probe = _extraProbes[i];
-            if (_usedExpansions[i] || !Comparable(probe.Reference) || !Fits(_ranked.size() * ProbeCost(probe))) continue;
+            auto& probe = _extraProbes[i];
+            const auto legs = _ranked.size() + (Comparable(probe.Reference) ? 0 : 1);
+            if (_usedExpansions[i] || !probe.Restore || !Fits(legs * ProbeCost(probe))) continue;
             _usedExpansions[i] = true;
             _roundProbe = &probe;
             _stage = Stage::Elimination;
             ++_round;
             _roundMasks = _ranked;
             _roundIndex = 0;
-            _csv.Decision(_round, 0, "expansion_baseline_mean_ms", Csv::Number(probe.Reference.Mean));
+            if (Comparable(probe.Reference))
+                _csv.Decision(_round, 0, "matched_control_mean_ms", Csv::Number(probe.Reference.Mean));
             for (auto mask : _ranked) _csv.Decision(_round, mask, "entered", Csv::Number(*_scores[mask]));
             StartRoundLeg(world, console, pipeline);
             return;
@@ -1095,14 +1166,34 @@ private:
 
     void CompleteRoundLeg(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline, Stats stats)
     {
-        const auto& probe = *_roundProbe;
+        auto& probe = *_roundProbe;
         const double cost = ProbeCost(probe);
         _probeScale = std::max(_probeScale, SecondsSince(_probeStarted) / cost);
         const bool recheck = _stage == Stage::Tiebreak;
         const bool enoughData = Comparable(stats);
-        if (enoughData)
+        if (_roundNeedsControl)
+        {
+            if (enoughData)
+            {
+                probe.Reference = stats;
+                probe.Groups = _legGroups;
+                _csv.Decision(_round, 0, "matched_control_mean_ms", Csv::Number(stats.Mean));
+                _csv.Decision(_round, 0, "matched_control_activity_mask", std::to_string(probe.Groups));
+                if (recheck)
+                {
+                    const unsigned missing = (_roundMasks[0] ^ _roundMasks[1]) & ~_coveredGroups;
+                    if (missing && !(probe.Groups & missing))
+                    {
+                        _csv.Decision(_round, 0, "recheck", "control did not show the distinguishing activity");
+                        if (!TryBoundaryCheck(world, console, pipeline, missing)) AdvanceRound(world, console, pipeline);
+                        return;
+                    }
+                }
+            }
+        }
+        else if (enoughData)
             _roundGains[_mask] = 1 - stats.Mean / probe.Reference.Mean;
-        ++_roundIndex;
+        if (!_roundNeedsControl) ++_roundIndex;
         if (enoughData && _roundIndex < _roundMasks.size() && Fits((_roundMasks.size() - _roundIndex) * cost))
         {
             StartRoundLeg(world, console, pipeline);
@@ -1154,6 +1245,11 @@ private:
 
     void CompleteLeg(World& world, ConsoleModule& console, RenderModule& render, BistroRenderPipeline& pipeline)
     {
+        if (!BistroBenchmarkData::CoversWindow(_frames, _window.Begin, _window.End))
+        {
+            Finish(world, console, pipeline, "incomplete: route coverage");
+            return;
+        }
         const auto stats = BistroBenchmarkData::Measure(_frames, _window.Begin, _window.End);
         if (_stage == Stage::Run)
         {
@@ -1169,15 +1265,40 @@ private:
         });
         if (placementChanged || EffectiveConfig(render) != _effective || SearchConfig(console) != _searchConfig)
         {
-            Finish(world, console, pipeline, "render settings changed", 0);
+            Finish(world, console, pipeline, "render settings changed",
+                TimedSearch() ? std::optional<unsigned>{0} : std::nullopt);
             return;
         }
         WriteLeg("completed");
+        if (_stage == Stage::Exhaustive)
+        {
+            if (_mask == 0) _baseline = stats;
+            if (_mask == 0 || std::tie(stats.Mean, stats.P95) < std::tie(_sweepBest.Mean, _sweepBest.P95))
+            {
+                _sweepBest = stats;
+                _sweepBestMask = _mask;
+            }
+            if (_mask + 1 < Cases)
+            {
+                Apply(console, Placement(++_mask));
+                BeginLeg(world, pipeline, {0, Duration(), 0});
+                return;
+            }
+            const double gain = 1 - _sweepBest.Mean / _baseline.Mean;
+            Report("BaselineMeanMs", _baseline.Mean);
+            Report("BaselineP95Ms", _baseline.P95);
+            Report("FastestMask", _sweepBestMask);
+            Report("FastestMeanMs", _sweepBest.Mean);
+            Report("FastestP95Ms", _sweepBest.P95);
+            Report("MeanGain", gain);
+            Finish(world, console, pipeline, "full sweep completed", _sweepBestMask, gain);
+            return;
+        }
         if (_stage == Stage::Baseline)
         {
             _baseline = stats;
-            _reference = BaselineWindows(_windows);
-            BaselineWindows(_extraWindows);
+            ReportBaselineWindows(_windows);
+            ReportBaselineWindows(_extraWindows);
             PrepareEliminationWindows();
             _finalReserve = SecondsSince(_started) + FinishReserve;
             _activeGroups = 0;
@@ -1192,12 +1313,12 @@ private:
                 Finish(world, console, pipeline, "no usable baseline or active groups", 0);
                 return;
             }
-            if (!Fits(NominalCost(_windows)))
+            if (!Fits(2 * NominalCost(_windows)))
             {
                 Finish(world, console, pipeline, "no time for comparable windows and finalist", 0);
                 return;
             }
-            _stage = Stage::Repeat;
+            _stage = Stage::Control;
             _repeatComparable = false;
             _pending.push_back(0);
             NextProbe(world, console, pipeline);
@@ -1227,6 +1348,7 @@ private:
         }
 
         const auto& windows = _windows;
+        if (_stage == Stage::Control) _coveredGroups |= _legGroups;
         _measurements[_windowIndex++] = stats;
         const double used = NominalCost(windows) - NominalCost(windows, _windowIndex);
         _probeScale = std::max(_probeScale, SecondsSince(_probeStarted) / used);
@@ -1236,7 +1358,13 @@ private:
             else NextProbe(world, console, pipeline);
             return;
         }
-        if (_stage == Stage::Repeat)
+        if (_stage == Stage::Control)
+        {
+            _reference = _measurements;
+            for (size_t i = 0; i < _primaryProbes.size(); ++i)
+                _primaryProbes[i].Reference = _reference[i];
+        }
+        else if (_stage == Stage::Repeat)
         {
             _repeatComparable = true;
             for (size_t i = 0; i < windows.size(); ++i)
@@ -1277,12 +1405,9 @@ private:
         if (_previous.empty()) return;
         auto restore = _previous;
         if (selected)
-            for (auto& [key, value] : restore)
-            {
-                if (key == L"App.Async.Queues") value = "true";
-                for (size_t i = 0; i < Techniques.size(); ++i)
-                    if (key == Techniques[i]) value = (*selected & (1u << i)) ? "true" : "false";
-            }
+            for (const auto& entry : EnabledPlacement(*selected))
+                for (auto& saved : restore)
+                    if (saved.first == entry.first) saved.second = entry.second;
         Apply(console, restore);
     }
 
@@ -1296,7 +1421,7 @@ private:
                 for (const auto& [name, value] : RenderConfig(console))
                     _csv.Config(std::filesystem::path(name).u8string(), value);
             WriteLeg(status);
-            if (_search)
+            if (TimedSearch())
             {
                 Report("MeanGainThreshold", _meanThreshold);
                 Report("ObservedMeanNoise", _observedMeanNoise);
@@ -1327,31 +1452,38 @@ private:
         _primaryProbes = {};
         _extraProbes = {};
         _activityProbes = {};
+        _checkpoints.clear();
         _roundProbe = nullptr;
         if (!error.empty())
         {
             selected.reset();
             status = "error";
         }
-        if (selected.value_or(0) && Remaining() <= 1)
+        const auto defaultMask = _startupDefault.value_or(0);
+        bool timedWinner = TimedSearch() && selected.value_or(0) != 0;
+        if (TimedSearch() && selected && !timedWinner) selected = defaultMask;
+        if (timedWinner && Remaining() <= 1)
         {
-            selected = 0;
+            selected = defaultMask;
+            timedWinner = false;
             status = "deadline";
         }
         try
         {
             RestoreSettings(console, selected);
-            if (selected.value_or(0) && Remaining() <= 0)
+            if (timedWinner && Remaining() <= 0)
             {
-                selected = 0;
+                selected = defaultMask;
+                timedWinner = false;
                 RestoreSettings(console, selected);
                 status = "deadline";
             }
-            if (_search) _csv.Result(selected.value_or(_userMask), SecondsSince(_started), status);
+            if (TimedSearch()) _csv.Result(selected.value_or(_userMask), SecondsSince(_started), status);
             _csv.Close();
-            if (selected.value_or(0) && Remaining() <= 0)
+            if (timedWinner && Remaining() <= 0)
             {
-                selected = 0;
+                selected = defaultMask;
+                timedWinner = false;
                 RestoreSettings(console, selected);
                 status = "deadline while closing CSV";
                 _csv.AppendResult(_path, *selected, SecondsSince(_started), status);
@@ -1365,17 +1497,50 @@ private:
             _csv.Close();
         }
 
+        if (_stage == Stage::Exhaustive)
+        {
+            if (selected)
+            {
+                const auto path = DefaultsPath();
+                const auto result = console.SavePatchIni(path, EnabledPlacement(*selected));
+                if (result.Error.empty())
+                {
+                    _startupDefault = *selected;
+                    status = "full sweep defaults saved";
+                    Log::Info("BistroBenchmark", "Full sweep ", Cases, "/", Cases, "; mask=", *selected,
+                        "; ", PlacementName(*selected), "; mean=", _sweepBest.Mean, " ms; p95=", _sweepBest.P95,
+                        " ms; baseline mean=", _baseline.Mean, " ms; baseline p95=", _baseline.P95,
+                        " ms; mean gain=", 100 * gain, "%; defaults: ", path.u8string());
+                }
+                else
+                {
+                    error = "Cannot save queue defaults: " + result.Error;
+                    selected.reset();
+                    RestoreSettings(console, {});
+                    status = "defaults write failed";
+                }
+            }
+            try { _csv.AppendResult(_path, selected.value_or(_userMask), SecondsSince(_started), status); }
+            catch (const std::exception& failure) { if (error.empty()) error = failure.what(); }
+        }
+
         _message = status;
         if (selected)
         {
             char measured[64]{};
-            if (*selected)
+            if (timedWinner || _stage == Stage::Exhaustive)
                 std::snprintf(measured, sizeof(measured), " | %.1fs | %.1f%% lower mean", SecondsSince(_started), 100 * gain);
             else
                 std::snprintf(measured, sizeof(measured), " | %.1fs", SecondsSince(_started));
-            _message = (*selected ? PlacementName(*selected) : std::string("Default kept")) + " (" + status + ")" + measured;
+            const auto layout = timedWinner || _stage == Stage::Exhaustive ? PlacementName(*selected) :
+                _startupDefault ? "Startup defaults kept: " + PlacementName(*selected) : "Default kept";
+            _message = layout + " (" + status + ")" + measured;
         }
-        if (!error.empty()) _message = error;
+        if (!error.empty())
+        {
+            _message = error;
+            Log::Error("BistroBenchmark", _message, " | CSV: ", _path.u8string());
+        }
         else _savedPath = _path.u8string();
         Log::Info("BistroBenchmark", _message, " | CSV: ", _savedPath);
     }
@@ -1412,7 +1577,7 @@ private:
     Stage _stage = Stage::Run;
     bool _active = false, _search = false, _legDone = false, _legOpen = false;
     bool _configured = false, _legConfigured = false, _hadInfluence = false, _repeatComparable = false;
-    unsigned _mask = 0, _userMask = 0, _activeGroups = 0, _runId = 0;
+    unsigned _mask = 0, _userMask = 0, _activeGroups = 0, _legGroups = 0, _runId = 0;
     size_t _windowIndex = 0;
     double _elapsed = 0, _routeTime = 0, _preroll = 0, _finalReserve = 0, _probeScale = 1;
     double _meanThreshold = .01, _p95Threshold = .02;
@@ -1425,6 +1590,9 @@ private:
     std::array<double, 4> _phaseEnds{};
     std::array<unsigned, 4> _activity{};
     Stats _baseline{};
+    Stats _sweepBest{};
+    unsigned _sweepBestMask = 0;
+    std::optional<unsigned> _startupDefault;
     Measurements _reference{}, _measurements{};
     std::bitset<Cases> _seen;
     std::array<std::optional<double>, Cases> _scores;
@@ -1433,7 +1601,9 @@ private:
     std::array<Probe, 4> _primaryProbes, _extraProbes;
     std::array<Probe, Techniques.size()> _activityProbes;
     std::bitset<4> _usedExpansions;
-    const Probe* _roundProbe = nullptr;
+    std::deque<Checkpoint> _checkpoints;
+    Probe* _roundProbe = nullptr;
+    bool _roundNeedsControl = false;
     std::vector<unsigned> _ranked, _roundMasks;
     unsigned _round = 0, _coveredGroups = 0;
     size_t _cut = 0, _roundIndex = 0;
