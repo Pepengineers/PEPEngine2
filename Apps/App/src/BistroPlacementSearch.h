@@ -140,7 +140,8 @@ public:
                 if (size == _sizes.end()) continue;
                 result.Settings.Resolution = size - _sizes.begin();
                 result.Settings.Owners = _high.Owners;
-                result.SourceCsv = item.path().filename().replace_extension(".csv").u8string();
+                result.SourceCsv = item.path().lexically_relative(output.parent_path())
+                    .replace_extension(".csv").generic_u8string();
                 _references.push_back(result);
             }
         }
@@ -327,7 +328,7 @@ public:
         {
             if ((RemotePhase() && !result.Remote) || _fullSettings.count(candidate)) continue;
             const bool dominated = std::any_of(_short.begin(), _short.end(), [&](const auto& other)
-                { return !_fullSettings.count(other.first) && Dominates(other.second, result); });
+                { return !_fullSettings.count(other.first) && !_retryFull.count(other.first) && Dominates(other.second, result); });
             if (dominated && result.Fps >= Threshold[_profile]) continue;
             if (!best || Better(result, *best)) best = &result;
         }
@@ -344,19 +345,24 @@ public:
     Trial Confirm(const Result& result)
     {
         if (result.Fps < Threshold[_profile]) _triedClosest = true;
-        return Make(result.Settings, "finalist of trial " + std::to_string(result.Id), true);
+        const auto source = _retryFull.count(result.Settings) ? "retry finalist of trial " : "finalist of trial ";
+        return Make(result.Settings, source + std::to_string(result.Id), true);
     }
 
-    void Record(const Trial& trial, const Result& result, BistroBenchmarkData::Csv& csv, bool outputUnavailable)
+    void Record(const Trial& trial, const Result& result, BistroBenchmarkData::Csv& csv, std::string_view rejection)
     {
+        const bool outputUnavailable = rejection == "requested output size unavailable";
         if (trial.Full)
         {
-            _fullSettings.insert(trial.Settings);
             if (result.Valid)
             {
+                _fullSettings.insert(trial.Settings);
                 _confirmed.push_back(result);
                 if (!_remote) SaveReferences();
             }
+            else if (outputUnavailable || rejection == "requested image mode unavailable" ||
+                rejection == "frame generation is active" || !_retryFull.insert(trial.Settings).second)
+                _fullSettings.insert(trial.Settings);
             return;
         }
         if (!result.Valid)
@@ -733,7 +739,16 @@ private:
             _profile == Quality && r->Fps < 30 ? "confirmed within tolerance" : "confirmed");
         if (!r) return;
         csv.Config(prefix + "Trial", std::to_string(r->Id));
-        if (!r->SourceCsv.empty()) csv.Config(prefix + "CSV", r->SourceCsv);
+        if (!r->SourceCsv.empty())
+        {
+            csv.Config(prefix + "CSV", r->SourceCsv);
+            auto trial = std::filesystem::u8path(r->SourceCsv);
+            trial.replace_extension();
+            trial /= "trial-" + std::to_string(r->Id) + ".csv";
+            std::error_code error;
+            if (std::filesystem::is_regular_file(_baselineFile.parent_path() / trial, error))
+                csv.Config(prefix + "TrialCSV", trial.generic_u8string());
+        }
         csv.Config(prefix + "Provider", std::to_string(r->Settings.Provider));
         csv.Config(prefix + "Preset", std::to_string(r->Settings.Preset));
         for (size_t i = 0; i < r->Activity.size(); ++i)
@@ -763,7 +778,7 @@ private:
     std::deque<Trial> _pending, _priority;
     std::set<Config> _scheduled;
     std::map<Config, Result> _short;
-    std::set<Config> _fullSettings;
+    std::set<Config> _fullSettings, _retryFull;
     std::vector<Result> _confirmed;
     std::vector<Result> _references;
     std::filesystem::path _baselineFile;

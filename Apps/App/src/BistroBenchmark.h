@@ -893,6 +893,9 @@ private:
         _trialWindowCount = _windows.size();
         _trialConfig.clear();
         _trialReason.clear();
+        _trialLastPass.clear();
+        _trialCompletedPasses = 0;
+        _trialPending = true;
         _trialPrefix = "Trial." + std::to_string(_trial.Id) + ".";
         _csv.Config(_trialPrefix + "Source", _trial.Source);
         _csv.Config(_trialPrefix + "Scope", _trial.Full ? "full route" : "common windows");
@@ -1098,6 +1101,7 @@ private:
             _trialReason = "incomplete route coverage";
         WritePlacementWaits(pipeline);
         WriteLeg(_trialReason.empty() ? "completed" : _trialReason.c_str());
+        if (_trialReason.empty()) ++_trialCompletedPasses;
         for (const auto& frame : _frames)
         {
             ++_trialFrames;
@@ -1193,13 +1197,13 @@ private:
             _csv.Config(_trialPrefix + "FPSWithThresholdRecheck", Csv::Number(_trialResult.ThresholdFps));
         _csv.Config(_trialPrefix + "P95ms", Csv::Number(_trialResult.P95));
         _csv.Config(_trialPrefix + "WallSeconds", Csv::Number(SecondsSince(_trialStarted)));
-        _csv.Config(_trialPrefix + "Status", _trialResult.Valid ? "measured" : _trialReason);
+        WritePlacementTrialStatus(_trialResult.Valid ? "measured" : _trialReason, !_trialResult.Valid);
         if (_manualPlacement)
         {
             Finish(world, console, pipeline, _trialResult.Valid ? "completed" : _trialReason.c_str());
             return;
         }
-        _placementSearch.Record(_trial, _trialResult, _csv, _trialReason == "requested output size unavailable");
+        _placementSearch.Record(_trial, _trialResult, _csv, _trialReason);
         if (_calibrating)
         {
             _calibrating = false;
@@ -1222,6 +1226,15 @@ private:
     {
         for (const auto& [role, adapter, consumer] : _trialPublications)
             _csv.Config(_trialPrefix + "ConsumedRemotePublication", role + " @ " + adapter + " -> " + consumer);
+    }
+
+    void WritePlacementTrialStatus(std::string_view status, bool partial)
+    {
+        if (!_trialLastPass.empty()) _csv.Config(_trialPrefix + "LastPassCSV", _trialLastPass);
+        _csv.Config(_trialPrefix + "CompletedPasses", std::to_string(_trialCompletedPasses));
+        _csv.Config(_trialPrefix + "Partial", partial ? "true" : "false");
+        _csv.Config(_trialPrefix + "Status", status);
+        _trialPending = false;
     }
 
     double PlacementFullCost() const { return Warmup + Duration() + 2; }
@@ -1287,6 +1300,7 @@ private:
         _windowPhysics = {};
         _extraPhysics = {};
         _legOpen = false;
+        _trialPending = false;
         _userMask = CurrentMask(console);
         _mask = _search ? 0 : _userMask;
         SetFlightDuration(FlightSeconds.GetValue());
@@ -1440,10 +1454,11 @@ private:
         if (!_legOpen) return;
         _legOpen = false;
         const double end = std::clamp(_preroll + _elapsed - LegWarmup(), _window.Begin, _window.End);
-        _csv.Leg(StageName(), _mask, _frames, _window.Begin, end, _elapsed, status, SectionName,
+        auto pass = _csv.Leg(StageName(), _mask, _frames, _window.Begin, end, _elapsed, status, SectionName,
             _stage == Stage::Placement ? unsigned(_trial.Id) :
                 _stage == Stage::Elimination || _stage == Stage::Tiebreak ? _round : 0,
             _window.Begin == 0 && _window.End == Duration());
+        if (_stage == Stage::Placement) _trialLastPass = std::move(pass);
     }
 
     static bool Comparable(Stats stats) { return stats.Count >= 3 && stats.Mean > 0 && stats.P95 > 0; }
@@ -2018,14 +2033,19 @@ private:
             {
                 WritePlacementWaits(pipeline);
                 if (_legOpen) WritePlacementPublications();
+                WriteLeg(status);
+                if (_trialPending) WritePlacementTrialStatus(status, true);
                 if (!_manualPlacement) _placementSearch.Report(_csv, status);
                 _csv.Config("StopReason", status);
                 _csv.Config("ElapsedSeconds", Csv::Number(SecondsSince(_started)));
             }
-            else if (!_configured)
-                for (const auto& [name, value] : RenderConfig(console))
-                    _csv.Config(std::filesystem::path(name).u8string(), value);
-            WriteLeg(status);
+            else
+            {
+                if (!_configured)
+                    for (const auto& [name, value] : RenderConfig(console))
+                        _csv.Config(std::filesystem::path(name).u8string(), value);
+                WriteLeg(status);
+            }
             if (TimedSearch())
             {
                 Report("MeanGainThreshold", _meanThreshold);
@@ -2258,5 +2278,7 @@ private:
     ConsoleVariablePatch _trialRequested;
     GDX12UpscalerProvider _trialProvider{};
     GDX12FrameGenerationProvider _trialFrameGeneration{};
-    std::string _trialPrefix, _trialReason;
+    std::string _trialPrefix, _trialReason, _trialLastPass;
+    size_t _trialCompletedPasses = 0;
+    bool _trialPending = false;
 };

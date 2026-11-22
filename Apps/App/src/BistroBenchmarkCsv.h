@@ -73,12 +73,15 @@ public:
             if (dot != name.npos && !id.empty() && id.find_first_not_of("0123456789") == id.npos)
             {
                 if (id != _trialId) OpenTrial(id);
-                Write(_trialRows, row);
                 const auto field = name.substr(dot + 1);
                 if (field == "FPS" || field == "P95ms" || field == "Status" ||
                     field == "Source" || field == "Scope" || field == "OutputResolution" ||
-                    field == "RenderResolution")
+                    field == "RenderResolution" || field == "LastPassCSV" ||
+                    field == "Partial" || field == "CompletedPasses")
                     Write(_file, row);
+                if (field == "LastPassCSV")
+                    row[Value] = std::filesystem::u8path(value).filename().generic_u8string();
+                Write(_trialRows, row);
                 if (field == "Status" || field == "EquivalentTrial" ||
                     field.find("RemovalEvidence") != field.npos) Flush();
                 return;
@@ -88,7 +91,7 @@ public:
     }
 
     template<class SectionName>
-    void Leg(const char* stage, unsigned mask, const std::vector<Frame>& frames, double begin,
+    std::string Leg(const char* stage, unsigned mask, const std::vector<Frame>& frames, double begin,
         double end, double elapsed, const char* status, SectionName sectionName, unsigned round, bool fullFlight)
     {
         const auto filename = "pass-" + std::to_string(++_pass) + ".csv";
@@ -191,6 +194,7 @@ public:
         Write(_file, entry);
         _file.flush();
         Check();
+        return entry[Value];
     }
 
     void Window(const char* stage, unsigned mask, const char* section, double begin, double end, Stats stats)
