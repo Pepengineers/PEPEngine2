@@ -29,6 +29,39 @@ void DrawOwners(const std::map<std::string, std::string>& groups, const std::str
     }
 }
 
+std::array<std::string, 3> QueueRows(const BistroRenderPipeline& pipeline)
+{
+    using BistroRender::Queue;
+    constexpr std::array labels{"AO", "Environment", "Light grid", "Particles", "Water", "Cloud picture", "HUD", "World canvases"};
+    std::array<std::array<bool, labels.size()>, 3> active{};
+    for (const auto& packet : pipeline.LastSchedule().Packets)
+    {
+        const std::string_view name = packet.Name;
+        int group = BistroBenchmark::QueueGroup(name);
+        if (name == "Game HUD raster") group = 6;
+        else if (name.find("world-space canvases") == 0) group = 7;
+        if (group >= 0) active[size_t(packet.Target)][group] = true;
+    }
+    const bool remoteCloud = pipeline.HasRemoteCloudPicture();
+    std::array<std::string, 3> rows;
+    for (size_t q = 0; q < rows.size(); ++q)
+    {
+        auto& row = rows[q];
+        for (size_t i = 0; i < labels.size(); ++i)
+            if (active[q][i])
+            {
+                if (!row.empty()) row += ", ";
+                row += i == 5 && remoteCloud ? "Cloud import" : labels[i];
+            }
+        if (remoteCloud && q == size_t(Queue::Compute))
+        {
+            if (!row.empty()) row += ", ";
+            row += "Cloud picture (peer GPU)";
+        }
+    }
+    return rows;
+}
+
 void DrawReconstruction(RenderModule& render)
 {
     const auto& status = render.GetReconstructionStatus();
@@ -109,6 +142,7 @@ void BistroInfoPanel::Draw(RenderModule& render, BistroRenderPipeline& pipeline,
         if (_snapshotRevision != pipeline.PanelRevision())
         {
             _snapshotRevision = pipeline.PanelRevision();
+            _queueRows = QueueRows(pipeline);
             _owners.clear();
             for (auto [name, adapter] : pipeline.PanelOwners())
             {
@@ -135,6 +169,13 @@ void BistroInfoPanel::Draw(RenderModule& render, BistroRenderPipeline& pipeline,
             ImGui::Separator();
             Heading("Technique placement");
             DrawOwners(_owners, _primary, false);
+        }
+        ImGui::Separator();
+        constexpr std::array queues{"DIRECT", "ASYNC COMPUTE", "COPY"};
+        for (size_t q = 0; q < queues.size(); ++q)
+        {
+            if (q == size_t(BistroRender::Queue::Copy) && _queueRows[q].empty()) continue;
+            ImGui::TextWrapped("%s  |  %s", queues[q], _queueRows[q].empty() ? "-" : _queueRows[q].c_str());
         }
     }
     ImGui::End();

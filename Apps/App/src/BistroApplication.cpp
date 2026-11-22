@@ -221,6 +221,7 @@ class BistroApplication final : public App
 		InitializeCamera(world);
 		_benchmark.Initialize(world, _bistroCharacters, *_bistroPipeline);
 		Engine::UI::EnableApplicationUIInput();
+		Engine::UI::HideSettings();
 		Engine::UI::SetDebugReconstructionStatusVisible(false);
 		IndirectCommandBuildSystem commands;
 		commands.Schedule(GetJobs(), world, 0).Complete();
@@ -244,6 +245,7 @@ class BistroApplication final : public App
 		if (_benchmark.Active() && (!_runActive || _legNumber != _benchmark.LegNumber()))
 		{
 			_info.Hide();
+			Engine::UI::HideSettings();
 			BistroRender::SceneTextureInspector::SetVisible(false);
 			_legNumber = _benchmark.LegNumber();
 			RefreshWindowCaption();
@@ -296,7 +298,7 @@ class BistroApplication final : public App
 	{
 		std::wstring status;
 		if (_benchmark.Active()) status = _benchmark.Caption() + L" | Esc: cancel | ";
-		return status + L"F6: compact | F7: full | F8: textures";
+		return status + L"F1: CVars | F6: compact | F7: full | F8: textures";
 	}
 	bool OnKeyReleased(WPARAM key) override
 	{

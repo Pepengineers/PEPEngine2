@@ -749,8 +749,8 @@ namespace Engine::UI
             auto dockFlags = ImGuiDockNodeFlags_PassthruCentralNode | ImGuiDockNodeFlags_NoDockingOverCentralNode;
             if (!Visible) dockFlags |= ImGuiDockNodeFlags_KeepAliveOnly;
             ImGui::DockSpaceOverViewport(0, nullptr, dockFlags);
-            DrawSettings();
         }
+        DrawSettings();
     }
 
 
@@ -891,7 +891,7 @@ namespace Engine::UI
     {
         if ((!DebugEnabled && !ApplicationUIInput) || !ImGui::GetCurrentContext()) return false;
         const bool handled = ImGui_ImplWin32_WndProcHandler(window, message, wParam, lParam) != 0;
-        if (SettingsEditingEnabled && DebugEnabled && message == WM_KEYUP && wParam == VK_F1) { Visible = !Visible; return true; }
+        if (message == WM_KEYUP && wParam == VK_F1) { Visible = !Visible; return true; }
         return handled || (message >= WM_MOUSEFIRST && message <= WM_MOUSELAST && WantsMouseInput()) ||
             (message >= WM_KEYFIRST && message <= WM_KEYLAST && WantsKeyboardInput());
     }
@@ -909,6 +909,7 @@ namespace Engine::UI
     void EnableApplicationUIInput() { ApplicationUIInput = true; }
     void SetDebugReconstructionStatusVisible(bool visible) { DebugReconstructionStatusVisible = visible; }
     void SetSettingsEditingEnabled(bool enabled) { SettingsEditingEnabled = enabled; }
+    void HideSettings() { Visible = false; }
     void EnableDebugUI() { DebugEnabled = true; }
     bool DebugUIVisible() { return SettingsEditingEnabled && DebugEnabled && FrameBegun && Visible; }
 }

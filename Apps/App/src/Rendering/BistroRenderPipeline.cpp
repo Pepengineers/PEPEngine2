@@ -289,12 +289,8 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 		}
 		if (std::exchange(_checkPanelPlacement, false))
 		{
-			auto owners = PanelAdapters();
-			if (owners != _panelOwners)
-			{
-				_panelOwners = std::move(owners);
-				++_panelRevision;
-			}
+			_panelOwners = PanelAdapters();
+			++_panelRevision; // Queue targets can change without changing GPU owners.
 		}
 		_post->Textures().ReadbackSubmitted(0, slot);
 	}

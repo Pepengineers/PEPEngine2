@@ -26,6 +26,7 @@ public:
 private:
     std::map<std::string, std::string> _owners;
     std::string _primary;
+    std::array<std::string, 3> _queueRows;
     bool _compact = false, _hidden = false, _checkPlacement = true;
     uint64_t _settingsRevision = 0;
     uint64_t _snapshotRevision = 0;
