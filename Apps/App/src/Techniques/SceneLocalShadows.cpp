@@ -1,6 +1,5 @@
 #include "SceneLocalShadows.h"
 #include "ShadowGeometry.h"
-#include "Engine.Core/Logging/Logger.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.RendererDX12/GDX12ShaderCompiler.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
@@ -260,7 +259,7 @@ void SceneLocalShadows::Invalidate(const Caster& caster, bool listsChanged)
 		return;
 	}
 	_changedCasterBounds.push_back(caster.Bounds);
-	InvalidateBounds(caster.Bounds, listsChanged && (!_staticOnly || !caster.Dynamic));
+	InvalidateBounds(caster.Bounds, listsChanged && caster.Dynamic != _staticOnly);
 }
 
 void SceneLocalShadows::InvalidateBounds(const BoundingBox& bounds, bool listsChanged)
@@ -629,7 +628,13 @@ void SceneLocalShadows::CullJob::Execute(size_t index)
 	}
 	output.SelectionDirty = false;
 	output.Needed = 0;
-	if (!output.InView)
+	if (!(light.ShadowFlags & ShadowEnabled) || (light.Type != 1 && light.Type != 2) ||
+	    !Owner->_resources.ShadowQuality.LocalResolution)
+	{
+		return;
+	}
+	const BoundingBox influence(light.Position, XMFLOAT3(light.Range, light.Range, light.Range));
+	if (!Frame->AllReceivers && !Frame->Camera->Intersects(influence))
 	{
 		return;
 	}
@@ -680,8 +685,6 @@ void SceneLocalShadows::CullJob::Execute(size_t index)
 		}
 	}
 	const UINT root = Owner->_staticOnly ? Owner->_staticRoot : Owner->_dynamicRoot;
-	if (missing && Frame->CombinedDepth && Owner->_staticRoot != UINT_MAX)
-		Owner->Gather(Owner->_staticRoot, light, faces, missing, output.Faces);
 	if (missing && root != UINT_MAX)
 		Owner->Gather(root, light, faces, missing, output.Faces);
 	output.ListsValid |= missing;
@@ -702,30 +705,7 @@ void SceneLocalShadows::PackJob::Execute(size_t)
 	}
 	if (Frame->NextSlice + additional > Frame->Slices)
 	{
-		std::vector<LightCache*> unusedPoint, unusedSpot;
-		for (auto& cached : Frame->Cache)
-		{
-			if (cached.Needed || cached.FirstSlice == UINT_MAX) continue;
-			auto& unused = LocalShadowFaceCount(cached.Light) == 6 ? unusedPoint : unusedSpot;
-			unused.push_back(&cached);
-		}
-		for (auto& cached : Frame->Cache)
-		{
-			if (!cached.Needed || cached.FirstSlice != UINT_MAX) continue;
-			const UINT faces = LocalShadowFaceCount(cached.Light);
-			auto& unused = faces == 6 ? unusedPoint : unusedSpot;
-			if (unused.empty()) continue;
-			auto* previous = unused.back();
-			unused.pop_back();
-			cached.FirstSlice = previous->FirstSlice;
-			previous->FirstSlice = UINT_MAX;
-			previous->MapsValid = 0;
-			additional -= faces;
-		}
 		++Frame->LayoutRevision;
-	}
-	if (Frame->NextSlice + additional > Frame->Slices)
-	{
 		Frame->NextSlice = 0;
 		for (auto& cached : Frame->Cache)
 		{
@@ -836,7 +816,6 @@ UINT SceneLocalShadows::UpdateLights(Slot& frame)
 		frame.Cache.resize(frame.Lights.size());
 		frame.NextSlice = 0;
 	}
-	const bool probesEnabled = GetReflectionSettings().Enabled;
 	UINT slices = 0;
 	for (UINT i = 0; i < frame.Lights.size(); ++i)
 	{
@@ -865,19 +844,7 @@ UINT SceneLocalShadows::UpdateLights(Slot& frame)
 		}
 		cached.Light = source;
 		cached.HasLight = true;
-		// Test the light's influence, including receivers whose light is outside the camera.
-		const BoundingBox influence(source.Position, Vector3(source.Range));
-		const bool inView = !(_staticOnly && frame.CombinedDepth) && _resources.ShadowQuality.LocalResolution && (source.ShadowFlags & ShadowEnabled) &&
-		    (source.Type == 1 || source.Type == 2) &&
-		    (frame.Camera->Intersects(influence) || (frame.AllReceivers && probesEnabled &&
-		        std::any_of(_resources.ReflectionProbes.begin(), _resources.ReflectionProbes.end(), [&](const auto& probe)
-		        {
-			        // The six capture frusta together fill this cube, including its corners.
-			        return BoundingBox(probe.Position, Vector3(probe.FarPlane)).Intersects(influence);
-		        })));
-		cached.SelectionDirty |= cached.InView != inView;
-		cached.InView = inView;
-		if (inView)
+		if (source.ShadowFlags & ShadowEnabled)
 		{
 			slices += LocalShadowFaceCount(source);
 		}
@@ -885,7 +852,7 @@ UINT SceneLocalShadows::UpdateLights(Slot& frame)
 	return slices;
 }
 
-void SceneLocalShadows::Freeze(UINT slot, const std::vector<GDX12RenderPrimitive>& grass, bool allReceivers, bool combinedDepth)
+void SceneLocalShadows::Freeze(UINT slot, const std::vector<GDX12RenderPrimitive>& grass, bool allReceivers)
 {
 	if (!_common.Jobs)
 	{
@@ -894,26 +861,17 @@ void SceneLocalShadows::Freeze(UINT slot, const std::vector<GDX12RenderPrimitive
 	UpdateCasters(slot);
 	UpdateGrass(grass);
 	auto& frame = _slots.at(slot);
+	const UINT slices = UpdateLights(frame);
 	frame.SelectionChanged = !frame.Camera || frame.SceneRevision != _sceneRevision ||
 	                         frame.GrassReceiverRevision != _grassReceiverRevision ||
 	                         frame.Resolution != (std::max)(1u, _resources.ShadowQuality.LocalResolution);
 	frame.SelectionChanged |= frame.AllReceivers != allReceivers;
 	frame.AllReceivers = allReceivers;
-	if (frame.CombinedDepth != combinedDepth)
-	{
-		frame.CombinedDepth = combinedDepth;
-		for (auto& cached : frame.Cache)
-		{
-			cached.MapsValid = cached.ListsValid = 0;
-			cached.SelectionDirty = true;
-		}
-	}
 	frame.SceneRevision = _sceneRevision;
 	frame.GrassReceiverRevision = _grassReceiverRevision;
 	frame.GrassCasterRevision = _grassCasterRevision;
-	UpdateCamera(frame);
-	const UINT slices = UpdateLights(frame);
 	PrepareAtlas(frame, (std::min)(slices, UINT(D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION)));
+	UpdateCamera(frame);
 	frame.Ready = frame.Cull.Schedule(*_common.Jobs, frame.Lights.size(), 1);
 	frame.Ready = frame.Pack.Schedule(*_common.Jobs, 1, frame.Ready);
 }
@@ -998,8 +956,7 @@ void SceneLocalShadows::PrepareAtlas(Slot& frame, UINT requestedSlices)
 {
 	const UINT resolution = (std::max)(1u, _resources.ShadowQuality.LocalResolution);
 	const UINT slices = (std::max)(1u, requestedSlices);
-	if (frame.Resolution == resolution && frame.Slices >= slices &&
-	    (!(_staticOnly && frame.CombinedDepth) || frame.Slices == slices))
+	if (frame.Resolution == resolution && frame.Slices >= slices)
 	{
 		return;
 	}
@@ -1047,8 +1004,6 @@ void SceneLocalShadows::PrepareAtlas(Slot& frame, UINT requestedSlices)
 	}
 	frame.Resolution = resolution;
 	frame.Slices = slices;
-	Log::Info("RenderGraph", "Local shadow atlas ", _staticOnly ? "static" : "dynamic",
-	          " resolution=", resolution, " slices=", slices);
 }
 
 void SceneLocalShadows::AppendGrassViews(Graph& graph, std::vector<ID3D12Resource*>& bindings, UINT slot, Id atlas,
@@ -1075,7 +1030,7 @@ void SceneLocalShadows::AppendGrassViews(Graph& graph, std::vector<ID3D12Resourc
 		                    Matrix(frame.Lights[view.Light].ShadowViewProj[view.Face]).Transpose(), cameraPosition,
 		                    cameraAddress};
 		grassTarget.View.Key = (2ull << 60) | (uint64_t(view.Light) * 6 + view.Face);
-		grassTarget.View.Filter = frame.CombinedDepth ? GDX12GeometryFilter::All : _staticOnly ? GDX12GeometryFilter::Static : GDX12GeometryFilter::Dynamic;
+		grassTarget.View.Filter = _staticOnly ? GDX12GeometryFilter::Static : GDX12GeometryFilter::Dynamic;
 		grassTarget.View.FrameSlot = slot;
 		grassTarget.View.DepthFormat = DXGI_FORMAT_D32_FLOAT;
 		grassTarget.Depth = atlas;
@@ -1133,7 +1088,7 @@ void SceneLocalShadows::Append(
 	const auto resource = [&](ID3D12Resource* value, const char* name)
 	{ return NativeWork::ResourceFor(graph, bindings, value, name); };
 	const Id atlas = resource(frame.Atlas.GetResource()->D3DResource.Get(), "local shadow depth array");
-	if (!_staticOnly && !frame.CombinedDepth && frame.Packed.empty())
+	if (!_staticOnly && frame.Packed.empty())
 	{
 		if (appendGrass)
 			AppendGrassViews(graph, bindings, slot, atlas, appendGrass);
@@ -1174,7 +1129,7 @@ void SceneLocalShadows::Append(
 	const auto lightSrv = lights.GetSRV()->GPUHandle;
 	const auto textures = _resources.SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex);
 	const UINT resolution = frame.Resolution;
-	const bool clearDepth = _staticOnly || frame.CombinedDepth;
+	const bool clearDepth = _staticOnly;
 	work.Add(graph, "local shadow CPU lists ExecuteIndirect", std::move(accesses),
 	         [=, &frame](auto* cmd)
 	         {

@@ -385,6 +385,31 @@ public:
         return Make(result.Settings, source + std::to_string(result.Id), true);
     }
 
+    void ScheduleWithinVideoMemory(const Trial& trial, ConsoleModule& console, Size output)
+    {
+        auto next = trial.Settings;
+        while (next.Resolution && (_sizes[next.Resolution].first > output.first || _sizes[next.Resolution].second > output.second))
+            --next.Resolution;
+        for (size_t i = 0; i < next.Levels.size(); ++i)
+        {
+            const auto& t = Techniques[i];
+            if (t.Enable && !console.FindConsoleVariable(t.Enable).GetBool()) next.Levels[i] = Off;
+            if (!t.Quality) continue;
+            const int admitted = console.FindConsoleVariable(t.Quality).GetInt();
+            auto& level = next.Levels[i];
+            while (level > Off && QualityValue(i, level) > admitted) level = Level(int(level) - 1);
+        }
+        for (size_t i = 0; i < next.Owners.size(); ++i)
+            next.Owners[i] = console.FindConsoleVariable(_placements[i].Variable).GetInt();
+        if (next.Provider == console.FindConsoleVariable(L"Render.Upscaler.Provider").GetInt())
+            Schedule(next, "within VRAM budget", true);
+        if (next.Resolution)
+        {
+            --next.Resolution;
+            Schedule(next, "lower output after VRAM rejection");
+        }
+    }
+
     void Record(const Trial& trial, const Result& result, BistroBenchmarkData::Csv& csv, std::string_view rejection)
     {
         const bool outputUnavailable = rejection == "requested output size unavailable";
@@ -398,7 +423,7 @@ public:
                 if (!result.Remote) SaveReferences();
             }
             else if (outputUnavailable || rejection == "requested image mode unavailable" ||
-                rejection == "NIS reconstruction failed" ||
+                rejection == "VRAM budget exceeded" || rejection == "NIS reconstruction failed" ||
                 rejection == "frame generation is active" || !_retryFull.insert(trial.Settings).second)
                 _fullSettings.insert(trial.Settings);
             return;

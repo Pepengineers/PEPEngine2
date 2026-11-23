@@ -35,6 +35,7 @@ namespace Engine::UI
         bool ApplicationUIInput = false;
         bool DebugReconstructionStatusVisible = true;
         bool SettingsEditingEnabled = true;
+        std::map<std::wstring, std::vector<int>> AvailableLevels;
 #ifdef _DEBUG
         bool DebugEnabled = true;
 #else
@@ -155,24 +156,31 @@ namespace Engine::UI
                     bool enabled = Current == "true";
                     if (ImGui::Checkbox("Enabled", &enabled)) Apply(variable, enabled ? "true" : "false");
                 }
-                else if (variable.GetType() == EConsoleVariableType::Enumeration && variable.GetEnumCount() > 0)
+                else if (const auto levels = AvailableLevels.find(Name);
+                         levels != AvailableLevels.end() || (variable.GetType() == EConsoleVariableType::Enumeration && variable.GetEnumCount() > 0))
                 {
                     const int activeValue = variable.GetInt();
-                    const std::string preview(variable.GetEnumValueName(activeValue));
-                    ImGui::SetNextItemWidth(-1);
-                    if (ImGui::BeginCombo("##value", preview.c_str()))
+                    const auto label = [&](int v)
                     {
-                        const int first = variable.GetEnumFirstValue();
-                        for (int index = 0; index < variable.GetEnumCount(); ++index)
+                        return variable.GetEnumCount() ? std::string(variable.GetEnumValueName(v)) : std::to_string(v);
+                    };
+                    if (levels != AvailableLevels.end() && !levels->second.empty())
+                        ImGui::Text("VRAM budget allows up to %s", label(levels->second.back()).c_str());
+                    ImGui::SetNextItemWidth(-1);
+                    if (ImGui::BeginCombo("##value", label(activeValue).c_str()))
+                    {
+                        const auto option = [&](int value)
                         {
-                            const int value = first + index;
-                            const std::string label(variable.GetEnumValueName(value));
                             ImGui::PushID(value);
-                            if (ImGui::Selectable(label.c_str(), value == activeValue))
+                            if (ImGui::Selectable(label(value).c_str(), value == activeValue))
                                 Apply(variable, std::to_string(value));
                             if (value == activeValue) ImGui::SetItemDefaultFocus();
                             ImGui::PopID();
-                        }
+                        };
+                        if (levels != AvailableLevels.end())
+                            for (int level : levels->second) option(level);
+                        else
+                            for (int i = 0; i < variable.GetEnumCount(); ++i) option(variable.GetEnumFirstValue() + i);
                         ImGui::EndCombo();
                     }
                 }
@@ -875,6 +883,7 @@ namespace Engine::UI
 
     void ShutdownUI()
     {
+        AvailableLevels.clear();
         ScreenAtlasCaptures.clear();
         ScreenAtlasGeneration = 0;
         ScreenAtlasFrame = -1;
@@ -909,6 +918,10 @@ namespace Engine::UI
 
     void EnableApplicationUIInput() { ApplicationUIInput = true; }
     void SetDebugReconstructionStatusVisible(bool visible) { DebugReconstructionStatusVisible = visible; }
+    void SetAvailableSettingLevels(std::map<std::wstring, std::vector<int>> levels)
+    {
+        AvailableLevels = std::move(levels);
+    }
     void SetSettingsEditingEnabled(bool enabled) { SettingsEditingEnabled = enabled; }
     void HideSettings() { Visible = FocusSettings = false; }
     void OpenSettings() { Visible = FocusSettings = true; }

@@ -5,6 +5,8 @@
 #include <DirectXCollision.h>
 #include <cstddef>
 #include <vector>
+#include <map>
+#include <string>
 #include <string_view>
 #ifdef _DEBUG
 #include <initializer_list>
@@ -34,6 +36,7 @@ namespace Engine::UI
     void EnableApplicationUIInput();
     void SetDebugReconstructionStatusVisible(bool visible);
     void SetSettingsEditingEnabled(bool enabled);
+    void SetAvailableSettingLevels(std::map<std::wstring, std::vector<int>> levels);
     void HideSettings();
     void OpenSettings();
     void EnableDebugUI(); // Startup opt-in for non-Debug builds.

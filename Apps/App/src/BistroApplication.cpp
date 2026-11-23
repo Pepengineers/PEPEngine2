@@ -17,6 +17,7 @@
 #include "Techniques/Water/BistroWater.h"
 #include "BistroReflections.h"
 #include "BistroBenchmark.h"
+#include "BistroVideoMemory.h"
 #include "BistroTaskbar.h"
 #include "Techniques/UI/BistroInfoPanel.h"
 #include "Techniques/UI/BistroUICanvases.h"
@@ -185,7 +186,7 @@ class BistroApplication final : public App
 	{
 		auto pipeline = std::make_unique<BistroRenderPipeline>();
 		_bistroPipeline = pipeline.get();
-		Locator.RegisterModule(std::make_shared<RenderModule>(GetWindow(), &Timer, std::move(pipeline), std::move(_adapters)));
+		Locator.RegisterModule(std::make_shared<RenderModule>(GetWindow(), &Timer, std::move(pipeline), _adapters));
 		const auto scene = std::filesystem::path(ASSETS_FOLDER) / "Scenes/Amazon Lumberyard Bistro";
 		for (const auto* part : {"Exterior/exterior.obj", "Interior/interior.obj"})
 		{
@@ -200,6 +201,7 @@ class BistroApplication final : public App
 		{
 			return false;
 		}
+		ApplyVideoMemoryBudget();
 		auto scenes = Locator.GetModule<SceneManagerModule>();
 
 		auto& world = *scenes->GetWorld();
@@ -246,6 +248,14 @@ class BistroApplication final : public App
 		}
 		_info.ApplyResolution(*GetWindow());
 		_benchmark.Update(world, *Locator.GetModule<ConsoleModule>(), *render, *_bistroPipeline, *GetWindow());
+		if (ApplyVideoMemoryBudget() && _benchmark.Active())
+		{
+			if (!_benchmark.RejectVideoMemoryTrial(*Locator.GetModule<ConsoleModule>(), *GetWindow()))
+			{
+				StopBenchmark("VRAM budget exceeded");
+				ApplyVideoMemoryBudget(); // Stopping restores the original render settings.
+			}
+		}
 		UpdateTaskbar();
 		if (_benchmark.Active() && (!_runActive || _legNumber != _benchmark.LegNumber()))
 		{
@@ -325,6 +335,7 @@ class BistroApplication final : public App
 	{
 		std::wstring status;
 		if (_benchmark.Active()) status = _benchmark.Caption() + L" | Esc: cancel | ";
+		if (!_videoMemory.LastLimit.empty()) status += L"Last VRAM limit: " + _videoMemory.LastLimit + L" | ";
 		return status + L"F1: CVars | F6: compact | F7: full | F8: textures";
 	}
 	bool OnKeyReleased(WPARAM key) override
@@ -351,6 +362,37 @@ class BistroApplication final : public App
 		}
 		Engine::UI::SetSettingsEditingEnabled(true);
 	}
+	// WM_SIZE can arrive inside a benchmark patch. Resize once all requested settings are known.
+	void OnResize() override { _resizePending = true; }
+
+	bool ApplyVideoMemoryBudget()
+	{
+		uint16_t width, height;
+		GetWindow()->GetWindowSize(width, height);
+		if (!width || !height) return false;
+		auto console = Locator.GetModule<ConsoleModule>();
+		auto scenes = Locator.GetModule<SceneManagerModule>();
+		bool limited = false;
+		for (;;)
+		{
+			const auto result = _videoMemory.Apply(*console, *scenes, *Locator.GetModule<RenderModule>(), _adapters, width, height, [](const char* name)
+			{
+				return LocalShadowSettings.at(name)->Adapter.GetValue();
+			});
+			limited |= result != BistroVideoMemory::Result::Fits;
+			if (result != BistroVideoMemory::Result::SmallerOutputRequired) break;
+			const auto oldWidth = width, oldHeight = height;
+			GetWindow()->SetWindowSize(width * 3 / 4, height * 3 / 4);
+			GetWindow()->GetWindowSize(width, height);
+			Require(width < oldWidth || height < oldHeight, "Bistro mandatory resources exceed the GPU memory budget at minimum window size");
+			_videoMemory.LastLimit = L"output " + std::to_wstring(width) + L"x" + std::to_wstring(height);
+		}
+		if (std::exchange(_resizePending, false)) App::OnResize();
+		if (limited) RefreshWindowCaption();
+		return limited;
+	}
+	bool _resizePending = false;
+	BistroVideoMemory _videoMemory;
 	std::vector<DeviceDesc> _adapters;
 	Entity _skyEntity = InvalidEntity;
 	double _sunCyclePhase = 0;

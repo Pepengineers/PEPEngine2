@@ -81,6 +81,7 @@ public:
     void ResetWorldHistory();
     std::pair<size_t, size_t> GetWorldProbeReadiness() const { return _pipeline->GetWorldProbeReadiness(); }
     const GDX12ShadowQuality& GetShadowQuality() const { return _primaryResources.ShadowQuality; }
+    uint64_t GetPrimaryGeometryBytes() const;
     D3D12MA::Statistics GetMemoryStatistics() const;
     double GetPrimaryGPUTimeMS();
     GDX12GPUTimingTotals GetPrimaryGPUTimingTotals();

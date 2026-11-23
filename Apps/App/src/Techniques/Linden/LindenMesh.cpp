@@ -197,14 +197,14 @@ void ExtractLinden(World& world, const Engine::Core::Mesh& exterior, RenderModul
         { return exterior.GetSubMesh(i).SourceNodeName == NodeName; }), staticParts.end());
 }
 
-std::shared_ptr<const LindenMesh> FindLindenMesh(SceneManagerModule& scenes)
+std::shared_ptr<const LindenMesh> FindLindenMesh(SceneManagerModule& scenes, int quality)
 {
     for (size_t i = 0; i < scenes.GetWorldCount(); ++i)
     {
         auto& ecs = scenes.GetWorld(i)->GetECS();
         ecs.RegisterComponent<LindenComponent>();
         const auto& trees = ecs.GetPool<LindenComponent>().GetDense();
-        if (!trees.empty()) return trees.front().Lods[static_cast<size_t>(Quality.GetValue())];
+        if (!trees.empty()) return trees.front().Lods.at(quality < 0 ? Quality.GetInt() : quality);
     }
     return {};
 }
