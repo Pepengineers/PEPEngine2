@@ -10,6 +10,10 @@
 class BistroComparePanel
 {
   public:
+    void UpdateHistory(const std::filesystem::path& latestCompleted, bool force = false);
+    bool LatestQuality(const char* mode) const;
+    bool LatestSingleGpuIsAsync() const;
+    void DrawLatest(const char* mode, const char* profile, bool fps);
     void Draw(const std::filesystem::path& latestCompleted);
 
   private:
@@ -43,7 +47,18 @@ class BistroComparePanel
     void Refresh();
     void Select(Selection &, int run, int pass);
     void DrawSelection(Selection &, const char *label);
-    void DrawPlot() const;
+    static void DrawPlot(const Selection* series, size_t count, bool fps);
+    using Filter = std::pair<std::string, std::string>;
+    struct Entry
+    {
+        std::filesystem::file_time_type Completed;
+        int RunIndex, PassIndex;
+    };
+    std::filesystem::file_time_type LatestTime(const Filter& filter) const;
+    std::map<Filter, std::vector<Entry>> _completed;
+    std::map<Filter, Selection> _lastPass;
+    bool _loadComparison = false;
+    std::string _openError;
     std::vector<Run> _runs;
     std::array<Selection, 2> _selected;
     bool _fps = false, _indexed = false;

@@ -4,6 +4,11 @@
 #include "Engine.Core/BenchmarkEngine.h"
 #include "Engine.Core/ConsoleModule.h"
 #include <imgui/imgui.h>
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <shellapi.h>
 #include <chrono>
 #include <ctime>
 #include <algorithm>
@@ -178,6 +183,27 @@ void BistroComparePanel::Refresh()
     if (ec && ec != std::errc::no_such_file_or_directory) _notice = ec.message();
     std::sort(_runs.begin(), _runs.end(),
               [](const Run &a, const Run &b) { return a.Path.filename() > b.Path.filename(); });
+    _completed.clear();
+    _lastPass.clear();
+    _openError.clear();
+    for (int r = 0; r < int(_runs.size()); ++r)
+    {
+        const auto& run = _runs[r];
+        auto& entries = _completed[{run.Mode, (run.Mode == "Single GPU" || run.Mode == "MGPU") ? run.Profile : ""}];
+        for (int p = 0; p < int(run.Passes.size()); ++p)
+        {
+            std::error_code timeError;
+            auto time = fs::last_write_time(run.Passes[p].Path, timeError);
+            if (!timeError) entries.push_back({time, r, p});
+        }
+    }
+    for (auto& [filter, entries] : _completed)
+        std::sort(entries.begin(), entries.end(), [](const Entry& a, const Entry& b) {
+            if (a.Completed != b.Completed) return a.Completed > b.Completed;
+            if (a.RunIndex != b.RunIndex) return a.RunIndex < b.RunIndex;
+            return a.PassIndex > b.PassIndex;
+        });
+    _loadComparison = true;
     for (int i = 0; i < 2; ++i)
     {
         int r = _runs.empty() ? -1 : std::min(i, int(_runs.size()) - 1);
@@ -190,7 +216,9 @@ void BistroComparePanel::Refresh()
                     r = j;
                     p = k;
                 }
-        Select(_selected[i], r, p);
+        _selected[i] = {};
+        _selected[i].RunIndex = r;
+        _selected[i].PassIndex = p;
     }
 }
 
@@ -330,27 +358,30 @@ void BistroComparePanel::DrawSelection(Selection &s, const char *label)
     ImGui::PopID();
 }
 
-void BistroComparePanel::DrawPlot() const
+void BistroComparePanel::DrawPlot(const Selection* series, size_t count, bool fps)
 {
-    const auto &a = _selected[0];
-    const auto &b = _selected[1];
+    const auto &a = series[0];
+    const auto &b = series[count - 1];
     if (!a.Error.empty() || !b.Error.empty() || a.Samples.empty() || b.Samples.empty()) return;
     const double begin = std::min(a.Samples.front().RouteSeconds, b.Samples.front().RouteSeconds);
     const double end = std::max(a.Samples.back().RouteSeconds, b.Samples.back().RouteSeconds);
     const double span = std::max(.001, end - begin);
-    const double peak = _fps ? std::max(a.MaxFps, b.MaxFps) : std::max(a.MaxMs, b.MaxMs);
+    const double peak = fps ? std::max(a.MaxFps, b.MaxFps) : std::max(a.MaxMs, b.MaxMs);
     const auto format = [](double value, const char *fmt) {
         char buf[64];
         std::snprintf(buf, sizeof(buf), fmt, value);
         return std::string(buf);
     };
-    ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(Color(a.Mode)), "A   %s", a.Mode.c_str());
-    ImGui::SameLine();
-    ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(Color(b.Mode)), "B   %s%s", b.Mode.c_str(),
-                       a.Mode == b.Mode ? "  (dashed)" : "");
+    if (count == 2)
+    {
+        ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(Color(a.Mode)), "A   %s", a.Mode.c_str());
+        ImGui::SameLine();
+        ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(Color(b.Mode)), "B   %s%s", b.Mode.c_str(),
+                           a.Mode == b.Mode ? "  (dashed)" : "");
+    }
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     const float width = std::max(1.f, ImGui::GetContentRegionAvail().x - 66);
-    constexpr float height = 215;
+    const float height = count == 2 ? 215.f : std::clamp(ImGui::GetContentRegionAvail().y - 30.f, 85.f, 175.f);
     const ImVec2 top{origin.x + 40, origin.y + 10};
     auto *draw = ImGui::GetWindowDrawList();
     const auto muted = ImGui::GetColorU32(ImGuiCol_TextDisabled);
@@ -364,12 +395,13 @@ void BistroComparePanel::DrawPlot() const
                       tick.c_str());
     }
     const auto point = [&](const Selection::Sample &sample) {
-        const double value = _fps ? 1000 / sample.IntervalMs : sample.IntervalMs;
+        const double value = fps ? 1000 / sample.IntervalMs : sample.IntervalMs;
         return ImVec2{top.x + width * float((sample.RouteSeconds - begin) / span),
                       top.y + height * float(1 - value / peak)};
     };
-    for (const auto &s : _selected)
+    for (size_t iSeries = 0; iSeries < count; ++iSeries)
     {
+        const auto& s = series[iSeries];
         const auto color = Color(s.Mode);
         ImVec2 previous = point(s.Samples[s.Trace.front()]);
         draw->AddCircleFilled(previous, 2, color);
@@ -377,7 +409,7 @@ void BistroComparePanel::DrawPlot() const
         for (size_t i = 1; i < s.Trace.size(); ++i)
         {
             const auto p = point(s.Samples[s.Trace[i]]);
-            if (&s == &b && a.Mode == b.Mode)
+            if (count == 2 && &s == &b && a.Mode == b.Mode)
             {
                 const float dx = p.x - previous.x, dy = p.y - previous.y, length = std::hypot(dx, dy);
                 for (float d = 0; d < length;)
@@ -405,8 +437,9 @@ void BistroComparePanel::DrawPlot() const
         draw->AddLine({x, top.y}, {x, top.y + height}, muted);
         ImGui::BeginTooltip();
         ImGui::Text("Route %.2f s", t);
-        for (const auto &s : _selected)
+        for (size_t iSeries = 0; iSeries < count; ++iSeries)
         {
+            const auto& s = series[iSeries];
             const char id = &s == &a ? 'A' : 'B';
             if (t < s.Samples.front().RouteSeconds || t > s.Samples.back().RouteSeconds)
             {
@@ -418,14 +451,14 @@ void BistroComparePanel::DrawPlot() const
             draw->AddCircleFilled(pos, 4, Color(s.Mode));
             draw->AddCircle(pos, 4, muted);
             ImGui::Separator();
-            ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(Color(s.Mode)), "%c   %s", id, s.Mode.c_str());
+            if (count == 2) ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(Color(s.Mode)), "%c   %s", id, s.Mode.c_str());
             BistroPlot::DrawFrameDetails(sample.Number, sample.RouteSeconds, sample.Section.c_str(), sample.FrameMs,
                                          sample.IntervalMs);
         }
         ImGui::EndTooltip();
     }
     ImGui::Dummy({0, 20});
-    if (ImGui::BeginTable("Compare metrics", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH))
+    if (count == 2 && ImGui::BeginTable("Compare metrics", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH))
     {
         for (auto title : {"Metric", "A", "B", "B vs A"}) ImGui::TableSetupColumn(title);
         ImGui::TableHeadersRow();
@@ -445,13 +478,73 @@ void BistroComparePanel::DrawPlot() const
     }
 }
 
-void BistroComparePanel::Draw(const fs::path& latestCompleted)
+void BistroComparePanel::UpdateHistory(const fs::path& latestCompleted, bool force)
 {
-    if (ImGui::SmallButton("Refresh history") || !_indexed || latestCompleted != _latestCompleted)
+    if (force || !_indexed || latestCompleted != _latestCompleted)
     {
         Refresh();
         _indexed = true;
         _latestCompleted = latestCompleted;
+    }
+}
+
+fs::file_time_type BistroComparePanel::LatestTime(const Filter& filter) const
+{
+    const auto it = _completed.find(filter);
+    return it != _completed.end() && !it->second.empty() ? it->second.front().Completed : fs::file_time_type::min();
+}
+
+bool BistroComparePanel::LatestQuality(const char* mode) const
+{
+    return LatestTime({mode, "Quality"}) > LatestTime({mode, "Performance"});
+}
+
+bool BistroComparePanel::LatestSingleGpuIsAsync() const
+{
+    return LatestTime({"Async", ""}) > std::max(LatestTime({"Single GPU", "Performance"}), LatestTime({"Single GPU", "Quality"}));
+}
+
+void BistroComparePanel::DrawLatest(const char* mode, const char* profile, bool fps)
+{
+    const Filter key{mode, profile};
+    auto [it, inserted] = _lastPass.try_emplace(key);
+    auto& selection = it->second;
+    if (inserted)
+    {
+        const auto found = _completed.find(key);
+        if (found != _completed.end())
+            for (const auto& entry : found->second)
+            {
+                Select(selection, entry.RunIndex, entry.PassIndex);
+                if (selection.Error.empty()) break;
+            }
+    }
+    if (!selection.Error.empty()) { ImGui::TextWrapped("%s", selection.Error.c_str()); return; }
+    if (selection.Samples.empty())
+    {
+        ImGui::TextDisabled("No completed pass for this selection yet.");
+        if (!_notice.empty()) ImGui::TextWrapped("%s", _notice.c_str());
+        return;
+    }
+    const auto& run = _runs[selection.RunIndex];
+    const auto& pass = run.Passes[selection.PassIndex];
+    ImGui::TextWrapped("%s   |   %s", run.Label.c_str(), pass.Label.c_str());
+    ImGui::Text("%.1f FPS avg    %.1f ms avg    %.1f ms P95", selection.Fps, 1000 / selection.Fps, selection.P95);
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Open CSV"))
+        _openError = reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", pass.Path.c_str(), nullptr, nullptr, SW_SHOWNORMAL)) <= 32
+            ? "Could not open the pass CSV." : "";
+    if (!_openError.empty()) ImGui::TextUnformatted(_openError.c_str());
+    DrawPlot(&selection, 1, fps);
+}
+
+void BistroComparePanel::Draw(const fs::path& latestCompleted)
+{
+    UpdateHistory(latestCompleted, ImGui::SmallButton("Refresh history"));
+    if (_loadComparison)
+    {
+        for (auto& s : _selected) Select(s, s.RunIndex, s.PassIndex);
+        _loadComparison = false;
     }
     if (!_notice.empty()) ImGui::TextWrapped("%s", _notice.c_str());
     if (_runs.empty())
@@ -492,6 +585,6 @@ void BistroComparePanel::Draw(const fs::path& latestCompleted)
     if (ImGui::RadioButton("Frame time (ms)", !_fps)) _fps = false;
     ImGui::SameLine();
     if (ImGui::RadioButton("FPS", _fps)) _fps = true;
-    DrawPlot();
+    DrawPlot(_selected.data(), _selected.size(), _fps);
     ImGui::EndTable();
 }

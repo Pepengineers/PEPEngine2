@@ -194,10 +194,18 @@ void BistroInfoPanel::DrawLivePlot(float height, RunMode mode) const
     ImGui::PopStyleColor();
 }
 
-void BistroInfoPanel::DrawResult(const BistroBenchmark& benchmark)
+void BistroInfoPanel::DrawResult(const BistroBenchmark& benchmark, RunMode tab)
 {
     const auto latestSlot = benchmark.LatestResultSlot();
     const auto& latest = benchmark.LastPass(latestSlot);
+    const bool changedTab = !_resultTab || *_resultTab != tab;
+    _resultTab = tab;
+    if (changedTab)
+    {
+        _compare.UpdateHistory(latest.Path);
+        _selectedMode = tab == RunMode::SingleGPU && _compare.LatestSingleGpuIsAsync() ? RunMode::Async : tab;
+        _quality = _compare.LatestQuality(ModeName(tab));
+    }
     if (_latestResult != latest.Path)
     {
         _latestResult = latest.Path;
@@ -211,7 +219,12 @@ void BistroInfoPanel::DrawResult(const BistroBenchmark& benchmark)
     {
         ImGui::SameLine();
         ImGui::PushStyleColor(ImGuiCol_Text, TraceColor(mode));
-        if (ImGui::RadioButton(ModeName(mode), mode == _selectedMode)) _selectedMode = mode;
+        if (ImGui::RadioButton(ModeName(mode), mode == _selectedMode) && mode != _selectedMode)
+        {
+            _selectedMode = mode;
+            _compare.UpdateHistory(latest.Path);
+            _quality = _compare.LatestQuality(ModeName(mode));
+        }
         ImGui::PopStyleColor();
     }
     if (_selectedMode == RunMode::SingleGPU || _selectedMode == RunMode::MultiGPU)
@@ -228,7 +241,13 @@ void BistroInfoPanel::DrawResult(const BistroBenchmark& benchmark)
     const auto profile = _quality ? BistroPlacement::Quality : BistroPlacement::Performance;
     const auto slot = BistroBenchmark::ResultSlot(_selectedMode, profile);
     const auto& pass = benchmark.LastPass(slot);
-    if (pass.Frames.empty()) { ImGui::TextDisabled("No completed pass for this selection yet."); return; }
+    if (pass.Frames.empty())
+    {
+        _compare.UpdateHistory(latest.Path);
+        const bool profiled = _selectedMode == RunMode::SingleGPU || _selectedMode == RunMode::MultiGPU;
+        _compare.DrawLatest(ModeName(_selectedMode), profiled ? BistroPlacement::ProfileName[profile] : "", _plotFps);
+        return;
+    }
     auto& series = _series[slot];
     ImGui::Text("%s    %.1f FPS avg    %.1f ms avg    %.1f ms P95", pass.Name.c_str(),
         pass.Timing.Mean > 0 ? 1000 / pass.Timing.Mean : 0, pass.Timing.Mean, pass.Timing.P95);
@@ -382,6 +401,7 @@ void BistroInfoPanel::Draw(RenderModule& render, BistroRenderPipeline& pipeline,
         else
         {
             bool comparing = false;
+            RunMode tab = RunMode::Manual;
             if (ImGui::BeginTabBar("Benchmark modes"))
             {
                 if (ImGui::BeginTabItem("Current run"))
@@ -398,6 +418,7 @@ void BistroInfoPanel::Draw(RenderModule& render, BistroRenderPipeline& pipeline,
                 }
                 if (ImGui::BeginTabItem("Single GPU"))
                 {
+                    tab = RunMode::SingleGPU;
                     ImGui::Text("Scene GPU   %s", _primary.c_str());
                     ImGui::BeginDisabled(!benchmark.CanStart());
                     if (ImGui::BeginTable("Single GPU actions", 2, ImGuiTableFlags_SizingStretchSame))
@@ -415,6 +436,7 @@ void BistroInfoPanel::Draw(RenderModule& render, BistroRenderPipeline& pipeline,
                 }
                 if (ImGui::BeginTabItem("Multi-GPU"))
                 {
+                    tab = RunMode::MultiGPU;
                     ImGui::Text("Scene GPU   %s", _primary.c_str());
                     for (const auto& peer : _peers) ImGui::Text("Peer GPU    %s", peer.c_str());
                     if (_peers.empty()) ImGui::TextDisabled("No peer GPU available.");
@@ -442,7 +464,7 @@ void BistroInfoPanel::Draw(RenderModule& render, BistroRenderPipeline& pipeline,
                 DrawLivePlot(36, benchmark.CurrentMode());
             }
             else if (!benchmark.Message().empty()) ImGui::TextWrapped("%s", benchmark.Message().c_str());
-            if (!comparing) DrawResult(benchmark);
+            if (!comparing) DrawResult(benchmark, tab);
         }
     }
     ImGui::End();

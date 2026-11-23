@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <map>
+#include <optional>
 #include <utility>
 #include <vector>
 #include <string>
@@ -35,7 +36,7 @@ private:
     struct Placement { std::string Technique, Adapter, Queue; };
     void RefreshPlacement(const BistroRenderPipeline&);
     void DrawPlacement(bool compact) const;
-    void DrawResult(const BistroBenchmark&);
+    void DrawResult(const BistroBenchmark&, BistroBenchmarkData::RunMode tab);
     void DrawCurrentSettings(RenderModule&);
     void DrawLivePlot(float height, BistroBenchmarkData::RunMode mode) const;
 
@@ -53,6 +54,7 @@ private:
     std::array<Series, 6> _series;
     BistroBenchmarkData::RunMode _selectedMode{};
     std::filesystem::path _latestResult;
+    std::optional<BistroBenchmarkData::RunMode> _resultTab;
     bool _quality = false;
     std::string _displayError, _csvError;
     bool _plotFps = false;
