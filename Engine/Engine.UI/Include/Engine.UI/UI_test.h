@@ -35,6 +35,7 @@ namespace Engine::UI
     void SetDebugReconstructionStatusVisible(bool visible);
     void SetSettingsEditingEnabled(bool enabled);
     void HideSettings();
+    void OpenSettings();
     void EnableDebugUI(); // Startup opt-in for non-Debug builds.
     bool DebugUIVisible();
 }

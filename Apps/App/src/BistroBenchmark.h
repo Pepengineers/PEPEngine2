@@ -60,10 +60,11 @@ class BistroBenchmark
         float Distance() const { return _distances.back(); }
         float Distance(size_t begin, size_t end) const { return _distances[end] - _distances[begin]; }
 
-        template<class Pace> void SetPace(Pace secondsPerCm)
+        template<class Pace> void SetPace(Pace secondsPerCm, float paintingHold = 0)
         {
+            _paintingHold = paintingHold;
             for (size_t i = 1; i < _times.size(); ++i)
-                _times[i] = _times[i - 1] + _points[i - 1].HoldSeconds + Distance(i - 1, i) * secondsPerCm(i);
+                _times[i] = _times[i - 1] + Hold(i - 1) + Distance(i - 1, i) * secondsPerCm(i);
         }
 
         float Duration() const { return _times.back(); }
@@ -74,7 +75,7 @@ class BistroBenchmark
             time = std::clamp(time, 0.f, Duration());
             const auto next = std::upper_bound(_times.begin(), _times.end(), time);
             const size_t i = std::min(size_t(next - _times.begin() - 1), _count - 2);
-            const float departure = _times[i] + _points[i].HoldSeconds;
+            const float departure = _times[i] + Hold(i);
             if (time < departure)
             {
                 const auto& point = _points[i];
@@ -94,7 +95,7 @@ class BistroBenchmark
                 size_t to = i + 1;
                 while (_points[from].Target == Vector3::Zero) --from;
                 while (_points[to].Target == Vector3::Zero) ++to;
-                const float panStart = _times[from] + _points[from].HoldSeconds;
+                const float panStart = _times[from] + Hold(from);
                 const float panTime = (time - panStart) / (_times[to] - panStart);
                 return {position, BlendDirection(_points[from].Target - position,
                     _points[to].Target - position, panTime)};
@@ -114,14 +115,17 @@ class BistroBenchmark
             return {position, BlendDirection(a, b, t)};
         }
     private:
+        float _paintingHold = 0;
+        float Hold(size_t i) const { return _points[i].PaintingStop ? _paintingHold : 0.f; }
+
         float SegmentSpeed(size_t i) const
         {
-            return Distance(i, i + 1) / (_times[i + 1] - _times[i] - _points[i].HoldSeconds);
+            return Distance(i, i + 1) / (_times[i + 1] - _times[i] - Hold(i));
         }
 
         float KnotSpeed(size_t i) const
         {
-            if (_points[i].HoldSeconds > 0) return 0;
+            if (Hold(i) > 0) return 0;
             if (i == 0) return SegmentSpeed(0);
             if (i + 1 == _count) return SegmentSpeed(i - 1);
             return std::min(SegmentSpeed(i - 1), SegmentSpeed(i));
@@ -159,13 +163,15 @@ class BistroBenchmark
     static constexpr std::array Techniques{
         L"Render.AO.AsyncCompute", L"Render.Sky.AsyncCompute", L"Render.LightGrid.AsyncCompute", L"Render.Particles.AsyncCompute",
         L"Render.Water.AsyncCompute", L"App.UI.CloudPicture.AsyncCompute"};
-    static constexpr double Budget = 600, FinishReserve = 4, Warmup = 3;
+    static constexpr double Budget = 600, FinishReserve = 4;
     static constexpr unsigned Cases = 1u << Techniques.size();
     inline static AutoConsoleVariable<float> FlightSeconds{L"App.Benchmark.FlightSeconds", 100.f,
-        L"Flight duration excluding warmup, including five fixed painting stops.",
+        L"Flight duration excluding warmup, including the painting stops.",
         EConsoleVariableFlags::Default,
-        [](float seconds) { return std::isfinite(seconds) && seconds >= BistroBenchmarkRoute::TotalPaintingHoldSeconds + 1; }};
+        [](float seconds) { return std::isfinite(seconds) && seconds >= 1; }};
+public:
     enum class Action { None, Automatic, Search, Exhaustive, SingleGPU, MultiGPU, PlacementRun, Cancel };
+private:
     enum class Stage { Baseline, Control, Repeat, Singles, Pairs, Neighbors, Elimination, Tiebreak, FinalControl, Final, Exhaustive, Placement };
     using Stats = BistroBenchmarkData::Stats;
     using Csv = BistroBenchmarkData::Csv;
@@ -204,6 +210,41 @@ public:
         L"Time budget for each independent Bistro profile search.",
         EConsoleVariableFlags::Default, [](float seconds) { return std::isfinite(seconds) && seconds > 0; }};
 
+    inline static AutoConsoleVariable<float> WarmupSeconds{L"App.Benchmark.WarmupSeconds", 3.f,
+        L"Base warmup in seconds for each benchmark pass; captured when a run starts.",
+        EConsoleVariableFlags::Default, [](float seconds) { return std::isfinite(seconds) && seconds >= 0; }};
+
+    inline static AutoConsoleVariable<float> PaintingHoldSeconds{L"App.Benchmark.PaintingHoldSeconds", 5.f,
+        L"Seconds at each painting stop. Zero skips the pause. Flight time includes all painting stops.",
+        EConsoleVariableFlags::Default, [](float seconds) { return std::isfinite(seconds) && seconds >= 0; }};
+
+    struct CompletedPass
+    {
+        std::string Name;
+        std::filesystem::path Path;
+        BistroBenchmarkData::RunMode Mode;
+        BistroBenchmarkData::Stats Timing;
+        std::vector<BistroBenchmarkData::Frame> Frames;
+    };
+    BistroBenchmarkData::RunMode CurrentMode() const { return _runMode; }
+    static size_t ResultSlot(BistroBenchmarkData::RunMode mode, BistroPlacement::Profile profile)
+    {
+        using BistroBenchmarkData::RunMode;
+        if (mode == RunMode::Manual) return 0;
+        if (mode == RunMode::Async) return 1;
+        return (mode == RunMode::SingleGPU ? 2u : 4u) + unsigned(profile);
+    }
+    size_t LatestResultSlot() const { return _latestResultSlot; }
+    const CompletedPass& LastPass(size_t slot) const { return _lastPasses.at(slot); }
+    const std::string& Message() const { return _message; }
+    double FlightTime() const { return _active ? Duration() : FlightSeconds.GetValue(); }
+    double BaseWarmup() const { return _active ? _warmup : WarmupSeconds.GetValue(); }
+    float PaintingHold() const { return _active ? _paintingHold : PaintingHoldSeconds.GetValue(); }
+    bool CanStart() const { return !_active && _action == Action::None; }
+    void Launch(Action action, BistroPlacement::Profile profile = BistroPlacement::Performance)
+    {
+        if (CanStart()) Request(action, profile);
+    }
     bool Active() const { return _active; }
 
     static std::filesystem::path DefaultsPath()
@@ -267,14 +308,14 @@ public:
 
     uint64_t LegNumber() const { return _legNumber; }
     void RequestCancel() { if (_active) _action = Action::Cancel; }
-    std::wstring Caption() const
+    std::wstring RunTimeLeft() const
     {
         const double pass = LegWarmup() + _window.End - _preroll;
         const double passLeft = std::max(0., pass - _elapsed);
         double runLeft = passLeft;
         bool budgetEstimate = false;
         if (_stage == Stage::Exhaustive)
-            runLeft += (Cases - _mask - 1) * (Warmup + Duration());
+            runLeft += (Cases - _mask - 1) * (_warmup + Duration());
         else if (_stage == Stage::Placement && !_manualPlacement)
         {
             runLeft = Seconds(Clock::now(), _placementDeadline);
@@ -288,8 +329,14 @@ public:
         }
         const auto seconds = static_cast<uint64_t>(std::ceil(std::max(0., runLeft)));
         const auto eta = std::to_wstring(seconds / 60) + (seconds % 60 < 10 ? L":0" : L":") + std::to_wstring(seconds % 60);
+        return (budgetEstimate ? L"up to " : L"~") + eta;
+    }
+    std::wstring Caption() const
+    {
+        const double pass = LegWarmup() + _window.End - _preroll;
+        const double passLeft = std::max(0., pass - _elapsed);
         const auto widen = [](std::string_view s) { return std::wstring(s.begin(), s.end()); };
-        return (budgetEstimate ? L"Benchmark: up to " : L"Benchmark: ~") + eta + L" left | " +
+        return L"Benchmark: " + RunTimeLeft() + L" left | " +
             widen(StageName()) + L" | " + widen(Measuring() ? SectionName(Section(_routeTime)) : "Warmup") +
             L" | " + std::to_wstring(int(std::clamp(_elapsed / pass, 0., 1.) * 100)) + L"% | " +
             std::to_wstring(int(std::ceil(passLeft))) +
@@ -307,69 +354,16 @@ public:
         const int left = int(std::ceil(std::max(0., pass - _elapsed)));
         ImGui::TextWrapped("%s  /  %s  /  %d:%02d left in pass", StageName(),
             Measuring() ? SectionName(Section(_routeTime)) : "Warmup", left / 60, left % 60);
+        const auto eta = RunTimeLeft();
+        ImGui::Text("Benchmark: %ls left", eta.c_str());
         ImGui::ProgressBar(float(std::clamp(_elapsed / pass, 0., 1.)), {-1, 4}, "");
+        if (detailed && _stage == Stage::Exhaustive) ImGui::Text("Layout %u of %u", _mask + 1, Cases);
+        if (detailed && _stage == Stage::Placement && !_manualPlacement)
+            ImGui::Text("Trial %u  /  %s  /  %s", unsigned(_trial.Id),
+                BistroPlacement::ProfileName[_placementProfile], _trial.Source.c_str());
         if (detailed && !_frames.empty())
             ImGui::Text("Pass samples: %zu    Last measured frame: %.1f ms    Present interval: %.1f ms",
                 _frames.size(), _frames.back().Milliseconds, _frames.back().IntervalMs);
-    }
-
-    void DrawControls(bool multiGPU)
-    {
-        if (!_active || _multiGPU != multiGPU)
-        {
-            ImGui::BeginDisabled(_active || _action != Action::None);
-            if (multiGPU)
-            {
-                if (ImGui::Button("Performance##multigpu")) Request(Action::MultiGPU, BistroPlacement::Performance);
-                ImGui::SameLine();
-                if (ImGui::Button("Quality##multigpu")) Request(Action::MultiGPU, BistroPlacement::Quality);
-                ImGui::SameLine();
-                if (ImGui::Button("Run current##multigpu")) Request(Action::PlacementRun);
-                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Measure the current placement along the full route.");
-            }
-            else
-            {
-                if (ImGui::Button("Async Quick")) Request(Action::Search);
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("Tune DIRECT/COMPUTE using short samples and full control and finalist runs, up to 10 minutes.");
-                ImGui::SameLine();
-                if (ImGui::Button("Async Full")) Request(Action::Exhaustive);
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("%u full flights, about %.0f minutes. Saves the fastest layout as local startup defaults.",
-                        Cases, Cases * (Warmup + FlightSeconds.GetValue()) / 60.);
-                ImGui::SameLine();
-                if (ImGui::Button("Profiles##single")) ImGui::OpenPopup("Single GPU profile");
-                if (ImGui::BeginPopup("Single GPU profile"))
-                {
-                    if (ImGui::Selectable("Performance")) Request(Action::SingleGPU, BistroPlacement::Performance);
-                    if (ImGui::Selectable("Quality")) Request(Action::SingleGPU, BistroPlacement::Quality);
-                    ImGui::EndPopup();
-                }
-            }
-            ImGui::EndDisabled();
-            const auto& output = _output[multiGPU];
-            if (!output.Message.empty()) DrawRunName(output.Message.c_str());
-            if (!output.Path.empty()) DrawRunName(output.Path.c_str());
-            return;
-        }
-
-        if (ImGui::SmallButton("Cancel")) _action = Action::Cancel;
-        ImGui::SameLine();
-        if (_stage == Stage::Exhaustive)
-            ImGui::Text("%s %u/%u | %.1fs", StageName(), _mask + 1, Cases, SecondsSince(_started));
-        else
-            ImGui::Text("%s | %.1fs", StageName(), SecondsSince(_started));
-        if (_search) DrawRunName(PlacementName(_mask).c_str());
-        if (_stage == Stage::Placement)
-        {
-            const auto prefix = _manualPlacement ? std::string{} : std::string(BistroPlacement::ProfileName[_placementProfile]) + " | ";
-            DrawRunName((prefix + _trial.Source + " | Trial " + std::to_string(_trial.Id)).c_str());
-        }
-        const double pass = LegWarmup() + _window.End - _preroll;
-        const double flightProgress = std::clamp(_elapsed / pass, 0., 1.);
-        const auto progress = _stage == Stage::Exhaustive ? (_mask + flightProgress) / Cases : flightProgress;
-        ImGui::ProgressBar(float(progress), {-1, 0},
-            Measuring() ? SectionName(Section(_routeTime)) : "Warmup");
     }
 
     void Update(World& world, ConsoleModule& console, RenderModule& render, BistroRenderPipeline& pipeline, ::Window& window)
@@ -407,7 +401,7 @@ public:
                 _placementWaitsOpen = true;
             }
             if (_search || _stage == Stage::Placement)
-                pipeline.SetBenchmarkTime(Warmup + _routeTime, _stage != Stage::Placement || !_manualPlacement);
+                pipeline.SetBenchmarkTime(_warmup + _routeTime, _stage != Stage::Placement || !_manualPlacement);
             const auto pose = Flight(float(_routeTime));
             auto& ecs = world.GetECS();
             auto& camera = ecs.Get<TransformComponent>(_camera);
@@ -490,22 +484,6 @@ public:
         catch (const std::exception& error) { Fail(world, console, pipeline, error.what()); }
     }
 private:
-    static void DrawRunName(const char* name)
-    {
-        const auto min = ImGui::GetCursorScreenPos();
-        const auto width = ImGui::GetContentRegionAvail().x;
-        const auto height = ImGui::GetTextLineHeight();
-        if (width <= 0) return;
-        const ImVec2 max{min.x + width, min.y + height};
-        auto* draw = ImGui::GetWindowDrawList();
-        draw->PushClipRect(min, max, true);
-        draw->AddText(min, ImGui::GetColorU32(ImGuiCol_TextDisabled), name);
-        draw->PopClipRect();
-        ImGui::Dummy({width, height});
-        if (ImGui::IsItemHovered() && ImGui::CalcTextSize(name).x > width)
-            ImGui::SetTooltip("%s", name);
-    }
-
     static float Ease(float t)
     {
         t = std::clamp(t, 0.f, 1.f);
@@ -533,7 +511,11 @@ private:
         constexpr float greenSeconds = 35.f;
         constexpr float exteriorSeconds = 20.f;
         constexpr float interiorSeconds = movingSeconds - greenSeconds - exteriorSeconds;
-        const float scale = (seconds - TotalPaintingHoldSeconds) / movingSeconds;
+        const auto stops = std::count_if(std::begin(Yellow), std::end(Yellow), [](const Point& p) { return p.PaintingStop; });
+        const double moving = seconds - double(stops) * _paintingHold;
+        if (moving < 1.)
+            throw std::runtime_error("FlightSeconds must allow all painting stops plus at least one second of movement.");
+        const float scale = float(moving / movingSeconds);
         const float interior = _yellow.Distance(BistroBenchmarkRoute::EntryDoor, BistroBenchmarkRoute::ExitDoor);
         const float exterior = 2 * _red.Distance() + _blue.Distance() + _yellow.Distance() - interior;
         const float outsidePace = exteriorSeconds * scale / exterior;
@@ -542,7 +524,7 @@ private:
         _yellow.SetPace([&](size_t i)
         {
             return i > EntryDoor && i <= ExitDoor ? interiorSeconds * scale / interior : outsidePace;
-        });
+        }, _paintingHold);
 
         constexpr size_t ArchEntrance = 4, ArchExit = 6, TreeStart = 9, TreeEnd = 21;
         constexpr size_t ReturnArchEntrance = 25, ReturnArchExit = 27;
@@ -653,7 +635,7 @@ private:
     static double SecondsSince(Clock::time_point begin) { return Seconds(begin, Clock::now()); }
     double Remaining() const { return Budget - SecondsSince(_started); }
     bool TimedSearch() const { return _search && _stage != Stage::Exhaustive; }
-    double LegWarmup() const { return Warmup + _window.AdditionalWarmup; }
+    double LegWarmup() const { return _warmup + _window.AdditionalWarmup; }
     bool Measuring() const { return _elapsed >= LegWarmup() + _window.Begin - _preroll; }
 
     void Request(Action action, BistroPlacement::Profile profile = BistroPlacement::Performance)
@@ -707,7 +689,7 @@ private:
         const double entry = yellow + _yellow.At(BistroBenchmarkRoute::EntryDoor);
         const double clouds = yellow + _yellow.At(10); // Painting C hosts CloudPicture.
         const double returnFlight = yellow + _yellow.Duration();
-        const double paintingEnd = clouds + BistroBenchmarkRoute::PaintingHoldSeconds;
+        const double paintingEnd = clouds + _paintingHold;
         _sections = {blue, green, entry, clouds, paintingEnd, returnFlight};
         _phaseEnds = {green, entry, clouds, Duration()};
         const auto window = [](double begin, double end, double anchor, double length, double weight)
@@ -720,7 +702,7 @@ private:
             window(blue, green, blue + _blue.At(3), 1.5, green),
             window(green, yellow, green + _green.At(4), 1.5, entry - green),
             window(entry, clouds, yellow + _yellow.At(7), 1.5, clouds - entry),
-            window(clouds, paintingEnd, clouds + .5, 1.5, Duration() - clouds),
+            window(clouds, std::min(returnFlight, std::max(paintingEnd, clouds + 1.5)), clouds + .5, 1.5, Duration() - clouds),
         }};
         _extraWindows = {{
             window(blue, green, blue + _blue.At(10), 2., _windows[0].Weight),
@@ -852,7 +834,7 @@ private:
             if (!exeLength || exeLength == std::size(executable))
                 throw std::runtime_error("Cannot identify benchmark executable");
             std::ostringstream conditions;
-            conditions << "bistro-baseline-v5 " << std::setprecision(17) << Duration() << ' ' << Warmup << ' ' <<
+            conditions << "bistro-baseline-v6 " << std::setprecision(17) << Duration() << ' ' << _paintingHold << ' ' << _warmup << ' ' <<
                 std::filesystem::last_write_time(executable).time_since_epoch().count() << ' ' <<
                 pipeline.BenchmarkSubmissions().AdapterLabel(0) << ' ' <<
                 world.GetTimeScale() << ' ' << _characters->Seed() << ' ' << _startupLayout;
@@ -882,7 +864,7 @@ private:
             _csv.Config("PlacementSeed", "20261122");
             _csv.Config("SkinningOwnerRestriction", "Remote skinning selection is startup-only; search uses scene GPU");
             _csv.Config("SceneOwnerRestriction", "The scene adapter is fixed at application startup");
-            if (Seconds(Clock::now(), _placementDeadline) < Warmup + Duration())
+            if (Seconds(Clock::now(), _placementDeadline) < _warmup + Duration())
             {
                 Finish(world, console, pipeline, "full route does not fit in budget");
                 return;
@@ -960,7 +942,7 @@ private:
         for (size_t i = 0; i < _placementPhysics.size(); ++i)
         {
             const double begin = PlacementWindow(i).Begin;
-            const double snapshot = std::max(0., begin - Warmup - 1.);
+            const double snapshot = std::max(0., begin - _warmup - 1.);
             if (_placementPhysics[i] || _routeTime < snapshot) continue;
             _placementPhysics[i] = snapshot == 0 ? _replayScene : CaptureScene(world, pipeline);
         }
@@ -1283,12 +1265,12 @@ private:
         _trialPending = false;
     }
 
-    double PlacementFullCost() const { return Warmup + Duration() + 2; }
-    static constexpr double PlacementProbeCost = 8 * (Warmup + 1 + 2) + 5;
+    double PlacementFullCost() const { return _warmup + Duration() + 2; }
+    double PlacementProbeCost() const { return 8 * (_warmup + 1 + 2) + 5; }
 
     void BeginNextPlacementPhase(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline)
     {
-        const double probeAndFull = PlacementProbeCost + PlacementFullCost();
+        const double probeAndFull = PlacementProbeCost() + PlacementFullCost();
         for (; _placementPhase < 4 && Clock::now() < _placementDeadline; ++_placementPhase)
         {
             if (_placementPhase == 0 && Seconds(Clock::now(), _placementDeadline) < 2 * probeAndFull &&
@@ -1315,7 +1297,7 @@ private:
         const double fullCost = PlacementFullCost();
         const double remaining = Seconds(now, _phaseDeadline);
         const auto* finalist = _placementSearch.Finalist();
-        if (remaining >= PlacementProbeCost + fullCost)
+        if (remaining >= PlacementProbeCost() + fullCost)
             if (auto probe = _placementSearch.NextProbe())
             {
                 BeginPlacementTrial(world, console, pipeline, std::move(*probe));
@@ -1335,11 +1317,13 @@ private:
         ::Window& window, Action action)
     {
         _multiGPU = action == Action::MultiGPU || action == Action::PlacementRun;
-        _output[_multiGPU] = {};
         if (std::find(_doors.begin(), _doors.end(), InvalidEntity) != _doors.end())
             throw std::runtime_error("Both Bistro entrance door leaves are required");
         _started = _requestedAt;
         _search = action == Action::Automatic || action == Action::Search || action == Action::Exhaustive;
+        using BistroBenchmarkData::RunMode;
+        _runMode = action == Action::PlacementRun ? RunMode::Manual : _search ? RunMode::Async :
+            _multiGPU ? RunMode::MultiGPU : RunMode::SingleGPU;
         _stage = action == Action::Exhaustive ? Stage::Exhaustive : _search ? Stage::Baseline : Stage::Placement;
         _sweepBest = {};
         _sweepBestMask = 0;
@@ -1372,6 +1356,8 @@ private:
         _trialPending = false;
         _userMask = CurrentMask(console);
         _mask = _search ? 0 : _userMask;
+        _warmup = WarmupSeconds.GetValue();
+        _paintingHold = PaintingHoldSeconds.GetValue();
         SetFlightDuration(FlightSeconds.GetValue());
         SetWindows();
 
@@ -1394,7 +1380,8 @@ private:
             action == Action::PlacementRun ? "manual_placement" : _multiGPU ? "multi_gpu_profiles" : "single_gpu_profiles");
         _csv.Config("RouteVersion", "1");
         _csv.Config("RouteSeconds", Csv::Number(Duration()));
-        _csv.Config("WarmupSeconds", Csv::Number(Warmup));
+        _csv.Config("WarmupSeconds", Csv::Number(_warmup));
+        _csv.Config("PaintingHoldSeconds", Csv::Number(_paintingHold));
         for (size_t i = 0; i < Techniques.size(); ++i)
             _csv.Config("MaskBit" + std::to_string(i), std::filesystem::path(Techniques[i]).u8string());
 
@@ -1422,13 +1409,13 @@ private:
             if (const auto result = console.ApplyPatch(patch, &_previous); !result.Error.empty())
                 throw std::runtime_error(result.Error);
             _searchConfig = SearchConfig(console);
-            if (TimedSearch() && Remaining() < Warmup + Duration() + FinishReserve)
+            if (TimedSearch() && Remaining() < _warmup + Duration() + FinishReserve)
             {
                 Finish(world, console, pipeline, "baseline does not fit", 0);
                 return;
             }
             _initialScene = CaptureScene(world, pipeline);
-            if (_stage == Stage::Baseline) _checkpoints.push_back({-Warmup, _initialScene});
+            if (_stage == Stage::Baseline) _checkpoints.push_back({-_warmup, _initialScene});
         }
         BeginLeg(world, pipeline, {0, Duration(), 0});
     }
@@ -1483,7 +1470,7 @@ private:
     void CaptureWindows(World& world, BistroRenderPipeline& pipeline, const Windows& windows, PhysicsStates& snapshots)
     {
         for (size_t i = 0; i < windows.size(); ++i)
-            if (!snapshots[i] && _routeTime >= windows[i].Begin - 1 - Warmup)
+            if (!snapshots[i] && _routeTime >= windows[i].Begin - 1 - _warmup)
                 snapshots[i] = _routeTime == 0 ? _initialScene : CaptureScene(world, pipeline);
     }
 
@@ -1498,10 +1485,10 @@ private:
 
     void CaptureCheckpoint(World& world, BistroRenderPipeline& pipeline)
     {
-        const double time = _elapsed - Warmup;
+        const double time = _elapsed - _warmup;
         if (time - _checkpoints.back().Time < .5) return;
         _checkpoints.push_back({time, CaptureScene(world, pipeline)});
-        while (_checkpoints.size() > 1 && _checkpoints[1].Time <= time - Warmup - 3.)
+        while (_checkpoints.size() > 1 && _checkpoints[1].Time <= time - _warmup - 3.)
             _checkpoints.pop_front();
     }
 
@@ -1512,7 +1499,7 @@ private:
             auto& probe = _activityProbes[group];
             if (!(groups & (1u << group)) || probe.Restore) continue;
             const auto begin = std::min(_routeTime, double(Duration()) - 1.5);
-            const double entry = std::max(0., begin - 1.) - Warmup;
+            const double entry = std::max(0., begin - 1.) - _warmup;
             const auto checkpoint = std::find_if(_checkpoints.rbegin(), _checkpoints.rend(),
                 [entry](const auto& sample) { return sample.Time <= entry; });
             if (checkpoint == _checkpoints.rend()) continue;
@@ -1525,10 +1512,17 @@ private:
         if (!_legOpen) return;
         _legOpen = false;
         const double end = std::clamp(_preroll + _elapsed - LegWarmup(), _window.Begin, _window.End);
+        Stats timing;
         auto pass = _csv.Leg(StageName(), _mask, _frames, _window.Begin, end, _elapsed, status, SectionName,
             _stage == Stage::Placement ? unsigned(_trial.Id) :
                 _stage == Stage::Elimination || _stage == Stage::Tiebreak ? _round : 0,
-            _window.Begin == 0 && _window.End == Duration());
+            _window.Begin == 0 && _window.End == Duration(), _runMode, timing);
+        if (std::string_view(status) == "completed" && timing.Count)
+        {
+            _latestResultSlot = ResultSlot(_runMode, _placementProfile);
+            _lastPasses[_latestResultSlot] = {StageName(),
+                _path.parent_path() / std::filesystem::u8path(pass), _runMode, timing, _frames};
+        }
         if (_stage == Stage::Placement) _trialLastPass = std::move(pass);
     }
 
@@ -1645,19 +1639,19 @@ private:
                 }
     }
 
-    static double NominalCost(const Windows& windows, size_t first = 0)
+    double NominalCost(const Windows& windows, size_t first = 0) const
     {
         double seconds = 0;
         for (size_t i = first; i < windows.size(); ++i)
-            seconds += Warmup + windows[i].End - std::max(0., windows[i].Begin - 1.);
+            seconds += _warmup + windows[i].End - std::max(0., windows[i].Begin - 1.);
         return seconds;
     }
 
     bool Fits(double seconds) const { return Remaining() > seconds * _probeScale + 1 + _finalReserve; }
-    static double ProbeCost(const Probe& probe)
+    double ProbeCost(const Probe& probe) const
     {
         const auto& w = probe.Range;
-        return Warmup + w.AdditionalWarmup + w.End - std::max(0., w.Begin - 1.);
+        return _warmup + w.AdditionalWarmup + w.End - std::max(0., w.Begin - 1.);
     }
 
     void NextProbe(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline)
@@ -2286,7 +2280,6 @@ private:
             Log::Error("BistroBenchmark", _message, " | CSV: ", _path.u8string());
         }
         else _savedPath = _path.u8string();
-        _output[_multiGPU] = {_message, _savedPath};
         Log::Info("BistroBenchmark", _message, " | CSV: ", _savedPath);
     }
 
@@ -2303,7 +2296,6 @@ private:
             error += cleanup.what();
         }
         _message = std::move(error);
-        _output[_multiGPU].Message = _message;
         Log::Error("BistroBenchmark", _message);
     }
 
@@ -2357,8 +2349,11 @@ private:
     std::deque<unsigned> _pending;
     std::vector<BistroBenchmarkData::Frame> _frames;
     std::string _message, _savedPath;
-    struct Output { std::string Message, Path; };
-    std::array<Output, 2> _output;
+    BistroBenchmarkData::RunMode _runMode = BistroBenchmarkData::RunMode::Manual;
+    size_t _latestResultSlot = 0;
+    std::array<CompletedPass, 6> _lastPasses{};
+    double _warmup = 3;
+    float _paintingHold = 5;
     bool _multiGPU = false;
     bool _inspectorWasVisible = false;
     bool _manualPlacement = false, _calibrating = false, _placementWaitsOpen = false;

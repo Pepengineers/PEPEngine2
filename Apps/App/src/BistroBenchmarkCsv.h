@@ -13,6 +13,19 @@
 
 namespace BistroBenchmarkData
 {
+enum class RunMode { Manual, Async, SingleGPU, MultiGPU };
+inline const char* ModeName(RunMode mode)
+{
+    switch (mode)
+    {
+    case RunMode::Manual: return "Manual";
+    case RunMode::SingleGPU: return "Single GPU";
+    case RunMode::Async: return "Async";
+    case RunMode::MultiGPU: return "MGPU";
+    }
+    return "";
+}
+
 struct Frame { double RouteSeconds, Milliseconds, IntervalMs; size_t Section; unsigned Groups = 0; };
 struct Stats { size_t Count = 0; double Mean = 0, P95 = 0; };
 
@@ -92,7 +105,7 @@ public:
 
     template<class SectionName>
     std::string Leg(const char* stage, unsigned mask, const std::vector<Frame>& frames, double begin,
-        double end, double elapsed, const char* status, SectionName sectionName, unsigned round, bool fullFlight)
+        double end, double elapsed, const char* status, SectionName sectionName, unsigned round, bool fullFlight, RunMode mode, Stats& timing)
     {
         const auto filename = "pass-" + std::to_string(++_pass) + ".csv";
         const auto path = _directory / filename;
@@ -100,6 +113,10 @@ public:
         pending += ".tmp";
         std::ofstream output(pending);
         output << Header;
+        auto execution = Row("config", stage, mask);
+        execution[Name] = "RunMode";
+        execution[Value] = ModeName(mode);
+        Write(output, execution);
         std::vector<double> intervals;
         intervals.reserve(frames.size());
         double measuredMs = 0;
@@ -175,6 +192,7 @@ public:
             const auto rank = intervals.begin() + (intervals.size() * 95 - 1) / 100;
             std::nth_element(intervals.begin(), rank, intervals.end());
             entry[P95] = Number(*rank);
+            timing = {frames.size(), measuredMs / frames.size(), *rank};
         }
         auto detail = entry;
         detail[Name] = "RunCSV";

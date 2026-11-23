@@ -8,11 +8,8 @@ struct Point
     Vector3 Position;
     Vector3 Target = Vector3::Zero;
     bool AlongPaintingWall = false;
-    float HoldSeconds = 0;
+    bool PaintingStop = false;
 };
-
-inline constexpr float PaintingHoldSeconds = 5;
-inline constexpr float TotalPaintingHoldSeconds = 5 * PaintingHoldSeconds;
 
 inline const Point Red[] = {
     {{1071, 202, -4195}},
@@ -86,13 +83,13 @@ inline const Point Yellow[] = {
     {{258, 200, -14}, {470, 110, -242}},
     {{433, 200, 44}, {470, 110, -242}},
     {{606, 200, 120}, {470, 110, -242}},
-    {{770, 200, 204}, {977, 237, 296}, true, PaintingHoldSeconds}, // C
+    {{770, 200, 204}, {977, 237, 296}, true, true}, // C
     {{805, 200, 139}, Vector3::Zero, true},
-    {{840, 200, 74}, {1089, 237, 92}, true, PaintingHoldSeconds}, // F
+    {{840, 200, 74}, {1089, 237, 92}, true, true}, // F
     {{875, 200, 9}, Vector3::Zero, true},
     {{910, 245, -56}, Vector3::Zero, true},
     {{945, 275, -121}, Vector3::Zero, true},
-    {{980, 265, -186}, {1210, 235, -151}, true, PaintingHoldSeconds}, // B
+    {{980, 265, -186}, {1210, 235, -151}, true, true}, // B
     {{1019, 200, -265}, {1210, 235, -151}},
     {{888, 200, -330}, {258, 275, 117}},
     {{799, 200, -367}, {234, 275, 109}},
@@ -106,13 +103,13 @@ inline const Point Yellow[] = {
     {{663, 200, -843}},
     {{721, 200, -958}},
     {{744, 200, -989}},
-    {{718, 200, -1018}, {750, 259, -1090}, false, PaintingHoldSeconds}, // E
+    {{718, 200, -1018}, {750, 259, -1090}, false, true}, // E
     {{658, 200, -968}, {750, 259, -1090}},
     {{590, 200, -840}, {750, 259, -1090}},
     {{522, 200, -720}, {750, 259, -1090}},
     {{438, 200, -665}, {500, 110, -237}},
     {{302, 200, -678}},
-    {{214, 200, -605}, {315, 237, -802}, false, PaintingHoldSeconds}, // D
+    {{214, 200, -605}, {315, 237, -802}, false, true}, // D
     {{148, 200, -469}, {315, 237, -802}},
     {{93, 200, -335}, {500, 110, -237}},
     {{44, 200, -194}},

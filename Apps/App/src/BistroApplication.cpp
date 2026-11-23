@@ -243,6 +243,7 @@ class BistroApplication final : public App
 			_autoBenchmarkPending = false;
 			_benchmark.RequestAutomatic();
 		}
+		_info.ApplyResolution(*GetWindow());
 		_benchmark.Update(world, *Locator.GetModule<ConsoleModule>(), *render, *_bistroPipeline, *GetWindow());
 		if (_benchmark.Active() && (!_runActive || _legNumber != _benchmark.LegNumber()))
 		{

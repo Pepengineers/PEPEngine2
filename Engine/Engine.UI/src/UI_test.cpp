@@ -41,6 +41,7 @@ namespace Engine::UI
         bool DebugEnabled = false;
 #endif
         bool Visible = false;
+        bool FocusSettings = false;
         std::string LayoutPath;
         std::vector<std::string> AdapterLabels;
         int PrimaryIndex = -1;
@@ -200,6 +201,7 @@ namespace Engine::UI
         void DrawSettings()
         {
             if (!Visible) return;
+            if (FocusSettings) { ImGui::SetNextWindowFocus(); FocusSettings = false; }
             ImGui::SetNextWindowPos(ImVec2(16, 16), ImGuiCond_FirstUseEver);
             ImGui::SetNextWindowSize(ImVec2(720, 580), ImGuiCond_FirstUseEver);
             if (ImGui::Begin("Settings (F1)", &Visible))
@@ -908,7 +910,8 @@ namespace Engine::UI
     void EnableApplicationUIInput() { ApplicationUIInput = true; }
     void SetDebugReconstructionStatusVisible(bool visible) { DebugReconstructionStatusVisible = visible; }
     void SetSettingsEditingEnabled(bool enabled) { SettingsEditingEnabled = enabled; }
-    void HideSettings() { Visible = false; }
+    void HideSettings() { Visible = FocusSettings = false; }
+    void OpenSettings() { Visible = FocusSettings = true; }
     void EnableDebugUI() { DebugEnabled = true; }
     bool DebugUIVisible() { return SettingsEditingEnabled && DebugEnabled && FrameBegun && Visible; }
 }
