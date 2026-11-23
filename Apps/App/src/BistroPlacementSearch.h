@@ -121,7 +121,6 @@ public:
         _conditions = std::move(conditions);
         _baselineFile = output;
         _baselineFile.replace_extension(".baseline");
-        if (!_remote) return;
         for (const auto* folder : {"SingleGPU", "MultiGPU"})
         {
             const auto directory = output.parent_path().parent_path() / folder;
@@ -131,7 +130,8 @@ public:
                 if (item.path().extension() != ".baseline" || !item.is_regular_file()) continue;
                 std::ifstream input(item.path());
                 std::string key;
-                if (!(input >> std::quoted(key)) || key != _conditions)
+                std::array<bool, 2> completed{};
+                if (!(input >> std::quoted(key) >> completed[0] >> completed[1]) || key != _conditions)
                 {
                     _incompatibleBaseline = true;
                     continue;
@@ -144,9 +144,12 @@ public:
                     result.Settings.Resolution = size - _sizes.begin();
                     result.Settings.Owners = _high.Owners;
                     result.Settings = EffectiveSettings(std::move(result.Settings));
-                    result.SourceCsv = item.path().lexically_relative(output.parent_path())
-                        .replace_extension(".csv").generic_u8string();
-                    _cachedMode[bool(result.Settings.Provider)] = true;
+                    const auto source = result.SourceCsv.empty() ? std::filesystem::path(item.path()).replace_extension(".csv") :
+                        (directory / std::filesystem::u8path(result.SourceCsv)).lexically_normal();
+                    result.SourceCsv = source.lexically_relative(output.parent_path()).generic_u8string();
+                    if (_remote && completed[bool(result.Settings.Provider)]) _cachedMode[bool(result.Settings.Provider)] = true;
+                    _fullSettings.insert(result.Settings);
+                    ObserveComposition(result);
                     _references.push_back(result);
                 }
             }
@@ -156,8 +159,8 @@ public:
         });
     }
 
-    void Start(ConsoleModule& console, Size original, Size screen, std::vector<int> adapters, bool remote,
-        bool fixedWaterSubsteps, const std::set<std::wstring>& shadowFixtures, BistroBenchmarkData::Csv& csv)
+    void Start(ConsoleModule& console, Size screen, std::vector<int> adapters, bool remote,
+        bool fixedWaterSubsteps, bool usesSkinningPreset, const std::set<std::wstring>& shadowFixtures, BistroBenchmarkData::Csv& csv)
     {
         _adapters = std::move(adapters);
         _remote = remote;
@@ -184,11 +187,9 @@ public:
             _placements.push_back({name, std::filesystem::path(fixture).u8string()});
             _localShadowSync.emplace_back(L"Render.Shadows.Local." + fixture + L".CrossSync", "1");
         }
-        const auto limit = std::max(original.second,
-            std::min(screen.second, unsigned(uint64_t(screen.first) * original.second / original.first)));
-        for (unsigned height : {480u, 720u, 900u, 1080u, 1440u, 2160u, original.second, limit})
-            if (height >= std::min(480u, original.second) && height <= limit)
-                _sizes.emplace_back(unsigned(uint64_t(height) * original.first / original.second), height);
+        for (unsigned height : {480u, 720u, 900u, 1080u, 1440u, 2160u, screen.second})
+            if (height <= screen.second)
+                _sizes.emplace_back(unsigned((uint64_t(height) * screen.first + screen.second / 2) / screen.second), height);
         std::sort(_sizes.begin(), _sizes.end());
         _sizes.erase(std::unique(_sizes.begin(), _sizes.end()), _sizes.end());
         _high.Owners.assign(_placements.size(), -1);
@@ -217,10 +218,11 @@ public:
         _values[SunShadowQuality] = {0, 1024, 2048, 4096};
         _values[LocalShadowQuality] = {0, 256, 512, 1024};
         _values[SkinningQuality][Epic] = _values[SkinningQuality][High];
-        if (console.FindConsoleVariable(L"Render.Skinning.PoseRateHz").GetInt() > 0)
+        if (!usesSkinningPreset)
             _values[SkinningQuality][Medium] = _values[SkinningQuality][High];
+        _values[WaterQuality][Epic] = _values[WaterQuality][High];
         if (fixedWaterSubsteps)
-            _values[WaterQuality][Medium] = _values[WaterQuality][Epic] = _values[WaterQuality][High];
+            _values[WaterQuality][Medium] = _values[WaterQuality][High];
         if (_adapters.empty() && _remote)
             csv.Config("MultiGPU.Reason", "no secondary GPU available");
     }
@@ -276,6 +278,7 @@ public:
     bool BeginPhase(unsigned phase)
     {
         _phase = phase;
+        _confirmedBeforePhase = _confirmed.size();
         _triedClosest = false;
         _pending.clear();
         _priority.clear();
@@ -335,6 +338,14 @@ public:
         return !_pending.empty();
     }
 
+    void EndPhase()
+    {
+        if (RemotePhase() || !HasReference(Upscaled())) return;
+        if (_confirmed.size() == _confirmedBeforePhase && (_short.empty() || Finalist())) return;
+        _completedMode[Upscaled()] = true;
+        SaveReferences();
+    }
+
     std::optional<Trial> NextProbe()
     {
         auto& queue = !_priority.empty() && (_pending.empty() || (++_probeIndex % 3 != 0)) ? _priority : _pending;
@@ -346,7 +357,7 @@ public:
 
     const Result* Finalist() const
     {
-        const auto* incumbent = Best(Upscaled(), RemotePhase());
+        const auto* incumbent = RemotePhase() ? Best(Upscaled(), true) : BestReference(Upscaled());
         const Result* best = nullptr;
         const Result* detail = nullptr;
         for (const auto& [candidate, result] : _short)
@@ -381,9 +392,8 @@ public:
         {
             if (result.Valid)
             {
-                if (std::none_of(trial.Settings.Levels.begin(), trial.Settings.Levels.end(), [](Level level) { return level == Off; }))
-                    for (size_t i = 0; i < _available.size(); ++i) _available[i] |= result.Activity[i];
-                _fullSettings.insert(trial.Settings);
+                ObserveComposition(result);
+                if (!_fullSettings.insert(trial.Settings).second) return;
                 _confirmed.push_back(result);
                 if (!result.Remote) SaveReferences();
             }
@@ -426,8 +436,8 @@ public:
         for (bool upscaled : {false, true})
         {
             const auto prefix = std::string(upscaled ? "Upscaled." : "Native.") + ProfileName[_profile] + ".";
-            const auto* remote = Best(upscaled, _remote);
-            const auto* reference = _remote ? BestReference(upscaled) : nullptr;
+            const auto* remote = _remote ? Best(upscaled, true) : nullptr;
+            const auto* reference = BestReference(upscaled);
             const auto* best = remote && (!reference || Better(*remote, *reference)) ? remote : reference;
             ReportResult(csv, prefix, best);
             if (_remote)
@@ -513,10 +523,16 @@ private:
         return true;
     }
 
+    void ObserveComposition(const Result& result)
+    {
+        if (std::find(result.Settings.Levels.begin(), result.Settings.Levels.end(), Off) != result.Settings.Levels.end()) return;
+        for (size_t i = 0; i < _available.size(); ++i) _available[i] |= result.Activity[i];
+    }
+
     static bool ReadReference(std::istream& input, Result& r)
     {
         if (!(input >> r.Id >> r.Settings.Provider >> r.Settings.Preset >> r.Output.first >> r.Output.second >>
-            r.Render.first >> r.Render.second >> r.Fps >> r.P95)) return false;
+            r.Render.first >> r.Render.second >> r.Fps >> r.P95 >> std::quoted(r.SourceCsv))) return false;
         if (!std::isfinite(r.Fps) || r.Fps <= 0 || !std::isfinite(r.P95) || r.P95 <= 0 ||
             r.Settings.Provider < 0 || r.Settings.Provider >= int(GDX12UpscalerProvider::Count) ||
             r.Settings.Preset < 0 || r.Settings.Preset >= int(GDX12UpscalerQuality::Count)) return false;
@@ -535,17 +551,22 @@ private:
         auto pending = _baselineFile;
         pending += ".tmp";
         std::ofstream output(pending, std::ios::trunc);
-        output << std::quoted(_conditions) << '\n' << std::setprecision(17);
-        for (const auto& r : _confirmed)
+        output << std::quoted(_conditions) << ' ' << _completedMode[0] << ' ' << _completedMode[1] << '\n' << std::setprecision(17);
+        const auto write = [&output](const Result& r)
         {
-            if (r.Remote) continue;
             output << r.Id << ' ' << r.Settings.Provider << ' ' << r.Settings.Preset << ' ' <<
                 r.Output.first << ' ' << r.Output.second << ' ' << r.Render.first << ' ' << r.Render.second <<
-                ' ' << r.Fps << ' ' << r.P95;
+                ' ' << r.Fps << ' ' << r.P95 << ' ' << std::quoted(r.SourceCsv);
             for (size_t i = 0; i < r.Activity.size(); ++i)
                 output << ' ' << unsigned(r.Settings.Levels[i]) << ' ' << r.Activity[i];
             output << '\n';
-        }
+        };
+        for (const auto& r : _confirmed)
+            if (!r.Remote) write(r);
+        for (bool upscaled : {false, true})
+            if (_completedMode[upscaled])
+                if (const auto* reference = BestReference(upscaled); reference && !reference->SourceCsv.empty())
+                    write(*reference);
         output.close();
         if (!output || !MoveFileExW(pending.c_str(), _baselineFile.c_str(), MOVEFILE_REPLACE_EXISTING))
             throw std::runtime_error("Cannot save Single GPU reference");
@@ -912,6 +933,8 @@ private:
     std::string _conditions;
     bool _incompatibleBaseline = false;
     std::array<bool, 2> _cachedMode{};
+    std::array<bool, 2> _completedMode{};
+    size_t _confirmedBeforePhase = 0;
     bool _triedClosest = false;
     std::array<std::optional<Result>, 2> _nearest, _detail, _nearMiss;
     std::array<unsigned, 2> _rejected{};

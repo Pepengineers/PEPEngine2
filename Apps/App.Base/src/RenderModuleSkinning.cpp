@@ -52,6 +52,17 @@ void RenderModule::ReleaseSkeletalState(World& world, Entity entity)
     if (_skeletalStates.empty() && !_batchWorldRelease) _skinning.clear();
 }
 
+bool RenderModule::UsesSkinningPoseRatePreset() const
+{
+    return SkinningPoseRate.GetValue() == 0 && std::any_of(_skeletalStates.begin(), _skeletalStates.end(), [](const auto& entry)
+    {
+        const auto& [world, entity] = entry.first;
+        const auto& ecs = world->GetECS();
+        return !entry.second.Parts.empty() && ecs.Has<TransformComponent>(entity) &&
+            ecs.Has<SkeletalMeshRenderComponent>(entity) && ecs.Get<SkeletalMeshRenderComponent>(entity).GetUpdateRateHz() == 0;
+    });
+}
+
 void RenderModule::PrepareSkeletalMeshes()
 {
     const bool instancing = GDX12SkeletalInstancingEnabled();

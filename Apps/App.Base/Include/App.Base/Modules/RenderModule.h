@@ -58,6 +58,7 @@ public:
     void SetFrameGenerationSuspended(bool);
     const GDX12ReconstructionStatus& GetReconstructionStatus() const;
     const GDX12FrameGenerationStatus& GetFrameGenerationStatus() const;
+    bool UsesSkinningPoseRatePreset() const;
     GDX12Device* GetPrimaryDevice() const { return _primaryDevice.get(); }
     std::uint64_t GetFrameSubmissionId() const { return _frameSubmission; }
 

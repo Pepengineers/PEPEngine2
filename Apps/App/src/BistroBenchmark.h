@@ -378,7 +378,7 @@ public:
         try
         {
             if (action == Action::Cancel) { Stop(world, console, pipeline); return; }
-            if (action != Action::None && !_active) Start(world, console, pipeline, window, action);
+            if (action != Action::None && !_active) Start(world, console, render, pipeline, window, action);
             if (!_active) return;
             if (TimedSearch() && Remaining() <= FinishReserve)
             {
@@ -785,7 +785,8 @@ private:
         return patch;
     }
 
-    void StartPlacement(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline, ::Window& window, bool manual)
+    void StartPlacement(World& world, ConsoleModule& console, const RenderModule& render,
+        BistroRenderPipeline& pipeline, ::Window& window, bool manual)
     {
         using BistroPlacement::Size;
         _manualPlacement = manual;
@@ -841,7 +842,8 @@ private:
             {
                 fixedWaterSubsteps &= fluid.GetSettings().MaxSubsteps != 0;
             });
-            _placementSearch.Start(console, {width, height}, screen, adapters, _multiGPU, fixedWaterSubsteps, shadowNames, _csv);
+            _placementSearch.Start(console, screen, adapters, _multiGPU, fixedWaterSubsteps,
+                render.UsesSkinningPoseRatePreset(), shadowNames, _csv);
             const auto local = LocalAdapters(console);
             patch.insert(patch.end(), local.begin(), local.end());
             const auto controlled = _placementSearch.ControlledSettings();
@@ -850,9 +852,9 @@ private:
             if (!exeLength || exeLength == std::size(executable))
                 throw std::runtime_error("Cannot identify benchmark executable");
             std::ostringstream conditions;
-            conditions << "bistro-baseline-v4 " << std::setprecision(17) << Duration() << ' ' << Warmup << ' ' <<
+            conditions << "bistro-baseline-v5 " << std::setprecision(17) << Duration() << ' ' << Warmup << ' ' <<
                 std::filesystem::last_write_time(executable).time_since_epoch().count() << ' ' <<
-                pipeline.BenchmarkSubmissions().AdapterLabel(0) << ' ' << double(width) / height << ' ' <<
+                pipeline.BenchmarkSubmissions().AdapterLabel(0) << ' ' <<
                 world.GetTimeScale() << ' ' << _characters->Seed() << ' ' << _startupLayout;
             for (const auto& [outputWidth, outputHeight] : _placementSearch.Resolutions())
                 conditions << ' ' << outputWidth << 'x' << outputHeight;
@@ -1286,31 +1288,32 @@ private:
 
     void BeginNextPlacementPhase(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline)
     {
-        const auto now = Clock::now();
-        const double remaining = Seconds(now, _placementDeadline);
         const double probeAndFull = PlacementProbeCost + PlacementFullCost();
-        for (; _placementPhase < 4 && now < _placementDeadline; ++_placementPhase)
+        for (; _placementPhase < 4 && Clock::now() < _placementDeadline; ++_placementPhase)
         {
-            if (_placementPhase == 0 && remaining < 2 * probeAndFull &&
+            if (_placementPhase == 0 && Seconds(Clock::now(), _placementDeadline) < 2 * probeAndFull &&
                 _placementSearch.HasReference(false) && !_placementSearch.HasReference(true))
                 continue;
             if (!_placementSearch.BeginPhase(_placementPhase)) continue;
             unsigned phases = 1;
             for (unsigned next = _placementPhase + 1; next < 4; ++next)
                 phases += _placementSearch.NeedsPhase(next);
-            const double budget = std::min(remaining, std::max(remaining / phases, probeAndFull));
-            _phaseDeadline = now + std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(budget));
-            NextPlacementTrial(world, console, pipeline);
+            const auto now = Clock::now();
+            const double budget = std::max(Seconds(now, _placementDeadline) / phases, probeAndFull);
+            _phaseDeadline = std::min(_placementDeadline,
+                now + std::chrono::ceil<Clock::duration>(std::chrono::duration<double>(budget)));
+            NextPlacementTrial(world, console, pipeline, now);
             return;
         }
-        Finish(world, console, pipeline, remaining < probeAndFull ?
+        Finish(world, console, pipeline, Seconds(Clock::now(), _placementDeadline) < probeAndFull ?
             "placement budget cannot fit another probe and full route" : "placement search finished");
     }
 
-    void NextPlacementTrial(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline)
+    void NextPlacementTrial(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline,
+        Clock::time_point now = Clock::now())
     {
         const double fullCost = PlacementFullCost();
-        const double remaining = Seconds(Clock::now(), _phaseDeadline);
+        const double remaining = Seconds(now, _phaseDeadline);
         const auto* finalist = _placementSearch.Finalist();
         if (remaining >= PlacementProbeCost + fullCost)
             if (auto probe = _placementSearch.NextProbe())
@@ -1323,11 +1326,13 @@ private:
             BeginPlacementTrial(world, console, pipeline, _placementSearch.Confirm(*finalist));
             return;
         }
+        _placementSearch.EndPhase();
         ++_placementPhase;
         BeginNextPlacementPhase(world, console, pipeline);
     }
 
-    void Start(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline, ::Window& window, Action action)
+    void Start(World& world, ConsoleModule& console, const RenderModule& render, BistroRenderPipeline& pipeline,
+        ::Window& window, Action action)
     {
         _multiGPU = action == Action::MultiGPU || action == Action::PlacementRun;
         _output[_multiGPU] = {};
@@ -1405,7 +1410,7 @@ private:
         BistroRender::SceneTextureInspector::SetVisible(false);
         if (_stage == Stage::Placement)
         {
-            StartPlacement(world, console, pipeline, window, action == Action::PlacementRun);
+            StartPlacement(world, console, render, pipeline, window, action == Action::PlacementRun);
             return;
         }
         if (_search)

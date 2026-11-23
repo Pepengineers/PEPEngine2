@@ -5,13 +5,15 @@
 #include "Engine.RendererDX12/GDX12StreamlineSDK.h"
 #include <stdexcept>
 #include <algorithm>
+#include <atomic>
+#include <cstdint>
 
 class GDX12NISUpscalePass : public GDX12RenderPass
 {
 public:
 	struct Failure : std::runtime_error { using std::runtime_error::runtime_error; };
 
-	explicit GDX12NISUpscalePass(float ratio = 1.5f) : IN_DepthBuffer(nullptr), IN_MotionVectors(nullptr), _viewportHandle(1337),
+	explicit GDX12NISUpscalePass(float ratio = 1.5f) : IN_DepthBuffer(nullptr), IN_MotionVectors(nullptr),
 		_sharpness(0.1f), _ratio(ratio)
 	{ _numInputs = 2; _flags = RENDER_PASS_FLAG_UPSCALER | RENDER_PASS_FLAG_USE_STREAMLINE; }
 
@@ -165,7 +167,8 @@ private:
 	IRenderPassLink* IN_MotionVectors;
 	std::vector<IRenderPassLink*> IN_Textures;
 	std::vector<std::unique_ptr<GDX12Texture>> OUT_UpscaledTextures;
-	sl::ViewportHandle _viewportHandle;
+	inline static std::atomic<std::uint32_t> _nextViewport{1337};
+	sl::ViewportHandle _viewportHandle{_nextViewport.fetch_add(1, std::memory_order_relaxed)};
 	float _sharpness;
     float _ratio;
 	std::string _resizeFailure;
