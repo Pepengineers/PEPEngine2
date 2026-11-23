@@ -234,6 +234,13 @@ public:
         if (mode == RunMode::Async) return 1;
         return (mode == RunMode::SingleGPU ? 2u : 4u) + unsigned(profile);
     }
+    static const char* SectionName(size_t section)
+    {
+        constexpr std::array names{"Approach", "Fountain", "Arch and tree", "Bistro interior", "Cloud painting",
+            "Painting corridor", "Return"};
+        return names.at(section);
+    }
+
     size_t LatestResultSlot() const { return _latestResultSlot; }
     const CompletedPass& LastPass(size_t slot) const { return _lastPasses.at(slot); }
     const std::string& Message() const { return _message; }
@@ -667,13 +674,6 @@ private:
     size_t Section(double time) const
     {
         return size_t(std::upper_bound(_sections.begin(), _sections.end(), time) - _sections.begin());
-    }
-
-    static const char* SectionName(size_t section)
-    {
-        constexpr std::array names{"Approach", "Fountain", "Arch and tree", "Bistro interior", "Cloud painting",
-            "Painting corridor", "Return"};
-        return names.at(section);
     }
 
     size_t Phase(double time) const

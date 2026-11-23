@@ -137,6 +137,7 @@
     <ClCompile Include="src\Techniques\UI\BistroComparePanel.cpp" />
     <ClInclude Include="src\Techniques\UI\BistroInfoPanel.h" />
     <ClInclude Include="src\Techniques\UI\BistroComparePanel.h" />
+    <ClInclude Include="src\Techniques\UI\BistroPlot.h" />
     <ClCompile Include="src\Techniques\UI\SceneTextureInspector.cpp" />
     <ClInclude Include="src\Techniques\UI\SceneTextureInspector.h" />
     <None Include="Shaders\SceneTextureInspector.hlsl" />

@@ -30,8 +30,14 @@ class BistroComparePanel
         int RunIndex = -1, PassIndex = -1;
         std::string Mode, Error;
         std::map<std::string, std::string> Settings;
-        using Sample = std::pair<double, double>; // route seconds, present interval in ms
-        std::vector<Sample> Samples, Trace;
+        struct Sample
+        {
+            double RouteSeconds, IntervalMs, FrameMs;
+            size_t Number;
+            std::string Section;
+        };
+        std::vector<Sample> Samples;
+        std::vector<size_t> Trace;
         double Fps = 0, P95 = 0, MaxMs = 0, MaxFps = 0;
     };
     void Refresh();

@@ -1,4 +1,5 @@
 #include "BistroInfoPanel.h"
+#include "BistroPlot.h"
 #include "BistroBenchmark.h"
 #include "Engine.Core/BenchmarkEngine.h"
 #include "Engine.UI/UI_test.h"
@@ -294,7 +295,24 @@ void BistroInfoPanel::DrawResult(const BistroBenchmark& benchmark)
         previous = pos;
         first = false;
     }
-    ImGui::Dummy({0, height + 27});
+    ImGui::SetCursorScreenPos(top);
+    ImGui::InvisibleButton("##pass cursor", {width, height});
+    if (ImGui::IsItemHovered())
+    {
+        const float x = std::clamp(ImGui::GetMousePos().x, top.x, top.x + width);
+        const double time = startTime + (x - top.x) / width * duration;
+        const size_t index = BistroPlot::NearestFrame(pass.Frames, time);
+        const auto& frame = pass.Frames[index];
+        const ImVec2 pos{top.x + width * (float(frame.RouteSeconds) - startTime) / duration,
+            top.y + height * (1 - value(float(frame.IntervalMs)) / maxValue)};
+        draw->AddLine({x, top.y}, {x, top.y + height}, ImGui::GetColorU32(ImGuiCol_TextDisabled));
+        draw->AddCircleFilled(pos, 4, ImGui::GetColorU32(TraceColor(_selectedMode)));
+        ImGui::BeginTooltip();
+        BistroPlot::DrawFrameDetails(index + 1, frame.RouteSeconds, BistroBenchmark::SectionName(frame.Section),
+                                     frame.Milliseconds, frame.IntervalMs);
+        ImGui::EndTooltip();
+    }
+    ImGui::Dummy({0, 20});
 }
 void BistroInfoPanel::Draw(RenderModule& render, BistroRenderPipeline& pipeline,
     BistroBenchmark& benchmark, float frameSeconds)

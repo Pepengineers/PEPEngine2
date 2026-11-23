@@ -1,4 +1,5 @@
 #include "BistroComparePanel.h"
+#include "BistroPlot.h"
 #include "Common/RuntimePaths.h"
 #include "Engine.Core/BenchmarkEngine.h"
 #include "Engine.Core/ConsoleModule.h"
@@ -213,12 +214,16 @@ void BistroComparePanel::Select(Selection &s, int run, int pass)
         if (csv.Get("type") == "frame")
         {
             auto t = Number(csv.Get("route_seconds")), ms = Number(csv.Get("frame_interval_ms"));
-            if (!t || !ms || *ms <= 0 || (!s.Samples.empty() && *t < s.Samples.back().first))
+            if (!t || !ms || *ms <= 0 || (!s.Samples.empty() && *t < s.Samples.back().RouteSeconds))
             {
                 s.Error = "Invalid frame samples in " + path.filename().string();
                 return;
             }
-            s.Samples.emplace_back(*t, *ms);
+            size_t number{};
+            const auto& index = csv.Get("frame");
+            const auto parsed = std::from_chars(index.data(), index.data() + index.size(), number);
+            if (parsed.ec != std::errc{} || parsed.ptr != index.data() + index.size()) number = s.Samples.size() + 1;
+            s.Samples.push_back({*t, *ms, Number(csv.Get("frame_ms")).value_or(-1), number, csv.Get("section")});
             intervals.push_back(*ms);
             sum += *ms;
             s.MaxMs = std::max(s.MaxMs, *ms);
@@ -272,20 +277,20 @@ void BistroComparePanel::Select(Selection &s, int run, int pass)
     std::nth_element(intervals.begin(), p95, intervals.end());
     s.P95 = *p95;
     // Keep local extrema in chronological order for rendering, raw samples for the cursor.
-    const double start = s.Samples.front().first;
-    const double span = std::max(.001, s.Samples.back().first - start);
-    const auto bin = [&](size_t i) { return int(512 * (s.Samples[i].first - start) / span); };
+    const double start = s.Samples.front().RouteSeconds;
+    const double span = std::max(.001, s.Samples.back().RouteSeconds - start);
+    const auto bin = [&](size_t i) { return int(512 * (s.Samples[i].RouteSeconds - start) / span); };
     for (size_t first = 0; first < s.Samples.size();)
     {
         size_t lo = first, hi = first, next = first + 1;
         const int bucket = bin(first);
         for (; next < s.Samples.size() && bin(next) == bucket; ++next)
         {
-            if (s.Samples[next].second < s.Samples[lo].second) lo = next;
-            if (s.Samples[next].second > s.Samples[hi].second) hi = next;
+            if (s.Samples[next].IntervalMs < s.Samples[lo].IntervalMs) lo = next;
+            if (s.Samples[next].IntervalMs > s.Samples[hi].IntervalMs) hi = next;
         }
-        s.Trace.push_back(s.Samples[std::min(lo, hi)]);
-        if (lo != hi) s.Trace.push_back(s.Samples[std::max(lo, hi)]);
+        s.Trace.push_back(std::min(lo, hi));
+        if (lo != hi) s.Trace.push_back(std::max(lo, hi));
         first = next;
     }
 }
@@ -330,8 +335,8 @@ void BistroComparePanel::DrawPlot() const
     const auto &a = _selected[0];
     const auto &b = _selected[1];
     if (!a.Error.empty() || !b.Error.empty() || a.Samples.empty() || b.Samples.empty()) return;
-    const double begin = std::min(a.Samples.front().first, b.Samples.front().first);
-    const double end = std::max(a.Samples.back().first, b.Samples.back().first);
+    const double begin = std::min(a.Samples.front().RouteSeconds, b.Samples.front().RouteSeconds);
+    const double end = std::max(a.Samples.back().RouteSeconds, b.Samples.back().RouteSeconds);
     const double span = std::max(.001, end - begin);
     const double peak = _fps ? std::max(a.MaxFps, b.MaxFps) : std::max(a.MaxMs, b.MaxMs);
     const auto format = [](double value, const char *fmt) {
@@ -358,20 +363,20 @@ void BistroComparePanel::DrawPlot() const
         draw->AddText({top.x + width * f - ImGui::CalcTextSize(tick.c_str()).x / 2, top.y + height + 4}, muted,
                       tick.c_str());
     }
+    const auto point = [&](const Selection::Sample &sample) {
+        const double value = _fps ? 1000 / sample.IntervalMs : sample.IntervalMs;
+        return ImVec2{top.x + width * float((sample.RouteSeconds - begin) / span),
+                      top.y + height * float(1 - value / peak)};
+    };
     for (const auto &s : _selected)
     {
-        const auto point = [&](const Selection::Sample &sample) {
-            const double value = _fps ? 1000 / sample.second : sample.second;
-            return ImVec2{top.x + width * float((sample.first - begin) / span),
-                          top.y + height * float(1 - value / peak)};
-        };
         const auto color = Color(s.Mode);
-        ImVec2 previous = point(s.Trace.front());
+        ImVec2 previous = point(s.Samples[s.Trace.front()]);
         draw->AddCircleFilled(previous, 2, color);
         float phase = 0;
         for (size_t i = 1; i < s.Trace.size(); ++i)
         {
-            const auto p = point(s.Trace[i]);
+            const auto p = point(s.Samples[s.Trace[i]]);
             if (&s == &b && a.Mode == b.Mode)
             {
                 const float dx = p.x - previous.x, dy = p.y - previous.y, length = std::hypot(dx, dy);
@@ -403,15 +408,19 @@ void BistroComparePanel::DrawPlot() const
         for (const auto &s : _selected)
         {
             const char id = &s == &a ? 'A' : 'B';
-            if (t < s.Samples.front().first || t > s.Samples.back().first)
+            if (t < s.Samples.front().RouteSeconds || t > s.Samples.back().RouteSeconds)
             {
                 ImGui::Text("%c   --", id);
                 continue;
             }
-            auto it = std::lower_bound(s.Samples.begin(), s.Samples.end(), t,
-                                       [](const auto &sample, double time) { return sample.first < time; });
-            if (it != s.Samples.begin() && t - (it - 1)->first < it->first - t) --it;
-            ImGui::Text("%c   %.2f %s", id, _fps ? 1000 / it->second : it->second, _fps ? "FPS" : "ms");
+            const auto& sample = s.Samples[BistroPlot::NearestFrame(s.Samples, t)];
+            const auto pos = point(sample);
+            draw->AddCircleFilled(pos, 4, Color(s.Mode));
+            draw->AddCircle(pos, 4, muted);
+            ImGui::Separator();
+            ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(Color(s.Mode)), "%c   %s", id, s.Mode.c_str());
+            BistroPlot::DrawFrameDetails(sample.Number, sample.RouteSeconds, sample.Section.c_str(), sample.FrameMs,
+                                         sample.IntervalMs);
         }
         ImGui::EndTooltip();
     }
