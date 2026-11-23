@@ -70,7 +70,7 @@ class SceneLocalShadows
 		UINT FirstSlice = UINT_MAX, Needed = 0, ListsValid = 0, MapsValid = 0;
 		Id Owner = 0;
 		bool Latest = false;
-		bool HasLight = false;
+		bool HasLight = false, InView = false;
 		bool SelectionDirty = true;
 	};
 	struct View

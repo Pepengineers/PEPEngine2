@@ -1,5 +1,6 @@
 #include "SceneLocalShadows.h"
 #include "ShadowGeometry.h"
+#include "Engine.Core/Logging/Logger.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.RendererDX12/GDX12ShaderCompiler.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
@@ -628,13 +629,7 @@ void SceneLocalShadows::CullJob::Execute(size_t index)
 	}
 	output.SelectionDirty = false;
 	output.Needed = 0;
-	if (!(light.ShadowFlags & ShadowEnabled) || (light.Type != 1 && light.Type != 2) ||
-	    !Owner->_resources.ShadowQuality.LocalResolution)
-	{
-		return;
-	}
-	const BoundingBox influence(light.Position, XMFLOAT3(light.Range, light.Range, light.Range));
-	if (!Frame->AllReceivers && !Frame->Camera->Intersects(influence))
+	if (!output.InView)
 	{
 		return;
 	}
@@ -705,7 +700,30 @@ void SceneLocalShadows::PackJob::Execute(size_t)
 	}
 	if (Frame->NextSlice + additional > Frame->Slices)
 	{
+		std::vector<LightCache*> unusedPoint, unusedSpot;
+		for (auto& cached : Frame->Cache)
+		{
+			if (cached.Needed || cached.FirstSlice == UINT_MAX) continue;
+			auto& unused = LocalShadowFaceCount(cached.Light) == 6 ? unusedPoint : unusedSpot;
+			unused.push_back(&cached);
+		}
+		for (auto& cached : Frame->Cache)
+		{
+			if (!cached.Needed || cached.FirstSlice != UINT_MAX) continue;
+			const UINT faces = LocalShadowFaceCount(cached.Light);
+			auto& unused = faces == 6 ? unusedPoint : unusedSpot;
+			if (unused.empty()) continue;
+			auto* previous = unused.back();
+			unused.pop_back();
+			cached.FirstSlice = previous->FirstSlice;
+			previous->FirstSlice = UINT_MAX;
+			previous->MapsValid = 0;
+			additional -= faces;
+		}
 		++Frame->LayoutRevision;
+	}
+	if (Frame->NextSlice + additional > Frame->Slices)
+	{
 		Frame->NextSlice = 0;
 		for (auto& cached : Frame->Cache)
 		{
@@ -816,6 +834,7 @@ UINT SceneLocalShadows::UpdateLights(Slot& frame)
 		frame.Cache.resize(frame.Lights.size());
 		frame.NextSlice = 0;
 	}
+	const bool probesEnabled = GetReflectionSettings().Enabled;
 	UINT slices = 0;
 	for (UINT i = 0; i < frame.Lights.size(); ++i)
 	{
@@ -844,7 +863,19 @@ UINT SceneLocalShadows::UpdateLights(Slot& frame)
 		}
 		cached.Light = source;
 		cached.HasLight = true;
-		if (source.ShadowFlags & ShadowEnabled)
+		// Test the light's influence, including receivers whose light is outside the camera.
+		const BoundingBox influence(source.Position, Vector3(source.Range));
+		const bool inView = _resources.ShadowQuality.LocalResolution && (source.ShadowFlags & ShadowEnabled) &&
+		    (source.Type == 1 || source.Type == 2) &&
+		    (frame.Camera->Intersects(influence) || (frame.AllReceivers && probesEnabled &&
+		        std::any_of(_resources.ReflectionProbes.begin(), _resources.ReflectionProbes.end(), [&](const auto& probe)
+		        {
+			        // The six capture frusta together fill this cube, including its corners.
+			        return BoundingBox(probe.Position, Vector3(probe.FarPlane)).Intersects(influence);
+		        })));
+		cached.SelectionDirty |= cached.InView != inView;
+		cached.InView = inView;
+		if (inView)
 		{
 			slices += LocalShadowFaceCount(source);
 		}
@@ -861,7 +892,6 @@ void SceneLocalShadows::Freeze(UINT slot, const std::vector<GDX12RenderPrimitive
 	UpdateCasters(slot);
 	UpdateGrass(grass);
 	auto& frame = _slots.at(slot);
-	const UINT slices = UpdateLights(frame);
 	frame.SelectionChanged = !frame.Camera || frame.SceneRevision != _sceneRevision ||
 	                         frame.GrassReceiverRevision != _grassReceiverRevision ||
 	                         frame.Resolution != (std::max)(1u, _resources.ShadowQuality.LocalResolution);
@@ -870,8 +900,9 @@ void SceneLocalShadows::Freeze(UINT slot, const std::vector<GDX12RenderPrimitive
 	frame.SceneRevision = _sceneRevision;
 	frame.GrassReceiverRevision = _grassReceiverRevision;
 	frame.GrassCasterRevision = _grassCasterRevision;
-	PrepareAtlas(frame, (std::min)(slices, UINT(D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION)));
 	UpdateCamera(frame);
+	const UINT slices = UpdateLights(frame);
+	PrepareAtlas(frame, (std::min)(slices, UINT(D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION)));
 	frame.Ready = frame.Cull.Schedule(*_common.Jobs, frame.Lights.size(), 1);
 	frame.Ready = frame.Pack.Schedule(*_common.Jobs, 1, frame.Ready);
 }
@@ -1004,6 +1035,8 @@ void SceneLocalShadows::PrepareAtlas(Slot& frame, UINT requestedSlices)
 	}
 	frame.Resolution = resolution;
 	frame.Slices = slices;
+	Log::Info("RenderGraph", "Local shadow atlas ", _staticOnly ? "static" : "dynamic",
+	          " resolution=", resolution, " slices=", slices);
 }
 
 void SceneLocalShadows::AppendGrassViews(Graph& graph, std::vector<ID3D12Resource*>& bindings, UINT slot, Id atlas,
