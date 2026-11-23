@@ -17,6 +17,7 @@
 #include "Techniques/Water/BistroWater.h"
 #include "BistroReflections.h"
 #include "BistroBenchmark.h"
+#include "BistroTaskbar.h"
 #include "Techniques/UI/BistroInfoPanel.h"
 #include "Techniques/UI/BistroUICanvases.h"
 #include "Components/BistroInteractionSource.h"
@@ -245,6 +246,7 @@ class BistroApplication final : public App
 		}
 		_info.ApplyResolution(*GetWindow());
 		_benchmark.Update(world, *Locator.GetModule<ConsoleModule>(), *render, *_bistroPipeline, *GetWindow());
+		UpdateTaskbar();
 		if (_benchmark.Active() && (!_runActive || _legNumber != _benchmark.LegNumber()))
 		{
 			_info.Hide();
@@ -277,8 +279,11 @@ class BistroApplication final : public App
 		const auto presented = _bistroPipeline->PresentedFrames();
 		App::Render(timer);
 		if (_benchmark.Active())
+		{
 			_benchmark.FrameRendered(*Locator.GetModule<SceneManagerModule>()->GetWorld(), *Locator.GetModule<ConsoleModule>(),
 			    *Locator.GetModule<RenderModule>(), *_bistroPipeline, _bistroPipeline->PresentedFrames() != presented);
+			UpdateTaskbar();
+		}
 	}
 	int Run()
 	{
@@ -296,6 +301,26 @@ class BistroApplication final : public App
 	}
 
   private:
+	LRESULT MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) override
+	{
+		_taskbar.OnMessage(hwnd, msg, wParam);
+		return App::MsgProc(hwnd, msg, wParam, lParam);
+	}
+
+	void UpdateTaskbar()
+	{
+		using State = BistroTaskbar::State;
+		const HWND hwnd = GetWindow()->GetWindowHandle();
+		if (const auto outcome = _benchmark.TakeOutcome())
+		{
+			const auto state = *outcome == BistroBenchmark::Outcome::Completed ? State::Completed :
+				*outcome == BistroBenchmark::Outcome::Failed ? State::Failed : State::Idle;
+			_taskbar.Set(hwnd, state);
+		}
+		else if (_benchmark.Active())
+			_taskbar.Set(hwnd, State::Running, _benchmark.RunPercent());
+	}
+
 	std::wstring StatusCaption() const override
 	{
 		std::wstring status;
@@ -319,8 +344,11 @@ class BistroApplication final : public App
 	void StopBenchmark(const char* status = "cancelled")
 	{
 		if (_benchmark.Active())
+		{
 			_benchmark.Stop(*Locator.GetModule<SceneManagerModule>()->GetWorld(), *Locator.GetModule<ConsoleModule>(),
 			    *_bistroPipeline, status);
+			UpdateTaskbar();
+		}
 		Engine::UI::SetSettingsEditingEnabled(true);
 	}
 	std::vector<DeviceDesc> _adapters;
@@ -331,6 +359,7 @@ class BistroApplication final : public App
 	BistroWater::Scene _bistroWater;
 	BistroReflections::Scene _bistroReflections{1, true};
 	BistroBenchmark _benchmark;
+	BistroTaskbar _taskbar;
 	bool _autoBenchmarkPending = false;
 	BistroInfoPanel _info;
 	BistroRenderPipeline* _bistroPipeline = nullptr;

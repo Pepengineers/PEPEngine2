@@ -44,7 +44,7 @@ public:
     bool Initialize() override;
     void CalculateFrameStats();
 
-    LRESULT MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+    virtual LRESULT MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
     static App* GetInstance();
     JobSystem& GetJobs() { return _jobs; }

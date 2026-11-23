@@ -252,6 +252,15 @@ public:
     {
         if (CanStart()) Request(action, profile);
     }
+    enum class Outcome { Completed, Failed, Cancelled };
+    std::optional<Outcome> TakeOutcome() { return std::exchange(_outcome, std::nullopt); }
+    int RunPercent() const
+    {
+        if (_stage != Stage::Exhaustive && !(_stage == Stage::Placement && _manualPlacement)) return -1;
+        const double duration = LegWarmup() + _window.End - _preroll;
+        const double pass = duration > 0 ? std::clamp(_elapsed / duration, 0., 1.) : 0.;
+        return int(100 * (_stage == Stage::Exhaustive ? (_mask + pass) / Cases : pass));
+    }
     bool Active() const { return _active; }
 
     static std::filesystem::path DefaultsPath()
@@ -276,7 +285,7 @@ public:
     void Stop(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline, const char* status = "cancelled")
     {
         if (!_active) return;
-        try { Finish(world, console, pipeline, status); }
+        try { Finish(world, console, pipeline, status, {}, 0, std::string_view(status) == "cancelled" ? Outcome::Cancelled : Outcome::Failed); }
         catch (const std::exception& error) { Fail(world, console, pipeline, error.what()); }
     }
 
@@ -437,7 +446,7 @@ public:
         {
             if (!presented)
             {
-                Finish(world, console, pipeline, "interrupted: frame not presented");
+                Finish(world, console, pipeline, "interrupted: frame not presented", {}, 0, Outcome::Failed);
                 return;
             }
             if (_stage == Stage::Placement && !_manualPlacement && pipeline.PresentCompletedAt() > _placementDeadline)
@@ -866,7 +875,7 @@ private:
             _csv.Config("SceneOwnerRestriction", "The scene adapter is fixed at application startup");
             if (Seconds(Clock::now(), _placementDeadline) < _warmup + Duration())
             {
-                Finish(world, console, pipeline, "full route does not fit in budget");
+                Finish(world, console, pipeline, "full route does not fit in budget", {}, 0, Outcome::Failed);
                 return;
             }
         }
@@ -1225,7 +1234,8 @@ private:
         WritePlacementTrialReport(_trialResult.Valid ? "measured" : _trialReason);
         if (_manualPlacement)
         {
-            Finish(world, console, pipeline, _trialResult.Valid ? "completed" : _trialReason.c_str());
+            Finish(world, console, pipeline, _trialResult.Valid ? "completed" : _trialReason.c_str(), {}, 0,
+                _trialResult.Valid ? Outcome::Completed : Outcome::Failed);
             return;
         }
         _placementSearch.Record(_trial, _trialResult, _csv, _trialReason);
@@ -1234,7 +1244,7 @@ private:
             _calibrating = false;
             if (std::any_of(_placementPhysics.begin(), _placementPhysics.end(), [](const auto& snapshot) { return !snapshot; }))
             {
-                Finish(world, console, pipeline, "incomplete route checkpoints");
+                Finish(world, console, pipeline, "incomplete route checkpoints", {}, 0, Outcome::Failed);
                 return;
             }
             BeginNextPlacementPhase(world, console, pipeline);
@@ -1411,7 +1421,7 @@ private:
             _searchConfig = SearchConfig(console);
             if (TimedSearch() && Remaining() < _warmup + Duration() + FinishReserve)
             {
-                Finish(world, console, pipeline, "baseline does not fit", 0);
+                Finish(world, console, pipeline, "baseline does not fit", 0, 0, Outcome::Failed);
                 return;
             }
             _initialScene = CaptureScene(world, pipeline);
@@ -1686,7 +1696,7 @@ private:
             case Stage::Repeat:
                 if (!_repeatComparable)
                 {
-                    Finish(world, console, pipeline, "baseline windows not comparable", 0);
+                    Finish(world, console, pipeline, "baseline windows not comparable", 0, 0, Outcome::Failed);
                     return;
                 }
                 _stage = Stage::Singles;
@@ -1932,7 +1942,7 @@ private:
         }
         if (!BistroBenchmarkData::CoversWindow(_frames, _window.Begin, _window.End))
         {
-            Finish(world, console, pipeline, "incomplete: route coverage");
+            Finish(world, console, pipeline, "incomplete: route coverage", {}, 0, Outcome::Failed);
             return;
         }
         const auto stats = BistroBenchmarkData::Measure(_frames, _window.Begin, _window.End);
@@ -1944,7 +1954,7 @@ private:
         if (placementChanged || EffectiveConfig(render) != _effective || SearchConfig(console) != _searchConfig)
         {
             Finish(world, console, pipeline, "render settings changed",
-                TimedSearch() ? std::optional<unsigned>{0} : std::nullopt);
+                TimedSearch() ? std::optional<unsigned>{0} : std::nullopt, 0, Outcome::Failed);
             return;
         }
         WriteLeg("completed");
@@ -1988,7 +1998,7 @@ private:
             }
             if (!Comparable(stats) || !_activeGroups)
             {
-                Finish(world, console, pipeline, "no usable baseline or active groups", 0);
+                Finish(world, console, pipeline, "no usable baseline or active groups", 0, 0, Comparable(stats) ? Outcome::Completed : Outcome::Failed);
                 return;
             }
             if (!Fits(2 * NominalCost(_windows)))
@@ -2011,7 +2021,7 @@ private:
         {
             if (!Comparable(stats))
             {
-                Finish(world, console, pipeline, "gain unconfirmed: full control data insufficient", 0);
+                Finish(world, console, pipeline, "gain unconfirmed: full control data insufficient", 0, 0, Outcome::Failed);
                 return;
             }
             Report("BaselineFirstMeanMs", _baseline.Mean);
@@ -2051,7 +2061,7 @@ private:
             const bool win = Comparable(stats) && gain > _meanThreshold && p95Change <= _p95Threshold;
             Finish(world, console, pipeline, !Comparable(stats) ? "finalist data insufficient" :
                 win ? "winner applied" : gain <= _meanThreshold ? "mean gain below threshold" : "p95 above tolerance",
-                win ? _mask : 0, gain);
+                win ? _mask : 0, gain, Comparable(stats) ? Outcome::Completed : Outcome::Failed);
             return;
         }
 
@@ -2118,7 +2128,7 @@ private:
     }
 
     void Finish(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline, const char* status,
-        std::optional<unsigned> selected = {}, double gain = 0)
+        std::optional<unsigned> selected = {}, double gain = 0, Outcome outcome = Outcome::Completed)
     {
         std::string error;
         try
@@ -2262,6 +2272,7 @@ private:
             catch (const std::exception& failure) { if (error.empty()) error = failure.what(); }
         }
 
+        _outcome = error.empty() ? outcome : Outcome::Failed;
         _message = status;
         if (selected)
         {
@@ -2287,7 +2298,7 @@ private:
     {
         try
         {
-            if (_active) Finish(world, console, pipeline, "error");
+            if (_active) Finish(world, console, pipeline, "error", {}, 0, Outcome::Failed);
             else if (_csv.IsOpen()) _csv.Close();
         }
         catch (const std::exception& cleanup)
@@ -2295,6 +2306,7 @@ private:
             error += " | ";
             error += cleanup.what();
         }
+        _outcome = Outcome::Failed;
         _message = std::move(error);
         Log::Error("BistroBenchmark", _message);
     }
@@ -2310,6 +2322,7 @@ private:
     std::function<void()> _initialScene;
     PhysicsStates _windowPhysics, _extraPhysics;
     BistroCharacters::Scene* _characters = nullptr;
+    std::optional<Outcome> _outcome;
     Action _action = Action::None;
     BistroPlacement::Profile _placementProfile = BistroPlacement::Performance;
     Stage _stage = Stage::Baseline;
