@@ -1,5 +1,6 @@
 #pragma once
 
+#include "BistroComparePanel.h"
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -38,6 +39,7 @@ private:
     void DrawCurrentSettings(RenderModule&);
     void DrawLivePlot(float height, BistroBenchmarkData::RunMode mode) const;
 
+    BistroComparePanel _compare;
     std::vector<Placement> _placement;
     std::map<std::pair<std::string, std::string>, std::string> _groups;
     std::vector<std::string> _peers;

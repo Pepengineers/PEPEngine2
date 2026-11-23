@@ -358,6 +358,7 @@ void BistroInfoPanel::Draw(RenderModule& render, BistroRenderPipeline& pipeline,
         }
         else
         {
+            bool comparing = false;
             if (ImGui::BeginTabBar("Benchmark modes"))
             {
                 if (ImGui::BeginTabItem("Current run"))
@@ -402,6 +403,12 @@ void BistroInfoPanel::Draw(RenderModule& render, BistroRenderPipeline& pipeline,
                     DrawPlacement(false);
                     ImGui::EndTabItem();
                 }
+                if (ImGui::BeginTabItem("Compare"))
+                {
+                    comparing = true;
+                    _compare.Draw(benchmark.LastPass(benchmark.LatestResultSlot()).Path);
+                    ImGui::EndTabItem();
+                }
                 ImGui::EndTabBar();
             }
             ImGui::Separator();
@@ -412,7 +419,7 @@ void BistroInfoPanel::Draw(RenderModule& render, BistroRenderPipeline& pipeline,
                 DrawLivePlot(36, benchmark.CurrentMode());
             }
             else if (!benchmark.Message().empty()) ImGui::TextWrapped("%s", benchmark.Message().c_str());
-            DrawResult(benchmark);
+            if (!comparing) DrawResult(benchmark);
         }
     }
     ImGui::End();
