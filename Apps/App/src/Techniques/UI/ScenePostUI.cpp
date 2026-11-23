@@ -14,6 +14,7 @@
 #include "Engine.RendererDX12/GDX12SwapChain.h"
 #include "Engine.RendererDX12/GDX12FrameGeneration.h"
 #include "Engine.RendererDX12/GDX12MotionBlurSettings.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12NISUpscalePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12TAAPass.h"
 #include "Common/GameTimer.h"
 #include <filesystem>
@@ -319,6 +320,12 @@ GDX12ReconstructionPass& ScenePostUI::Reconstruction()
 	return _remotePost ? _remotePost->Stack->_reconstruction : _reconstruction;
 }
 
+const std::string& ScenePostUI::BenchmarkNISFailure() const
+{
+	if (!_postNISFailure.empty()) return _postNISFailure;
+	return _remotePost ? _remotePost->Stack->_nisFrameFailure : _nisFrameFailure;
+}
+
 std::vector<std::pair<std::string, Id>> ScenePostUI::ExecutionDevices() const
 {
 	const auto slot = _resources.CurrFrameConstantsIndex;
@@ -391,6 +398,7 @@ bool ScenePostUI::UpdatePostOwner(RenderPipelineContext& c, const std::shared_pt
 	_requestedPost = owner;
 	_postRequest = settings;
 	_postFgRequest = int(fg);
+	_postNISFailure.clear();
 	DrainHud();
 	c.Runtime.DrainFrameWork();
 	auto retired = std::move(_remotePost);
@@ -399,7 +407,10 @@ bool ScenePostUI::UpdatePostOwner(RenderPipelineContext& c, const std::shared_pt
 		auto remote = std::make_unique<RemotePost>(c, submit, owner);
 		const auto& reconstruction = remote->Stack->_reconstruction.GetStatus();
 		if (reconstruction.Effective != settings.Provider)
+		{
 			reason = "requested SR on post adapter: " + reconstruction.FallbackReason;
+			if (settings.Provider == GDX12UpscalerProvider::NIS) _postNISFailure = reason;
+		}
 		else
 		{
 			try
@@ -703,6 +714,8 @@ Id ScenePostUI::AppendReconstruction(Graph& graph, std::vector<ID3D12Resource*>&
 	}
 	auto* reconstructed = _reconstruction.GetOutput(0)->GetTexture();
 	const bool native = _reconstruction.GetStatus().Effective == GDX12UpscalerProvider::Native;
+	const bool nis = _reconstruction.GetStatus().Effective == GDX12UpscalerProvider::NIS;
+	_nisFrameFailure.clear();
 	if (!native)
 	{
 		auto* taa = _reconstruction.TAA();
@@ -733,16 +746,23 @@ Id ScenePostUI::AppendReconstruction(Graph& graph, std::vector<ID3D12Resource*>&
 			}
 			const auto reconstruction = Packet(
 			    graph, bindings, "reconstruction provider DIRECT SDK boundary", std::move(accesses),
-			    [this](auto* cmd) { _reconstruction.Execute(cmd); }, std::move(dependencies));
+			    [this](auto* cmd)
+			    {
+				    try { _reconstruction.Execute(cmd); }
+				    catch (const GDX12NISUpscalePass::Failure& error) { _nisFrameFailure = error.what(); }
+			    }, std::move(dependencies));
 			dependencies = {reconstruction};
 		}
 	}
+	std::vector<std::pair<GDX12Resource*, Mode>> outputAccesses{
+	    {resource(reconstructed), Mode::Read}, {resource(target), Mode::Write}};
+	if (nis) outputAccesses.emplace_back(resource(color), Mode::Read);
 	return Packet(
-	    graph, bindings, "output HDR display transform",
-	    {{resource(reconstructed), Mode::Read}, {resource(target), Mode::Write}},
-	    [this, native](auto* cmd)
+	    graph, bindings, "output HDR display transform", std::move(outputAccesses),
+	    [this, native, color](auto* cmd)
 	    {
-		    _output.Execute(cmd);
+		    if (_nisFrameFailure.empty()) _output.Execute(cmd);
+		    else _output.ExecuteWithInput(cmd, color);
 		    if (native)
 		    {
 			    _reconstruction.Execute(cmd);

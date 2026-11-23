@@ -385,7 +385,7 @@ public:
                 Finish(world, console, pipeline, "gain unconfirmed: deadline", 0);
                 return;
             }
-            if (_stage == Stage::Placement && !_manualPlacement && Clock::now() >= _placementDeadline)
+            if (!_legDone && _stage == Stage::Placement && !_manualPlacement && Clock::now() >= _placementDeadline)
             {
                 Finish(world, console, pipeline, "placement budget exhausted");
                 return;
@@ -437,6 +437,11 @@ public:
             if (!presented)
             {
                 Finish(world, console, pipeline, "interrupted: frame not presented");
+                return;
+            }
+            if (_stage == Stage::Placement && !_manualPlacement && pipeline.PresentCompletedAt() > _placementDeadline)
+            {
+                Finish(world, console, pipeline, "placement budget exhausted");
                 return;
             }
             if (Measuring() && _routeTime < _window.End)
@@ -787,6 +792,7 @@ private:
         _placementPhase = 0;
         _calibrating = !manual;
         _placementWindow = nullptr;
+        _placementBorderless = false;
         _placementPhysics = {};
         _shadowFixtures.clear();
         _placementSearch = BistroPlacement::Search(_placementProfile);
@@ -798,11 +804,6 @@ private:
             _csv.Config("MinimumFps", Csv::Number(BistroPlacement::Threshold[_placementProfile]));
         }
         const auto adapters = pipeline.BenchmarkSubmissions().BenchmarkAdapterIndices();
-        if (_multiGPU && !manual && adapters.empty())
-        {
-            Finish(world, console, pipeline, "no secondary GPU available");
-            return;
-        }
         _initialScene = CaptureScene(world, pipeline);
         ConsoleVariablePatch patch{{L"Render.FrameGeneration.Provider", "0"}, {L"Render.Sky.SunCycle.Enabled", "false"}};
         if (!manual)
@@ -818,19 +819,15 @@ private:
             if (!GetWindowPlacement(window.GetWindowHandle(), &_placementRestore))
                 throw std::runtime_error("Cannot save Bistro window placement");
             _placementWindow = &window;
-            _placementOriginal = {width, height};
+            _placementWindowStyle = GetWindowLongPtrW(window.GetWindowHandle(), GWL_STYLE);
             MONITORINFO monitor{};
             monitor.cbSize = sizeof(monitor);
             const auto handle = MonitorFromWindow(window.GetWindowHandle(), MONITOR_DEFAULTTONEAREST);
-            auto screen = _placementOriginal;
-            if (GetMonitorInfoW(handle, &monitor))
-            {
-                RECT frame{};
-                AdjustWindowRect(&frame, WS_OVERLAPPEDWINDOW, false);
-                screen = {
-                    unsigned(std::max(1L, monitor.rcWork.right - monitor.rcWork.left - (frame.right - frame.left))),
-                    unsigned(std::max(1L, monitor.rcWork.bottom - monitor.rcWork.top - (frame.bottom - frame.top)))};
-            }
+            if (!GetMonitorInfoW(handle, &monitor))
+                throw std::runtime_error("Cannot determine the Bistro monitor size");
+            _placementMonitor = monitor.rcMonitor;
+            const Size screen{unsigned(_placementMonitor.right - _placementMonitor.left),
+                unsigned(_placementMonitor.bottom - _placementMonitor.top)};
             std::set<std::wstring> shadowNames;
             world.GetECS().ForEach<NameComponent, LightComponent>([&](Entity entity, const NameComponent& name, const LightComponent& light)
             {
@@ -839,7 +836,12 @@ private:
                 const auto decoded = std::filesystem::u8path(name.value).wstring();
                 shadowNames.insert(decoded);
             });
-            _placementSearch.Start(console, _placementOriginal, screen, adapters, _multiGPU, shadowNames, _csv);
+            bool fixedWaterSubsteps = true;
+            world.GetECS().ForEach<FluidRenderComponent>([&](Entity, const FluidRenderComponent& fluid)
+            {
+                fixedWaterSubsteps &= fluid.GetSettings().MaxSubsteps != 0;
+            });
+            _placementSearch.Start(console, {width, height}, screen, adapters, _multiGPU, fixedWaterSubsteps, shadowNames, _csv);
             const auto local = LocalAdapters(console);
             patch.insert(patch.end(), local.begin(), local.end());
             const auto controlled = _placementSearch.ControlledSettings();
@@ -848,10 +850,12 @@ private:
             if (!exeLength || exeLength == std::size(executable))
                 throw std::runtime_error("Cannot identify benchmark executable");
             std::ostringstream conditions;
-            conditions << "bistro-baseline-v3 " << std::setprecision(17) << Duration() << ' ' << Warmup << ' ' <<
+            conditions << "bistro-baseline-v4 " << std::setprecision(17) << Duration() << ' ' << Warmup << ' ' <<
                 std::filesystem::last_write_time(executable).time_since_epoch().count() << ' ' <<
                 pipeline.BenchmarkSubmissions().AdapterLabel(0) << ' ' << double(width) / height << ' ' <<
                 world.GetTimeScale() << ' ' << _characters->Seed() << ' ' << _startupLayout;
+            for (const auto& [outputWidth, outputHeight] : _placementSearch.Resolutions())
+                conditions << ' ' << outputWidth << 'x' << outputHeight;
             auto renderConditions = RenderConfig(console);
             std::sort(renderConditions.begin(), renderConditions.end());
             const auto controls = [](const auto& entries, const auto& name) {
@@ -921,11 +925,27 @@ private:
         {
             if (!first) Apply(console, _placementSearch.Patch(_trial.Settings));
             const auto [width, height] = _placementSearch.Resolution(_trial.Settings);
-            if (IsZoomed(_placementWindow->GetWindowHandle())) ShowWindow(_placementWindow->GetWindowHandle(), SW_RESTORE);
+            const auto hwnd = _placementWindow->GetWindowHandle();
+            const bool changeStyle = !_placementBorderless;
+            if (changeStyle)
+            {
+                if (IsZoomed(hwnd)) ShowWindow(hwnd, SW_RESTORE);
+                const auto style = (_placementWindowStyle & ~(WS_OVERLAPPEDWINDOW | WS_MAXIMIZE)) | WS_POPUP;
+                SetLastError(ERROR_SUCCESS);
+                if (!SetWindowLongPtrW(hwnd, GWL_STYLE, style) && GetLastError() != ERROR_SUCCESS)
+                    throw std::runtime_error("Cannot switch Bistro to a borderless measurement window");
+                _placementBorderless = true;
+            }
             uint16_t currentWidth, currentHeight;
             _placementWindow->GetWindowSize(currentWidth, currentHeight);
-            if (width != currentWidth || height != currentHeight)
-                _placementWindow->SetWindowSize(uint16_t(width), uint16_t(height));
+            if (changeStyle || width != currentWidth || height != currentHeight)
+            {
+                const int x = _placementMonitor.left + (_placementMonitor.right - _placementMonitor.left - int(width)) / 2;
+                const int y = _placementMonitor.top + (_placementMonitor.bottom - _placementMonitor.top - int(height)) / 2;
+                if (!SetWindowPos(hwnd, nullptr, x, y, int(width), int(height),
+                    SWP_NOZORDER | SWP_NOACTIVATE | (changeStyle ? SWP_FRAMECHANGED : 0)))
+                    throw std::runtime_error("Cannot resize the Bistro measurement window");
+            }
         }
         _trialRequested = RenderConfig(console);
         for (const auto& [name, value] : _trialRequested)
@@ -1075,7 +1095,10 @@ private:
                     _csv.Config(_trialPrefix + "ReconstructionFallback", status.FallbackReason);
                 if (!_manualPlacement)
                 {
-                    if (_trialResult.Output != _placementSearch.Resolution(_trial.Settings))
+                    uint16_t width, height;
+                    _placementWindow->GetWindowSize(width, height);
+                    if (_trialResult.Output != _placementSearch.Resolution(_trial.Settings) ||
+                        _trialResult.Output != BistroPlacement::Size{width, height})
                         _trialReason = "requested output size unavailable";
                     else if (int(status.Effective) != _trial.Settings.Provider ||
                         (status.Effective == GDX12UpscalerProvider::Native) != (_trialResult.Render == _trialResult.Output))
@@ -1099,6 +1122,11 @@ private:
             _trialResult.Output != BistroPlacement::Size{common.WindowWidth, common.WindowHeight} ||
             _trialResult.Render != BistroPlacement::Size{common.DownscaledWidth, common.DownscaledHeight})
             _trialReason = "effective display, reconstruction or frame generation changed";
+        if (const auto& failure = pipeline.BenchmarkNISFailure(); !failure.empty())
+        {
+            _csv.Config(_trialPrefix + "ReconstructionFallback", failure);
+            _trialReason = "NIS reconstruction failed";
+        }
         if (!_trialReason.empty() && !_calibrating)
         {
             _legDone = true;
@@ -1137,7 +1165,7 @@ private:
         {
             const double fps = _trialFrames / _trialSeconds;
             const auto threshold = BistroPlacement::Threshold[_placementProfile];
-            bool missing = _multiGPU && _trialPublications.empty();
+            bool missing = _placementSearch.RemotePhase() && _trialPublications.empty();
             for (size_t i = 0; i < _placementSeenOnRoute.size(); ++i)
                 missing |= _placementSeenOnRoute[i] && _trial.Settings.Levels[i] != BistroPlacement::Off &&
                     !_trialResult.Activity[i];
@@ -1145,7 +1173,10 @@ private:
         }
         if (_trialReason.empty() && !_trial.Full && _placementWindowIndex < _trialWindowCount)
         {
-            BeginPlacementLeg(world, pipeline);
+            if (Clock::now() >= _placementDeadline)
+                Finish(world, console, pipeline, "placement budget exhausted");
+            else
+                BeginPlacementLeg(world, pipeline);
             return;
         }
         CompletePlacementTrial(world, console, pipeline);
@@ -1170,8 +1201,9 @@ private:
     void CompletePlacementTrial(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline)
     {
         _trialResult.Remote = !_trialPublications.empty();
-        if (!_manualPlacement && _multiGPU != _trialResult.Remote && _trialReason.empty())
-            _trialReason = _multiGPU ? "no frame consumer observed on the requested placement" : "unexpected cross-GPU work";
+        const bool remote = _placementSearch.RemotePhase();
+        if (!_manualPlacement && remote != _trialResult.Remote && _trialReason.empty())
+            _trialReason = remote ? "no frame consumer observed on the requested placement" : "unexpected cross-GPU work";
         if (!_manualPlacement)
         {
             const auto& placements = _placementSearch.Candidates();
@@ -1216,17 +1248,13 @@ private:
         if (_calibrating)
         {
             _calibrating = false;
-            const auto now = Clock::now();
-            const double remaining = Seconds(now, _placementDeadline);
-            const double nativeBudget = std::min(remaining, std::max(remaining / 2, PlacementFullCost() + PlacementProbeCost));
-            _phaseDeadline = now +
-                std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(nativeBudget));
             if (std::any_of(_placementPhysics.begin(), _placementPhysics.end(), [](const auto& snapshot) { return !snapshot; }))
             {
                 Finish(world, console, pipeline, "incomplete route checkpoints");
                 return;
             }
-            _placementSearch.BeginPhase(_placementPhase);
+            BeginNextPlacementPhase(world, console, pipeline);
+            return;
         }
         NextPlacementTrial(world, console, pipeline);
     }
@@ -1256,12 +1284,35 @@ private:
     double PlacementFullCost() const { return Warmup + Duration() + 2; }
     static constexpr double PlacementProbeCost = 8 * (Warmup + 1 + 2) + 5;
 
+    void BeginNextPlacementPhase(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline)
+    {
+        const auto now = Clock::now();
+        const double remaining = Seconds(now, _placementDeadline);
+        const double probeAndFull = PlacementProbeCost + PlacementFullCost();
+        for (; _placementPhase < 4 && now < _placementDeadline; ++_placementPhase)
+        {
+            if (_placementPhase == 0 && remaining < 2 * probeAndFull &&
+                _placementSearch.HasReference(false) && !_placementSearch.HasReference(true))
+                continue;
+            if (!_placementSearch.BeginPhase(_placementPhase)) continue;
+            unsigned phases = 1;
+            for (unsigned next = _placementPhase + 1; next < 4; ++next)
+                phases += _placementSearch.NeedsPhase(next);
+            const double budget = std::min(remaining, std::max(remaining / phases, probeAndFull));
+            _phaseDeadline = now + std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(budget));
+            NextPlacementTrial(world, console, pipeline);
+            return;
+        }
+        Finish(world, console, pipeline, remaining < probeAndFull ?
+            "placement budget cannot fit another probe and full route" : "placement search finished");
+    }
+
     void NextPlacementTrial(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline)
     {
         const double fullCost = PlacementFullCost();
-        const double remaining = Seconds(Clock::now(), _placementPhase == 0 ? _phaseDeadline : _placementDeadline);
+        const double remaining = Seconds(Clock::now(), _phaseDeadline);
         const auto* finalist = _placementSearch.Finalist();
-        if (remaining >= PlacementProbeCost + (finalist ? fullCost : 0))
+        if (remaining >= PlacementProbeCost + fullCost)
             if (auto probe = _placementSearch.NextProbe())
             {
                 BeginPlacementTrial(world, console, pipeline, std::move(*probe));
@@ -1272,11 +1323,8 @@ private:
             BeginPlacementTrial(world, console, pipeline, _placementSearch.Confirm(*finalist));
             return;
         }
-        if (_placementSearch.BeginPhase(++_placementPhase))
-            NextPlacementTrial(world, console, pipeline);
-        else
-            Finish(world, console, pipeline, Clock::now() + std::chrono::seconds(5) >= _placementDeadline ?
-                "placement budget exhausted" : "placement search finished");
+        ++_placementPhase;
+        BeginNextPlacementPhase(world, console, pipeline);
     }
 
     void Start(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline, ::Window& window, Action action)
@@ -1353,6 +1401,8 @@ private:
         if (_hadInfluence) _previousInfluence = ecs.Get<BistroInteractionSource>(_camera);
         else ecs.Add<BistroInteractionSource>(_camera);
         _active = true;
+        _inspectorWasVisible = BistroRender::SceneTextureInspector::Visible();
+        BistroRender::SceneTextureInspector::SetVisible(false);
         if (_stage == Stage::Placement)
         {
             StartPlacement(world, console, pipeline, window, action == Action::PlacementRun);
@@ -2100,6 +2150,7 @@ private:
         }
         catch (const std::exception& failure) { error = failure.what(); }
         _active = false;
+        BistroRender::SceneTextureInspector::SetVisible(_inspectorWasVisible);
         pipeline.SetBenchmarkTime({});
         auto& ecs = world.GetECS();
         auto& camera = ecs.Get<TransformComponent>(_camera);
@@ -2142,7 +2193,18 @@ private:
             const auto* window = std::exchange(_placementWindow, nullptr);
             try { RestoreSettings(console, selected); }
             catch (const std::exception& failure) { error = failure.what(); }
-            if (!SetWindowPlacement(window->GetWindowHandle(), &_placementRestore) && error.empty())
+            const auto hwnd = window->GetWindowHandle();
+            if (_placementBorderless)
+            {
+                SetLastError(ERROR_SUCCESS);
+                if ((!SetWindowLongPtrW(hwnd, GWL_STYLE, _placementWindowStyle & ~WS_MAXIMIZE) &&
+                     GetLastError() != ERROR_SUCCESS) && error.empty())
+                    error = "Cannot restore Bistro window style";
+                if (!SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED) && error.empty())
+                    error = "Cannot restore Bistro window frame";
+            }
+            if (!SetWindowPlacement(hwnd, &_placementRestore) && error.empty())
                 error = "Cannot restore Bistro window placement";
         }
         try
@@ -2293,6 +2355,7 @@ private:
     struct Output { std::string Message, Path; };
     std::array<Output, 2> _output;
     bool _multiGPU = false;
+    bool _inspectorWasVisible = false;
     bool _manualPlacement = false, _calibrating = false, _placementWaitsOpen = false;
     unsigned _placementPhase = 0;
     size_t _placementWindowIndex = 0, _trialWindowCount = 0, _trialFrames = 0;
@@ -2300,7 +2363,9 @@ private:
     double _trialSeconds = 0, _trialPrimarySeconds = 0;
     ::Window* _placementWindow = nullptr;
     WINDOWPLACEMENT _placementRestore{};
-    BistroPlacement::Size _placementOriginal{};
+    RECT _placementMonitor{};
+    LONG_PTR _placementWindowStyle = 0;
+    bool _placementBorderless = false;
     Clock::time_point _trialStarted, _placementDeadline, _phaseDeadline;
     std::array<std::function<void()>, 8> _placementPhysics;
     std::function<void()> _replayScene;

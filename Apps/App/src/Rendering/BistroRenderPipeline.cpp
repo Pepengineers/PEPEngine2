@@ -346,6 +346,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 
 void BistroRenderPipeline::FramePresented()
 {
+	_afterPresent = std::chrono::steady_clock::now();
 	++_presentedFrames;
 	_cloudPicture->Presented();
 	_post->HudPresented();

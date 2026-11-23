@@ -248,7 +248,6 @@ class BistroApplication final : public App
 		{
 			_info.Hide();
 			Engine::UI::HideSettings();
-			BistroRender::SceneTextureInspector::SetVisible(false);
 			_legNumber = _benchmark.LegNumber();
 			RefreshWindowCaption();
 		}
@@ -309,7 +308,7 @@ class BistroApplication final : public App
 		if (key == VK_F8)
 		{
 			using BistroRender::SceneTextureInspector;
-			SceneTextureInspector::SetVisible(!SceneTextureInspector::Visible());
+			if (!_benchmark.Active()) SceneTextureInspector::SetVisible(!SceneTextureInspector::Visible());
 			return true;
 		}
 		return false;
@@ -488,6 +487,7 @@ class BistroApplication final : public App
 
 int RunBistroApplication()
 {
+	SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 	SetErrorMode(SEM_NOGPFAULTERRORBOX | SEM_FAILCRITICALERRORS);
 	try
 	{

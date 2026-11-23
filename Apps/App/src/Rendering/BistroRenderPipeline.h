@@ -63,6 +63,7 @@ class BistroRenderPipeline final : public IRenderPipeline
 	void FramePresented() override;
 	void BeforePresent() override { _beforePresent = std::chrono::steady_clock::now(); }
 	auto PresentTime() const { return _beforePresent; }
+	auto PresentCompletedAt() const { return _afterPresent; }
 	void WriteExecution(std::ostream& output) const override { _schedule->Write(output); }
 	const BistroRender::Schedule& LastSchedule() const { return *_schedule; }
 	bool HasRemoteCloudPicture() const { return _cloudPicture->IsRemote(); }
@@ -75,6 +76,7 @@ class BistroRenderPipeline final : public IRenderPipeline
 	SkySource BenchmarkSkySource() const { return _benchmarkSky; }
 	bool BenchmarkLocalCloudsActive() const { return _environment->LocalCloudsActive(); }
 	auto BenchmarkPostPublication() const { return _post->BenchmarkPublication(); }
+	const auto& BenchmarkNISFailure() const { return _post->BenchmarkNISFailure(); }
 	void AppendBenchmarkProbes(std::vector<std::pair<std::string, BistroRender::Id>>& owners) const
 	{
 		_lighting->AppendPublishedProbes(owners);
@@ -120,6 +122,7 @@ class BistroRenderPipeline final : public IRenderPipeline
 	std::shared_ptr<BistroWaves::Controller> _waves;
 	uint64_t _presentedFrames = 0;
 	std::chrono::steady_clock::time_point _beforePresent{};
+	std::chrono::steady_clock::time_point _afterPresent{};
 	uint64_t _frameNumber = 0;
 	std::array<BistroRender::Id, 5> _reportedDevices{
 	    BistroRender::Invalid, BistroRender::Invalid, BistroRender::Invalid, BistroRender::Invalid, BistroRender::Invalid};

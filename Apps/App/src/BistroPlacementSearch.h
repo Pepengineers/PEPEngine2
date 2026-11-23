@@ -69,6 +69,8 @@ inline const Placement Placements[]{
     {L"Render.Shadows.Sun.Adapter", "SunShadowAdapter"},
 };
 inline constexpr size_t AO = 0, Wind = 4, Post = 11, HUD = 12, SunShadow = 13;
+inline constexpr size_t WaterQuality = 4, SkinningQuality = 12;
+inline constexpr size_t SunShadowQuality = std::size(Techniques) - 2, LocalShadowQuality = std::size(Techniques) - 1;
 
 enum Level { Off, Medium, High, Epic };
 enum Profile { Performance, Quality };
@@ -120,28 +122,33 @@ public:
         _baselineFile = output;
         _baselineFile.replace_extension(".baseline");
         if (!_remote) return;
-        const auto directory = output.parent_path().parent_path() / "SingleGPU";
-        if (!std::filesystem::is_directory(directory)) return;
-        for (const auto& item : std::filesystem::directory_iterator(directory))
+        for (const auto* folder : {"SingleGPU", "MultiGPU"})
         {
-            if (item.path().extension() != ".baseline" || !item.is_regular_file()) continue;
-            std::ifstream input(item.path());
-            std::string key;
-            if (!(input >> std::quoted(key)) || key != _conditions)
+            const auto directory = output.parent_path().parent_path() / folder;
+            if (!std::filesystem::is_directory(directory)) continue;
+            for (const auto& item : std::filesystem::directory_iterator(directory))
             {
-                _incompatibleBaseline = true;
-                continue;
-            }
-            Result result;
-            while (ReadReference(input, result))
-            {
-                const auto size = std::find(_sizes.begin(), _sizes.end(), result.Output);
-                if (size == _sizes.end()) continue;
-                result.Settings.Resolution = size - _sizes.begin();
-                result.Settings.Owners = _high.Owners;
-                result.SourceCsv = item.path().lexically_relative(output.parent_path())
-                    .replace_extension(".csv").generic_u8string();
-                _references.push_back(result);
+                if (item.path().extension() != ".baseline" || !item.is_regular_file()) continue;
+                std::ifstream input(item.path());
+                std::string key;
+                if (!(input >> std::quoted(key)) || key != _conditions)
+                {
+                    _incompatibleBaseline = true;
+                    continue;
+                }
+                Result result;
+                while (ReadReference(input, result))
+                {
+                    const auto size = std::find(_sizes.begin(), _sizes.end(), result.Output);
+                    if (size == _sizes.end()) continue;
+                    result.Settings.Resolution = size - _sizes.begin();
+                    result.Settings.Owners = _high.Owners;
+                    result.Settings = EffectiveSettings(std::move(result.Settings));
+                    result.SourceCsv = item.path().lexically_relative(output.parent_path())
+                        .replace_extension(".csv").generic_u8string();
+                    _cachedMode[bool(result.Settings.Provider)] = true;
+                    _references.push_back(result);
+                }
             }
         }
         std::sort(_references.begin(), _references.end(), [](const auto& a, const auto& b) {
@@ -150,15 +157,13 @@ public:
     }
 
     void Start(ConsoleModule& console, Size original, Size screen, std::vector<int> adapters, bool remote,
-        const std::set<std::wstring>& shadowFixtures, BistroBenchmarkData::Csv& csv)
+        bool fixedWaterSubsteps, const std::set<std::wstring>& shadowFixtures, BistroBenchmarkData::Csv& csv)
     {
         _adapters = std::move(adapters);
         _remote = remote;
         _windAlgorithm = console.FindConsoleVariable(L"Render.Wind.Algorithm").GetString();
         _preferredProvider = console.FindConsoleVariable(L"Render.Upscaler.Provider").GetInt();
         _preferredPreset = console.FindConsoleVariable(L"Render.Upscaler.Quality").GetInt();
-        csv.Config("Upscaled.NIS.AutomaticSearchStatus", "unsupported by the benchmark runner");
-        csv.Config("Upscaled.NIS.Reason", "The runner cannot recover an in-flight Streamline evaluation failure; adapter support was not assessed");
         _placements.assign(std::begin(Placements), std::end(Placements));
         if (console.FindConsoleVariable(L"Render.ReflectionProbes.Count").GetInt() > 0)
             _placements.push_back({L"Render.ReflectionProbes.First.Adapter", "Probe 0"});
@@ -181,7 +186,7 @@ public:
         }
         const auto limit = std::max(original.second,
             std::min(screen.second, unsigned(uint64_t(screen.first) * original.second / original.first)));
-        for (unsigned height : {480u, 720u, 900u, 1080u, 1440u, 2160u, original.second})
+        for (unsigned height : {480u, 720u, 900u, 1080u, 1440u, 2160u, original.second, limit})
             if (height >= std::min(480u, original.second) && height <= limit)
                 _sizes.emplace_back(unsigned(uint64_t(height) * original.first / original.second), height);
         std::sort(_sizes.begin(), _sizes.end());
@@ -209,11 +214,19 @@ public:
             if (levels[Off] == -1) levels[Off] = levels[High];
         }
         // The renderer exposes shadow quality as a discrete resolution.
-        _values[_values.size() - 2] = {0, 1024, 2048, 4096};
-        _values.back() = {0, 256, 512, 1024};
+        _values[SunShadowQuality] = {0, 1024, 2048, 4096};
+        _values[LocalShadowQuality] = {0, 256, 512, 1024};
+        _values[SkinningQuality][Epic] = _values[SkinningQuality][High];
+        if (console.FindConsoleVariable(L"Render.Skinning.PoseRateHz").GetInt() > 0)
+            _values[SkinningQuality][Medium] = _values[SkinningQuality][High];
+        if (fixedWaterSubsteps)
+            _values[WaterQuality][Medium] = _values[WaterQuality][Epic] = _values[WaterQuality][High];
+        if (_adapters.empty() && _remote)
+            csv.Config("MultiGPU.Reason", "no secondary GPU available");
     }
 
     Size Resolution(const Config& config) const { return _sizes.at(config.Resolution); }
+    const auto& Resolutions() const { return _sizes; }
     const auto& Candidates() const { return _placements; }
     int QualityValue(size_t technique, Level level) const { return _values[technique][level]; }
 
@@ -248,10 +261,17 @@ public:
     Trial Calibration()
     {
         auto settings = _high;
-        if (const auto* reference = BestReference(false)) settings = FullComposition(reference->Settings);
-        if (_remote) settings.Owners[Post] = _adapters.front();
+        if (const auto* reference = BestReference(false)) settings.Resolution = reference->Settings.Resolution;
         return Make(settings, "native route checkpoints", true);
     }
+
+    bool NeedsPhase(unsigned phase) const
+    {
+        if (phase < 2) return !_cachedMode[phase];
+        return phase < 4 && _remote && !_adapters.empty();
+    }
+
+    bool HasReference(bool upscaled) const { return BestReference(upscaled) != nullptr; }
 
     bool BeginPhase(unsigned phase)
     {
@@ -261,13 +281,15 @@ public:
         _priority.clear();
         _scheduled.clear();
         _short.clear();
-        if (phase >= 2) return false;
-        if (_remote)
+        _failedProbes.clear();
+        if (!NeedsPhase(phase)) return false;
+        if (RemotePhase())
         {
             if (const auto* reference = BestReference(Upscaled()))
             {
+                Seed(reference->Settings, false, true);
                 auto next = FullComposition(reference->Settings);
-                Seed(next);
+                if (next.Levels != reference->Settings.Levels) Seed(next, false, true);
                 if (next.Resolution + 1 < _sizes.size())
                 {
                     ++next.Resolution;
@@ -278,6 +300,7 @@ public:
                 const auto detail = DetailedReference(Upscaled());
                 if (detail && detail != reference && detail != closest) Seed(FullComposition(detail->Settings), true);
             }
+            else return false;
         }
         Config seed = _high;
         seed.Resolution = _sizes.size() - 1;
@@ -291,7 +314,8 @@ public:
         std::vector<Config> modes;
         const auto addMode = [&](int provider, int preset)
         {
-            if (provider && provider != int(U::NIS) && preset != int(P::NativeAA))
+            if (provider && preset != int(P::NativeAA) &&
+                (provider != int(U::NIS) || preset <= int(P::Performance)))
             {
                 seed.Provider = provider;
                 seed.Preset = preset;
@@ -322,11 +346,13 @@ public:
 
     const Result* Finalist() const
     {
-        const auto* incumbent = Best(Upscaled());
+        const auto* incumbent = Best(Upscaled(), RemotePhase());
         const Result* best = nullptr;
+        const Result* detail = nullptr;
         for (const auto& [candidate, result] : _short)
         {
             if ((RemotePhase() && !result.Remote) || _fullSettings.count(candidate)) continue;
+            if (result.Fps < Threshold[_profile] && (!detail || Better(result, *detail, true))) detail = &result;
             const bool dominated = std::any_of(_short.begin(), _short.end(), [&](const auto& other)
                 { return !_fullSettings.count(other.first) && !_retryFull.count(other.first) && Dominates(other.second, result); });
             if (dominated && result.Fps >= Threshold[_profile]) continue;
@@ -335,8 +361,7 @@ public:
         if ((!incumbent || incumbent->Fps < Threshold[_profile]) && _triedClosest &&
             (!best || best->Fps < Threshold[_profile]))
         {
-            const auto& detail = _detail[Upscaled()];
-            if (detail && !_fullSettings.count(detail->Settings)) return &*detail;
+            if (detail) return detail;
         }
         return best && (!incumbent || Better(*best, *incumbent) || best->Fps >= Threshold[_profile] * .96)
             ? best : nullptr;
@@ -356,23 +381,33 @@ public:
         {
             if (result.Valid)
             {
+                if (std::none_of(trial.Settings.Levels.begin(), trial.Settings.Levels.end(), [](Level level) { return level == Off; }))
+                    for (size_t i = 0; i < _available.size(); ++i) _available[i] |= result.Activity[i];
                 _fullSettings.insert(trial.Settings);
                 _confirmed.push_back(result);
-                if (!_remote) SaveReferences();
+                if (!result.Remote) SaveReferences();
             }
             else if (outputUnavailable || rejection == "requested image mode unavailable" ||
+                rejection == "NIS reconstruction failed" ||
                 rejection == "frame generation is active" || !_retryFull.insert(trial.Settings).second)
                 _fullSettings.insert(trial.Settings);
             return;
         }
         if (!result.Valid)
         {
+            _failedProbes.insert(trial.Settings);
             ++_rejected[Upscaled()];
             if (outputUnavailable && trial.Settings.Resolution)
             {
                 auto smaller = trial.Settings;
                 --smaller.Resolution;
                 Schedule(smaller, "lower output after window size rejection", true);
+            }
+            if (trial.Settings.Resolution == 0)
+            {
+                const auto high = WithHighInsteadOfMedium(trial.Settings);
+                if (const auto measured = _short.find(high); measured != _short.end() && measured->second.ThresholdFps < Threshold[_profile])
+                    Expand({measured->second.Id, high, {}, false}, measured->second, csv);
             }
             return;
         }
@@ -391,7 +426,7 @@ public:
         for (bool upscaled : {false, true})
         {
             const auto prefix = std::string(upscaled ? "Upscaled." : "Native.") + ProfileName[_profile] + ".";
-            const auto* remote = Best(upscaled);
+            const auto* remote = Best(upscaled, _remote);
             const auto* reference = _remote ? BestReference(upscaled) : nullptr;
             const auto* best = remote && (!reference || Better(*remote, *reference)) ? remote : reference;
             ReportResult(csv, prefix, best);
@@ -399,6 +434,8 @@ public:
             {
                 ReportResult(csv, prefix + "SingleGPU.", reference);
                 ReportResult(csv, prefix + "MultiGPU.", remote);
+                if (reference && !remote && reference->Fps >= Threshold[_profile])
+                    csv.Config(prefix + "Winner", "Single GPU");
                 if (!reference || !remote)
                     csv.Config(prefix + "Comparison", !reference ?
                         (_incompatibleBaseline ? "no baseline matching build, profile, route and scene replay state" :
@@ -435,14 +472,45 @@ public:
     }
 
     bool Upscaled() const { return (_phase & 1u) != 0; }
-    bool RemotePhase() const { return _remote; }
+    bool RemotePhase() const { return _phase >= 2; }
 
 private:
+    Config EffectiveSettings(Config config) const
+    {
+        for (size_t i = 0; i < config.Levels.size(); ++i)
+        {
+            auto& level = config.Levels[i];
+            if (level != Off && _values[i][level] == _values[i][High]) level = High;
+        }
+        return config;
+    }
+
     Config FullComposition(Config config) const
     {
         for (size_t i = 0; i < config.Levels.size(); ++i)
             if (config.Levels[i] == Off) config.Levels[i] = _high.Levels[i];
         return config;
+    }
+
+    static Config WithMediumShadows(Config config)
+    {
+        for (const auto shadow : {SunShadowQuality, LocalShadowQuality})
+            if (config.Levels[shadow] == High) config.Levels[shadow] = Medium;
+        return config;
+    }
+
+    static Config WithHighInsteadOfMedium(Config config)
+    {
+        for (auto& level : config.Levels)
+            if (level == Medium) level = High;
+        return config;
+    }
+
+    bool KeepsComposition(const Config& config) const
+    {
+        for (size_t i = 0; i < _available.size(); ++i)
+            if (_available[i] && config.Levels[i] == Off) return false;
+        return true;
     }
 
     static bool ReadReference(std::istream& input, Result& r)
@@ -470,6 +538,7 @@ private:
         output << std::quoted(_conditions) << '\n' << std::setprecision(17);
         for (const auto& r : _confirmed)
         {
+            if (r.Remote) continue;
             output << r.Id << ' ' << r.Settings.Provider << ' ' << r.Settings.Preset << ' ' <<
                 r.Output.first << ' ' << r.Output.second << ' ' << r.Render.first << ' ' << r.Render.second <<
                 ' ' << r.Fps << ' ' << r.P95;
@@ -491,7 +560,7 @@ private:
 
     const Result* BestReference(bool upscaled) const
     {
-        const Result* best = nullptr;
+        const Result* best = Best(upscaled, false);
         for (const auto& r : _references)
             if (bool(r.Settings.Provider) == upscaled && (!best || Better(r, *best))) best = &r;
         return best;
@@ -503,6 +572,9 @@ private:
         for (const auto& r : _references)
             if (bool(r.Settings.Provider) == upscaled && r.Fps < Threshold[_profile] && (!best || r.Fps > best->Fps))
                 best = &r;
+        for (const auto& r : _confirmed)
+            if (!r.Remote && bool(r.Settings.Provider) == upscaled && r.Fps < Threshold[_profile] && (!best || r.Fps > best->Fps))
+                best = &r;
         return best;
     }
 
@@ -511,6 +583,9 @@ private:
         const Result* best = nullptr;
         for (const auto& r : _references)
             if (bool(r.Settings.Provider) == upscaled && r.Fps < Threshold[_profile] &&
+                (!best || Better(r, *best, true))) best = &r;
+        for (const auto& r : _confirmed)
+            if (!r.Remote && bool(r.Settings.Provider) == upscaled && r.Fps < Threshold[_profile] &&
                 (!best || Better(r, *best, true))) best = &r;
         return best;
     }
@@ -521,6 +596,7 @@ private:
 
     void Schedule(Config config, const std::string& source, bool priority = false)
     {
+        config = EffectiveSettings(std::move(config));
         // Owners of disabled techniques cannot change the publication or the schedule.
         for (const auto [technique, owner] : {std::pair<size_t, size_t>{0, AO}, {2, Wind}, {3, 2},
                 {4, 3}, {10, 6}, {10, 7}, {13, HUD}, {16, 5}, {17, SunShadow}})
@@ -530,14 +606,14 @@ private:
             config.Owners[std::size(Placements)] = -1;
         if (config.Levels[18] == Off)
             std::fill(config.Owners.begin() + _firstLocalShadow, config.Owners.end(), -1);
-        if (_remote && std::all_of(config.Owners.begin(), config.Owners.end(), [](int owner) { return owner < 0; })) return;
+        if (RemotePhase() && std::all_of(config.Owners.begin(), config.Owners.end(), [](int owner) { return owner < 0; })) return;
         if (!_scheduled.insert(config).second) return;
         auto trial = Make(config, source, false);
         if (priority) _priority.push_back(std::move(trial));
         else _pending.push_back(std::move(trial));
     }
 
-    void Seed(const Config& config, bool postOnly = false)
+    void Seed(const Config& config, bool postOnly = false, bool priority = false)
     {
         if (!RemotePhase())
         {
@@ -548,9 +624,16 @@ private:
         {
             auto next = config;
             next.Owners[Post] = adapter;
-            Schedule(next, "post placement");
+            Schedule(next, "post placement", priority);
             next.Owners[HUD] = adapter;
-            Schedule(next, "post and HUD placement");
+            Schedule(next, "post and HUD placement", priority);
+            if (!postOnly)
+            {
+                next = config;
+                next.Owners[AO] = adapter;
+                next.RemoteAOFilter = true;
+                Schedule(next, "AO and filter on one adapter", priority);
+            }
         }
         if (postOnly) return;
         std::vector<std::vector<int>> seeds;
@@ -603,16 +686,43 @@ private:
             }
             else
             {
-                for (size_t i = 0; i < std::size(Techniques); ++i)
-                    if ((Techniques[i].Enable || Techniques[i].ScaledOff) && result.Activity[i] && config.Levels[i] != Off)
+                const auto high = WithHighInsteadOfMedium(config);
+                auto reduced = high;
+                bool pending = false, passes = false;
+                const auto lowerQuality = [&](const Config& candidate)
+                {
+                    if (const auto measured = _short.find(candidate); measured != _short.end())
+                        passes |= measured->second.ThresholdFps >= threshold;
+                    else if (!_failedProbes.count(candidate))
                     {
-                        next = config;
-                        next.Levels[i] = Off;
-                        next.Resolution = _sizes.size() - 1;
-                        enqueue(next, "effect removal after minimum resolution", true);
+                        enqueue(candidate, "minimum output with reduced quality", true);
+                        pending = true;
                     }
-                csv.Config("Trial." + source + "." + ProfileName[_profile] + ".RemovalEvidence",
-                    BistroBenchmarkData::Csv::Number(result.ThresholdFps) + " FPS at " + std::to_string(result.Output.second) + "p");
+                };
+                if (result.Activity[SunShadowQuality] && result.Activity[LocalShadowQuality] &&
+                    high.Levels[SunShadowQuality] == High && high.Levels[LocalShadowQuality] == High)
+                    lowerQuality(WithMediumShadows(high));
+                for (size_t i = 0; i < high.Levels.size(); ++i)
+                {
+                    if (!result.Activity[i] || high.Levels[i] != High || _values[i][Medium] == _values[i][High]) continue;
+                    next = high;
+                    next.Levels[i] = reduced.Levels[i] = Medium;
+                    lowerQuality(next);
+                }
+                if (reduced.Levels != high.Levels) lowerQuality(reduced);
+                if (!pending && !passes)
+                {
+                    for (size_t i = 0; i < std::size(Techniques); ++i)
+                        if ((Techniques[i].Enable || Techniques[i].ScaledOff) && result.Activity[i] && config.Levels[i] != Off)
+                        {
+                            next = config;
+                            next.Levels[i] = Off;
+                            next.Resolution = _sizes.size() - 1;
+                            enqueue(next, "effect removal after minimum resolution", true);
+                        }
+                    csv.Config("Trial." + source + "." + ProfileName[_profile] + ".RemovalEvidence",
+                        BistroBenchmarkData::Csv::Number(result.ThresholdFps) + " FPS at " + std::to_string(result.Output.second) + "p");
+                }
             }
         }
         if (result.Fps >= threshold * .96)
@@ -622,15 +732,24 @@ private:
                 next = config;
                 ++next.Resolution;
                 enqueue(next, "higher output");
-                if (_profile == Performance)
+                if (_profile == Performance && KeepsComposition(config))
+                {
+                    if (next.Levels[SunShadowQuality] == High && next.Levels[LocalShadowQuality] == High)
+                    {
+                        const auto mediumShadows = WithMediumShadows(next);
+                        if (HighMajority(mediumShadows, result.Activity))
+                            enqueue(mediumShadows, "higher output with Medium shadows", true);
+                    }
                     for (size_t i = 0; i < std::size(Techniques); ++i)
                     {
                         if (config.Levels[i] != High || _values[i][Medium] == _values[i][High]) continue;
                         next = config;
                         ++next.Resolution;
                         next.Levels[i] = Medium;
-                        if (HighMajority(next, result.Activity)) enqueue(next, "higher output with Medium");
+                        if (HighMajority(next, result.Activity))
+                            enqueue(next, "higher output with Medium", Techniques[i].ScaledOff);
                     }
+                }
             }
             const bool allHigh = std::none_of(config.Levels.begin(), config.Levels.end(), [](Level l) { return l == Medium; });
             for (size_t i = 0; i < std::size(Techniques); ++i)
@@ -667,11 +786,16 @@ private:
         }
     }
 
-    static bool HighMajority(const Config& config, const std::array<bool, std::size(Techniques)>& active)
+    bool HasQualityScale(size_t i) const
+    {
+        return _values[i][Medium] != _values[i][High] || _values[i][High] != _values[i][Epic];
+    }
+
+    bool HighMajority(const Config& config, const std::array<bool, std::size(Techniques)>& active) const
     {
         size_t high = 0, medium = 0;
         for (size_t i = 0; i < active.size(); ++i)
-            if (active[i] && Techniques[i].Quality)
+            if (active[i] && HasQualityScale(i))
             {
                 high += config.Levels[i] >= High;
                 medium += config.Levels[i] == Medium;
@@ -698,7 +822,8 @@ private:
         {
             const auto high = count(r, High);
             const auto epic = count(r, Epic);
-            const bool resolutionFirst = _profile == Performance && HighMajority(r.Settings, r.Activity);
+            const bool resolutionFirst = _profile == Performance && KeepsComposition(r.Settings) &&
+                HighMajority(r.Settings, r.Activity);
             const auto pixels = uint64_t(r.Output.first) * r.Output.second;
             return std::tuple{resolutionFirst, resolutionFirst ? pixels : 0, high, pixels, epic,
                 uint64_t(r.Render.first) * r.Render.second, r.Fps, -r.P95};
@@ -723,11 +848,11 @@ private:
         return true;
     }
 
-    const Result* Best(bool upscaled) const
+    const Result* Best(bool upscaled, bool remote) const
     {
         const Result* best = nullptr;
         for (const auto& result : _confirmed)
-            if (bool(result.Settings.Provider) == upscaled && result.Remote == _remote &&
+            if (bool(result.Settings.Provider) == upscaled && result.Remote == remote &&
                 (!best || Better(result, *best)))
                 best = &result;
         return best;
@@ -753,7 +878,7 @@ private:
         csv.Config(prefix + "Preset", std::to_string(r->Settings.Preset));
         for (size_t i = 0; i < r->Activity.size(); ++i)
             if (r->Activity[i]) csv.Config(prefix + "Technique", std::string(Techniques[i].Pass) + "=" +
-                (Techniques[i].Quality ? std::to_string(QualityValue(i, r->Settings.Levels[i])) : "enabled"));
+                (HasQualityScale(i) ? std::to_string(QualityValue(i, r->Settings.Levels[i])) : "enabled"));
         csv.Config(prefix + "Output", std::to_string(r->Output.first) + "x" + std::to_string(r->Output.second));
         csv.Config(prefix + "Render", std::to_string(r->Render.first) + "x" + std::to_string(r->Render.second));
         csv.Config(prefix + "FPS", BistroBenchmarkData::Csv::Number(r->Fps));
@@ -775,15 +900,18 @@ private:
     ConsoleVariablePatch _localShadowSync;
     std::vector<Size> _sizes;
     std::array<std::array<int, 4>, std::size(Techniques)> _values{};
+    std::array<bool, std::size(Techniques)> _available{};
     std::deque<Trial> _pending, _priority;
     std::set<Config> _scheduled;
     std::map<Config, Result> _short;
+    std::set<Config> _failedProbes;
     std::set<Config> _fullSettings, _retryFull;
     std::vector<Result> _confirmed;
     std::vector<Result> _references;
     std::filesystem::path _baselineFile;
     std::string _conditions;
     bool _incompatibleBaseline = false;
+    std::array<bool, 2> _cachedMode{};
     bool _triedClosest = false;
     std::array<std::optional<Result>, 2> _nearest, _detail, _nearMiss;
     std::array<unsigned, 2> _rejected{};

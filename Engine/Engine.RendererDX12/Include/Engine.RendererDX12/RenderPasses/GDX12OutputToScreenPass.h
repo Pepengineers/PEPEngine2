@@ -37,7 +37,11 @@ public:
 
     void Execute(GDX12CommandList* commands) override
     {
-        auto* input = _inputs[0]->GetTexture();
+        ExecuteWithInput(commands, _inputs[0]->GetTexture());
+    }
+
+    void ExecuteWithInput(GDX12CommandList* commands, GDX12Texture* input)
+    {
         auto* output = _inputs[1]->GetTexture();
         GDX12_SCOPED_EVENT(commands, "HDR tone map to display", Colors::Aqua);
         commands->ResourceBarrier({ input->GetResource()->GetSRVBarrier(), output->GetResource()->GetRenderTargetBarrier() });

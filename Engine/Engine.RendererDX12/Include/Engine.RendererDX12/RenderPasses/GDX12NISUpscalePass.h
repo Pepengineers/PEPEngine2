@@ -9,6 +9,8 @@
 class GDX12NISUpscalePass : public GDX12RenderPass
 {
 public:
+	struct Failure : std::runtime_error { using std::runtime_error::runtime_error; };
+
 	explicit GDX12NISUpscalePass(float ratio = 1.5f) : IN_DepthBuffer(nullptr), IN_MotionVectors(nullptr), _viewportHandle(1337),
 		_sharpness(0.1f), _ratio(ratio)
 	{ _numInputs = 2; _flags = RENDER_PASS_FLAG_UPSCALER | RENDER_PASS_FLAG_USE_STREAMLINE; }
@@ -65,6 +67,7 @@ public:
 	{
 		using namespace sl;
 
+		if (!_resizeFailure.empty()) throw Failure(_resizeFailure);
 		GDX12_SCOPED_EVENT(cmdList, "NIS Upscale Pass", Colors::Blue);
 
 		FrameToken* currentFrame = _commonData->StreamlineFrame;
@@ -72,7 +75,7 @@ public:
 		if (result != Result::eOk || currentFrame == nullptr)
 		{
 			std::string errorMsg = "NIS: Failed to get a frame token: " + SLResultToString(result) + "\n";
-			throw std::runtime_error(errorMsg);
+			throw Failure(errorMsg);
 		}
 
 		Extent inputExtent{};
@@ -110,7 +113,7 @@ public:
 			if (result != Result::eOk)
 			{
 				std::string errorMsg = "NIS: Failed to set tags: " + SLResultToString(result) + "\n";
-				throw std::runtime_error(errorMsg);
+				throw Failure(errorMsg);
 			}
 
 			const BaseStructure* inputs[] = { &_viewportHandle };
@@ -119,7 +122,7 @@ public:
 			if (result != Result::eOk)
 			{
 				std::string errorMsg = "NIS EVALUATE ERROR: " + SLResultToString(result) + "\n";
-				throw std::runtime_error(errorMsg);
+				throw Failure(errorMsg);
 			}
             cmdList->ResourceBarrier({ upscaledTexture->GetResource()->GetUAVBarrier() });
 		}
@@ -130,7 +133,9 @@ public:
 	{
 		for (auto& texture : OUT_UpscaledTextures) { texture->Resize(_commonData->WindowWidth, _commonData->WindowHeight); }
 		GDX12StreamlineSDK::Get().FreeResources(sl::kFeatureNIS, _viewportHandle);
-		CreateNISFeature();
+		_resizeFailure.clear();
+		try { CreateNISFeature(); }
+		catch (const Failure& error) { _resizeFailure = error.what(); }
 	}
 
 	void QueryRenderTargetResolution() override
@@ -163,6 +168,7 @@ private:
 	sl::ViewportHandle _viewportHandle;
 	float _sharpness;
     float _ratio;
+	std::string _resizeFailure;
 
 	void MatchOutputCount(UINT outputCount)
 	{
@@ -191,7 +197,7 @@ private:
 		if (result == Result::eOk) { return; }
 
 		std::string errorMsg = "ERROR: NIS Feature is not supported on the current adapter: " + SLResultToString(result) + "\n";
-		throw std::runtime_error(errorMsg);
+		throw Failure(errorMsg);
 	}
 
 	void CreateNISFeature()
@@ -207,7 +213,7 @@ private:
 		if (result != Result::eOk)
 		{
 			std::string errorMsg = "ERROR: Failed to set NIS options: " + SLResultToString(result) + "\n";
-			throw std::runtime_error(errorMsg);
+			throw Failure(errorMsg);
 		}
 	}
 
