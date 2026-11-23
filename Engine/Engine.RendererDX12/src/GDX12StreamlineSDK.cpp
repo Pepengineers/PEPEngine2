@@ -209,7 +209,16 @@ sl::Result GDX12StreamlineSDK::SetTagForFrame(const sl::FrameToken& frame, const
 
 sl::Result GDX12StreamlineSDK::EvaluateFeature(const sl::Feature feature, const sl::FrameToken& frame, const sl::BaseStructure** inputs, const uint32_t numInputs, sl::CommandBuffer* cmdBuffer) const
 {
-    return _initialized && _slEvaluateFeature ? _slEvaluateFeature(feature, frame, inputs, numInputs, cmdBuffer) : sl::Result::eErrorInvalidState;
+    if (!_initialized || !_slEvaluateFeature) return sl::Result::eErrorInvalidState;
+    const auto result = _slEvaluateFeature(feature, frame, inputs, numInputs, cmdBuffer);
+    // Streamline reports budget pressure after a successful dispatch. Its output is valid.
+    if (result == sl::Result::eWarnOutOfVRAM)
+    {
+        static const bool warned = [this] { LogWarning("GPU memory budget exceeded during evaluation."); return true; }();
+        (void)warned;
+        return sl::Result::eOk;
+    }
+    return result;
 }
 
 sl::Result GDX12StreamlineSDK::FreeResources(const sl::Feature feature, const sl::ViewportHandle& viewport) const
