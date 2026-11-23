@@ -347,14 +347,19 @@ void BistroInfoPanel::Draw(RenderModule& render, BistroRenderPipeline& pipeline,
     }
     const bool compact = _compact;
     const auto* vp = ImGui::GetMainViewport();
-    const float width = std::min(compact ? 444.f : 980.f, vp->Size.x - 16.f);
-    const float height = std::min(690.f, vp->Size.y - 16.f);
     if (compact)
+    {
+        const float width = std::min(444.f, vp->Size.x - 16.f);
+        const float height = std::min(690.f, vp->Size.y - 16.f);
         ImGui::SetNextWindowPos({vp->Pos.x + 8, vp->Pos.y + vp->Size.y - 8}, ImGuiCond_Always, {0,1});
+        ImGui::SetNextWindowSizeConstraints({width, 0}, {width, height});
+        ImGui::SetNextWindowSize({width, 0});
+    }
     else
+    {
         ImGui::SetNextWindowPos(vp->GetCenter(), ImGuiCond_Always, {.5f,.5f});
-    ImGui::SetNextWindowSizeConstraints({width,0}, {width,height});
-    ImGui::SetNextWindowSize({width, compact ? 0.f : height});
+        ImGui::SetNextWindowSize({vp->Size.x * .9f, vp->Size.y * .9f}, ImGuiCond_Always);
+    }
     ImGui::SetNextWindowViewport(vp->ID);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {14,12});
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 6.f);
