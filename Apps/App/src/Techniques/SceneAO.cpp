@@ -13,14 +13,14 @@ namespace
 {
 constexpr State Read = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
 
-AutoConsoleVariable<bool> AsyncAO(L"App.Async.AO", false,
+AutoConsoleVariable<bool> AsyncAO(L"Render.AO.AsyncCompute", false,
                                   L"Run ambient occlusion passes on the local COMPUTE queue.",
                                   EConsoleVariableFlags::Default);
 
-AutoConsoleVariable<int> CrossSync(L"App.AO.CrossSync", 1,
+AutoConsoleVariable<int> CrossSync(L"Render.AO.CrossSync", 1,
     L"Remote AO: 1 exact current, 0 exact previous with reprojection (first uses current).",
     EConsoleVariableFlags::Default, [](int value) { return value == 0 || value == 1; });
-AutoConsoleVariable<bool> BlurOnSecondary(L"App.AO.BlurOnSecondary", false,
+AutoConsoleVariable<bool> BlurOnSecondary(L"Render.AO.BlurOnSecondary", false,
     L"Run SSAO/HBAO blur or XeGTAO denoise on GPU1. CACAO filters inside its SDK context.");
 
 void CheckCACAO(FFX_CACAO_Status result)

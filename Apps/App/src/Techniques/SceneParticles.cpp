@@ -15,15 +15,15 @@ namespace BistroRender
 {
 namespace
 {
-AutoConsoleVariable<bool> AsyncSimulation(L"App.Async.Particles", false,
+AutoConsoleVariable<bool> AsyncSimulation(L"Render.Particles.AsyncCompute", false,
                                           L"Run particle pool initialization and simulation on the local COMPUTE queue.",
                                           EConsoleVariableFlags::Default);
-AutoConsoleVariable<int> Adapter(L"App.Particles.Adapter", -1,
+AutoConsoleVariable<int> Adapter(L"Render.Particles.Adapter", -1,
     L"Secondary DXGI index for marked independent particle emitters. -1 uses GPU0.");
-AutoConsoleVariable<int> CrossSync(L"App.Particles.CrossSync", 1,
+AutoConsoleVariable<int> CrossSync(L"Render.Particles.CrossSync", 1,
     L"Remote particles: 1 exact current, 0 exact previous (first uses current), 2 independent and 3 frame-driven (newest completed, empty until ready).",
     EConsoleVariableFlags::Default, [](int value) { return value >= 0 && value <= 3; });
-AutoConsoleVariable<bool> LogSnapshots(L"App.Particles.LogSnapshots", false,
+AutoConsoleVariable<bool> LogSnapshots(L"Render.Particles.LogSnapshots", false,
     L"Read back visible remote particle counts for short MGPU diagnostics.");
 
 constexpr State CopySource = D3D12_RESOURCE_STATE_COPY_SOURCE;

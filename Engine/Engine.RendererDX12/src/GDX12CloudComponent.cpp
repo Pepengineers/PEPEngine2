@@ -4,9 +4,9 @@
 #include <cmath>
 #include <stdexcept>
 
-static AutoConsoleVariable<bool> Enabled(L"Render.Clouds.Enabled", true,
+static AutoConsoleVariable<bool> Enabled(L"Render.Sky.Clouds.Enabled", true,
     L"Allow explicitly selected cloud sources. Default true.", EConsoleVariableFlags::Default);
-static AutoConsoleVariable<GDX12LegacyQuality> Quality(L"Render.Clouds.Quality", GDX12LegacyQuality::Mid,
+static AutoConsoleVariable<GDX12LegacyQuality> Quality(L"Render.Sky.Clouds.Quality", GDX12LegacyQuality::Mid,
     L"0 Off, 1 Low (3 octaves), 2 Mid (5), 3 High (8).", EConsoleVariableFlags::Default);
 
 GDX12CloudComponent::GDX12CloudComponent()

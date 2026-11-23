@@ -4,16 +4,16 @@
 #include <cmath>
 #include <stdexcept>
 
-static AutoConsoleVariable<bool> Enabled(L"Render.Reflection.Enabled", true,
+static AutoConsoleVariable<bool> Enabled(L"Render.ReflectionProbes.Enabled", true,
     L"Enable local reflection probes. Default true.", EConsoleVariableFlags::Default);
-static AutoConsoleVariable<GDX12Quality> Quality(L"Render.Reflection.Quality", GDX12Quality::Mid,
+static AutoConsoleVariable<GDX12Quality> Quality(L"Render.ReflectionProbes.Quality", GDX12Quality::Mid,
     L"0 Off, 1 Low, 2 Mid (default), 3 High, 4 Epic.", EConsoleVariableFlags::Default);
-static AutoConsoleVariable<bool> Scheduled(L"Render.Reflection.Schedule.Enabled", false,
+static AutoConsoleVariable<bool> Scheduled(L"Render.ReflectionProbes.Schedule.Enabled", false,
     L"Use the benchmark probe schedule and distance policy");
-static AutoConsoleVariable<int> Schedule(L"Render.Reflection.Schedule", 0,
+static AutoConsoleVariable<int> Schedule(L"Render.ReflectionProbes.Schedule.Mode", 0,
     L"0 all probes, 1 one whole probe, 2 one face each, 3 one face total per frame", EConsoleVariableFlags::Default,
     [](int value) { return value >= 0 && value <= 3; });
-static AutoConsoleVariable<float> FullDistance(L"Render.Reflection.FullUpdateDistanceMetres", 0,
+static AutoConsoleVariable<float> FullDistance(L"Render.ReflectionProbes.Schedule.FullUpdateDistanceMetres", 0,
     L"Distance to influence box for full updates: 0 disabled, -1 always, otherwise metres", EConsoleVariableFlags::Default,
     [](float value) { return std::isfinite(value) && (value == -1 || value >= 0); });
 GDX12ReflectionSettings GetReflectionSettings()

@@ -1,4 +1,5 @@
 #include "BistroApplication.h"
+#include "BistroIniMigration.h"
 #include "Rendering/BistroRenderPipeline.h"
 #include "App.Base/ECS/Components/ReflectionProbeComponent.h"
 #include "App.Base/BistroLightPlacements.h"
@@ -49,9 +50,9 @@ bool SkipAutomaticBenchmark()
 struct BistroLocalShadowSettings
 {
 	explicit BistroLocalShadowSettings(const std::wstring& name)
-	    : Adapter(L"App.Shadows.Local.Adapter." + name, -1, L"Hardware GPU index; -1 uses GPU0",
+	    : Adapter(L"Render.Shadows.Local." + name + L".Adapter", -1, L"Hardware GPU index; -1 uses GPU0",
 	              EConsoleVariableFlags::Default, [](int index) { return index >= -1; }),
-	      CrossSync(L"App.Shadows.Local.CrossSync." + name, 1, L"Remote shadow freshness: 1 Exact, 3 Latest",
+	      CrossSync(L"Render.Shadows.Local." + name + L".CrossSync", 1, L"Remote shadow freshness: 1 Exact, 3 Latest",
 	                EConsoleVariableFlags::Default, [](int mode) { return mode == 1 || mode == 3; })
 	{}
 	AutoConsoleVariable<int> Adapter, CrossSync;
@@ -91,14 +92,14 @@ constexpr float CameraSpeedBoost = 4.0f;
 const Vector3 InitialCameraPosition{400, 230, -370};
 const Vector3 InitialCameraRotation{8, 40, 0};
 
-AutoConsoleVariable<int> BistroSkySource(L"App.Sky.Source", 2,
+AutoConsoleVariable<int> BistroSkySource(L"Render.Sky.Source", 2,
                                          L"Ordinary Bistro sky: 0 Off, 1 original SkyBox, 2 SkyAtmosphere",
                                          EConsoleVariableFlags::Default,
                                          [](int value) { return value >= 0 && value <= 2; });
 AutoConsoleVariable<bool> BistroSunCycle(
-    L"App.Sky.SunCycle.Enabled", true,
+    L"Render.Sky.SunCycle.Enabled", true,
     L"Start in daylight, fade to dusk, and return to daylight");
-AutoConsoleVariable<float> BistroSunCyclePeriod(L"App.Sky.SunCycle.PeriodSeconds", 120.f,
+AutoConsoleVariable<float> BistroSunCyclePeriod(L"Render.Sky.SunCycle.PeriodSeconds", 120.f,
                                                 L"Seconds for a full daylight to dusk and back cycle",
                                                 EConsoleVariableFlags::Default,
                                                 [](float value) { return std::isfinite(value) && value > 0; });
@@ -120,12 +121,12 @@ void ValidateStartupAdapters(ConsoleModule& console, const std::filesystem::path
     ConsoleVariablePatch reset{
         {L"Render.PrimaryAdapter", "0"},
         {L"App.UI.CloudPicture.Adapter", "-1"},
-        {L"App.AO.Adapter", "-1"},
-        {L"App.Particles.Adapter", "-1"},
-        {L"App.Water.Adapter", "-1"},
-        {L"App.Sky.SkyView.Adapter", "-1"},
-        {L"App.Sky.AerialPerspective.Adapter", "-1"},
-        {L"App.Grass.Wind.Adapter", "-1"}};
+        {L"Render.AO.Adapter", "-1"},
+        {L"Render.Particles.Adapter", "-1"},
+        {L"Render.Water.Adapter", "-1"},
+        {L"Render.Sky.SkyView.Adapter", "-1"},
+        {L"Render.Sky.AerialPerspective.Adapter", "-1"},
+        {L"Render.Wind.Adapter", "-1"}};
     for (const auto& poster : BistroUICanvases::Posters)
         if (poster.Adapter) reset.emplace_back(poster.Adapter, "-1");
     bool invalid = false;
@@ -148,26 +149,6 @@ void ValidateStartupAdapters(ConsoleModule& console, const std::filesystem::path
     if (!result.Error.empty()) throw ConsoleConfigError(result.Error);
 }
 
-void MigrateBistroIniKey(std::wstring& key)
-{
-    constexpr wchar_t oldCloud[] = L"App.CloudPicture.";
-    if (_wcsnicmp(key.c_str(), oldCloud, std::size(oldCloud) - 1) == 0) {
-        key.replace(0, std::size(oldCloud) - 1, L"App.UI.CloudPicture.");
-        return;
-    }
-    constexpr std::pair<const wchar_t*, const wchar_t*> renamed[]{
-        {L"App.Async.CloudPicture", L"App.UI.CloudPicture.AsyncCompute"},
-        {L"App.UI.WorldCanvas.Adapter.Atrium", L"App.UI.WorldCanvas.Atrium.Adapter"},
-        {L"App.UI.WorldCanvas.Adapter.Terrace", L"App.UI.WorldCanvas.Terrace.Adapter"},
-        {L"App.UI.WorldCanvas.CrossSync.Atrium", L"App.UI.WorldCanvas.Atrium.CrossSync"},
-        {L"App.UI.WorldCanvas.CrossSync.Terrace", L"App.UI.WorldCanvas.Terrace.CrossSync"},
-        {L"App.UI.WorldCanvas.Adapter.Clouds", L""},
-        {L"App.UI.WorldCanvas.CrossSync.Clouds", L""}
-    };
-    for (const auto& [previous, current] : renamed)
-        if (_wcsicmp(key.c_str(), previous) == 0) { key = current; return; }
-}
-
 std::vector<DeviceDesc> PrepareStartup()
 {
 	const auto root = Engine::Core::GetExecutableDirectory();
@@ -187,10 +168,10 @@ std::vector<DeviceDesc> PrepareStartup()
 	if (!overlay.empty())
 		Log::Info("BistroBenchmark", "Loaded startup queue defaults from ", overlay.u8string());
 	Log::Info("Bistro", "SCENE EXECUTOR; primary=", console.FindConsoleVariable(L"Render.PrimaryAdapter").GetInt(),
-	          "; App.Async.Queues=",
-	          console.FindConsoleVariable(L"App.Async.Queues").GetBool(),
-	          " App.Water.Adapter=", console.FindConsoleVariable(L"App.Water.Adapter").GetInt(),
-	          " App.Water.CrossSync=", console.FindConsoleVariable(L"App.Water.CrossSync").GetInt());
+	          "; Render.Queues.AsyncEnabled=",
+	          console.FindConsoleVariable(L"Render.Queues.AsyncEnabled").GetBool(),
+	          " Render.Water.Adapter=", console.FindConsoleVariable(L"Render.Water.Adapter").GetInt(),
+	          " Render.Water.CrossSync=", console.FindConsoleVariable(L"Render.Water.CrossSync").GetInt());
 	return adapters;
 }
 

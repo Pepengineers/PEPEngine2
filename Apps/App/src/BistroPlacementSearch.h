@@ -29,17 +29,17 @@ inline constexpr Technique Techniques[]{
     {L"Render.Grass.Enabled", L"Render.Grass.Quality", "grass"},
     {L"Render.Wind.Enabled", L"Render.Wind.Quality", "wind"},
     {L"Render.Particles.Enabled", L"Render.Particles.Quality", "particle"},
-    {L"Render.Fluid.Enabled", L"Render.Fluid.Quality", "water"},
-    {L"Render.Clouds.Enabled", L"Render.Clouds.Quality", "cloud"},
-    {L"Render.Reflection.Enabled", L"Render.Reflection.Quality", "environment"},
+    {L"Render.Water.Enabled", L"Render.Water.Quality", "water"},
+    {L"Render.Sky.Clouds.Enabled", L"Render.Sky.Clouds.Quality", "cloud"},
+    {L"Render.ReflectionProbes.Enabled", L"Render.ReflectionProbes.Quality", "environment"},
     {L"Render.SSR.Enabled", L"Render.SSR.Quality", "SSR"},
     {L"Render.DOF.Enabled", L"Render.DOF.Quality", "DoF"},
     {L"Render.MotionBlur.Enabled", L"Render.MotionBlur.Quality", "motion blur"},
-    {L"Render.SkyAtmosphere.Enabled", L"Render.SkyAtmosphere.Quality", "atmosphere"},
-    {L"Render.SkyBox.Enabled", L"Render.SkyBox.Quality", "sky"},
+    {L"Render.Sky.Atmosphere.Enabled", L"Render.Sky.Atmosphere.Quality", "atmosphere"},
+    {L"Render.Sky.SkyBox.Enabled", L"Render.Sky.SkyBox.Quality", "sky"},
     {L"Render.Skinning.Enabled", L"Render.Skinning.Quality", "skin deformation"},
-    {L"Render.UI.GameHUD.Enabled", L"Render.UI.GameHUD.Quality", "HUD"},
-    {nullptr, L"Render.UI.WorldCanvas.Quality", "canvas"},
+    {L"App.UI.GameHUD.Enabled", L"App.UI.GameHUD.Quality", "HUD"},
+    {nullptr, L"App.UI.WorldCanvas.Quality", "canvas"},
     {nullptr, L"Render.Tree.Quality", "Linden"},
     {L"App.UI.CloudPicture.Enabled", nullptr, "cloud picture"},
     {nullptr, L"Render.Shadows.Sun.Resolution", "sun shadow", true},
@@ -53,20 +53,20 @@ struct Placement
 };
 
 inline const Placement Placements[]{
-    {L"App.AO.Adapter", "AOAdapter"},
-    {L"App.LightGrid.Adapter", "LightGridAdapter"},
-    {L"App.Particles.Adapter", "ParticleAdapter"},
-    {L"App.Water.Adapter", "WaterAdapter"},
-    {L"App.Grass.Wind.Adapter", "GrassWindAdapter"},
+    {L"Render.AO.Adapter", "AOAdapter"},
+    {L"Render.LightGrid.Adapter", "LightGridAdapter"},
+    {L"Render.Particles.Adapter", "ParticleAdapter"},
+    {L"Render.Water.Adapter", "WaterAdapter"},
+    {L"Render.Wind.Adapter", "GrassWindAdapter"},
     {L"App.UI.CloudPicture.Adapter", "CloudPictureAdapter"},
-    {L"App.Sky.SkyView.Adapter", "SkyViewAdapter"},
-    {L"App.Sky.AerialPerspective.Adapter", "AerialPerspectiveAdapter"},
-    {L"App.WBOIT.Adapter", "TransparencyAdapter"},
+    {L"Render.Sky.SkyView.Adapter", "SkyViewAdapter"},
+    {L"Render.Sky.AerialPerspective.Adapter", "AerialPerspectiveAdapter"},
+    {L"Render.WBOIT.Adapter", "TransparencyAdapter"},
     {L"App.UI.WorldCanvas.Atrium.Adapter", "AtriumCanvasAdapter"},
     {L"App.UI.WorldCanvas.Terrace.Adapter", "TerraceCanvasAdapter"},
-    {L"App.Post.Adapter", "PostAdapter"},
+    {L"Render.Post.Adapter", "PostAdapter"},
     {L"App.UI.GameHUD.Adapter", "GameHUDAdapter"},
-    {L"App.Shadows.Sun.Adapter", "SunShadowAdapter"},
+    {L"Render.Shadows.Sun.Adapter", "SunShadowAdapter"},
 };
 inline constexpr size_t AO = 0, Wind = 4, Post = 11, HUD = 12, SunShadow = 13;
 
@@ -154,28 +154,30 @@ public:
     {
         _adapters = std::move(adapters);
         _remote = remote;
-        _windAlgorithm = console.FindConsoleVariable(L"App.Grass.Wind.Algorithm").GetString();
+        _windAlgorithm = console.FindConsoleVariable(L"Render.Wind.Algorithm").GetString();
         _preferredProvider = console.FindConsoleVariable(L"Render.Upscaler.Provider").GetInt();
         _preferredPreset = console.FindConsoleVariable(L"Render.Upscaler.Quality").GetInt();
         csv.Config("Upscaled.NIS.AutomaticSearchStatus", "unsupported by the benchmark runner");
         csv.Config("Upscaled.NIS.Reason", "The runner cannot recover an in-flight Streamline evaluation failure; adapter support was not assessed");
         _placements.assign(std::begin(Placements), std::end(Placements));
-        if (console.FindConsoleVariable(L"App.ReflectionProbes.Count").GetInt() > 0)
-            _placements.push_back({L"App.ReflectionProbes.FirstAdapter", "Probe 0"});
+        if (console.FindConsoleVariable(L"Render.ReflectionProbes.Count").GetInt() > 0)
+            _placements.push_back({L"Render.ReflectionProbes.First.Adapter", "Probe 0"});
         else
-            csv.Config("App.ReflectionProbes.FirstAdapter.Reason", "reflection probe count is zero");
+            csv.Config("Render.ReflectionProbes.First.Adapter.Reason", "reflection probe count is zero");
         _firstLocalShadow = _placements.size();
-        for (const auto* variable : console.GetConsoleVariables(L"App.Shadows.Local.Adapter."))
+        for (const auto* variable : console.GetConsoleVariables(L"Render.Shadows.Local."))
         {
             const std::wstring name(variable->GetName());
-            const auto fixture = name.substr(std::wstring_view(L"App.Shadows.Local.Adapter.").size());
+            constexpr std::wstring_view prefix = L"Render.Shadows.Local.", suffix = L".Adapter";
+            if (name.size() <= prefix.size() + suffix.size() || name.compare(name.size() - suffix.size(), suffix.size(), suffix) != 0) continue;
+            const auto fixture = name.substr(prefix.size(), name.size() - prefix.size() - suffix.size());
             if (!shadowFixtures.count(fixture))
             {
                 csv.Config(std::filesystem::path(name).u8string() + ".Reason", "no enabled shadow-casting light for this fixture");
                 continue;
             }
             _placements.push_back({name, std::filesystem::path(fixture).u8string()});
-            _localShadowSync.emplace_back(L"App.Shadows.Local.CrossSync." + fixture, "1");
+            _localShadowSync.emplace_back(L"Render.Shadows.Local." + fixture + L".CrossSync", "1");
         }
         const auto limit = std::max(original.second,
             std::min(screen.second, unsigned(uint64_t(screen.first) * original.second / original.first)));
@@ -220,12 +222,12 @@ public:
         ConsoleVariablePatch patch{
             {L"Render.Upscaler.Provider", std::to_string(config.Provider)},
             {L"Render.Upscaler.Quality", std::to_string(config.Preset)},
-            {L"App.AO.BlurOnSecondary", config.RemoteAOFilter ? "1" : "0"},
-            {L"App.Grass.Wind.Algorithm", config.Owners[Wind] >= 0 ? "1" : _windAlgorithm},
-            {L"App.AO.CrossSync", "1"}, {L"App.Water.CrossSync", "1"}, {L"App.Particles.CrossSync", "1"},
-            {L"App.UI.CloudPicture.CrossSync", "1"}, {L"App.Grass.Wind.CrossSync", "1"},
-            {L"App.Sky.SkyView.CrossSync", "1"}, {L"App.Sky.AerialPerspective.CrossSync", "1"},
-            {L"App.Shadows.Sun.CrossSync", "1"},
+            {L"Render.AO.BlurOnSecondary", config.RemoteAOFilter ? "1" : "0"},
+            {L"Render.Wind.Algorithm", config.Owners[Wind] >= 0 ? "1" : _windAlgorithm},
+            {L"Render.AO.CrossSync", "1"}, {L"Render.Water.CrossSync", "1"}, {L"Render.Particles.CrossSync", "1"},
+            {L"App.UI.CloudPicture.CrossSync", "1"}, {L"Render.Wind.CrossSync", "1"},
+            {L"Render.Sky.SkyView.CrossSync", "1"}, {L"Render.Sky.AerialPerspective.CrossSync", "1"},
+            {L"Render.Shadows.Sun.CrossSync", "1"},
             {L"App.UI.WorldCanvas.Atrium.CrossSync", "1"}, {L"App.UI.WorldCanvas.Terrace.CrossSync", "1"},
         };
         for (size_t i = 0; i < std::size(Techniques); ++i)

@@ -12,12 +12,12 @@ namespace BistroRender
 {
 namespace
 {
-AutoConsoleVariable<bool> AsyncWater(L"App.Async.Water", false,
+AutoConsoleVariable<bool> AsyncWater(L"Render.Water.AsyncCompute", false,
                                      L"Run the SPH water simulation on the local COMPUTE queue.",
                                      EConsoleVariableFlags::Default);
-AutoConsoleVariable<int> WaterAdapter(L"App.Water.Adapter", -1,
+AutoConsoleVariable<int> WaterAdapter(L"Render.Water.Adapter", -1,
     L"Hardware GPU index for Bistro SPH. -1 uses the primary GPU.");
-AutoConsoleVariable<int> CrossSync(L"App.Water.CrossSync", 0,
+AutoConsoleVariable<int> CrossSync(L"Render.Water.CrossSync", 0,
     L"Remote water: 0 exact previous (first uses current), 1 exact current, 2 independent GPU1 and latest completed (first waits for export).",
     EConsoleVariableFlags::Default, [](int value) { return value >= 0 && value <= 2; });
 constexpr State CopyRead = D3D12_RESOURCE_STATE_COPY_SOURCE;

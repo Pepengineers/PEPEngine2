@@ -16,7 +16,8 @@ New-Item -ItemType Directory -Force -Path $Output | Out-Null
 if (Test-Path (Join-Path $Output 'run-1.json')) { throw 'Output already contains measurements; use a new directory' }
 $fixturePath = Join-Path (Split-Path $Exe -Parent) 'Config/Engine.ini'
 $saved = $null
-$fixture = (git -C $repo show HEAD:Config/Engine.ini) -join "`n"
+# The retired CrowdBenchmark executable reads the original CVar names.
+$fixture = (git -C $repo show 206b3b08f2ee9d629797e5ccedfdd4d4fc79d8b9:Config/Engine.ini) -join "`n"
 if ($LASTEXITCODE) { throw 'Cannot load committed benchmark fixture' }
 $settings = [ordered]@{
     'App.NPC.Count' = "$People"; 'App.Fox.Count' = "$Foxes"; 'App.RenderInBackground' = 'true'

@@ -20,7 +20,7 @@ inline const Vector3 ReferenceHalfExtent(5, 1, 10);
 inline const Vector3 ReferenceScale(HalfExtent.x / ReferenceHalfExtent.x, HalfExtent.y / ReferenceHalfExtent.y,
                                     HalfExtent.z / ReferenceHalfExtent.z);
 inline AutoConsoleVariable<float> HeightScale(
-    L"App.Water.HeightScale", 2.0f, L"Vertical Simulation-to-world scale, preserves basin floor, startup only, 1..3",
+    L"Render.Water.HeightScale", 2.0f, L"Vertical Simulation-to-world scale, preserves basin floor, startup only, 1..3",
     EConsoleVariableFlags::ReadOnly, [](float value) { return std::isfinite(value) && value >= 1 && value <= 3; });
 // shortcut: virtual walls extend above the rim; use open-top collisions for actual overflow.
 inline Vector3 SimulationScale()
@@ -31,30 +31,30 @@ inline Vector3 SimulationOffset()
 {
 	return Vector3(0, HalfExtent.y * (HeightScale.GetValue() - 1), 0);
 }
-inline AutoConsoleVariable<int> Count(L"App.Water.Count", 1, L"Bistro water basins, 0 disables, maximum 8",
+inline AutoConsoleVariable<int> Count(L"Render.Water.Count", 1, L"Bistro water basins, 0 disables, maximum 8",
                                       EConsoleVariableFlags::Default,
                                       [](int value) { return value >= 0 && value <= 8; });
 inline AutoConsoleVariable<float> WaveSpeed(
-    L"App.Water.WaveSpeed", 6.0f,
+    L"Render.Water.WaveSpeed", 6.0f,
     L"Initial mirrored wave speed away from the center in simulation units/s, startup only, 0..12",
     EConsoleVariableFlags::ReadOnly, [](float value) { return std::isfinite(value) && value >= 0 && value <= 12; });
 inline AutoConsoleVariable<float> WaveAcceleration(
-    L"App.Water.WaveAcceleration", 4.0f,
+    L"Render.Water.WaveAcceleration", 4.0f,
     L"Periodic mirrored X wave acceleration in simulation units/s^2, startup only, 0..12",
     EConsoleVariableFlags::ReadOnly, [](float value) { return std::isfinite(value) && value >= 0 && value <= 12; });
-inline AutoConsoleVariable<float> WavePeriod(L"App.Water.WavePeriod", 6.0f,
+inline AutoConsoleVariable<float> WavePeriod(L"Render.Water.WavePeriod", 6.0f,
                                              L"Wave forcing period in simulation seconds, startup only, 1..30",
                                              EConsoleVariableFlags::ReadOnly, [](float value)
                                              { return std::isfinite(value) && value >= 1 && value <= 30; });
-inline AutoConsoleVariable<int> ParticleCount(L"App.Water.ParticleCount", 100000,
+inline AutoConsoleVariable<int> ParticleCount(L"Render.Water.ParticleCount", 100000,
                                               L"Fluid particle target, startup only, 10000..300000",
                                               EConsoleVariableFlags::ReadOnly,
                                               [](int value) { return value >= 10000 && value <= 300000; });
 inline AutoConsoleVariable<UINT> PresetParticleCount(
-    L"App.Water.PresetParticleCount", 0,
+    L"Render.Water.PresetParticleCount", 0,
     L"Fluid resolution target on world restart, 25000..100000; 0 uses the legacy target",
     EConsoleVariableFlags::Default, [](UINT value) { return value == 0 || (value >= 25000 && value <= 100000); });
-inline AutoConsoleVariable<float> ParticleRadius(L"App.Water.ParticleRadius", 0.15f,
+inline AutoConsoleVariable<float> ParticleRadius(L"Render.Water.ParticleRadius", 0.15f,
                                                  L"Fluid render radius in simulation units, startup only, 0.01..0.2",
                                                  EConsoleVariableFlags::ReadOnly, [](float value)
                                                  { return std::isfinite(value) && value >= 0.01f && value <= 0.2f; });

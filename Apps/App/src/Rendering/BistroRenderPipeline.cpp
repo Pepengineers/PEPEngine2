@@ -10,12 +10,12 @@
 
 namespace
 {
-AutoConsoleVariable<int> AOAdapter(L"App.AO.Adapter", -1,
+AutoConsoleVariable<int> AOAdapter(L"Render.AO.Adapter", -1,
     L"Hardware GPU index for Bistro AO. -1 uses local AO. Remote grids: SSAO/CACAO full or half, HBAO half, XeGTAO full.");
-AutoConsoleVariable<int> PostAdapter(L"App.Post.Adapter", -1,
+AutoConsoleVariable<int> PostAdapter(L"Render.Post.Adapter", -1,
     L"DXGI index for Bistro postprocessing and presentation. -1 uses the scene device.",
     EConsoleVariableFlags::Default, [](int index) { return index >= -1; });
-AutoConsoleVariable<bool> AsyncQueues(L"App.Async.Queues", true,
+AutoConsoleVariable<bool> AsyncQueues(L"Render.Queues.AsyncEnabled", true,
                                       L"Place explicit local work on COMPUTE/COPY; false uses DIRECT.",
                                       EConsoleVariableFlags::Default);
 

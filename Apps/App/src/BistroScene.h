@@ -12,36 +12,36 @@
 
 namespace BistroParticles
 {
-inline AutoConsoleVariable<int> Count(L"App.Particles.Count", -1,
+inline AutoConsoleVariable<int> Count(L"Render.Particles.Count", -1,
                                       L"Total live Bistro particles: -1 uses CountScale, 0 disables, maximum 4194304",
                                       EConsoleVariableFlags::Default,
                                       [](int value) { return value >= -1 && value <= 4194304; });
 inline AutoConsoleVariable<double> CountScale(
-    L"App.Particles.CountScale", 2.0, L"Multiply authored Bistro particle counts; <=0 uses 1, maximum 4194304/250000",
+    L"Render.Particles.CountScale", 2.0, L"Multiply authored Bistro particle counts; <=0 uses 1, maximum 4194304/250000",
     EConsoleVariableFlags::Default, [](double value) { return value <= 4194304.0 / 250000; });
-inline AutoConsoleVariable<UINT> EdgeSamples(L"App.Particles.EdgeSamples", 1,
+inline AutoConsoleVariable<UINT> EdgeSamples(L"Render.Particles.EdgeSamples", 1,
                                              L"Texture samples per particle sprite, 1..4",
                                              EConsoleVariableFlags::Default,
                                              [](UINT value) { return value >= 1 && value <= 4; });
-inline AutoConsoleVariable<float> MinPixelSize(L"App.Particles.MinPixelSize", 0.0f,
+inline AutoConsoleVariable<float> MinPixelSize(L"Render.Particles.MinPixelSize", 0.0f,
                                                L"Cull particles smaller than this projected size, 0..64 pixels",
                                                EConsoleVariableFlags::Default,
                                                [](float value) { return value >= 0 && value <= 64; });
 inline AutoConsoleVariable<ParticleSimulation> Simulation(
-    L"App.Particles.Simulation", ParticleSimulation::SemiImplicitEuler,
+    L"Render.Particles.Integrator", ParticleSimulation::SemiImplicitEuler,
     L"0 analytic drag + trapezoidal position, 1 MGPU semi-implicit Euler (default)");
-inline AutoConsoleVariable<bool> VolumeEnabled(L"App.Particles.Volume.Enabled", false,
+inline AutoConsoleVariable<bool> VolumeEnabled(L"Render.Particles.Volume.Enabled", false,
                                                L"Override unbound emitters with box spawn and a reflecting "
                                                L"emitter-local simulation volume; Dust/Steam use App.Bounds");
-inline AutoConsoleVariable<float> VolumeHalfExtentX(L"App.Particles.Volume.HalfExtentX", 100.0f,
+inline AutoConsoleVariable<float> VolumeHalfExtentX(L"Render.Particles.Volume.HalfExtentX", 100.0f,
                                                     L"Particle box half-size X in emitter-local cm, 0.01..1000000",
                                                     EConsoleVariableFlags::Default,
                                                     [](float value) { return value >= 0.01f && value <= 1000000; });
-inline AutoConsoleVariable<float> VolumeHalfExtentY(L"App.Particles.Volume.HalfExtentY", 100.0f,
+inline AutoConsoleVariable<float> VolumeHalfExtentY(L"Render.Particles.Volume.HalfExtentY", 100.0f,
                                                     L"Particle box half-size Y in emitter-local cm, 0.01..1000000",
                                                     EConsoleVariableFlags::Default,
                                                     [](float value) { return value >= 0.01f && value <= 1000000; });
-inline AutoConsoleVariable<float> VolumeHalfExtentZ(L"App.Particles.Volume.HalfExtentZ", 100.0f,
+inline AutoConsoleVariable<float> VolumeHalfExtentZ(L"Render.Particles.Volume.HalfExtentZ", 100.0f,
                                                     L"Particle box half-size Z in emitter-local cm, 0.01..1000000",
                                                     EConsoleVariableFlags::Default,
                                                     [](float value) { return value >= 0.01f && value <= 1000000; });

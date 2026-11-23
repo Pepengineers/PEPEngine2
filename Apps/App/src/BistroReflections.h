@@ -16,26 +16,26 @@
 
 namespace BistroReflections
 {
-    inline AutoConsoleVariable<bool> ShowBounds(L"App.ReflectionProbes.ShowBounds", false,
+    inline AutoConsoleVariable<bool> ShowBounds(L"Render.ReflectionProbes.ShowBounds", false,
         L"Show colored table-sized reflection boxes and capture labels above Bistro tables");
-    inline AutoConsoleVariable<bool> ShowSpheres(L"App.ReflectionProbes.ShowSpheres", true,
+    inline AutoConsoleVariable<bool> ShowSpheres(L"Render.ReflectionProbes.ShowSpheres", true,
         L"Show mirror spheres sampling each Bistro probe's own baked cubemap");
-    inline AutoConsoleVariable<UINT> Resolution(L"App.ReflectionProbes.Resolution", 128,
+    inline AutoConsoleVariable<UINT> Resolution(L"Render.ReflectionProbes.Resolution", 128,
         L"Capture face size, a power of two in 16..512", EConsoleVariableFlags::Default,
         [](UINT value) { return value >= 16 && value <= 512 && (value & (value - 1)) == 0; });
-    inline AutoConsoleVariable<UINT> PrefilterSamples(L"App.ReflectionProbes.PrefilterSamples", 64,
+    inline AutoConsoleVariable<UINT> PrefilterSamples(L"Render.ReflectionProbes.PrefilterSamples", 64,
         L"Capture prefilter samples, 8..1024", EConsoleVariableFlags::Default,
         [](UINT value) { return value >= 8 && value <= 1024; });
-    inline AutoConsoleVariable<int> Implementation(L"App.ReflectionProbes.Implementation", 2,
+    inline AutoConsoleVariable<int> Implementation(L"Render.ReflectionProbes.Implementation", 2,
         L"0 full dynamic, 1 baked static with dynamic overlay, 2 frozen manual capture", EConsoleVariableFlags::Default,
         [](int value) { return value >= 0 && value <= 2; });
-    inline AutoConsoleVariable<int> FirstAdapter(L"App.ReflectionProbes.FirstAdapter", -1,
+    inline AutoConsoleVariable<int> FirstAdapter(L"Render.ReflectionProbes.First.Adapter", -1,
         L"DXGI hardware index for the first Bistro probe; -1 uses GPU0", EConsoleVariableFlags::Default,
         [](int value) { return value >= -1; });
-    inline AutoConsoleVariable<UINT> FirstFacesPerFrame(L"App.ReflectionProbes.FirstFacesPerFrame", 6,
+    inline AutoConsoleVariable<UINT> FirstFacesPerFrame(L"Render.ReflectionProbes.First.FacesPerFrame", 6,
         L"Capture face budget for the first Bistro probe", EConsoleVariableFlags::Default,
         [](UINT value) { return value >= 1 && value <= 6; });
-    inline AutoConsoleVariable<int> FirstImplementation(L"App.ReflectionProbes.FirstImplementation", -1,
+    inline AutoConsoleVariable<int> FirstImplementation(L"Render.ReflectionProbes.First.Implementation", -1,
         L"Capture mode of the first probe; -1 inherits Implementation", EConsoleVariableFlags::Default,
         [](int value) { return value >= -1 && value <= 2; });
 
@@ -65,16 +65,16 @@ namespace BistroReflections
         {{638.546f,124.309f,-5.547f},62.810f}}};
     static_assert(Tables.size() <= MaxReflectionProbes);
     inline bool InteriorSelection = false;
-    inline AutoConsoleVariable<int> Count(L"App.ReflectionProbes.Count", 0,
+    inline AutoConsoleVariable<int> Count(L"Render.ReflectionProbes.Count", 0,
         L"Interior table probes. Frozen static captures at seeded unique tables; 0 disables, maximum " +
         std::to_wstring(Tables.size()) + L" (the number of tables: 11 terrace + 10 interior)",
         EConsoleVariableFlags::Default, [](int value) { return value >= 0 && value <= (InteriorSelection ? 10 : static_cast<int>(Tables.size())); });
 
-    inline AutoConsoleVariable<UINT> Seed(L"App.ReflectionProbes.Seed", 1,
+    inline AutoConsoleVariable<UINT> Seed(L"Render.ReflectionProbes.Seed", 1,
         L"Interior table selection seed");
-    inline AutoConsoleVariable<UINT> Reset(L"App.ReflectionProbes.Reset", 0,
+    inline AutoConsoleVariable<UINT> Reset(L"Render.ReflectionProbes.Reset", 0,
         L"Increment to reset probe anchors");
-    inline AutoConsoleVariable<UINT> Recapture(L"App.ReflectionProbes.Recapture", 0,
+    inline AutoConsoleVariable<UINT> Recapture(L"Render.ReflectionProbes.Recapture", 0,
         L"Increment to explicitly recapture frozen probes");
 
     class Scene

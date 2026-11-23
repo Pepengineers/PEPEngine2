@@ -4,15 +4,15 @@
 #include <cmath>
 #include <stdexcept>
 
-static AutoConsoleVariable<bool> SkyBoxEnabled(L"Render.SkyBox.Enabled", true,
+static AutoConsoleVariable<bool> SkyBoxEnabled(L"Render.Sky.SkyBox.Enabled", true,
     L"Enable the selected SkyBox component", EConsoleVariableFlags::Default);
-static AutoConsoleVariable<GDX12Quality> SkyBoxQuality(L"Render.SkyBox.Quality", GDX12Quality::High,
+static AutoConsoleVariable<GDX12Quality> SkyBoxQuality(L"Render.Sky.SkyBox.Quality", GDX12Quality::High,
     L"SkyBox: 0 Off, 1 Low, 2 Mid, 3 High, 4 Epic", EConsoleVariableFlags::Default);
-static AutoConsoleVariable<bool> SkyBoxPresetIBLBudgets(L"Render.SkyBox.PresetIBLBudgets", false,
+static AutoConsoleVariable<bool> SkyBoxPresetIBLBudgets(L"Render.Sky.SkyBox.PresetIBLBudgets", false,
     L"Use the quality tier's cube resolution and sample count in place of SkyBox component budget overrides.");
-static AutoConsoleVariable<bool> AtmosphereEnabled(L"Render.SkyAtmosphere.Enabled", true,
+static AutoConsoleVariable<bool> AtmosphereEnabled(L"Render.Sky.Atmosphere.Enabled", true,
     L"Enable the selected SkyAtmosphere component", EConsoleVariableFlags::Default);
-static AutoConsoleVariable<GDX12LegacyQuality> AtmosphereQuality(L"Render.SkyAtmosphere.Quality", GDX12LegacyQuality::Mid,
+static AutoConsoleVariable<GDX12LegacyQuality> AtmosphereQuality(L"Render.Sky.Atmosphere.Quality", GDX12LegacyQuality::Mid,
     L"Atmosphere: 0 Off, 1 Low, 2 Mid, 3 High", EConsoleVariableFlags::Default);
 
 UINT GetSkyBoxQuality() { return SkyBoxEnabled.GetValue() ? SkyBoxQuality.GetInt() : 0; }

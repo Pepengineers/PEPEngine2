@@ -16,19 +16,19 @@ namespace BistroRender
 {
 namespace
 {
-AutoConsoleVariable<bool> AsyncLightGrid(L"App.Async.LightGrid", false,
+AutoConsoleVariable<bool> AsyncLightGrid(L"Render.LightGrid.AsyncCompute", false,
                                         L"Build the light grid on the local COMPUTE queue.",
                                         EConsoleVariableFlags::Default);
-AutoConsoleVariable<int> LightGridAdapter(L"App.LightGrid.Adapter", -1,
+AutoConsoleVariable<int> LightGridAdapter(L"Render.LightGrid.Adapter", -1,
     L"DXGI hardware index for Exact Bistro light grid construction; -1 uses GPU0",
     EConsoleVariableFlags::Default, [](int index) { return index >= -1; });
-AutoConsoleVariable<int> SunShadowAdapter(L"App.Shadows.Sun.Adapter", -1,
+AutoConsoleVariable<int> SunShadowAdapter(L"Render.Shadows.Sun.Adapter", -1,
     L"DXGI hardware index for far CSM cascades; -1 uses GPU0", EConsoleVariableFlags::Default,
     [](int index) { return index >= -1; });
-AutoConsoleVariable<UINT> SunShadowNearCount(L"App.Shadows.Sun.NearCascades", 2,
+AutoConsoleVariable<UINT> SunShadowNearCount(L"Render.Shadows.Sun.NearCascades", 2,
     L"Number of nearest active sun cascades drawn on GPU0", EConsoleVariableFlags::Default,
     [](UINT count) { return count <= 4; });
-AutoConsoleVariable<int> SunShadowSync(L"App.Shadows.Sun.CrossSync", 1,
+AutoConsoleVariable<int> SunShadowSync(L"Render.Shadows.Sun.CrossSync", 1,
     L"Remote sun shadow freshness: 1 Exact, 3 Latest", EConsoleVariableFlags::Default,
     [](int mode) { return mode == 1 || mode == 3; });
 

@@ -22,13 +22,15 @@ offscreen UI canvases and screen UI. The cloud picture retains its secondary
 adapter transport. Retired experimental particle/water transports and the old
 Editor/Benchmark application targets are not part of this renderer.
 
-`App.Async.Queues=true` lets the graph place local work on COMPUTE/COPY;
-`false` uses DIRECT. Scheduling is controlled by the graph, with no separate
-legacy per-technique async switches.
+### Finding settings in F1 and Startup.ini
+
+Rendering settings are grouped by technique under `Render`. For example, `Render.AO` contains quality, algorithm, adapter, synchronization and queue settings. `Adapter` selects the GPU, `CrossSync` selects which remote publication the primary uses, and `AsyncCompute` requests local COMPUTE work. `Render.Queues.AsyncEnabled=false` forces local work onto DIRECT. Game UI settings are under `App.UI`. Scene population, physics and benchmark controls are under `App`.
+
+Use `Render.Water` for the SPH simulation, `Render.ReflectionProbes` for local probes, and `Render.Sky` for sky and environment lighting. Each local shadow fixture has its own group. Bistro accepts the previous key names when loading startup INIs and benchmark overlays.
 
 ### Skeletal deformation placement
 
-`App.NPC.Skinning.Adapter` and `App.Fox.Skinning.Adapter` select a DXGI hardware
+`Render.Skinning.NPC.Adapter` and `Render.Skinning.Fox.Adapter` select a DXGI hardware
 index in Startup.ini. Both default to `-1` (GPU0). Each skeletal component can
 also change its own owner with `SetSkinningAdapter`. Instancing batches draws
 while each independently animated pose keeps its own deformation order.
@@ -39,15 +41,15 @@ Shadows on the same owner can copy those ranges from the owner-local result.
 
 ### Shadow placement
 
-Bistro renders shadows on the primary adapter by default. `App.Shadows.Sun.Adapter`
+Bistro renders shadows on the primary adapter by default. `Render.Shadows.Sun.Adapter`
 selects the DXGI hardware index for the far CSM cascades (`-1` keeps all cascades
-local). `App.Shadows.Sun.NearCascades` gives the number of active cascades kept on
+local). `Render.Shadows.Sun.NearCascades` gives the number of active cascades kept on
 GPU0, starting at the camera. Use `0` for an entirely remote CSM or the active
 cascade count for an entirely local CSM.
 
-Each Bistro fixture has `App.Shadows.Local.Adapter.<fixture name>` and
-`App.Shadows.Local.CrossSync.<fixture name>` settings. All six faces of a point
-light use the same settings. The Sun uses `App.Shadows.Sun.CrossSync`.
+Each Bistro fixture has `Render.Shadows.Local.<fixture name>.Adapter` and
+`Render.Shadows.Local.<fixture name>.CrossSync` settings. All six faces of a point
+light use the same settings. The Sun uses `Render.Shadows.Sun.CrossSync`.
 `1` (Exact) waits on the owner GPU export for the current frame. `3` (Latest)
 uses the last compatible depth already in the primary atlas until a newer
 export completes. The first publication and changes to the shadow projection,
@@ -58,16 +60,16 @@ places the first two sun cascades on GPU0, the rest on GPU1, and sends one point
 light to GPU1 independently:
 
 ```ini
-App.Shadows.Sun.Adapter = 1
-App.Shadows.Sun.NearCascades = 2
-App.Shadows.Sun.CrossSync = 1
-App.Shadows.Local.Adapter.Paris_Building_01_paris_building_01_bottom_44 = 1
-App.Shadows.Local.CrossSync.Paris_Building_01_paris_building_01_bottom_44 = 3
+Render.Shadows.Sun.Adapter = 1
+Render.Shadows.Sun.NearCascades = 2
+Render.Shadows.Sun.CrossSync = 1
+Render.Shadows.Local.Paris_Building_01_paris_building_01_bottom_44.Adapter = 1
+Render.Shadows.Local.Paris_Building_01_paris_building_01_bottom_44.CrossSync = 3
 ```
 
 ### Early camera DepthNormals
 
-DepthNormals is enabled by default. Set `App.DepthNormalsPrepass = false`
+DepthNormals is enabled by default. Set `Render.DepthNormals.PrepassEnabled = false`
 in Startup.ini or the CVar editor to use the depth-only path. The packet
 `scene DepthNormals ready` publishes depth and a separate world-space
 normal/roughness target before the G-buffer. Opaque particles share one set of
@@ -86,8 +88,8 @@ NEON DISTRICT and ASTRA have their own UI rendering. Open `App.UI.WorldCanvas.At
 
 ### Two-adapter synchronization
 
-`App.Sky.SkyView.Adapter` selects the GPU for the camera-visible SkyAtmosphere
-SkyView LUT. The default `-1` keeps it local. Remote `App.Sky.SkyView.CrossSync=1`
+`Render.Sky.SkyView.Adapter` selects the GPU for the camera-visible SkyAtmosphere
+SkyView LUT. The default `-1` keeps it local. Remote `Render.Sky.SkyView.CrossSync=1`
 (default) imports the current requested view and reuses it while its key stays
 unchanged. Mode `0` displays the exact request of the previous frame, including
 frames with unchanged keys. A new history begins with the current request.
@@ -99,15 +101,15 @@ screen ray and remaining atmosphere parameters use the current frame.
 The secondary GPU caches matching transmittance and multiple scattering
 tables. Capture sky and IBL continue to run on GPU0.
 
-`App.Sky.AerialPerspective.Adapter` independently selects the GPU for the active
+`Render.Sky.AerialPerspective.Adapter` independently selects the GPU for the active
 camera's aerial radiance and transmittance volumes. Its default `-1` runs on GPU0.
-`App.Sky.AerialPerspective.CrossSync=1` imports the current camera's matching pair
+`Render.Sky.AerialPerspective.CrossSync=1` imports the current camera's matching pair
 before the first draw that samples it. Unchanged inputs reuse the current pair.
 SkyView and Aerial Perspective share the input tables when assigned to the same
 secondary GPU. Both adapter selectors show GPU names in F1.
 
 In F1, each technique can select its GPU by name. `App.UI.CloudPicture.Adapter`,
-`App.AO.Adapter`, `App.Particles.Adapter`, `App.Water.Adapter` and `App.Grass.Wind.Adapter` use absolute
+`Render.AO.Adapter`, `Render.Particles.Adapter`, `Render.Water.Adapter` and `Render.Wind.Adapter` use absolute
 indices in the same hardware list as the startup-only `Render.PrimaryAdapter`.
 The default `-1` and the current primary index both run locally. Techniques can
 share a remote GPU or use different ones. Changing a selection takes effect
@@ -129,12 +131,12 @@ For AO, mode `0` reprojects the previous result into the current frame.
 
 ### Two-adapter ProjectedGrid wind
 
-Set `App.Grass.Wind.Algorithm = 1` and select a secondary GPU with
-`App.Grass.Wind.Adapter`. Its default `-1` runs wind on GPU0. An unavailable
+Set `Render.Wind.Algorithm = 1` and select a secondary GPU with
+`Render.Wind.Adapter`. Its default `-1` runs wind on GPU0. An unavailable
 adapter falls back to GPU0. Analytic wind also runs on GPU0.
 
 GPU1 solves each active grass field and the Linden crown field separately.
-`App.Grass.Wind.CrossSync = 1` (default) imports that frame's publication.
+`Render.Wind.CrossSync = 1` (default) imports that frame's publication.
 Mode `0` imports exactly the preceding publication, with ordered/imported
 pairs `1/1 в†’ 2/1 в†’ 3/2` at startup. A new or reset field starts with its
 current publication. GPU0 waits on the selected export at import.
@@ -144,7 +146,7 @@ When a field repeats, grass uses the repeated grid for both velocity samples.
 Linden evaluates its next pose from the selected current grid with its area,
 time and resolution, and displays poses in the existing order.
 
-`App.Grass.Wind.LindenResponseOnSecondary = true` evaluates Linden's crown
+`Render.Wind.LindenResponseOnSecondary = true` evaluates Linden's crown
 fragments on the same GPU as its remote ProjectedGrid. The default is `false`.
 The selected publication carries one 28-byte response per fragment for Linden
 in place of its velocity grids. GPU0 imports the response for vertex deformation
@@ -153,7 +155,7 @@ imports its velocity grids. Local and Analytic wind keep evaluation on GPU0.
 
 ### Remote ambient occlusion
 
-Set `App.AO.Adapter` to a secondary DXGI index from the same list as
+Set `Render.AO.Adapter` to a secondary DXGI index from the same list as
 `Render.PrimaryAdapter`. The default `-1` runs AO locally. An unavailable
 adapter, an unsupported grid, or a missing required prepass falls back to local AO.
 
@@ -164,19 +166,19 @@ adapter, an unsupported grid, or a missing required prepass falls back to local 
 | `2` XeGTAO | Full (`0`) | Early depth and material normals | XeGTAO denoise on GPU0 or GPU1 |
 | `3` CACAO | Full (`0`), Half (`1`) | Early depth and material normals | CACAO SDK on GPU1 |
 
-SSAO, XeGTAO and CACAO require `App.DepthNormalsPrepass = true`. GPU0 prepares
+SSAO, XeGTAO and CACAO require `Render.DepthNormals.PrepassEnabled = true`. GPU0 prepares
 and exports their inputs at the DepthNormals boundary, before the G-buffer.
 Half-resolution preparation preserves the representative pixel used by SSAO
 and by the GPU0 depth/normal-aware upsample. CACAO retains its SDK settings
 and the existing padding for small grids.
 
-All four paths support `App.AO.CrossSync = 1` (current frame, default) and
+All four paths support `Render.AO.CrossSync = 1` (current frame, default) and
 `0` (exactly the previous frame). The first frame and the first after a history
 reset import their own output. GPU0 reprojects delayed AO using G-buffer motion,
 both frames' jitter, and the source depth. Invalid pixels use visibility 1.
 Resolve and any upsample run on GPU0.
 
-- SSAO and HBAO export one visibility texture. With `App.AO.BlurOnSecondary = 0`
+- SSAO and HBAO export one visibility texture. With `Render.AO.BlurOnSecondary = 0`
   (default), GPU0 reprojects before bilateral blur and uses current depth and
   material normals. With `1`, GPU1 filters the source grid before export. SSAO
   uses the exported normals and HBAO reconstructs normals from half-depth.
@@ -186,18 +188,18 @@ Resolve and any upsample run on GPU0.
   With `1`, GPU1 denoises and returns only terms. Zero passes export only raw
   terms and use the raw-terms scale once.
 - CACAO returns the SDK's final visibility. Its configured blur passes run in
-  the SDK context on GPU1. `App.AO.BlurOnSecondary` has no effect on CACAO.
+  the SDK context on GPU1. `Render.AO.BlurOnSecondary` has no effect on CACAO.
 
 Use `--read-texture=Scene.AO.Reprojected` to capture the final `Scene.AO` once
 a delayed frame has consumed history.
 
 ### Remote SPH water
 
-`App.Water.Adapter = -1` (default) keeps the local SPH path and
-`App.Async.Water` queue selection. Set it to a secondary DXGI index to run SPH
+`Render.Water.Adapter = -1` (default) keeps the local SPH path and
+`Render.Water.AsyncCompute` queue selection. Set it to a secondary DXGI index to run SPH
 on GPU1. An unavailable adapter falls back to local SPH.
 
-`App.Water.CrossSync = 0` defaults to exact Nв€’1 when a secondary adapter is
+`Render.Water.CrossSync = 0` defaults to exact Nв€’1 when a secondary adapter is
 selected. Mode `1` imports exact N. Mode `2` advances SPH on GPU1 with a
 monotonic clock scaled by game time and the instance's time scale. GPU0
 imports the newest completed display snapshot each visible frame, including
@@ -210,7 +212,7 @@ keeps its pool, and changing GPU owners resets it from the authored seed.
 
 ### Remote particles
 
-Set `App.Particles.Adapter` to a secondary DXGI index from the same list as
+Set `Render.Particles.Adapter` to a secondary DXGI index from the same list as
 `Render.PrimaryAdapter`. The default `-1` runs simulation on GPU0. Marked
 transparent emitters with frame-only inputs can use GPU1. Bistro enables this
 for Terrace Embers, Interior Dust and Table Steam. These emitters share one
@@ -226,7 +228,7 @@ An unavailable adapter falls back to local simulation.
 Changing the owner resets the pool and preserves the already consumed burst
 total for the same emitter revision.
 
-`App.Particles.CrossSync = 1` (default) imports the exact step ordered by
+`Render.Particles.CrossSync = 1` (default) imports the exact step ordered by
 the current frame. With `0`, the same frame orders step N and imports Nв€’1.
 The first frame of each history shows its own step. Changing between these
 policies starts fresh publication history and keeps the live GPU1 pool.
@@ -244,7 +246,7 @@ producers start when the first external input completes and use the newest
 complete input at each step.
 Repeats and gaps reset particle position, age and rotation history when
 there is no immediately preceding displayed step. Camera motion remains.
-`App.Particles.LogSnapshots = true` enables a short readback
+`Render.Particles.LogSnapshots = true` enables a short readback
 of remote draw elements that passed the GPU0 particle cull.
 
 ### Read back a scene texture by name

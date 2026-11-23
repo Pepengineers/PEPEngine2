@@ -10,7 +10,7 @@ namespace BistroRender
 {
 namespace
 {
-AutoConsoleVariable<int> TransferMode(L"App.ReflectionProbes.TransferMode", 0,
+AutoConsoleVariable<int> TransferMode(L"Render.ReflectionProbes.TransferMode", 0,
     L"Remote transfer schedule: 0 all ready cubemaps, 1 one cubemap, 2 one face per frame",
     EConsoleVariableFlags::Default, [](int value) { return value >= 0 && value <= 2; });
 }

@@ -42,7 +42,7 @@ bool WboitVisible(const std::array<XMVECTOR, 6>& planes, const GDX12InstanceData
 	return true;
 }
 
-AutoConsoleVariable<int> WboitAdapter(L"App.WBOIT.Adapter", -1, L"DXGI adapter for exact Bistro WBOIT accumulation; -1 uses GPU0.",
+AutoConsoleVariable<int> WboitAdapter(L"Render.WBOIT.Adapter", -1, L"DXGI adapter for exact Bistro WBOIT accumulation; -1 uses GPU0.",
                                       EConsoleVariableFlags::Default, [](int index) { return index >= -1; });
 Id PacketFor(const Schedule& plan, Id operation)
 {

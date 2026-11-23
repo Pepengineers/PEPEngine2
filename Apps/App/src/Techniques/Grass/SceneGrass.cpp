@@ -16,13 +16,13 @@ namespace BistroRender
 {
 namespace
 {
-AutoConsoleVariable<int> WindAdapter(L"App.Grass.Wind.Adapter", -1,
+AutoConsoleVariable<int> WindAdapter(L"Render.Wind.Adapter", -1,
     L"Hardware GPU index for Bistro ProjectedGrid wind. -1 keeps wind on the primary GPU.",
     EConsoleVariableFlags::Default, [](int value) { return value >= -1; });
-AutoConsoleVariable<int> WindCrossSync(L"App.Grass.Wind.CrossSync", 1,
+AutoConsoleVariable<int> WindCrossSync(L"Render.Wind.CrossSync", 1,
     L"Remote ProjectedGrid wind: 0 exact previous frame (first uses current), 1 exact current frame.",
     EConsoleVariableFlags::Default, [](int value) { return value == 0 || value == 1; });
-AutoConsoleVariable<bool> LindenResponseOnSecondary(L"App.Grass.Wind.LindenResponseOnSecondary", false,
+AutoConsoleVariable<bool> LindenResponseOnSecondary(L"Render.Wind.LindenResponseOnSecondary", false,
     L"Evaluate Linden crown fragments on the adapter running its ProjectedGrid. Deform vertices on the primary GPU.");
 // ECS wind owners count upward from one. Reserve the last ID for the scene mesh.
 constexpr uint64_t LindenWindOwner = UINT64_MAX;

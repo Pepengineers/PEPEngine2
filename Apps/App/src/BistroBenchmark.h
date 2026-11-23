@@ -157,8 +157,8 @@ class BistroBenchmark
     };
 
     static constexpr std::array Techniques{
-        L"App.Async.AO", L"App.Async.Environment", L"App.Async.LightGrid", L"App.Async.Particles",
-        L"App.Async.Water", L"App.UI.CloudPicture.AsyncCompute"};
+        L"Render.AO.AsyncCompute", L"Render.Sky.AsyncCompute", L"Render.LightGrid.AsyncCompute", L"Render.Particles.AsyncCompute",
+        L"Render.Water.AsyncCompute", L"App.UI.CloudPicture.AsyncCompute"};
     static constexpr double Budget = 600, FinishReserve = 4, Warmup = 3;
     static constexpr unsigned Cases = 1u << Techniques.size();
     inline static AutoConsoleVariable<float> FlightSeconds{L"App.Benchmark.FlightSeconds", 100.f,
@@ -623,7 +623,7 @@ private:
     static ConsoleVariablePatch EnabledPlacement(unsigned mask)
     {
         auto patch = Placement(mask);
-        patch.emplace_back(L"App.Async.Queues", "true");
+        patch.emplace_back(L"Render.Queues.AsyncEnabled", "true");
         return patch;
     }
 
@@ -769,13 +769,12 @@ private:
     static ConsoleVariablePatch LocalAdapters(ConsoleModule& console)
     {
         ConsoleVariablePatch patch;
-        for (const auto* variable : console.GetConsoleVariables(L"App."))
+        for (const auto* variable : console.GetConsoleVariables())
         {
             const auto name = variable->GetName();
-            const auto pos = name.find(L".Adapter");
-            if (variable->GetFlags() == EConsoleVariableFlags::Default &&
-                ((pos != name.npos && (pos + 8 == name.size() || name[pos + 8] == L'.')) ||
-                name == L"App.ReflectionProbes.FirstAdapter"))
+            constexpr std::wstring_view suffix = L".Adapter";
+            if (variable->GetFlags() == EConsoleVariableFlags::Default && name.size() > suffix.size() &&
+                name.substr(name.size() - suffix.size()) == suffix)
                 patch.emplace_back(name, "-1");
         }
         return patch;
@@ -805,7 +804,7 @@ private:
             return;
         }
         _initialScene = CaptureScene(world, pipeline);
-        ConsoleVariablePatch patch{{L"Render.FrameGeneration.Provider", "0"}, {L"App.Sky.SunCycle.Enabled", "false"}};
+        ConsoleVariablePatch patch{{L"Render.FrameGeneration.Provider", "0"}, {L"Render.Sky.SunCycle.Enabled", "false"}};
         if (!manual)
         {
             if (world.GetECS().GetPool<RigidBodyComponent>().Size() != _startupBodies)
@@ -860,7 +859,7 @@ private:
             };
             for (const auto& [name, value] : renderConditions)
                 if (name.compare(0, 14, L"App.Benchmark.") != 0 && !controls(patch, name) &&
-                    (!controls(controlled, name) || name == L"App.Grass.Wind.Algorithm"))
+                    (!controls(controlled, name) || name == L"Render.Wind.Algorithm"))
                     conditions << '\n' << std::quoted(std::filesystem::path(name).u8string()) << ' ' << std::quoted(value);
             _placementSearch.LinkBaseline(_path, std::string(BistroPlacement::ProfileName[_placementProfile]) + ' ' +
                 conditions.str());
@@ -1362,7 +1361,7 @@ private:
         if (_search)
         {
             auto patch = EnabledPlacement(0);
-            patch.insert(patch.end(), {{L"Render.FrameGeneration.Provider", "0"}, {L"App.Sky.SunCycle.Enabled", "false"}});
+            patch.insert(patch.end(), {{L"Render.FrameGeneration.Provider", "0"}, {L"Render.Sky.SunCycle.Enabled", "false"}});
             const auto local = LocalAdapters(console);
             patch.insert(patch.end(), local.begin(), local.end());
             if (const auto result = console.ApplyPatch(patch, &_previous); !result.Error.empty())

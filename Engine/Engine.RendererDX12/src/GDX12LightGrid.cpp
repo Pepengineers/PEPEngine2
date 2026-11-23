@@ -8,13 +8,13 @@
 
 namespace
 {
-    AutoConsoleVariable<UINT> TileSize(L"Render.Lighting.Cluster.TileSize", 64,
+    AutoConsoleVariable<UINT> TileSize(L"Render.LightGrid.Cluster.TileSize", 64,
         L"Frustum light grid XY cell size in pixels; restart required.", EConsoleVariableFlags::ReadOnly,
         [](const UINT value) { return value >= 8 && value <= 1024; });
-    AutoConsoleVariable<UINT> DepthSlices(L"Render.Lighting.Cluster.DepthSlices", 32,
+    AutoConsoleVariable<UINT> DepthSlices(L"Render.LightGrid.Cluster.DepthSlices", 32,
         L"Frustum light grid logarithmic depth slices; restart required.", EConsoleVariableFlags::ReadOnly,
         [](const UINT value) { return value >= 1 && value <= 128; });
-    AutoConsoleVariable<float> FarDepth(L"Render.Lighting.Cluster.FarDepthCm", 100000.0f,
+    AutoConsoleVariable<float> FarDepth(L"Render.LightGrid.Cluster.FarDepthCm", 100000.0f,
         L"Logarithmic grid depth in cm (1..1e9). The last slice also covers farther visible geometry.",
         EConsoleVariableFlags::Default,
         [](const float value) { return std::isfinite(value) && value >= 1 && value <= 1e9f; });

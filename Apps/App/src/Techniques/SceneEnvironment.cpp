@@ -14,19 +14,19 @@ namespace BistroRender
 namespace
 {
 constexpr State Read = D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE;
-AutoConsoleVariable<bool> AsyncEnvironment(L"App.Async.Environment", false,
+AutoConsoleVariable<bool> AsyncEnvironment(L"Render.Sky.AsyncCompute", false,
                                            L"Run atmosphere, clouds and environment IBL kernels on the local COMPUTE queue.",
                                            EConsoleVariableFlags::Default);
-AutoConsoleVariable<int> SkyViewAdapter(L"App.Sky.SkyView.Adapter", -1,
+AutoConsoleVariable<int> SkyViewAdapter(L"Render.Sky.SkyView.Adapter", -1,
     L"Hardware GPU for the camera SkyView LUT. -1 keeps SkyView on the primary GPU.",
     EConsoleVariableFlags::Default, [](int value) { return value >= -1; });
-AutoConsoleVariable<int> SkyViewCrossSync(L"App.Sky.SkyView.CrossSync", 1,
+AutoConsoleVariable<int> SkyViewCrossSync(L"Render.Sky.SkyView.CrossSync", 1,
     L"Remote camera SkyView: 0 exact previous, 1 exact current, 3 latest completed with local bootstrap.",
     EConsoleVariableFlags::Default, [](int value) { return value == 0 || value == 1 || value == 3; });
-AutoConsoleVariable<int> AerialAdapter(L"App.Sky.AerialPerspective.Adapter", -1,
+AutoConsoleVariable<int> AerialAdapter(L"Render.Sky.AerialPerspective.Adapter", -1,
     L"Hardware GPU for the active camera's aerial perspective volumes. -1 keeps them on the primary GPU.",
     EConsoleVariableFlags::Default, [](int value) { return value >= -1; });
-AutoConsoleVariable<int> AerialCrossSync(L"App.Sky.AerialPerspective.CrossSync", 1,
+AutoConsoleVariable<int> AerialCrossSync(L"Render.Sky.AerialPerspective.CrossSync", 1,
     L"Remote aerial perspective: 1 imports the current camera's matching volume pair.",
     EConsoleVariableFlags::Default, [](int value) { return value == 1; });
 

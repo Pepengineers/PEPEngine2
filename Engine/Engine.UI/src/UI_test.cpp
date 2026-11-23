@@ -135,9 +135,7 @@ namespace Engine::UI
                         ImGui::TextWrapped("Startup hardware index (0, 1, ...). -1 is only valid for technique settings.");
                     }
                 }
-                else if (Name == L"App.UI.GameHUD.Adapter" || Name == L"App.UI.CloudPicture.Adapter" || Name == L"App.AO.Adapter" ||
-                    Name == L"App.Particles.Adapter" || Name == L"App.Water.Adapter" || Name == L"App.Grass.Wind.Adapter" ||
-                    Name == L"App.Sky.SkyView.Adapter" || Name == L"App.Sky.AerialPerspective.Adapter" || canvasAdapter)
+                else if (Name.substr(Name.find_last_of(L'.') + 1) == L"Adapter")
                     DrawAdapter(variable);
                 else if (worldCanvas && Name.substr(Name.find_last_of(L'.') + 1) == L"CrossSync")
                 {

@@ -13,89 +13,89 @@
 
 namespace BistroGrass
 {
-    inline AutoConsoleVariable<int> Count(L"App.Grass.Count", 1,
+    inline AutoConsoleVariable<int> Count(L"Render.Grass.Count", 1,
         L"Bistro arch grass fields, 0 disables, maximum 16",
         EConsoleVariableFlags::Default, [](int value) { return value >= 0 && value <= 16; });
 
     enum class Geometry : std::uint8_t { Ribbon, CrossedRibbons, Count };
     enum class WindAlgorithm : std::uint8_t { Analytic, ProjectedGrid, Count };
-    inline AutoConsoleVariable<Geometry> Implementation(L"App.Grass.Implementation", Geometry::Ribbon,
+    inline AutoConsoleVariable<Geometry> Implementation(L"Render.Grass.Implementation", Geometry::Ribbon,
         L"0 Ribbon, 1 CrossedRibbons; runtime grass geometry");
-    inline AutoConsoleVariable<float> ExtentsXCm(L"App.Grass.ExtentsXCm", BistroArch::HalfWidthCm,
+    inline AutoConsoleVariable<float> ExtentsXCm(L"Render.Grass.ExtentsXCm", BistroArch::HalfWidthCm,
         L"Patch half-width along local X in cm, 1..100000", EConsoleVariableFlags::Default,
         [](float value) { return value >= 1 && value <= 100000; });
-    inline AutoConsoleVariable<float> ExtentsZCm(L"App.Grass.ExtentsZCm", BistroArch::HalfLengthCm,
+    inline AutoConsoleVariable<float> ExtentsZCm(L"Render.Grass.ExtentsZCm", BistroArch::HalfLengthCm,
         L"Patch half-width along local Z in cm, 1..100000", EConsoleVariableFlags::Default,
         [](float value) { return value >= 1 && value <= 100000; });
-    inline AutoConsoleVariable<float> Density(L"App.Grass.DensityPerSquareMetre", 1500,
+    inline AutoConsoleVariable<float> Density(L"Render.Grass.DensityPerSquareMetre", 1500,
         L"Blades per square metre, 0..100000; actual count = min(ceil(area*density), MaxBlades)",
         EConsoleVariableFlags::Default, [](float value) { return value >= 0 && value <= 100000; });
-    inline AutoConsoleVariable<UINT> MaxBlades(L"App.Grass.MaxBlades", 60000,
+    inline AutoConsoleVariable<UINT> MaxBlades(L"Render.Grass.MaxBlades", 60000,
         L"Blade budget per patch, 0 inherits Render.Grass.Quality, maximum 262144",
         EConsoleVariableFlags::Default, [](UINT value) { return value <= 262144; });
-    inline AutoConsoleVariable<UINT> Segments(L"App.Grass.Segments", 4,
+    inline AutoConsoleVariable<UINT> Segments(L"Render.Grass.Segments", 4,
         L"Segments per blade, 0 inherits Render.Grass.Quality, maximum 8",
         EConsoleVariableFlags::Default, [](UINT value) { return value <= 8; });
-    inline AutoConsoleVariable<UINT> Seed(L"App.Grass.Seed", 7919, L"Root distribution seed; patches use distinct multiples");
-    inline AutoConsoleVariable<float> HeightCm(L"App.Grass.HeightCm", 40,
+    inline AutoConsoleVariable<UINT> Seed(L"Render.Grass.Seed", 7919, L"Root distribution seed; patches use distinct multiples");
+    inline AutoConsoleVariable<float> HeightCm(L"Render.Grass.HeightCm", 40,
         L"Blade height in cm, 0.1..10000", EConsoleVariableFlags::Default,
         [](float value) { return value >= 0.1f && value <= 10000; });
-    inline AutoConsoleVariable<float> HeightVariation(L"App.Grass.HeightVariation", 0.25f,
+    inline AutoConsoleVariable<float> HeightVariation(L"Render.Grass.HeightVariation", 0.25f,
         L"Relative random height variation, 0..1", EConsoleVariableFlags::Default,
         [](float value) { return value >= 0 && value <= 1; });
-    inline AutoConsoleVariable<float> WidthCm(L"App.Grass.WidthCm", 3.0f,
+    inline AutoConsoleVariable<float> WidthCm(L"Render.Grass.WidthCm", 3.0f,
         L"Blade width in cm, 0.01..1000", EConsoleVariableFlags::Default,
         [](float value) { return value >= 0.01f && value <= 1000; });
-    inline AutoConsoleVariable<float> BendSeconds(L"App.Grass.BendSeconds", 0.15f,
+    inline AutoConsoleVariable<float> BendSeconds(L"Render.Grass.BendSeconds", 0.15f,
         L"Grass wind response time in seconds, 0..10", EConsoleVariableFlags::Default,
         [](float value) { return value >= 0 && value <= 10; });
-    inline AutoConsoleVariable<float> MaxBendCm(L"App.Grass.MaxBendCm", 20,
+    inline AutoConsoleVariable<float> MaxBendCm(L"Render.Grass.MaxBendCm", 20,
         L"Maximum blade bend in cm, 0..10000; also expands culling/wind bounds",
         EConsoleVariableFlags::Default, [](float value) { return value >= 0 && value <= 10000; });
-    inline AutoConsoleVariable<float> LodDistanceCm(L"App.Grass.LodDistanceCm", 1500,
+    inline AutoConsoleVariable<float> LodDistanceCm(L"Render.Grass.LodDistanceCm", 1500,
         L"Near LOD distance in cm, 1..1000000; far-card and cull distances are 2x and 4x",
         EConsoleVariableFlags::Default, [](float value) { return value >= 1 && value <= 1000000; });
-    inline AutoConsoleVariable<bool> CastShadows(L"App.Grass.CastShadows", true, L"Grass casts directional and local shadows");
-    inline AutoConsoleVariable<bool> CaptureReflections(L"App.Grass.CaptureReflections", false,
+    inline AutoConsoleVariable<bool> CastShadows(L"Render.Grass.CastShadows", true, L"Grass casts directional and local shadows");
+    inline AutoConsoleVariable<bool> CaptureReflections(L"Render.Grass.CaptureReflections", false,
         L"Include Bistro grass in reflection probe captures");
 
-    inline AutoConsoleVariable<bool> WindEnabled(L"App.Grass.Wind.Enabled", true, L"Enable wind for Bistro grass and the plaza linden");
-    inline AutoConsoleVariable<WindAlgorithm> Algorithm(L"App.Grass.Wind.Algorithm", WindAlgorithm::Analytic,
+    inline AutoConsoleVariable<bool> WindEnabled(L"Render.Wind.FieldEnabled", true, L"Enable wind for Bistro grass and the plaza linden");
+    inline AutoConsoleVariable<WindAlgorithm> Algorithm(L"Render.Wind.Algorithm", WindAlgorithm::Analytic,
         L"0 Analytic directional gusts, 1 ProjectedGrid pressure-solved wind");
-    inline AutoConsoleVariable<float> WindSpeed(L"App.Grass.Wind.SpeedCmPerSecond", 100,
+    inline AutoConsoleVariable<float> WindSpeed(L"Render.Wind.SpeedCmPerSecond", 100,
         L"Base wind speed in cm/s, 0..500", EConsoleVariableFlags::Default,
         [](float value) { return value >= 0 && value <= 500; });
-    inline AutoConsoleVariable<float> WindAngleDegrees(L"App.Grass.Wind.AngleDegrees", 67.5f,
+    inline AutoConsoleVariable<float> WindAngleDegrees(L"Render.Wind.AngleDegrees", 67.5f,
         L"Wind direction in local XZ degrees, -180..180; zero points along +X",
         EConsoleVariableFlags::Default, [](float value) { return value >= -180 && value <= 180; });
-    inline AutoConsoleVariable<float> GustAmplitude(L"App.Grass.Wind.GustAmplitude", 0.6f,
+    inline AutoConsoleVariable<float> GustAmplitude(L"Render.Wind.GustAmplitude", 0.6f,
         L"Relative gust amplitude, 0..1", EConsoleVariableFlags::Default,
         [](float value) { return value >= 0 && value <= 1; });
-    inline AutoConsoleVariable<float> GustFrequencyHz(L"App.Grass.Wind.GustFrequencyHz", 0.4f,
+    inline AutoConsoleVariable<float> GustFrequencyHz(L"Render.Wind.GustFrequencyHz", 0.4f,
         L"Gust frequency in Hz, 0..100", EConsoleVariableFlags::Default,
         [](float value) { return value >= 0 && value <= 100; });
-    inline AutoConsoleVariable<float> GustWavelengthCm(L"App.Grass.Wind.GustWavelengthCm", 500,
+    inline AutoConsoleVariable<float> GustWavelengthCm(L"Render.Wind.GustWavelengthCm", 500,
         L"Gust wavelength in cm, 1..1000000", EConsoleVariableFlags::Default,
         [](float value) { return value >= 1 && value <= 1000000; });
-    inline AutoConsoleVariable<float> ForcePerSecond(L"App.Grass.Wind.ForcePerSecond", 2,
+    inline AutoConsoleVariable<float> ForcePerSecond(L"Render.Wind.ForcePerSecond", 2,
         L"Projected-grid flow forcing per second, 0..100", EConsoleVariableFlags::Default,
         [](float value) { return value >= 0 && value <= 100; });
-    inline AutoConsoleVariable<float> DampingPerSecond(L"App.Grass.Wind.DampingPerSecond", 0.2f,
+    inline AutoConsoleVariable<float> DampingPerSecond(L"Render.Wind.DampingPerSecond", 0.2f,
         L"Projected-grid velocity damping per second, 0..100", EConsoleVariableFlags::Default,
         [](float value) { return value >= 0 && value <= 100; });
-    inline AutoConsoleVariable<float> TimeScale(L"App.Grass.Wind.TimeScale", 1,
+    inline AutoConsoleVariable<float> TimeScale(L"Render.Wind.TimeScale", 1,
         L"Wind simulation time scale, 0..10; zero freezes wind", EConsoleVariableFlags::Default,
         [](float value) { return value >= 0 && value <= 10; });
-    inline AutoConsoleVariable<float> MaxStepSeconds(L"App.Grass.Wind.MaxStepSeconds", 1.0f / 60,
+    inline AutoConsoleVariable<float> MaxStepSeconds(L"Render.Wind.MaxStepSeconds", 1.0f / 60,
         L"Maximum projected-grid step in seconds, 0.0001..0.1", EConsoleVariableFlags::Default,
         [](float value) { return value >= 0.0001f && value <= 0.1f; });
-    inline AutoConsoleVariable<UINT> MaxSubsteps(L"App.Grass.Wind.MaxSubsteps", 4,
+    inline AutoConsoleVariable<UINT> MaxSubsteps(L"Render.Wind.MaxSubsteps", 4,
         L"Maximum wind substeps per frame, 1..16", EConsoleVariableFlags::Default,
         [](UINT value) { return value >= 1 && value <= 16; });
-    inline AutoConsoleVariable<UINT> GridResolution(L"App.Grass.Wind.GridResolution", 0,
+    inline AutoConsoleVariable<UINT> GridResolution(L"Render.Wind.GridResolution", 0,
         L"Wind field resolution (both algorithms), 0 inherits Render.Wind.Quality, or 8..256",
         EConsoleVariableFlags::Default, [](UINT value) { return value == 0 || (value >= 8 && value <= 256); });
-    inline AutoConsoleVariable<UINT> PressureIterations(L"App.Grass.Wind.PressureIterations", 0,
+    inline AutoConsoleVariable<UINT> PressureIterations(L"Render.Wind.PressureIterations", 0,
         L"Projected-grid pressure solve iterations, 0 inherits Render.Wind.Quality, maximum 128",
         EConsoleVariableFlags::Default, [](UINT value) { return value <= 128; });
 

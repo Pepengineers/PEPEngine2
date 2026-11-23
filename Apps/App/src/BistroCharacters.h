@@ -26,10 +26,10 @@ namespace BistroCharacters
     inline AutoConsoleVariable<int> PresetFoxCount(L"App.Fox.PresetCount", -1,
         L"Fox count override, -1 inherits startup count. Restart Bistro to apply.",
         EConsoleVariableFlags::Default, [](int value) { return value >= -1 && value <= 5; });
-    inline AutoConsoleVariable<int> NPCSkinningAdapter(L"App.NPC.Skinning.Adapter", -1,
+    inline AutoConsoleVariable<int> NPCSkinningAdapter(L"Render.Skinning.NPC.Adapter", -1,
         L"DXGI skinning adapter for Bistro people at spawn. -1 uses GPU0.",
         EConsoleVariableFlags::ReadOnly, [](int value) { return value >= -1; });
-    inline AutoConsoleVariable<int> FoxSkinningAdapter(L"App.Fox.Skinning.Adapter", -1,
+    inline AutoConsoleVariable<int> FoxSkinningAdapter(L"Render.Skinning.Fox.Adapter", -1,
         L"DXGI skinning adapter for Bistro foxes at spawn. -1 uses GPU0.",
         EConsoleVariableFlags::ReadOnly, [](int value) { return value >= -1; });
 

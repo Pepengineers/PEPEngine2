@@ -68,6 +68,7 @@
     <ClCompile Include="src\Techniques\UI\BistroUIPosters.cpp" />
     <ClInclude Include="src\Techniques\UI\BistroPaintingSurfaces.h" />
     <ClInclude Include="src\BistroApplication.h" />
+    <ClInclude Include="src\BistroIniMigration.h" />
     <ClInclude Include="src\Techniques\NativeWork.h" />
     <ClInclude Include="src\Techniques\SceneEnvironment.h" />
     <ClInclude Include="src\Techniques\SceneAO.h" />

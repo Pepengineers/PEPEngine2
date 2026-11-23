@@ -46,7 +46,7 @@ static Fixtures BuildFixtures()
     Require(odd.RasterSize == CanvasSize{514, 290} && odd.EffectsSize == CanvasSize{172, 97},
         "Odd canvas size was rounded incorrectly");
 
-    auto& quality = ConsoleModule{}.FindConsoleVariable(L"Render.UI.WorldCanvas.Quality");
+    auto& quality = ConsoleModule{}.FindConsoleVariable(L"App.UI.WorldCanvas.Quality");
     Require(quality.GetType() == EConsoleVariableType::Enumeration && quality.GetEnumCount() == 4 &&
         quality.GetEnumValueName(0) == "Low" && quality.GetEnumValueName(1) == "Medium" &&
         quality.GetEnumValueName(2) == "High" && quality.GetEnumValueName(3) == "Epic",
@@ -56,7 +56,7 @@ static Fixtures BuildFixtures()
     Require(quality.SetFromString("2") && GetCanvasProfile({768, 512}, GetCanvasQuality()).RasterSize == CanvasSize{1152, 768} &&
         quality.SetFromString("3") && GetCanvasProfile({768, 512}, GetCanvasQuality()).RasterSize == CanvasSize{1536, 1024} &&
         quality.SetFromString("0"), "High and Epic must select their supersampled canvas sizes");
-    const auto& hud = ConsoleModule{}.FindConsoleVariable(L"Render.UI.GameHUD.Quality");
+    const auto& hud = ConsoleModule{}.FindConsoleVariable(L"App.UI.GameHUD.Quality");
     Require(hud.GetEnumCount() == 3 && hud.GetEnumValueName(0) == "Low" && hud.GetEnumValueName(1) == "Medium" &&
         hud.GetEnumValueName(2) == "High", "Game HUD quality must expose its presets to the settings editor");
 

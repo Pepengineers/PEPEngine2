@@ -12,9 +12,9 @@ namespace
 {
 constexpr UINT SolverGroupSize = 128; // FluidSolver.hlsl numthreads.x
 constexpr UINT SortTileSize = 1024;
-static AutoConsoleVariable<bool> Enabled(L"Render.Fluid.Enabled", true, L"Enable fluid components. Default true.",
+static AutoConsoleVariable<bool> Enabled(L"Render.Water.Enabled", true, L"Enable fluid components. Default true.",
                                          EConsoleVariableFlags::Default);
-static AutoConsoleVariable<GDX12Quality> Quality(L"Render.Fluid.Quality", GDX12Quality::Mid,
+static AutoConsoleVariable<GDX12Quality> Quality(L"Render.Water.Quality", GDX12Quality::Mid,
                                                  L"0 Off, 1 Low, 2 Mid (default), 3 High, 4 Epic.",
                                                  EConsoleVariableFlags::Default);
 bool Finite(const Vector3 value)
