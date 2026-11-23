@@ -363,7 +363,6 @@ void SceneLighting::Freeze(SceneGeometry& geometry, UINT slot, const std::shared
 	auto staticVegetation = vegetation;
 	staticVegetation.erase(std::remove_if(staticVegetation.begin(), staticVegetation.end(),
 	                                      [](const auto& primitive) { return primitive.Dynamic; }), staticVegetation.end());
-	_probeStaticShadows->Freeze(slot, staticVegetation, true);
 	auto& placements = _localShadows->_placements;
 	std::vector<std::pair<GDX12LocalShadowKey, Id>> resolved;
 	_localShadows->_latestPlacements.clear();
@@ -379,7 +378,10 @@ void SceneLighting::Freeze(SceneGeometry& geometry, UINT slot, const std::shared
 		placements = std::move(resolved);
 		++_localPlacementEpoch;
 	}
-	_localShadows->Freeze(slot, vegetation, true);
+	// Without a static-only consumer, render dirty faces directly into the final depth atlas.
+	const bool combinedDepth = placements.empty() && (_resources.ReflectionProbes.empty() || !GetReflectionSettings().Enabled);
+	_probeStaticShadows->Freeze(slot, staticVegetation, true, combinedDepth);
+	_localShadows->Freeze(slot, vegetation, true, combinedDepth);
 	_sunShadows->Freeze(slot, _localShadows->CastersRebuilt(), _localShadows->ChangedCasterBounds(), vegetation);
 	auto& sun = _sunShadows->_slots.at(slot);
 	const Id sunOwner = submissions->SelectAdapter(SunShadowAdapter.GetValue());
@@ -602,7 +604,7 @@ void SceneLighting::AppendShadows(Graph& graph, std::vector<ID3D12Resource*>& bi
 	AppendRemoteLocalShadows(graph, bindings, geometry);
 	auto& local = _localShadows->_slots[_slot];
 	auto& statics = _probeStaticShadows->_slots[_slot];
-	if (!local.Views.empty())
+	if (!local.CombinedDepth && !local.Views.empty())
 	{
 		std::vector<std::pair<UINT, UINT>> slices;
 		for (const auto& view : local.Views)

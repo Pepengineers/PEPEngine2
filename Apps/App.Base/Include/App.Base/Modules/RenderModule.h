@@ -2,6 +2,7 @@
 
 #include "Engine.RendererDX12/GDX12DeviceFactory.h"
 #include "Common/GameTimer.h"
+#include "Common/ConsoleVariables.h"
 #include "Common/Module.h"
 
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
@@ -68,11 +69,13 @@ public:
     //returns a pointer to a fully initialized structure that you can specify in components
     GDX12Material* CreateMaterial(const std::string& name);
 
+    static AutoConsoleVariable<UINT> MaterialMaxDimension;
+    GPUTexture* LoadMaterialTexture(const std::string& name, const std::filesystem::path& path, ETextureType type);
     GPUTexture* GetTextureByName(const std::string& name);
     //returns a pointer to a fully initialized structure that you can specify in materials
-    GPUTexture* CreateTexture(const std::string& name, const Texture* texture, ETextureType type);
+    GPUTexture* CreateTexture(const std::string& name, const Texture* texture, ETextureType type, UINT maxDimension = 0);
     using TextureSource = std::function<const Texture*(std::unique_ptr<Texture>&)>;
-    void SetTextureReplicaSource(const std::string& name, ETextureType, TextureSource);
+    void SetTextureReplicaSource(const std::string& name, ETextureType, TextureSource, UINT maxDimension = 0);
     void WaitForUploads();
     void DrainFrameWork();
     void ResetWorldHistory();
@@ -258,7 +261,7 @@ private:
     void UnsubscribeFromSceneManager();
     void UnsubscribeFromAllWorlds();
 
-    GDX12Texture* CreateDX12Texture(const std::string& name, GDX12DeviceResources* resources, const Texture* texture, ETextureType type);
+    GDX12Texture* CreateDX12Texture(const std::string& name, GDX12DeviceResources* resources, const Texture* texture, ETextureType type, UINT maxDimension = 0);
 
     std::uint64_t _textureUploadBudget = 0;
     std::uint64_t _textureUploadBytes = 0;

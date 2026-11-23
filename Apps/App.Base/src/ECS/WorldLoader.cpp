@@ -15,6 +15,7 @@
 #include "App.Base/LoadingSettings.h"
 #include "Engine.Core/IO/MeshImporter.h"
 #include "Engine.Core/IO/TextureLoader.h"
+#include "Engine.Core/IO/AssetCache.h"
 #include "Engine.Core/Logging/Logger.h"
 
 #include <algorithm>
@@ -444,7 +445,8 @@ namespace
         }
 
         const std::string textureName = sceneName + "_Texture_" + std::to_string(gpuTexturesByPath.size());
-        GPUTexture* gpuTexture = renderModule.CreateTexture(textureName, texture, textureType);
+        const UINT maxDimension = RenderModule::MaterialMaxDimension.GetValue();
+        GPUTexture* gpuTexture = renderModule.CreateTexture(textureName, texture, textureType, maxDimension);
         const bool created = gpuTexture != nullptr;
         if (created)
         {
@@ -453,7 +455,7 @@ namespace
             renderModule.SetTextureReplicaSource(textureName, textureType, [texturePath, compressed](auto& temporary) {
                 temporary = Engine::Core::TextureLoader::LoadTextureAsset(texturePath, compressed);
                 return temporary.get();
-            });
+            }, maxDimension);
         }
         if (!created)
         {
@@ -504,7 +506,15 @@ namespace
                 gpuTexturesByPath);
         }
 
-        std::unique_ptr<Engine::Core::Texture> mergedTexture = TryCreateDiffuseTextureWithOpacityAlpha(*diffuseTexture, *opacityTexture);
+        const auto opacityKey = Engine::Core::AssetCachePath(opacityTexturePath, "alpha");
+        const auto cache = opacityKey.empty() ? std::filesystem::path{} :
+            Engine::Core::AssetCachePath(diffuseTexturePath, opacityKey.filename().string() + "-merged-bc7-v1.dds");
+        auto prepare = [cache](const auto& diffuse, const auto& opacity) {
+            if (!cache.empty() && std::filesystem::is_regular_file(cache))
+                if (auto cached = Engine::Core::TextureLoader::LoadTextureAsset(cache)) return cached;
+            return Engine::Core::TextureLoader::PrepareBC7(TryCreateDiffuseTextureWithOpacityAlpha(diffuse, opacity), cache);
+        };
+        auto mergedTexture = prepare(*diffuseTexture, *opacityTexture);
         if (mergedTexture == nullptr)
         {
             return LoadSceneGpuTexture(renderModule, assetManager, diffuseTexturePath, Engine::Core::ETextureType::Color, sceneName,
@@ -512,16 +522,17 @@ namespace
         }
 
         const std::string textureName = sceneName + "_Texture_" + std::to_string(gpuTexturesByPath.size());
-        GPUTexture* gpuTexture = renderModule.CreateTexture(textureName, mergedTexture.get(), Engine::Core::ETextureType::Color);
+        const UINT maxDimension = RenderModule::MaterialMaxDimension.GetValue();
+        GPUTexture* gpuTexture = renderModule.CreateTexture(textureName, mergedTexture.get(), Engine::Core::ETextureType::Color, maxDimension);
         const bool created = gpuTexture != nullptr;
         if (created)
             renderModule.SetTextureReplicaSource(textureName, Engine::Core::ETextureType::Color,
-                [diffuseTexturePath, opacityTexturePath](auto& temporary) -> const Engine::Core::Texture* {
+                [diffuseTexturePath, opacityTexturePath, prepare](auto& temporary) -> const Engine::Core::Texture* {
                     const auto diffuse = Engine::Core::TextureLoader::LoadTextureAsset(diffuseTexturePath);
                     const auto opacity = Engine::Core::TextureLoader::LoadTextureAsset(opacityTexturePath);
-                    if (diffuse && opacity) temporary = TryCreateDiffuseTextureWithOpacityAlpha(*diffuse, *opacity);
+                    if (diffuse && opacity) temporary = prepare(*diffuse, *opacity);
                     return temporary.get();
-                });
+                }, maxDimension);
         if (!created)
         {
             gpuTexture = renderModule.GetTextureByName(textureName);

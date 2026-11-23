@@ -100,9 +100,7 @@ UINT TreeMaterial(RenderModule& render, const std::filesystem::path& folder, con
     const auto texture = [&](const std::string& file, Engine::Core::ETextureType type)
     {
         const auto name = folder.filename().string() + "/" + file;
-        const auto* image = Engine::Core::AssetManager::GetInstance().LoadTexture(folder / (file + ".png"));
-        if (!image) throw std::runtime_error("Missing linden texture: " + name);
-        auto* gpu = render.CreateTexture(name, image, type);
+        auto* gpu = render.LoadMaterialTexture(name, folder / (file + ".png"), type);
         if (!gpu) throw std::runtime_error("Failed to upload linden texture: " + name);
         return gpu;
     };

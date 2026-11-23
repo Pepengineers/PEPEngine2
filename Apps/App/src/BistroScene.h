@@ -303,20 +303,7 @@ inline void CreateBistroParticles(World& world)
 {
 	auto& render = *BenchmarkEngine::GetLocator().GetModule<RenderModule>();
 	const auto path = std::filesystem::path(ASSETS_FOLDER) / "Textures/Particles/mgpu-fountain-atlas.png";
-	const auto* texture = Engine::Core::AssetManager::GetInstance().LoadTexture(path);
-	if (!texture)
-	{
-		throw std::runtime_error("Missing MGPU fountain atlas");
-	}
-	auto* atlas = render.GetTextureByName("BistroFountainAtlas");
-	if (!atlas)
-	{
-		atlas = render.CreateTexture("BistroFountainAtlas", texture, Engine::Core::ETextureType::Color);
-		if (atlas)
-			render.SetTextureReplicaSource(atlas->Name, Engine::Core::ETextureType::Color, [path](auto&) {
-				return Engine::Core::AssetManager::GetInstance().LoadTexture(path);
-			});
-	}
+	auto* atlas = render.LoadMaterialTexture("BistroFountainAtlas", path, Engine::Core::ETextureType::Color);
 	if (!atlas)
 	{
 		throw std::runtime_error("Cannot create Bistro fountain atlas");

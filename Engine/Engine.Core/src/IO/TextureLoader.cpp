@@ -630,7 +630,12 @@ namespace Engine::Core
 				std::to_wstring(loadedTexture->GetMipLevels()) + L" mip levels.\n");
 		}
 
-        if (compressedCache && loadedTexture->GetDimension() == ETextureDimension::Texture2D &&
+        return compressedCache ? PrepareBC7(std::move(loadedTexture), cache) : std::move(loadedTexture);
+	}
+
+    std::unique_ptr<Texture> TextureLoader::PrepareBC7(std::unique_ptr<Texture> loadedTexture, const std::filesystem::path& cache)
+    {
+        if (loadedTexture && loadedTexture->GetDimension() == ETextureDimension::Texture2D &&
             loadedTexture->GetFormat() == DXGI_FORMAT_R8G8B8A8_UNORM &&
             loadedTexture->GetWidth() >= 4 && loadedTexture->GetHeight() >= 4)
         {
@@ -660,7 +665,7 @@ namespace Engine::Core
             }
             if (SUCCEEDED(result))
             {
-                loadedTexture = CreateTextureFromScratchImage(compressed.GetMetadata(), compressed, ETextureType::Unknown);
+                loadedTexture = CreateTextureFromScratchImage(compressed.GetMetadata(), compressed, loadedTexture->GetType());
                 if (!cache.empty())
                 {
                     const auto temporary = CacheTemporaryPath(cache);
@@ -668,7 +673,7 @@ namespace Engine::Core
                         compressed.GetMetadata(), DirectX::DDS_FLAGS_NONE, temporary.c_str()))) PublishAssetCache(temporary, cache);
                 }
             }
-            else Log::Warning("Texture", "BC7 preparation failed; retaining original pixels: ", sourcePath, ", HRESULT ", result);
+            else Log::Warning("Texture", "BC7 preparation failed; retaining original pixels: ", cache, ", HRESULT ", result);
         }
 		return loadedTexture;
 	}

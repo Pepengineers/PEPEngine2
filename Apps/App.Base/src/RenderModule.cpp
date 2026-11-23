@@ -1,3 +1,5 @@
+#include <directxtex/DirectXTex.h>
+#include "Engine.Core/IO/TextureLoader.h"
 #include "App.Base/Modules/RenderModule.h"
 
 #include "App.Base/Window.h"
@@ -250,7 +252,25 @@ GPUTexture* RenderModule::GetTextureByName(const std::string& name)
     return nullptr;
 }
 
-GPUTexture* RenderModule::CreateTexture(const std::string& name, const Texture* texture, ETextureType type)
+AutoConsoleVariable<UINT> RenderModule::MaterialMaxDimension(L"Render.Textures.MaterialMaxDimension", 0u,
+    L"Maximum imported material texture dimension at load time; 0 keeps all mip levels");
+
+GPUTexture* RenderModule::LoadMaterialTexture(const std::string& name, const std::filesystem::path& path, ETextureType type)
+{
+    if (auto* existing = GetTextureByName(name)) return existing;
+    const auto image = TextureLoader::LoadTextureAsset(path, true);
+    if (!image) return nullptr;
+    const UINT limit = MaterialMaxDimension.GetValue();
+    auto* texture = CreateTexture(name, image.get(), type, limit);
+    if (texture)
+        SetTextureReplicaSource(name, type, [path](auto& temporary) {
+            temporary = TextureLoader::LoadTextureAsset(path, true);
+            return temporary.get();
+        }, limit);
+    return texture;
+}
+
+GPUTexture* RenderModule::CreateTexture(const std::string& name, const Texture* texture, ETextureType type, UINT maxDimension)
 {
     if (_textures.find(name) != _textures.end())
     {
@@ -262,14 +282,14 @@ GPUTexture* RenderModule::CreateTexture(const std::string& name, const Texture* 
     _textures[name] = std::make_unique<GPUTexture>();
     _textures[name]->Name = name;
     if (_primaryPipelineFlags & RENDER_PASS_FLAG_USE_MATERIALS)
-    { _textures[name]->PrimaryDeviceTexture = CreateDX12Texture(name, &_primaryResources, texture, type); }
+    { _textures[name]->PrimaryDeviceTexture = CreateDX12Texture(name, &_primaryResources, texture, type, maxDimension); }
     return _textures[name].get();
 }
 
-void RenderModule::SetTextureReplicaSource(const std::string& name, ETextureType type, TextureSource source)
+void RenderModule::SetTextureReplicaSource(const std::string& name, ETextureType type, TextureSource source, UINT maxDimension)
 {
     auto& loader = _primaryResources.TextureReplicaLoaders[name];
-    loader.Load = [this, name, type, source = std::move(source)](auto& owner) {
+    loader.Load = [this, name, type, maxDimension, source = std::move(source)](auto& owner) {
         std::unique_ptr<Texture> temporary;
         const auto* texture = source(temporary);
         if (!texture) throw std::runtime_error("Missing CPU source for texture " + name);
@@ -277,7 +297,7 @@ void RenderModule::SetTextureReplicaSource(const std::string& name, ETextureType
         try
         {
             ThrowIfFailed(owner.Device->GetDevice()->GetDeviceRemovedReason());
-            return CreateDX12Texture(name, &owner, texture, type);
+            return CreateDX12Texture(name, &owner, texture, type, maxDimension);
         }
         catch (const DxException&)
         {
@@ -323,7 +343,7 @@ void RenderModule::EndTextureUploadBatch()
     _textureUploadBudget = 0;
 }
 
-GDX12Texture* RenderModule::CreateDX12Texture(const std::string& name, GDX12DeviceResources* resources, const Texture* texture, ETextureType type)
+GDX12Texture* RenderModule::CreateDX12Texture(const std::string& name, GDX12DeviceResources* resources, const Texture* texture, ETextureType type, UINT maxDimension)
 {
     GDX12TextureDesc desc;
     desc.SRV_UAV_Heap = resources->SRV_UAV_Heap.get();
@@ -337,6 +357,16 @@ GDX12Texture* RenderModule::CreateDX12Texture(const std::string& name, GDX12Devi
     uint32_t numMipLevels = texture->GetMipLevels();
     uint32_t numArraySlices = texture->GetArraySize();
 
+    UINT firstMip = 0;
+    while (maxDimension && numMipLevels > 1 && (desc.Width > maxDimension || desc.Height > maxDimension))
+    {
+        const auto& mip = texture->GetSubresource(firstMip + 1, 0);
+        if (DirectX::IsCompressed(desc.Format) && ((mip.Width % 4) || (mip.Height % 4))) break;
+        ++firstMip;
+        --numMipLevels;
+        desc.Width = mip.Width;
+        desc.Height = mip.Height;
+    }
     GDX12ResourceHandle textureResource;
 
     bool convertToSRGB = type == Engine::Core::ETextureType::Color;
@@ -379,7 +409,7 @@ GDX12Texture* RenderModule::CreateDX12Texture(const std::string& name, GDX12Devi
             D3D12_RESOURCE_STATE_COMMON, nullptr);
     }
 
-    auto& subresources = texture->GetSubresources();
+
     UINT totalSubresources = numMipLevels * numArraySlices;
 
     UINT64 totalSize = 0;
@@ -411,7 +441,7 @@ GDX12Texture* RenderModule::CreateDX12Texture(const std::string& name, GDX12Devi
         for (uint32_t mipLevel = 0; mipLevel < numMipLevels; mipLevel++)
         {
             uint32_t subresourceIndex = arraySlice * numMipLevels + mipLevel;
-            auto& subresource = texture->GetSubresource(mipLevel, arraySlice);
+            auto& subresource = texture->GetSubresource(firstMip + mipLevel, arraySlice);
 
             uint8_t* dest = static_cast<uint8_t*>(mappedData) + footprints[subresourceIndex].Offset;
             const uint8_t* src = reinterpret_cast<const uint8_t*>(subresource.Data.data());

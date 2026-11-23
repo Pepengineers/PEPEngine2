@@ -260,7 +260,7 @@ void SceneLocalShadows::Invalidate(const Caster& caster, bool listsChanged)
 		return;
 	}
 	_changedCasterBounds.push_back(caster.Bounds);
-	InvalidateBounds(caster.Bounds, listsChanged && caster.Dynamic != _staticOnly);
+	InvalidateBounds(caster.Bounds, listsChanged && (!_staticOnly || !caster.Dynamic));
 }
 
 void SceneLocalShadows::InvalidateBounds(const BoundingBox& bounds, bool listsChanged)
@@ -680,6 +680,8 @@ void SceneLocalShadows::CullJob::Execute(size_t index)
 		}
 	}
 	const UINT root = Owner->_staticOnly ? Owner->_staticRoot : Owner->_dynamicRoot;
+	if (missing && Frame->CombinedDepth && Owner->_staticRoot != UINT_MAX)
+		Owner->Gather(Owner->_staticRoot, light, faces, missing, output.Faces);
 	if (missing && root != UINT_MAX)
 		Owner->Gather(root, light, faces, missing, output.Faces);
 	output.ListsValid |= missing;
@@ -865,7 +867,7 @@ UINT SceneLocalShadows::UpdateLights(Slot& frame)
 		cached.HasLight = true;
 		// Test the light's influence, including receivers whose light is outside the camera.
 		const BoundingBox influence(source.Position, Vector3(source.Range));
-		const bool inView = _resources.ShadowQuality.LocalResolution && (source.ShadowFlags & ShadowEnabled) &&
+		const bool inView = !(_staticOnly && frame.CombinedDepth) && _resources.ShadowQuality.LocalResolution && (source.ShadowFlags & ShadowEnabled) &&
 		    (source.Type == 1 || source.Type == 2) &&
 		    (frame.Camera->Intersects(influence) || (frame.AllReceivers && probesEnabled &&
 		        std::any_of(_resources.ReflectionProbes.begin(), _resources.ReflectionProbes.end(), [&](const auto& probe)
@@ -883,7 +885,7 @@ UINT SceneLocalShadows::UpdateLights(Slot& frame)
 	return slices;
 }
 
-void SceneLocalShadows::Freeze(UINT slot, const std::vector<GDX12RenderPrimitive>& grass, bool allReceivers)
+void SceneLocalShadows::Freeze(UINT slot, const std::vector<GDX12RenderPrimitive>& grass, bool allReceivers, bool combinedDepth)
 {
 	if (!_common.Jobs)
 	{
@@ -897,6 +899,15 @@ void SceneLocalShadows::Freeze(UINT slot, const std::vector<GDX12RenderPrimitive
 	                         frame.Resolution != (std::max)(1u, _resources.ShadowQuality.LocalResolution);
 	frame.SelectionChanged |= frame.AllReceivers != allReceivers;
 	frame.AllReceivers = allReceivers;
+	if (frame.CombinedDepth != combinedDepth)
+	{
+		frame.CombinedDepth = combinedDepth;
+		for (auto& cached : frame.Cache)
+		{
+			cached.MapsValid = cached.ListsValid = 0;
+			cached.SelectionDirty = true;
+		}
+	}
 	frame.SceneRevision = _sceneRevision;
 	frame.GrassReceiverRevision = _grassReceiverRevision;
 	frame.GrassCasterRevision = _grassCasterRevision;
@@ -987,7 +998,8 @@ void SceneLocalShadows::PrepareAtlas(Slot& frame, UINT requestedSlices)
 {
 	const UINT resolution = (std::max)(1u, _resources.ShadowQuality.LocalResolution);
 	const UINT slices = (std::max)(1u, requestedSlices);
-	if (frame.Resolution == resolution && frame.Slices >= slices)
+	if (frame.Resolution == resolution && frame.Slices >= slices &&
+	    (!(_staticOnly && frame.CombinedDepth) || frame.Slices == slices))
 	{
 		return;
 	}
@@ -1063,7 +1075,7 @@ void SceneLocalShadows::AppendGrassViews(Graph& graph, std::vector<ID3D12Resourc
 		                    Matrix(frame.Lights[view.Light].ShadowViewProj[view.Face]).Transpose(), cameraPosition,
 		                    cameraAddress};
 		grassTarget.View.Key = (2ull << 60) | (uint64_t(view.Light) * 6 + view.Face);
-		grassTarget.View.Filter = _staticOnly ? GDX12GeometryFilter::Static : GDX12GeometryFilter::Dynamic;
+		grassTarget.View.Filter = frame.CombinedDepth ? GDX12GeometryFilter::All : _staticOnly ? GDX12GeometryFilter::Static : GDX12GeometryFilter::Dynamic;
 		grassTarget.View.FrameSlot = slot;
 		grassTarget.View.DepthFormat = DXGI_FORMAT_D32_FLOAT;
 		grassTarget.Depth = atlas;
@@ -1121,7 +1133,7 @@ void SceneLocalShadows::Append(
 	const auto resource = [&](ID3D12Resource* value, const char* name)
 	{ return NativeWork::ResourceFor(graph, bindings, value, name); };
 	const Id atlas = resource(frame.Atlas.GetResource()->D3DResource.Get(), "local shadow depth array");
-	if (!_staticOnly && frame.Packed.empty())
+	if (!_staticOnly && !frame.CombinedDepth && frame.Packed.empty())
 	{
 		if (appendGrass)
 			AppendGrassViews(graph, bindings, slot, atlas, appendGrass);
@@ -1162,7 +1174,7 @@ void SceneLocalShadows::Append(
 	const auto lightSrv = lights.GetSRV()->GPUHandle;
 	const auto textures = _resources.SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex);
 	const UINT resolution = frame.Resolution;
-	const bool clearDepth = _staticOnly;
+	const bool clearDepth = _staticOnly || frame.CombinedDepth;
 	work.Add(graph, "local shadow CPU lists ExecuteIndirect", std::move(accesses),
 	         [=, &frame](auto* cmd)
 	         {

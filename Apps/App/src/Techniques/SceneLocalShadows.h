@@ -16,7 +16,7 @@ class SceneLocalShadows
   public:
 	SceneLocalShadows(GDX12DeviceResources&, RenderPipelineCommonData&, bool staticOnly = false);
 	~SceneLocalShadows();
-	void Freeze(UINT slot, const std::vector<GDX12RenderPrimitive>& grass = {}, bool allReceivers = false);
+	void Freeze(UINT slot, const std::vector<GDX12RenderPrimitive>& grass = {}, bool allReceivers = false, bool combinedDepth = false);
 	void Complete(UINT slot);
 	void Submitted(UINT slot);
 	uint64_t SceneRevision() const { return _sceneRevision; }
@@ -100,7 +100,7 @@ class SceneLocalShadows
 		std::vector<GDX12IndirectDrawArgs> Packed;
 		std::optional<GDX12LocalShadowFrustum> Camera;
 		XMFLOAT4X4 CameraMatrix{};
-		bool SelectionChanged = true, AllReceivers = false;
+		bool SelectionChanged = true, AllReceivers = false, CombinedDepth = false;
 		std::array<XMFLOAT4, 6> CameraPlanes;
 		std::array<XMFLOAT3, 8> CameraCorners;
 		CullJob Cull;

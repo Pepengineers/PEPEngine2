@@ -34,6 +34,8 @@ namespace Engine::Core
         // compressedCache prepares BC7 plus a disposable DDS cache; leave false for CPU pixel editing/alpha merging.
 		[[nodiscard]] static std::unique_ptr<Texture> LoadTextureAsset(const std::filesystem::path& sourcePath, bool compressedCache = false);
 
+		static std::unique_ptr<Texture> PrepareBC7(std::unique_ptr<Texture> texture, const std::filesystem::path& cache);
+
 		/// Creates a minimal 2x2 fallback texture used when a real texture fails to load.
 		///
 		/// The texture is a magenta/black checkerboard pattern in DXGI_FORMAT_R8G8B8A8_UNORM:
