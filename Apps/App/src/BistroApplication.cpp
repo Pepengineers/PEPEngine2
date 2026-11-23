@@ -119,14 +119,15 @@ void ValidateStartupAdapters(ConsoleModule& console, const std::filesystem::path
 
     ConsoleVariablePatch reset{
         {L"Render.PrimaryAdapter", "0"},
-        {L"App.CloudPicture.Adapter", "-1"},
+        {L"App.UI.CloudPicture.Adapter", "-1"},
         {L"App.AO.Adapter", "-1"},
         {L"App.Particles.Adapter", "-1"},
         {L"App.Water.Adapter", "-1"},
         {L"App.Sky.SkyView.Adapter", "-1"},
         {L"App.Sky.AerialPerspective.Adapter", "-1"},
         {L"App.Grass.Wind.Adapter", "-1"}};
-    for (const auto& poster : BistroUICanvases::Posters) reset.emplace_back(poster.Adapter, "-1");
+    for (const auto& poster : BistroUICanvases::Posters)
+        if (poster.Adapter) reset.emplace_back(poster.Adapter, "-1");
     bool invalid = false;
     for (const auto& [name, fallback] : reset)
     {
@@ -147,6 +148,26 @@ void ValidateStartupAdapters(ConsoleModule& console, const std::filesystem::path
     if (!result.Error.empty()) throw ConsoleConfigError(result.Error);
 }
 
+void MigrateBistroIniKey(std::wstring& key)
+{
+    constexpr wchar_t oldCloud[] = L"App.CloudPicture.";
+    if (_wcsnicmp(key.c_str(), oldCloud, std::size(oldCloud) - 1) == 0) {
+        key.replace(0, std::size(oldCloud) - 1, L"App.UI.CloudPicture.");
+        return;
+    }
+    constexpr std::pair<const wchar_t*, const wchar_t*> renamed[]{
+        {L"App.Async.CloudPicture", L"App.UI.CloudPicture.AsyncCompute"},
+        {L"App.UI.WorldCanvas.Adapter.Atrium", L"App.UI.WorldCanvas.Atrium.Adapter"},
+        {L"App.UI.WorldCanvas.Adapter.Terrace", L"App.UI.WorldCanvas.Terrace.Adapter"},
+        {L"App.UI.WorldCanvas.CrossSync.Atrium", L"App.UI.WorldCanvas.Atrium.CrossSync"},
+        {L"App.UI.WorldCanvas.CrossSync.Terrace", L"App.UI.WorldCanvas.Terrace.CrossSync"},
+        {L"App.UI.WorldCanvas.Adapter.Clouds", L""},
+        {L"App.UI.WorldCanvas.CrossSync.Clouds", L""}
+    };
+    for (const auto& [previous, current] : renamed)
+        if (_wcsicmp(key.c_str(), previous) == 0) { key = current; return; }
+}
+
 std::vector<DeviceDesc> PrepareStartup()
 {
 	const auto root = Engine::Core::GetExecutableDirectory();
@@ -162,7 +183,7 @@ std::vector<DeviceDesc> PrepareStartup()
 	console.InitializeWithOverlay(overlay, {}, [&] {
 		adapters = GDX12DeviceFactory::GetDeviceDescriptors();
 		ValidateStartupAdapters(console, startup, adapters);
-	});
+	}, MigrateBistroIniKey);
 	if (!overlay.empty())
 		Log::Info("BistroBenchmark", "Loaded startup queue defaults from ", overlay.u8string());
 	Log::Info("Bistro", "SCENE EXECUTOR; primary=", console.FindConsoleVariable(L"Render.PrimaryAdapter").GetInt(),

@@ -329,7 +329,7 @@ std::vector<std::pair<std::string, Id>> ScenePostUI::ExecutionDevices() const
 	    screen.Game.Draw ? (screen.HudOwner ? screen.HudOwner->Owner : 0) : Invalid;
 	const auto posters = _posters->ExecutionDevices();
 	return {{"PostAdapter", post}, {"PresentationAdapter", presentation}, {"GameHUDAdapter", hud},
-	    {"AtriumCanvasAdapter", posters[0]}, {"TerraceCanvasAdapter", posters[1]}, {"CloudCanvasAdapter", posters[2]}};
+	    {"AtriumCanvasAdapter", posters[0]}, {"TerraceCanvasAdapter", posters[1]}};
 }
 
 std::array<uint64_t, 4> ScenePostUI::BenchmarkTransferBytes() const

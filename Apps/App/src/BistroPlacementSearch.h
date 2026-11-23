@@ -41,7 +41,7 @@ inline constexpr Technique Techniques[]{
     {L"Render.UI.GameHUD.Enabled", L"Render.UI.GameHUD.Quality", "HUD"},
     {nullptr, L"Render.UI.WorldCanvas.Quality", "canvas"},
     {nullptr, L"Render.Tree.Quality", "Linden"},
-    {L"App.CloudPicture.Enabled", nullptr, "cloud picture"},
+    {L"App.UI.CloudPicture.Enabled", nullptr, "cloud picture"},
     {nullptr, L"Render.Shadows.Sun.Resolution", "sun shadow", true},
     {nullptr, L"Render.Shadows.Local.Resolution", "local shadow", true},
 };
@@ -58,18 +58,17 @@ inline const Placement Placements[]{
     {L"App.Particles.Adapter", "ParticleAdapter"},
     {L"App.Water.Adapter", "WaterAdapter"},
     {L"App.Grass.Wind.Adapter", "GrassWindAdapter"},
-    {L"App.CloudPicture.Adapter", "CloudPictureAdapter"},
+    {L"App.UI.CloudPicture.Adapter", "CloudPictureAdapter"},
     {L"App.Sky.SkyView.Adapter", "SkyViewAdapter"},
     {L"App.Sky.AerialPerspective.Adapter", "AerialPerspectiveAdapter"},
     {L"App.WBOIT.Adapter", "TransparencyAdapter"},
-    {L"App.UI.WorldCanvas.Adapter.Atrium", "AtriumCanvasAdapter"},
-    {L"App.UI.WorldCanvas.Adapter.Terrace", "TerraceCanvasAdapter"},
-    {L"App.UI.WorldCanvas.Adapter.Clouds", "CloudCanvasAdapter"},
+    {L"App.UI.WorldCanvas.Atrium.Adapter", "AtriumCanvasAdapter"},
+    {L"App.UI.WorldCanvas.Terrace.Adapter", "TerraceCanvasAdapter"},
     {L"App.Post.Adapter", "PostAdapter"},
     {L"App.UI.GameHUD.Adapter", "GameHUDAdapter"},
     {L"App.Shadows.Sun.Adapter", "SunShadowAdapter"},
 };
-inline constexpr size_t AO = 0, Wind = 4, Post = 12, HUD = 13;
+inline constexpr size_t AO = 0, Wind = 4, Post = 11, HUD = 12, SunShadow = 13;
 
 enum Level { Off, Medium, High, Epic };
 enum Profile { Performance, Quality };
@@ -224,11 +223,10 @@ public:
             {L"App.AO.BlurOnSecondary", config.RemoteAOFilter ? "1" : "0"},
             {L"App.Grass.Wind.Algorithm", config.Owners[Wind] >= 0 ? "1" : _windAlgorithm},
             {L"App.AO.CrossSync", "1"}, {L"App.Water.CrossSync", "1"}, {L"App.Particles.CrossSync", "1"},
-            {L"App.CloudPicture.CrossSync", "1"}, {L"App.Grass.Wind.CrossSync", "1"},
+            {L"App.UI.CloudPicture.CrossSync", "1"}, {L"App.Grass.Wind.CrossSync", "1"},
             {L"App.Sky.SkyView.CrossSync", "1"}, {L"App.Sky.AerialPerspective.CrossSync", "1"},
             {L"App.Shadows.Sun.CrossSync", "1"},
-            {L"App.UI.WorldCanvas.CrossSync.Atrium", "1"}, {L"App.UI.WorldCanvas.CrossSync.Terrace", "1"},
-            {L"App.UI.WorldCanvas.CrossSync.Clouds", "1"},
+            {L"App.UI.WorldCanvas.Atrium.CrossSync", "1"}, {L"App.UI.WorldCanvas.Terrace.CrossSync", "1"},
         };
         for (size_t i = 0; i < std::size(Techniques); ++i)
         {
@@ -523,7 +521,7 @@ private:
     {
         // Owners of disabled techniques cannot change the publication or the schedule.
         for (const auto [technique, owner] : {std::pair<size_t, size_t>{0, AO}, {2, Wind}, {3, 2},
-                {4, 3}, {10, 6}, {10, 7}, {13, HUD}, {16, 5}, {17, 14}})
+                {4, 3}, {10, 6}, {10, 7}, {13, HUD}, {16, 5}, {17, SunShadow}})
             if (config.Levels[technique] == Off) config.Owners[owner] = -1;
         if (config.Owners[AO] < 0) config.RemoteAOFilter = false;
         if (config.Levels[6] == Off && _firstLocalShadow > std::size(Placements))
@@ -568,7 +566,7 @@ private:
                 std::fill(owners.begin() + _firstLocalShadow, owners.end(), adapter);
                 seeds.push_back(std::move(owners));
             }
-            for (const auto& [a, b] : {std::pair{Post, HUD}, {6u, 7u}, {9u, 10u}, {10u, 11u}, {2u, 8u}})
+            for (const auto& [a, b] : {std::pair{Post, HUD}, {6u, 7u}, {9u, 10u}, {2u, 8u}})
             {
                 auto owners = config.Owners;
                 owners[a] = owners[b] = adapter;

@@ -80,23 +80,9 @@ Use `--read-texture=Scene.DepthNormals.Normals` or
 
 ### World-space billboards
 
-The F1 settings show a GPU picker by hardware name for each billboard. The
-saved keys are `App.UI.WorldCanvas.Adapter.Atrium` for NEON DISTRICT (CanvasId 1),
-`App.UI.WorldCanvas.Adapter.Terrace` for ASTRA (2), and
-`App.UI.WorldCanvas.Adapter.Clouds` for CLOUDS (3). The default `-1` follows
-the primary GPU. Each billboard owns its rendering and material texture.
+In F1, open **App → UI → CloudPicture** to configure the CLOUDS poster. Its material samples the generated texture directly. A remote producer transfers the selected image once to the primary GPU, where both the surface and reflections sample it. `Adapter` selects the producer (`-1` follows the primary GPU). `CrossSync` selects the publication as described below. `Width`, `Height`, `SpeedScale`, `Enabled` and `AsyncCompute` are in the same group. `AsyncCompute` controls local generation.
 
-Each billboard also has a saved `App.UI.WorldCanvas.CrossSync.<name>` setting
-in F1, with the same Atrium, Terrace, and Clouds suffixes. Remote mode `1`
-(default) displays the current publication. Mode `0` still orders a current
-render each frame and displays exactly the previous publication. A new
-compatible series starts with ordered/displayed pairs `1/1 → 2/1 → 3/2`.
-Local billboards always render the current frame.
-
-GPU0 waits at import and shares the displayed texture between the surface and
-reflection passes. A remote CLOUDS order receives the image selected by Cloud
-Picture for that order. In mode `0`, importing the previous billboard can run
-before the current cloud input export.
+NEON DISTRICT and ASTRA have their own UI rendering. Open `App.UI.WorldCanvas.Atrium` or `App.UI.WorldCanvas.Terrace` to set the corresponding poster’s `Adapter` and `CrossSync`. Remote mode `1` (default) shows the current frame. Mode `0` shows the previous frame after a current-frame bootstrap. Both use the current frame on the primary GPU.
 
 ### Two-adapter synchronization
 
@@ -120,7 +106,7 @@ before the first draw that samples it. Unchanged inputs reuse the current pair.
 SkyView and Aerial Perspective share the input tables when assigned to the same
 secondary GPU. Both adapter selectors show GPU names in F1.
 
-In F1, each technique can select its GPU by name. `App.CloudPicture.Adapter`,
+In F1, each technique can select its GPU by name. `App.UI.CloudPicture.Adapter`,
 `App.AO.Adapter`, `App.Particles.Adapter`, `App.Water.Adapter` and `App.Grass.Wind.Adapter` use absolute
 indices in the same hardware list as the startup-only `Render.PrimaryAdapter`.
 The default `-1` and the current primary index both run locally. Techniques can
@@ -134,7 +120,7 @@ GPU0 import queue. A wait for an already completed export incurs no GPU stall.
 
 | Mode | Who starts GPU1 work | Version used by GPU0 | Wait and first frame | Available techniques |
 | --- | --- | --- | --- | --- |
-| `0` | Bistro orders N | Exactly N−1 | Wait for N−1 if pending. First uses N, so the first pairs are 1/1, 2/1, 3/2. | Cloud Picture **(default)**, AO, particles, water **(default)**, ProjectedGrid wind |
+| `0` | Bistro orders N | Exactly Nв€’1 | Wait for Nв€’1 if pending. First uses N, so the first pairs are 1/1, 2/1, 3/2. | Cloud Picture **(default)**, AO, particles, water **(default)**, ProjectedGrid wind |
 | `1` | Bistro orders N | Exactly N | Wait for N if pending, including the first frame. | Cloud Picture, AO **(default)**, particles **(default)**, water, ProjectedGrid wind **(default)** |
 | `2` | GPU1 advances independently | Newest completed publication | Cloud Picture and water can wait for the first issued export token, then wait on that fence at import. Particles start empty until a snapshot completes. After bootstrap each technique uses completed exports. | Cloud Picture, particles, water |
 | `3` | Bistro orders N | Newest completed publication | Starts empty until the first export completes. No wait for pending results at import. | Particles |
@@ -150,7 +136,7 @@ adapter falls back to GPU0. Analytic wind also runs on GPU0.
 GPU1 solves each active grass field and the Linden crown field separately.
 `App.Grass.Wind.CrossSync = 1` (default) imports that frame's publication.
 Mode `0` imports exactly the preceding publication, with ordered/imported
-pairs `1/1 → 2/1 → 3/2` at startup. A new or reset field starts with its
+pairs `1/1 в†’ 2/1 в†’ 3/2` at startup. A new or reset field starts with its
 current publication. GPU0 waits on the selected export at import.
 
 Grass uses the selected publication's current and previous velocity grids.
@@ -171,7 +157,7 @@ Set `App.AO.Adapter` to a secondary DXGI index from the same list as
 `Render.PrimaryAdapter`. The default `-1` runs AO locally. An unavailable
 adapter, an unsupported grid, or a missing required prepass falls back to local AO.
 
-| `Render.AO.Implementation` | Remote grids (`Render.AO.Resolution`) | GPU0 → GPU1 | Filter |
+| `Render.AO.Implementation` | Remote grids (`Render.AO.Resolution`) | GPU0 в†’ GPU1 | Filter |
 | --- | --- | --- | --- |
 | `0` SSAO | Full (`0`), Half (`1`) | Early depth and material normals | Bilateral on GPU0 or GPU1 |
 | `1` HBAO | Half (`1`) | Half-depth | Bilateral on GPU0 or GPU1 |
@@ -211,7 +197,7 @@ a delayed frame has consumed history.
 `App.Async.Water` queue selection. Set it to a secondary DXGI index to run SPH
 on GPU1. An unavailable adapter falls back to local SPH.
 
-`App.Water.CrossSync = 0` defaults to exact N−1 when a secondary adapter is
+`App.Water.CrossSync = 0` defaults to exact Nв€’1 when a secondary adapter is
 selected. Mode `1` imports exact N. Mode `2` advances SPH on GPU1 with a
 monotonic clock scaled by game time and the instance's time scale. GPU0
 imports the newest completed display snapshot each visible frame, including
@@ -241,7 +227,7 @@ Changing the owner resets the pool and preserves the already consumed burst
 total for the same emitter revision.
 
 `App.Particles.CrossSync = 1` (default) imports the exact step ordered by
-the current frame. With `0`, the same frame orders step N and imports N−1.
+the current frame. With `0`, the same frame orders step N and imports Nв€’1.
 The first frame of each history shows its own step. Changing between these
 policies starts fresh publication history and keeps the live GPU1 pool.
 With `3`, Bistro orders one step per frame and displays the newest completed

@@ -22,10 +22,10 @@ namespace BistroUICanvases
     };
 
     inline constexpr std::array Posters{
-        Poster{Atrium, "NEON DISTRICT", L"App.UI.WorldCanvas.Adapter.Atrium", L"App.UI.WorldCanvas.CrossSync.Atrium", L"NEON DISTRICT",
+        Poster{Atrium, "NEON DISTRICT", L"App.UI.WorldCanvas.Atrium.Adapter", L"App.UI.WorldCanvas.Atrium.CrossSync", L"NEON DISTRICT",
                "BistroUINeon", Engine::UI::CanvasStyle::Neon, {768, 512}},
-        Poster{Terrace, "ASTRA", L"App.UI.WorldCanvas.Adapter.Terrace", L"App.UI.WorldCanvas.CrossSync.Terrace", L"ASTRA",
+        Poster{Terrace, "ASTRA", L"App.UI.WorldCanvas.Terrace.Adapter", L"App.UI.WorldCanvas.Terrace.CrossSync", L"ASTRA",
                "BistroUIAstra", Engine::UI::CanvasStyle::Graffiti, {768, 512}},
-        Poster{Clouds, "CLOUDS", L"App.UI.WorldCanvas.Adapter.Clouds", L"App.UI.WorldCanvas.CrossSync.Clouds", L"CLOUDS",
+        Poster{Clouds, "CLOUDS", nullptr, nullptr, L"CLOUDS",
                "BistroUIClouds", Engine::UI::CanvasStyle::Image, {1024, 512}}};
 }

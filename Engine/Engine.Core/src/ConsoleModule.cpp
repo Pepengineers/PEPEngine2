@@ -368,11 +368,13 @@ std::filesystem::path ConsoleModule::GetDefaultConfigPath()
     return Engine::Core::GetExecutableDirectory() / L"Config" / L"Engine.ini";
 }
 
-ConsoleConfigResult ConsoleModule::LoadIni(const std::filesystem::path& Path)
+ConsoleConfigResult ConsoleModule::LoadIni(const std::filesystem::path& Path, IniKeyMigration migrate)
 {
     if (StartupComplete.load()) return { 0, "INI configuration can only be loaded during startup" };
-    return ParseIni(Path, true, [this](std::wstring name, const char* value) -> std::string
+    return ParseIni(Path, true, [this, migrate](std::wstring name, const char* value) -> std::string
     {
+        if (migrate) migrate(name);
+        if (name.empty()) return {};
         IConsoleVariable* variable = nullptr;
         if (!TryFindConsoleVariable(name, variable))
             return "Unknown CVar: " + std::filesystem::path(name).u8string();
@@ -382,16 +384,19 @@ ConsoleConfigResult ConsoleModule::LoadIni(const std::filesystem::path& Path)
     });
 }
 
-ConsoleConfigResult ConsoleModule::ReadPatchIni(const std::filesystem::path& Path, ConsoleVariablePatch& Out)
+ConsoleConfigResult ConsoleModule::ReadPatchIni(const std::filesystem::path& Path, ConsoleVariablePatch& Out, IniKeyMigration migrate)
 {
     ConsoleVariablePatch patch;
+    bool hasEntries = false;
     auto result = ParseIni(Path, false, [&](std::wstring name, const char* value) -> std::string
     {
-        patch.emplace_back(std::move(name), value);
+        hasEntries = true;
+        if (migrate) migrate(name);
+        if (!name.empty()) patch.emplace_back(std::move(name), value);
         return {};
     });
     if (!result.Error.empty()) return result;
-    if (patch.empty()) return {0, "Empty CVar overlay"};
+    if (!hasEntries) return {0, "Empty CVar overlay"};
     Out = std::move(patch);
     return {};
 }
@@ -472,7 +477,7 @@ void ConsoleModule::Initialize()
 }
 
 void ConsoleModule::InitializeWithOverlay(const std::filesystem::path& Overlay, const std::filesystem::path& Overrides,
-                                          const std::function<void()>& BeforeLock)
+                                          const std::function<void()>& BeforeLock, IniKeyMigration migrate)
 {
     if (StartupComplete.load())
     {
@@ -482,7 +487,7 @@ void ConsoleModule::InitializeWithOverlay(const std::filesystem::path& Overlay, 
     }
     auto path = GetDefaultConfigPath();
     Log::Info("Config", "Loading INI: ", path);
-    auto result = LoadIni(path);
+    auto result = LoadIni(path, migrate);
     if (result.Error.empty() && (!Overlay.empty() || !Overrides.empty()))
     {
         ConsoleVariablePatch patch;
@@ -492,7 +497,7 @@ void ConsoleModule::InitializeWithOverlay(const std::filesystem::path& Overlay, 
             if (layer->empty()) continue;
             path = *layer;
             ConsoleVariablePatch input;
-            result = ReadPatchIni(path, input);
+            result = ReadPatchIni(path, input, migrate);
             if (!result.Error.empty()) break;
             std::vector<ResolvedValue> resolved;
             result = ResolvePatch(*this, input, true, resolved);

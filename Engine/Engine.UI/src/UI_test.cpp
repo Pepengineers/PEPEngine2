@@ -115,7 +115,8 @@ namespace Engine::UI
             {
                 const auto name = std::filesystem::path(Name).u8string();
                 const auto description = std::filesystem::path(variable.GetDescription()).u8string();
-                const bool canvasAdapter = Name.rfind(L"App.UI.WorldCanvas.Adapter.", 0) == 0;
+                const bool worldCanvas = Name.rfind(L"App.UI.WorldCanvas.", 0) == 0;
+                const bool canvasAdapter = worldCanvas && Name.substr(Name.find_last_of(L'.') + 1) == L"Adapter";
                 const auto active = variable.GetString();
                 if (Draft == Current) Draft = active;
                 Current = active;
@@ -134,11 +135,11 @@ namespace Engine::UI
                         ImGui::TextWrapped("Startup hardware index (0, 1, ...). -1 is only valid for technique settings.");
                     }
                 }
-                else if (Name == L"App.UI.GameHUD.Adapter" || Name == L"App.CloudPicture.Adapter" || Name == L"App.AO.Adapter" ||
+                else if (Name == L"App.UI.GameHUD.Adapter" || Name == L"App.UI.CloudPicture.Adapter" || Name == L"App.AO.Adapter" ||
                     Name == L"App.Particles.Adapter" || Name == L"App.Water.Adapter" || Name == L"App.Grass.Wind.Adapter" ||
                     Name == L"App.Sky.SkyView.Adapter" || Name == L"App.Sky.AerialPerspective.Adapter" || canvasAdapter)
                     DrawAdapter(variable);
-                else if (Name.rfind(L"App.UI.WorldCanvas.CrossSync.", 0) == 0)
+                else if (worldCanvas && Name.substr(Name.find_last_of(L'.') + 1) == L"CrossSync")
                 {
                     const int mode = variable.GetInt();
                     const char* labels[] = {"Previous frame (N-1)", "Current frame (N)"};

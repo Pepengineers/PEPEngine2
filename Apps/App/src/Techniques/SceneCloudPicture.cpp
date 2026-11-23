@@ -20,14 +20,14 @@ bool ParseValue(std::string_view text, BistroRender::CloudPictureMode& mode) {
 
 namespace BistroRender {
 namespace {
-AutoConsoleVariable<bool> Enabled(L"App.CloudPicture.Enabled", true, L"Show the cloud picture in Bistro.");
-AutoConsoleVariable<int> Width(L"App.CloudPicture.Width", 1024, L"Cloud picture texture width, independent of window/SR.",
+AutoConsoleVariable<bool> Enabled(L"App.UI.CloudPicture.Enabled", true, L"Show the cloud picture in Bistro.");
+AutoConsoleVariable<int> Width(L"App.UI.CloudPicture.Width", 1024, L"Cloud picture texture width, independent of window/SR.",
     EConsoleVariableFlags::Default, [](int v) { return v > 0 && v <= D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION; });
-AutoConsoleVariable<int> Height(L"App.CloudPicture.Height", 512, L"Cloud picture texture height, independent of window/SR.",
+AutoConsoleVariable<int> Height(L"App.UI.CloudPicture.Height", 512, L"Cloud picture texture height, independent of window/SR.",
     EConsoleVariableFlags::Default, [](int v) { return v > 0 && v <= D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION; });
-AutoConsoleVariable<int> Adapter(L"App.CloudPicture.Adapter", -1,
+AutoConsoleVariable<int> Adapter(L"App.UI.CloudPicture.Adapter", -1,
     L"Cloud Picture GPU in the Render.PrimaryAdapter hardware list. -1 uses the primary GPU.");
-AutoConsoleVariable<CloudPictureMode> CrossSync(L"App.CloudPicture.CrossSync", CloudPictureMode::PreviousFrame,
+AutoConsoleVariable<CloudPictureMode> CrossSync(L"App.UI.CloudPicture.CrossSync", CloudPictureMode::PreviousFrame,
     L"Remote clouds: 0 exact previous (first uses current), 1 exact current, 2 independent GPU1 and latest completed (first can wait for export).");
 struct Settings {
     bool Active;

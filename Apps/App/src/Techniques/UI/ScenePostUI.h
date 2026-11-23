@@ -49,11 +49,7 @@ class ScenePostUI
 		if (!_remotePost) _reconstruction.Submitted();
 	}
 	void PrepareMaterials(Executor&, uint64_t frame, double animationSeconds, GDX12Texture* cloudImage);
-	void AddPosterExchanges(const Schedule& schedule, std::vector<PacketWait>& waits,
-	                       std::vector<Executor::PacketExchange>& exchanges)
-	{
-		_posters->AddExchanges(schedule, waits, exchanges);
-	}
+	void AddPosterWaits(const Schedule& schedule, std::vector<PacketWait>& waits) { _posters->AddWaits(schedule, waits); }
 	void PostersSubmitted(uint64_t frame, const std::vector<CompletionToken>& completions)
 	{
 		_posters->Submitted(frame, completions);
@@ -71,10 +67,6 @@ class ScenePostUI
 	            GDX12Texture* featureMotion, GDX12Texture* target,
 	            const std::function<void(GDX12CommandList*)>& finish);
 	std::vector<CanvasRead> AppendPosters(Graph&, std::vector<ID3D12Resource*>&);
-	void AppendPreviousPosterImports(Graph& graph, std::vector<ID3D12Resource*>& bindings)
-	{
-		_posters->AppendPreviousImports(graph, bindings, _work);
-	}
 	bool Record(Id id, ID3D12GraphicsCommandList* cmd) const { return _work.Record(id, cmd); }
 
   private:

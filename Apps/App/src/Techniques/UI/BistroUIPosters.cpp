@@ -28,6 +28,7 @@ namespace
         std::array<std::unique_ptr<AutoConsoleVariable<int>>, BistroUICanvases::Posters.size()> variables;
         for (size_t index = 0; index < variables.size(); ++index) {
             const auto& poster = BistroUICanvases::Posters[index];
+            if (!poster.Adapter) continue;
             variables[index] = std::make_unique<AutoConsoleVariable<int>>(poster.Adapter, -1, poster.Description,
                 EConsoleVariableFlags::Default, [](int value) { return value >= -1; });
         }
@@ -37,6 +38,7 @@ namespace
         std::array<std::unique_ptr<AutoConsoleVariable<int>>, BistroUICanvases::Posters.size()> variables;
         for (size_t index = 0; index < variables.size(); ++index) {
             const auto& poster = BistroUICanvases::Posters[index];
+            if (!poster.CrossSync) continue;
             variables[index] = std::make_unique<AutoConsoleVariable<int>>(poster.CrossSync, 1,
                 std::wstring(poster.Description) + L" remote display: 0 exact previous (first uses current), 1 exact current. Local uses current.",
                 EConsoleVariableFlags::Default, [](int value) { return value == 0 || value == 1; });
@@ -148,10 +150,10 @@ namespace
             PostOwner.reset();
         }
 
-        void PrepareTarget(GDX12DeviceResources& device, CanvasSize size, bool post)
+        void PrepareTarget(GDX12DeviceResources& device, CanvasSize size)
         {
             if (!Target || Target->GetWidth() != size.Width || Target->GetHeight() != size.Height) {
-                Target = MakeMaterialTarget(device, size, post);
+                Target = MakeMaterialTarget(device, size, true);
                 PreparedPost.reset();
             }
         }
@@ -167,9 +169,7 @@ namespace
         {
             frame.Input = input;
             const auto profile = GetCanvasProfile(input->LogicalSize, input->Quality);
-            const bool post = input->Style != CanvasStyle::Image;
-            frame.PrepareTarget(device, profile.RasterSize, post);
-            if (!post) return;
+            frame.PrepareTarget(device, profile.RasterSize);
             if (!Effects) Effects = std::make_unique<CanvasEffects>(*device.Device);
             if (!frame.Effect || frame.Effect->GetWidth() != profile.EffectsSize.Width ||
                 frame.Effect->GetHeight() != profile.EffectsSize.Height) {
@@ -186,33 +186,28 @@ namespace
         }
 
         void Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work,
-                    DrawFrame& frame, GDX12Texture* image, const std::string& name)
+                    DrawFrame& frame, const std::string& name)
         {
-            const bool post = frame.Input->Style != CanvasStyle::Image;
-            auto* effect = (post ? frame.Effect.get() : image)->GetResource();
+            auto* effect = frame.Effect->GetResource();
             auto* output = frame.Target->GetResource();
-            auto* raster = (post ? frame.Raw.get() : frame.Target.get())->GetResource();
+            auto* raster = frame.Raw->GetResource();
             std::vector<Access> accesses{
                 Bind(graph, bindings, effect->D3DResource.Get(), "canvas effect/image",
-                    post ? Mode::ReadWrite : Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE),
+                    Mode::ReadWrite, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE),
                 Bind(graph, bindings, raster->D3DResource.Get(), "canvas raster",
-                    post ? Mode::ReadWrite : Mode::Write, D3D12_RESOURCE_STATE_RENDER_TARGET)};
-            if (post) accesses.push_back(Bind(graph, bindings, output->D3DResource.Get(), "canvas post",
-                Mode::Write, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE));
+                    Mode::ReadWrite, D3D12_RESOURCE_STATE_RENDER_TARGET),
+                Bind(graph, bindings, output->D3DResource.Get(), "canvas post",
+                    Mode::Write, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE)};
             work.AddOwned(graph, name, std::move(accesses), bindings,
-                [this, &frame, effect, raster, output, post](auto* cmd) {
-                    if (post) {
-                        cmd->ResourceBarrier({effect->GetUnorderedAccessBarrier()});
-                        frame.EffectOwner = Effects->RecordPrepared(*cmd, *frame.Input, frame.PreparedEffects);
-                        cmd->ResourceBarrier({effect->GetPixelShaderResourceBarrier()});
-                    }
+                [this, &frame, effect, raster, output](auto* cmd) {
+                    cmd->ResourceBarrier({effect->GetUnorderedAccessBarrier()});
+                    frame.EffectOwner = Effects->RecordPrepared(*cmd, *frame.Input, frame.PreparedEffects);
+                    cmd->ResourceBarrier({effect->GetPixelShaderResourceBarrier()});
                     frame.RasterOwner = Raster.TryRecord(*cmd, raster->D3DResource, frame.Input->Draw,
                         {{CanvasEffectTextureId, effect->D3DResource}});
                     if (!frame.RasterOwner) throw std::logic_error("Retired world canvas has no raster slot");
-                    if (post) {
-                        cmd->ResourceBarrier({raster->GetNonPixelShaderResourceBarrier(), output->GetUnorderedAccessBarrier()});
-                        frame.PostOwner = Effects->RecordPost(*cmd, *frame.Input, frame.PreparedPost);
-                    }
+                    cmd->ResourceBarrier({raster->GetNonPixelShaderResourceBarrier(), output->GetUnorderedAccessBarrier()});
+                    frame.PostOwner = Effects->RecordPost(*cmd, *frame.Input, frame.PreparedPost);
                 }, "World canvas cannot submit private queue signals");
         }
     };
@@ -231,14 +226,12 @@ struct BistroUIPosters::Impl
         struct Slot
         {
             DrawFrame Draw;
-            std::unique_ptr<GDX12Texture> Image;
-            SharedImage Output, Input;
+            SharedImage Output;
             NativeWork Work;
             Schedule Plan;
             std::vector<ID3D12Resource*> Bindings;
-            CompletionToken Ready, CloudInput, Reader;
+            CompletionToken Ready, Reader;
             uint64_t Version = 0;
-            Id InputPacket = Invalid;
         };
         std::shared_ptr<QueueSubmission> Submit;
         Id Device;
@@ -249,8 +242,6 @@ struct BistroUIPosters::Impl
         Id Latest = Invalid;
         size_t Next = 0;
         uint64_t Ordered = 0, SurfaceRevision = 0;
-        CanvasSize ImageSize;
-        DXGI_FORMAT ImageFormat = DXGI_FORMAT_UNKNOWN;
         int Mode = -1;
 
         Remote(Executor& primary, Id device, UINT count)
@@ -264,15 +255,11 @@ struct BistroUIPosters::Impl
                 D3D12_DESCRIPTOR_HEAP_TYPE_RTV, count * 3, D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
         }
 
-        Id Prepare(int mode, const std::shared_ptr<const CanvasFrame>& input, GDX12Texture* image, const std::string& title)
+        Id Prepare(int mode, const std::shared_ptr<const CanvasFrame>& input, const std::string& title)
         {
-            const CanvasSize size = image ? CanvasSize{image->GetWidth(), image->GetHeight()} : CanvasSize{};
-            const auto format = image ? image->GetFormat() : DXGI_FORMAT_UNKNOWN;
-            if (Mode != mode || SurfaceRevision != input->SurfaceRevision || ImageSize != size || ImageFormat != format) {
+            if (Mode != mode || SurfaceRevision != input->SurfaceRevision) {
                 Mode = mode;
                 SurfaceRevision = input->SurfaceRevision;
-                ImageSize = size;
-                ImageFormat = format;
                 Latest = Invalid;
                 Ordered = 0;
             }
@@ -284,8 +271,7 @@ struct BistroUIPosters::Impl
             if (slot.Reader && !Submit->Complete(slot.Reader))
                 throw std::logic_error("World canvas transfer slot still in use by GPU0");
             slot.Draw.Retire();
-            slot.Ready = slot.CloudInput = slot.Reader = {};
-            slot.InputPacket = Invalid;
+            slot.Ready = slot.Reader = {};
             slot.Bindings.clear();
             slot.Work.Commands.clear();
             Draw.Prepare(Resources, slot.Draw, input);
@@ -293,37 +279,21 @@ struct BistroUIPosters::Impl
             Graph graph;
             graph.Device = Device;
             graph.FrameBoundary = false;
-            Id inputOp = Invalid;
-            if (image) {
-                if (!slot.Image || slot.Image->GetWidth() != size.Width || slot.Image->GetHeight() != size.Height)
-                    slot.Image = MakeMaterialTarget(Resources, size);
-                slot.Input.Prepare(*Submit, Device, Native(*image)->GetDesc());
-                inputOp = slot.Input.Append(graph, slot.Bindings, slot.Work, "canvas receive selected cloud picture",
-                    1, *slot.Image, false, Queue::Direct);
-            }
-            Draw.Append(graph, slot.Bindings, slot.Work, slot.Draw, slot.Image.get(), title + " remote raster");
+            Draw.Append(graph, slot.Bindings, slot.Work, slot.Draw, title + " remote raster");
             slot.Output.Append(graph, slot.Bindings, slot.Work, title + " export final texture",
                 1, *slot.Draw.Target, true, Queue::Direct);
             slot.Plan = Compile(graph);
-            if (image) {
-                for (Id packet = 0; packet < slot.Plan.Packets.size(); ++packet)
-                    if (slot.Plan.Packets[packet].Operation == inputOp) slot.InputPacket = packet;
-                if (slot.InputPacket == Invalid) throw std::logic_error("Missing remote canvas input packet");
-            }
             Recorder.Reserve(slot.Plan);
             slot.Version = ++Ordered;
             return index;
         }
 
-        CompletionToken Execute(UINT index, CompletionToken input = {})
+        void Execute(UINT index)
         {
             auto& slot = Slots.at(index);
-            std::vector<PacketWait> waits;
-            if (input) waits.push_back({slot.InputPacket, input});
-            slot.CloudInput = input;
             Recorder.Execute(slot.Plan, slot.Bindings,
-                [&](Id op, uint32_t, auto* cmd) { slot.Work.Record(op, cmd); }, nullptr, nullptr, nullptr, waits);
-            return slot.Ready = Recorder.Completions().back();
+                [&](Id op, uint32_t, auto* cmd) { slot.Work.Record(op, cmd); });
+            slot.Ready = Recorder.Completions().back();
         }
     };
 
@@ -331,11 +301,10 @@ struct BistroUIPosters::Impl
     {
         DrawFrame Local;
         std::shared_ptr<Remote> Lane;
-        GDX12Texture* InputImage = nullptr;
+        GDX12Texture* MaterialTexture = nullptr;
         uint64_t Version = 0;
         Id Order = Invalid, Display = Invalid;
-        Id Output = Invalid, Import = Invalid, ExportInput = Invalid, ImportPacket = Invalid, Consumer = Invalid;
-        bool Published = false;
+        Id Output = Invalid, Import = Invalid, ImportPacket = Invalid, Consumer = Invalid;
     };
 
     struct Surface
@@ -436,19 +405,18 @@ struct BistroUIPosters::Impl
             frame.Local.Retire();
             frame.Lane.reset();
             frame.Order = frame.Display = Invalid;
-            frame.Output = frame.Import = frame.ExportInput = frame.ImportPacket = frame.Consumer = Invalid;
+            frame.Output = frame.Import = frame.ImportPacket = frame.Consumer = Invalid;
             surface->Current = nullptr;
             const auto& poster = surface->Definition;
             const bool image = poster.Style == CanvasStyle::Image;
             const bool active = !Worlds.empty() && surface->Material && (!image || (CloudCanvas && cloudImage));
-            const auto* oldTarget = frame.Local.Target.get();
-            if (active) {
+            const auto* oldTarget = frame.MaterialTexture;
+            frame.MaterialTexture = active && image ? cloudImage : nullptr;
+            if (active && !image) {
                 const auto input = surface->Canvas.BuildFrame(poster.Size, seconds, quality);
                 if (input->Id != poster.Id) throw std::logic_error("World canvas identity mismatch");
-                frame.InputImage = image ? cloudImage : nullptr;
-                frame.Version = version;
                 const auto profile = GetCanvasProfile(input->LogicalSize, input->Quality);
-                frame.Local.PrepareTarget(primary, profile.RasterSize, !image);
+                frame.Local.PrepareTarget(primary, profile.RasterSize);
                 const int requested = AdapterVariables[surface->Index]->GetValue();
                 if (requested != surface->FailedAdapter) surface->FailedAdapter = -1;
                 const Id device = requested >= 0 && requested != surface->FailedAdapter ?
@@ -464,7 +432,7 @@ struct BistroUIPosters::Impl
                     try {
                         if (!surface->Lane) surface->Lane = std::make_shared<Remote>(executor, device, UINT(Slots.size() + 1));
                         auto& lane = *surface->Lane;
-                        frame.Order = lane.Prepare(CrossSyncVariables[surface->Index]->GetValue(), input, frame.InputImage, poster.Title);
+                        frame.Order = lane.Prepare(CrossSyncVariables[surface->Index]->GetValue(), input, poster.Title);
                         frame.Display = lane.Mode == 0 && lane.Latest != Invalid ? lane.Latest : frame.Order;
                         lane.Latest = frame.Order;
                         frame.Lane = surface->Lane;
@@ -476,18 +444,21 @@ struct BistroUIPosters::Impl
                     }
                 }
                 if (frame.Lane) {
-                    if (!frame.InputImage) frame.Lane->Execute(frame.Order);
+                    frame.Lane->Execute(frame.Order);
                 } else {
                     if (!surface->Local) surface->Local = std::make_unique<CanvasRenderer>(*primary.Device, UINT(Slots.size()));
                     surface->Local->Prepare(primary, frame.Local, input);
                 }
-                surface->Current = &frame;
+                frame.MaterialTexture = frame.Local.Target.get();
             } else surface->Lane.reset();
-            auto* target = active ? frame.Local.Target.get() : nullptr;
-            if ((active && (!frame.Published || oldTarget != target)) || (!active && surface->Binding.PrimaryDeviceTexture))
+            auto* target = frame.MaterialTexture;
+            if (active) {
+                frame.Version = version;
+                surface->Current = &frame;
+            }
+            if ((active && oldTarget != target) || (!active && surface->Binding.PrimaryDeviceTexture))
                 surface->Material->DirtyFlag = true;
             surface->Binding.PrimaryDeviceTexture = target;
-            frame.Published = active;
             for (auto& [world, entities] : Worlds) {
                 const auto entity = entities[surface->Index];
                 if (entity == InvalidEntity) continue;
@@ -513,29 +484,17 @@ struct BistroUIPosters::Impl
             0, *frame.Local.Target, false, Queue::Copy);
     }
 
-    void AppendPreviousImports(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work)
-    {
-        for (auto* surface : Surfaces())
-            if (surface->Current && surface->Current->Lane && surface->Current->Display != surface->Current->Order)
-                AppendImport(graph, bindings, work, *surface);
-    }
-
     std::vector<CanvasRead> Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work)
     {
         std::vector<CanvasRead> reads;
         for (auto* surface : Surfaces()) {
             if (!surface->Current) continue;
             auto& frame = *surface->Current;
-            auto& target = *frame.Local.Target;
-            const std::string title(surface->Definition.Title);
+            auto& target = *frame.MaterialTexture;
             if (frame.Lane) {
-                auto& slot = frame.Lane->Slots.at(frame.Order);
-                if (frame.InputImage)
-                    frame.ExportInput = slot.Input.Append(graph, bindings, work, title + " export selected cloud picture",
-                        0, *frame.InputImage, true, Queue::Copy);
-                if (frame.Display == frame.Order) AppendImport(graph, bindings, work, *surface);
-            } else {
-                surface->Local->Append(graph, bindings, work, frame.Local, frame.InputImage, title + " local raster");
+                AppendImport(graph, bindings, work, *surface);
+            } else if (surface->Definition.Style != CanvasStyle::Image) {
+                surface->Local->Append(graph, bindings, work, frame.Local, std::string(surface->Definition.Title) + " local raster");
             }
             const auto access = Bind(graph, bindings, Native(target), "canvas material texture",
                 Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
@@ -545,16 +504,14 @@ struct BistroUIPosters::Impl
         return reads;
     }
 
-    void AddExchanges(const Schedule& schedule, std::vector<PacketWait>& waits, std::vector<Executor::PacketExchange>& exchanges)
+    void AddWaits(const Schedule& schedule, std::vector<PacketWait>& waits)
     {
         for (auto* surface : Surfaces()) {
             if (!surface->Current) continue;
             auto& frame = *surface->Current;
-            Id input = Invalid;
             for (Id i = 0; i < schedule.Packets.size(); ++i) {
                 const auto& packet = schedule.Packets[i];
                 if (frame.Import != Invalid && packet.Operation == frame.Import) frame.ImportPacket = i;
-                if (frame.ExportInput != Invalid && packet.Operation == frame.ExportInput) input = i;
                 if (packet.Name == "world-space canvases over G-buffer" &&
                     std::any_of(packet.Accesses.begin(), packet.Accesses.end(), [&](const auto& access) {
                         return access.Resource == frame.Output && access.Usage == Mode::Read;
@@ -562,18 +519,7 @@ struct BistroUIPosters::Impl
             }
             if (!frame.Lane) continue;
             if (frame.ImportPacket == Invalid) throw std::logic_error("Missing world canvas import");
-            const bool displayCurrent = frame.Display == frame.Order;
-            if (frame.InputImage) {
-                if (input == Invalid) throw std::logic_error("Missing canvas cloud picture export");
-                if (!displayCurrent && frame.ImportPacket >= input)
-                    throw std::logic_error("Previous canvas import must precede the current cloud input export");
-                exchanges.push_back({input, displayCurrent ? frame.ImportPacket : Invalid,
-                    [lane = frame.Lane, slot = frame.Order](CompletionToken token) {
-                    return lane->Execute(slot, token);
-                }});
-            }
-            if (!frame.InputImage || !displayCurrent)
-                waits.push_back({frame.ImportPacket, frame.Lane->Slots.at(frame.Display).Ready});
+            waits.push_back({frame.ImportPacket, frame.Lane->Slots.at(frame.Display).Ready});
         }
     }
 
@@ -598,13 +544,12 @@ struct BistroUIPosters::Impl
             Log::Info("RenderGraph", "World canvas frame=", version, " id=", uint64_t(surface->Definition.Id),
                 " title=", surface->Definition.Title, " GPU=", Submissions->AdapterLabel(device),
                 " material=", surface->Definition.Material, " materialIndex=", surface->Material->_CBufferIndex,
-                " textureIndex=", frame.Local.Target->GetSRV()->HeapIndex - Texture2D_StartIndex,
+                " textureIndex=", frame.MaterialTexture->GetSRV()->HeapIndex - Texture2D_StartIndex,
                 " crossSync=", frame.Lane ? frame.Lane->Mode : -1,
                 " ordered=", order ? order->Version : frame.Version,
                 " shown=", display ? display->Version : frame.Version,
                 " exportFence=", display ? display->Ready.Value : 0, " importFence=", imported.Value,
                 " orderedExportFence=", order ? order->Ready.Value : 0,
-                " cloudInputFence=", order ? order->CloudInput.Value : 0,
                 " consumer=world-space canvases over G-buffer consumerFence=", completions[frame.Consumer].Value);
         }
     }
@@ -641,15 +586,9 @@ std::vector<CanvasRead> BistroUIPosters::Append(Graph& graph, std::vector<ID3D12
     return _impl->Append(graph, bindings, work);
 }
 
-void BistroUIPosters::AppendPreviousImports(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work)
+void BistroUIPosters::AddWaits(const Schedule& schedule, std::vector<PacketWait>& waits)
 {
-    _impl->AppendPreviousImports(graph, bindings, work);
-}
-
-void BistroUIPosters::AddExchanges(const Schedule& schedule, std::vector<PacketWait>& waits,
-                                   std::vector<Executor::PacketExchange>& exchanges)
-{
-    _impl->AddExchanges(schedule, waits, exchanges);
+    _impl->AddWaits(schedule, waits);
 }
 
 void BistroUIPosters::Submitted(uint64_t frame, const std::vector<CompletionToken>& completions)
