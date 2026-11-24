@@ -29,7 +29,7 @@ public:
     // Instance indices are global draw-cache slots, so casters from different worlds stay distinct.
     void RemoveCaster(UINT instance);
 
-    // Updates cached projections when a point/spot light or its FirstShadowViewIndex changes; follows Bistro GDX12LocalLights.
+    // Updates cached projections when a point/spot light or its FirstShadowViewIndex changes.
     void UpdatePointSpotViews(const GDX12LightConstants& light);
 
     // Merges caster bounds, rebuilds directional cascades and assigns array layers.
@@ -44,7 +44,7 @@ public:
     UINT PointSpotArraySize = 0;
 
 private:
-    // Cascade splits, texel snapping and overlap follow Bistro GDX12ShadowCascades.
+    // Cascade splits, texel snapping and overlaps.
     void UpdateDirectionalViews(const GDX12LightConstants& light, const BoundingBox* casterBounds);
 
     struct ShadowCaster

@@ -48,7 +48,6 @@ void ClusteredLightingGrid::BuildClusterLightMasks(const Matrix& view, const Mat
         }
         if (light.Range <= 0) { continue; }
 
-        // Bistro's conservative sphere bounds, clipped to each logarithmic depth slice.
         const Vector3 center = Vector3::Transform(light.Position, view);
         const float centerDepth = -center.z;
         const float range = light.Range;

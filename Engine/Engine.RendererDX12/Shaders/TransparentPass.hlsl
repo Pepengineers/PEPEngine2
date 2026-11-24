@@ -148,7 +148,7 @@ float3 ShadeLight(PBRSurface s, float3 position, float3 v, GDX12LightConstants l
             l = delta * rsqrt(max(distanceSquared, 1e-6f));
             float cone = light.Type == LIGHT_TYPE_SPOT ? saturate((dot(-l, light.Direction) - light.OuterConeCos) / max(light.InnerConeCos - light.OuterConeCos, 1e-4f)) : 1;
             float rangeFade = saturate(1 - pow(distanceSquared / (light.Range * light.Range), 2));
-            // Bistro units are centimetres; intensity is expressed per square metre.
+            // Units are centimetres, intensity is expressed per square metre.
             float attenuation = rangeFade * rangeFade * cone * cone / max(distanceSquared * 0.0001f, 0.01f);
             result = EvaluateBRDF(s, v, l) * radiance * attenuation;
         }
