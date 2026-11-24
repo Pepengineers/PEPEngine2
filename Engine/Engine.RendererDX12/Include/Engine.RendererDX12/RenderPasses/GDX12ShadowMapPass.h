@@ -1,10 +1,10 @@
 #pragma once
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 
-// Renders all shadow projections every frame from the three shadow DrawStreams.
+// Renders shadow projections from the three shadow DrawStreams.
 // FrameGraph owns both depth arrays and can transfer the inputs and outputs between GPUs.
-// Private point/spot static and final caches survive slot changes. Only dirty lights are drawn;
-// the complete final cache is copied into the current FrameGraph output for its consumers.
+// Private point/spot static depth is reused across slots. Final depth lives directly in each
+// FrameGraph output; only stale slots/lights are restored from static depth and receive dynamic draws.
 class GDX12ShadowMapPass final : public GDX12RenderPass
 {
 public:
@@ -19,14 +19,14 @@ public:
     void ResolveResourceRequirements(PassResourceRequirementsContext& context) override;
     void Initialize(PassInitContext& context) override;
     void Execute(PassExecutionContext& context) override;
-    // Rebuilds caches when the array size changes and refreshes all views after resource reconstruction.
+    // Rebuilds static depth when needed and marks every new output slot as uninitialized.
     void OnResourcesRecreated(PassInitContext& context) override;
-    // Retains private allocations through GPU completion and tracks their states on this GPU's DIRECT queue.
+    // Retains static depth through GPU completion and tracks its state on this GPU's DIRECT queue.
     std::vector<ExternalResourceUse> GetExternalResources(PassExecutionContext& context) override;
 
 private:
-    // Cache textures belong to this pass/GPU and survive frame-slot output reconstruction.
-    // FrameGraph drains the queues before this callback can replace their allocations.
+    // Static depth belongs to this pass/GPU. FrameGraph drains the queues before reconstruction
+    // can replace its allocation; final depth is owned by the FrameGraph slots.
     void CreatePointSpotCache(PassInitContext& context);
 
     std::unique_ptr<GDX12RootSignature> _root;
@@ -34,6 +34,6 @@ private:
     ComPtr<ID3D12PipelineState> _directionalPipeline;
     ComPtr<ID3D12PipelineState> _pointSpotPipeline;
     std::unique_ptr<GDX12Texture> _pointSpotStaticCache;
-    std::unique_ptr<GDX12Texture> _pointSpotFinalCache;
     bool _resetCache = true;
+    std::vector<bool> _initializedSlots;
 };

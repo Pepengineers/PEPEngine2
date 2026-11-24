@@ -50,6 +50,7 @@ void GDX12ShadowMapPass::ResolveResourceRequirements(PassResourceRequirementsCon
 void GDX12ShadowMapPass::Initialize(PassInitContext& context)
 {
     CreatePointSpotCache(context);
+    _initializedSlots.assign(context.GetDeviceResources()->FrameConstants.size(), false);
 
     GDX12RootSignatureDesc root;
     root.Constants = {2};
@@ -138,20 +139,20 @@ void GDX12ShadowMapPass::Execute(PassExecutionContext& context)
     commands->SetViewport(pointSpot->GetViewport());
     commands->SetScissorRect(pointSpot->GetScissorRect());
     auto* staticCache = _pointSpotStaticCache.get();
-    auto* finalCache = _pointSpotFinalCache.get();
+    const auto slot = context.GetFrameSlotResourcesIndex();
+    const bool initializeOutput = !_initializedSlots[slot];
+    const UINT forcedUpdates = _resetCache ? SHADOW_UPDATE_STATIC | SHADOW_UPDATE_FINAL :
+        initializeOutput ? SHADOW_UPDATE_FINAL : 0;
     const auto& shadows = context.GetFrameData()->ShadowSystem;
     const auto& views = shadows.Views;
-    if (_resetCache)
-    {
-        commands->ClearDepthStencilView(staticCache);
-        commands->ClearDepthStencilView(finalCache);
-    }
+    if (_resetCache) commands->ClearDepthStencilView(staticCache);
 
-    bool updateStatic = _resetCache, updateFinal = _resetCache;
+    if (initializeOutput) commands->ClearDepthStencilView(pointSpot);
+    bool updateStatic = _resetCache, updateFinal = initializeOutput || _resetCache;
     for (const auto& view : views)
     {
         if (view.Type == LightType::Directional) continue;
-        const auto updates = shadows.LightUpdateFlags[view.LightIndex];
+        const auto updates = shadows.LightUpdateFlags[view.LightIndex] | forcedUpdates;
         updateStatic |= (updates & SHADOW_UPDATE_STATIC) != 0;
         updateFinal |= (updates & SHADOW_UPDATE_FINAL) != 0;
         if (!_resetCache && (updates & SHADOW_UPDATE_STATIC))
@@ -168,27 +169,24 @@ void GDX12ShadowMapPass::Execute(PassExecutionContext& context)
     }
     if (updateFinal)
     {
-        commands->BeginPixEvent("Point/Spot Final Cache", Colors::MediumPurple);
-        commands->ResourceBarrier({staticCache->GetResource()->GetCopySourceBarrier(), finalCache->GetResource()->GetCopyDestBarrier()});
+        commands->BeginPixEvent("Point/Spot Compose Static&Dynamic Shadows", Colors::MediumPurple);
+        commands->ResourceBarrier({staticCache->GetResource()->GetCopySourceBarrier(), pointSpot->GetResource()->GetCopyDestBarrier()});
         for (const auto& view : views)
         {
-            if (view.Type == LightType::Directional ||
-                (!_resetCache && !(shadows.LightUpdateFlags[view.LightIndex] & SHADOW_UPDATE_FINAL))) continue;
+            if (view.Type == LightType::Directional) continue;
+            const auto updates = shadows.LightUpdateFlags[view.LightIndex] | forcedUpdates;
+            if (!(updates & SHADOW_UPDATE_FINAL)) continue;
             const CD3DX12_TEXTURE_COPY_LOCATION source(staticCache->GetResource()->D3DResource.Get(), view.Layer);
-            const CD3DX12_TEXTURE_COPY_LOCATION target(finalCache->GetResource()->D3DResource.Get(), view.Layer);
+            const CD3DX12_TEXTURE_COPY_LOCATION target(pointSpot->GetResource()->D3DResource.Get(), view.Layer);
             commands->GetCommandList()->CopyTextureRegion(&target, 0, 0, 0, &source, nullptr);
         }
-        commands->ResourceBarrier({finalCache->GetResource()->GetDepthWriteBarrier()});
-        commands->SetRenderTargets({}, finalCache);
+        commands->ResourceBarrier({pointSpot->GetResource()->GetDepthWriteBarrier()});
+        commands->SetRenderTargets({}, pointSpot);
         commands->ExecuteIndirect(_signature.Get(), dynamicDraws.Capacity,
             dynamicDraws.Arguments->D3DResource.Get(), 0, dynamicDraws.Count->D3DResource.Get(), 0);
         commands->EndPixEvent();
     }
-    // Each slot (and each receiving GPU) still gets a complete map. Partial transfer is a separate optimization.
-    commands->ResourceBarrier({finalCache->GetResource()->GetCopySourceBarrier()});
-    context.TransitionTextureState(context.GetOutputTexture(OutPointSpotMaps), D3D12_RESOURCE_STATE_COPY_DEST);
-    commands->GetCommandList()->CopyResource(pointSpot->GetResource()->D3DResource.Get(), finalCache->GetResource()->D3DResource.Get());
-    context.TransitionTextureState(context.GetOutputTexture(OutPointSpotMaps), D3D12_RESOURCE_STATE_DEPTH_WRITE);
+    _initializedSlots[slot] = true;
     _resetCache = false;
     commands->EndPixEvent();
 }
@@ -208,16 +206,14 @@ void GDX12ShadowMapPass::CreatePointSpotCache(PassInitContext& context)
     description.DSVHeap = resources->DSVHeap.get();
     description.ClearValue = {1, 0, 0, 0};
     _pointSpotStaticCache = std::make_unique<GDX12Texture>();
-    _pointSpotFinalCache = std::make_unique<GDX12Texture>();
     description.DSVHeapIndex = resources->DSVHeap->GetAvailableIndex();
     _pointSpotStaticCache->Initialize(description);
-    description.DSVHeapIndex = resources->DSVHeap->GetAvailableIndex();
-    _pointSpotFinalCache->Initialize(description);
 }
 
 void GDX12ShadowMapPass::OnResourcesRecreated(PassInitContext& context)
 {
     CreatePointSpotCache(context);
+    _initializedSlots.assign(context.GetDeviceResources()->FrameConstants.size(), false);
     _resetCache = true;
 }
 
@@ -225,6 +221,5 @@ std::vector<ExternalResourceUse> GDX12ShadowMapPass::GetExternalResources(PassEx
 {
     auto uses = GDX12RenderPass::GetExternalResources(context);
     uses.push_back({_pointSpotStaticCache->GetResource(), D3D12_RESOURCE_STATE_DEPTH_WRITE, {}});
-    uses.push_back({_pointSpotFinalCache->GetResource(), D3D12_RESOURCE_STATE_DEPTH_WRITE, {}});
     return uses;
 }

@@ -717,7 +717,7 @@ void RenderModule::PreRender()
     auto& shadows = _RPcommonData.ShadowSystem;
     const auto directionalArraySize = shadows.DirectionalArraySize;
     const auto pointSpotArraySize = shadows.PointSpotArraySize;
-    shadows.BuildViews(_lightingGrid.Lights);
+    shadows.BuildViews(_lightingGrid.Lights, _frameGraph->GetExecutionPlan().FrameSlotCount);
     if (shadows.DirectionalArraySize != directionalArraySize || shadows.PointSpotArraySize != pointSpotArraySize)
         _frameGraph->RequestFrameSlotResourcesRebuild();
     for (const auto role : {DEVICE_ROLE_PRIMARY, DEVICE_ROLE_SECONDARY})

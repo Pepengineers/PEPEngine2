@@ -13,7 +13,7 @@ public:
     void ResolveResourceRequirements(PassResourceRequirementsContext& context) override;
     void Initialize(PassInitContext& context) override;
     void Execute(PassExecutionContext& context) override;
-    // Matches ShadowMapPass's cache reset: the next culling dispatch includes every point/spot view.
+    // Rebuild static depth once and generate dynamic draws on the first use of each new output slot.
     void OnResourcesRecreated(PassInitContext& context) override;
 
 private:
@@ -21,4 +21,5 @@ private:
     ComPtr<ID3D12PipelineState> _cullingPipeline;
     ComPtr<ID3D12PipelineState> _clearPipeline;
     bool _resetCache = true;
+    std::vector<bool> _initializedSlots;
 };

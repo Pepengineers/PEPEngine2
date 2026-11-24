@@ -32,9 +32,10 @@ public:
     // Updates cached projections when a point/spot light or its FirstShadowViewIndex changes; follows Bistro GDX12LocalLights.
     void UpdatePointSpotViews(const GDX12LightConstants& light);
 
-    // Merges caster bounds after edits, rebuilds directional cascades each frame and assigns array layers,
-    // preserving cached point/spot projections.
-    void BuildViews(const std::vector<GDX12LightConstants>& lights);
+    // Merges caster bounds, rebuilds directional cascades and assigns array layers.
+    // Final-cache changes stay dirty for frameSlotCount consecutive rendered frames, so every
+    // cyclic FrameGraph slot receives the latest depth. Static-cache changes apply once.
+    void BuildViews(const std::vector<GDX12LightConstants>& lights, UINT frameSlotCount);
 
     std::vector<ShadowView> Views;
     // One cache-update mask per light, indexed like LightsCache. All views of a light share this entry.
@@ -60,6 +61,8 @@ private:
     std::vector<ChangedCasterBounds> _changedCasterBounds;
     // Pending projection changes, keyed by the light's first view; consumed by BuildViews.
     std::unordered_map<UINT, UINT> _pointSpotUpdates;
+    // One counter per light, following the same propagation pattern as component _numFramesDirty.
+    std::vector<UINT> _finalFramesDirty;
     BoundingBox _casterBounds{};
     bool _casterBoundsDirty = false;
     Matrix _inverseView = Matrix::Identity;
