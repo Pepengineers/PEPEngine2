@@ -185,6 +185,7 @@ void GDX12ShadowMapPass::Execute(PassExecutionContext& context)
     {
         commands->BeginPixEvent("Point/Spot Compose Static&Dynamic Shadows", Colors::MediumPurple);
         commands->ResourceBarrier({staticCache->GetResource()->GetCopySourceBarrier(), pointSpot->GetResource()->GetCopyDestBarrier()});
+        std::vector<UINT> updatedArrayElements;
         for (const auto& view : views)
         {
             if (view.Type == LightType::Directional) continue;
@@ -193,13 +194,16 @@ void GDX12ShadowMapPass::Execute(PassExecutionContext& context)
             const CD3DX12_TEXTURE_COPY_LOCATION source(staticCache->GetResource()->D3DResource.Get(), view.Layer);
             const CD3DX12_TEXTURE_COPY_LOCATION target(pointSpot->GetResource()->D3DResource.Get(), view.Layer);
             commands->GetCommandList()->CopyTextureRegion(&target, 0, 0, 0, &source, nullptr);
+            updatedArrayElements.push_back(view.Layer);
         }
         commands->ResourceBarrier({pointSpot->GetResource()->GetDepthWriteBarrier()});
         commands->SetRenderTargets({}, pointSpot);
         commands->ExecuteIndirect(_signature.Get(), dynamicDraws.Capacity,
             dynamicDraws.Arguments->D3DResource.Get(), 0, dynamicDraws.Count->D3DResource.Get(), 0);
         commands->EndPixEvent();
+        if (!initializeOutput) context.SetUpdatedDepthArrayElements(OutPointSpotMaps, updatedArrayElements);
     }
+    else { context.SetUpdatedDepthArrayElements(OutPointSpotMaps, {}); }
     _initializedSlots[slot] = true;
     _resetCache = false;
     commands->EndPixEvent();

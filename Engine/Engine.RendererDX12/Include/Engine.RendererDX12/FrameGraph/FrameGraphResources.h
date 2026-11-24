@@ -43,6 +43,11 @@ struct FrameGraphMaterialization
     GDX12CompletionPoint ProducerReady;
     GDX12CompletionPoint SharedReady;
     std::array<GDX12CompletionPoint, 2> LocalCopyReady{};
+    // Copy contents persist across uses of this slot; readiness fences are reset each frame.
+    bool SharedInitialized = false;
+    std::array<bool, 2> LocalCopyInitialized{};
+    bool HasUpdatedDepthArrayElements = false;
+    std::vector<UINT> UpdatedDepthArrayElements;
 };
 
 std::unique_ptr<FrameGraphPhysicalResource> CreateFrameGraphNative(GDX12DeviceResources* owner, const ResourceDescription& description);
@@ -52,7 +57,9 @@ HRESULT TryCreateFrameGraphShared(GDX12DeviceResources* producer, GDX12DeviceRes
 void TransitionFrameGraphResource(GDX12CommandList* commands, FrameGraphPhysicalResource& resource, D3D12_RESOURCE_STATES state);
 void FrameGraphUAVBarrier(GDX12CommandList* commands, FrameGraphPhysicalResource& resource);
 struct FrameGraphCopyStatistics { uint64_t Bytes = 0; uint32_t Commands = 0; };
-FrameGraphCopyStatistics CopyFrameGraphResource(GDX12CommandList* commands, FrameGraphPhysicalResource& source, FrameGraphPhysicalResource& target);
+// Null selects the whole resource. A validated list selects complete array elements of a D32_FLOAT array.
+FrameGraphCopyStatistics CopyFrameGraphResource(GDX12CommandList* commands, FrameGraphPhysicalResource& source,
+    FrameGraphPhysicalResource& target, const std::vector<UINT>* arrayElements = nullptr);
 // Check whether the device is capable of doing operations, described by the port
 PortCapabilities QueryFrameGraphCapabilities(GDX12Device* device, const PortDescription& schema);
 ResourceDescription DescribeFrameGraphTexture(GDX12Texture* texture);

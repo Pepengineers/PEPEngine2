@@ -3,6 +3,7 @@
 #include "Engine.RendererDX12/GDX12Descriptor.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
 
+#include <algorithm>
 #include <limits>
 
 namespace
@@ -243,6 +244,22 @@ namespace
     }
 }
 
+void PassExecutionContext::SetUpdatedDepthArrayElements(const PinId& id, const std::vector<UINT>& arrayElements) const
+{
+    const auto& description = GetOutputTexture(id).GetDescription();
+    if (description.Type != ResourceType::Texture2DArray || description.Format != DXGI_FORMAT_D32_FLOAT)
+        throw std::invalid_argument("ERROR: " + _node.Id + "." + id + ": updated depth array elements require a D32_FLOAT Texture2DArray output.");
+    if (std::any_of(arrayElements.begin(), arrayElements.end(), [&](UINT element) { return element >= description.ArraySize; }))
+        throw std::invalid_argument("ERROR: " + _node.Id + "." + id + ": updated depth array element is outside the texture array.");
+    auto* output = GetBinding(id).Output;
+    if (!output) throw std::logic_error("ERROR: Updated depth array elements require a FrameGraph output binding.");
+    output->UpdatedDepthArrayElements = arrayElements;
+    auto& elements = output->UpdatedDepthArrayElements;
+    std::sort(elements.begin(), elements.end());
+    elements.erase(std::unique(elements.begin(), elements.end()), elements.end());
+    output->HasUpdatedDepthArrayElements = true;
+}
+
 void PassResourceRequirementsContext::SetOutputTextureArraySize(const PinId& id, UINT arraySize)
 {
     auto output = _node.Description.Outputs.find(id);
@@ -468,7 +485,7 @@ void FrameGraphUAVBarrier(GDX12CommandList* commands, FrameGraphPhysicalResource
 }
 
 FrameGraphCopyStatistics CopyFrameGraphResource(GDX12CommandList* commands, FrameGraphPhysicalResource& source,
-    FrameGraphPhysicalResource& target)
+    FrameGraphPhysicalResource& target, const std::vector<UINT>* arrayElements)
 {
     if (source.DeviceResources->Device != target.DeviceResources->Device)
     { throw std::invalid_argument("ERROR: Copy source or destination mapping belongs to another device. Use source and destination resource "
@@ -482,11 +499,12 @@ FrameGraphCopyStatistics CopyFrameGraphResource(GDX12CommandList* commands, Fram
     FrameGraphCopyStatistics result;
     auto* sourceTexture = ResolveTexture(source);
     auto* targetTexture = ResolveTexture(target);
-    if (sourceTexture && targetTexture)
+    if (sourceTexture && targetTexture &&
+        sourceTexture->GetResource()->D3DResource.Get() == targetTexture->GetResource()->D3DResource.Get()) return result;
+    if (sourceTexture && targetTexture && !arrayElements)
     {
         const auto src = sourceTexture->GetResource()->D3DResource;
         const auto dst = targetTexture->GetResource()->D3DResource;
-        if (src.Get() == dst.Get()) { return result; }
         commands->CopyResource(dst.Get(), src.Get());
         result.Bytes = source.TransferBytes ? source.TransferBytes : target.TransferBytes;
         if (!result.Bytes)
@@ -499,27 +517,40 @@ FrameGraphCopyStatistics CopyFrameGraphResource(GDX12CommandList* commands, Fram
     }
     if (sourceTexture || targetTexture)
     {
-        auto& payload = sourceTexture ? target : source;
-        auto* native = sourceTexture ? sourceTexture : targetTexture;
-        if (payload.Footprints.empty() || payload.Buffers.size() != 1 || payload.Footprints.size() != a.ArraySize * a.MipLevels)
+        const auto* payload = sourceTexture && targetTexture ? nullptr : sourceTexture ? &target : &source;
+        if (payload && (payload->Footprints.empty() || payload->Buffers.size() != 1 || payload->Footprints.size() != a.ArraySize * a.MipLevels))
         { throw std::invalid_argument("ERROR: Texture transport has no complete canonical whole-resource copy footprints. Create whole-resource copy "
             "footprints for every texture subresource before transferring it."); }
-        for (UINT i = 0; i < payload.Footprints.size(); ++i)
+        std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> nativeFootprints;
+        if (!payload) { Footprints(source.DeviceResources->Device, a, nativeFootprints, result.Bytes); result.Bytes = 0; }
+        const auto& footprints = payload ? payload->Footprints : nativeFootprints;
+        auto location = [](FrameGraphPhysicalResource& resource, GDX12Texture* texture, UINT subresource)
         {
-            D3D12_TEXTURE_COPY_LOCATION textureLocation = {};
-            textureLocation.pResource = native->GetResource()->D3DResource.Get();
-            textureLocation.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-            textureLocation.SubresourceIndex = i;
-            D3D12_TEXTURE_COPY_LOCATION bufferLocation = {};
-            bufferLocation.pResource = payload.Buffers[0].Resource.D3DResource.Get();
-            bufferLocation.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-            bufferLocation.PlacedFootprint = payload.Footprints[i];
-            const auto* src = sourceTexture ? &textureLocation : &bufferLocation;
-            const auto* dst = sourceTexture ? &bufferLocation : &textureLocation;
-            commands->GetCommandList()->CopyTextureRegion(dst, 0, 0, 0, src, nullptr);
+            if (texture) return CD3DX12_TEXTURE_COPY_LOCATION(texture->GetResource()->D3DResource.Get(), subresource);
+            return CD3DX12_TEXTURE_COPY_LOCATION(resource.Buffers[0].Resource.D3DResource.Get(), resource.Footprints[subresource]);
+        };
+        auto copy = [&](UINT subresource)
+        {
+            const auto src = location(source, sourceTexture, subresource);
+            const auto dst = location(target, targetTexture, subresource);
+            commands->GetCommandList()->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
             ++result.Commands;
+            if (arrayElements)
+            {
+                const auto& footprint = footprints[subresource].Footprint;
+                result.Bytes = AddBytes(result.Bytes, uint64_t(footprint.RowPitch) * (footprint.Height - 1) + uint64_t(footprint.Width) * sizeof(float));
+            }
+        };
+        if (arrayElements)
+        {
+            for (const auto element : *arrayElements)
+                for (UINT mip = 0; mip < a.MipLevels; ++mip) copy(element * a.MipLevels + mip);
         }
-        result.Bytes = payload.Buffers[0].Resource.D3DResource->GetDesc().Width;
+        else
+        {
+            for (UINT i = 0; i < footprints.size(); ++i) copy(i);
+            result.Bytes = payload->Buffers[0].Resource.D3DResource->GetDesc().Width;
+        }
         return result;
     }
     if (source.Buffers.size() != target.Buffers.size()) { throw std::invalid_argument("ERROR: GPU transport source and destination component counts differ. Match the source and destination "

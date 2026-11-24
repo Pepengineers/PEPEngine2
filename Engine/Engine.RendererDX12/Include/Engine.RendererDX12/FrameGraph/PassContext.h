@@ -9,6 +9,7 @@
 
 class RenderPipelineCommonData;
 struct FrameGraphPhysicalResource;
+struct FrameGraphMaterialization;
 
 struct ExternalResourceUse
 {
@@ -67,6 +68,7 @@ struct BufferBinding
 struct PassBinding
 {
     FrameGraphPhysicalResource* Resource = nullptr;
+    FrameGraphMaterialization* Output = nullptr;
     TextureBinding Texture;
     DrawStreamBinding Draws;
     BufferBinding Buffer;
@@ -158,6 +160,10 @@ public:
         return binding ? &binding->Draws : nullptr;
     }
     GDX12Descriptor* GetOutputRTV(const PinId& id, uint32_t layer = 0) const { return GetOutputTexture(id).GetRTV(layer); }
+    // Reports modified array elements of a D32_FLOAT depth-array output in this frame slot.
+    // Omitting the call keeps full transfers. An empty list reuses initialized receiving copies;
+    // every new copy is filled completely first. Each selected array element includes all its mips.
+    void SetUpdatedDepthArrayElements(const PinId& id, const std::vector<UINT>& arrayElements) const;
     void TransitionTextureState(const TextureBinding& binding, D3D12_RESOURCE_STATES state) const
     { _commands->ResourceBarrier({binding.GetTexture()->GetResource()->GetTransitionBarrier(state)}); }
 private:

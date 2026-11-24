@@ -517,6 +517,7 @@ struct CompiledFrameGraph::Runtime
                 }
                 pass.Outputs.push_back(&material);
                 bind(pin, port, *material.ProducerResource, shared);
+                pass.Bindings.at(pin).Output = &material;
             }
         }
     }
@@ -713,8 +714,9 @@ struct CompiledFrameGraph::Runtime
     // Copy between two representations on one device; shared mappings carry data across adapters.
     GDX12CompletionPoint TransferResourceData(FrameGraphPhysicalResource& source, FrameGraphPhysicalResource& target,
         const GDX12CompletionPoint& ready, ResourceTransfer transfer, FrameSlotResources& frameResources,
-        const PinAddress& sourcePin, bool exporting)
+        const PinAddress& sourcePin, bool exporting, const std::vector<UINT>* arrayElements = nullptr)
     {
+        if (arrayElements && arrayElements->empty()) { return ready; }
         const bool useCopy = transfer.Method == TransferMethod::CopyQueue;
         const bool compute = transfer.Method == TransferMethod::ComputeCopy;
         const auto scope = transfer.Scope;
@@ -748,7 +750,7 @@ struct CompiledFrameGraph::Runtime
         auto* timer = !frameResources.MeasureFrame || scope == CopyScope::Local ? nullptr : &Diagnostics.GetTransferTimer(queue, sourcePin, exporting, CompileData.FrameSlotCount);
         const bool timed = timer && timer->Start(commands, false);
         auto statistics = compute ? ComputeCopiers[device->Role].Dispatch(commands, source, target)
-                                  : CopyFrameGraphResource(commands, source, target);
+                                  : CopyFrameGraphResource(commands, source, target, arrayElements);
         if (timed) { timer->Stop(commands); }
         // COPY uses implicit promotion from COMMON; resources decay back after its submission completes.
         if (!useCopy)
@@ -778,6 +780,7 @@ struct CompiledFrameGraph::Runtime
         const auto& resource = *input.Plan;
         const auto& replica = resource.Imports[role];
         if (input.Access == MemoryType::Local && !replica) { return material.ProducerReady; }
+        const auto* arrayElements = material.HasUpdatedDepthArrayElements ? &material.UpdatedDepthArrayElements : nullptr;
         auto& sharedSet = GetSharedResources(material);
         if (!material.SharedReady)
         {
@@ -785,7 +788,8 @@ struct CompiledFrameGraph::Runtime
             {
                 auto& shared = sharedSet.GetDeviceMapping(material.ProducerResource->DeviceResources->Device);
                 material.SharedReady = TransferResourceData(*material.ProducerResource, shared, material.ProducerReady,
-                    resource.Export, frameResources, *input.SourcePin, true);
+                    resource.Export, frameResources, *input.SourcePin, true, material.SharedInitialized ? arrayElements : nullptr);
+                material.SharedInitialized = true;
             }
             else { material.SharedReady = material.ProducerReady; }
         }
@@ -795,7 +799,8 @@ struct CompiledFrameGraph::Runtime
         {
             auto& shared = sharedSet.GetDeviceMapping(GetDeviceResources(role)->Device);
             ready = TransferResourceData(shared, *input.Resource, material.SharedReady,
-                replica, frameResources, *input.SourcePin, false);
+                replica, frameResources, *input.SourcePin, false, material.LocalCopyInitialized[role] ? arrayElements : nullptr);
+            material.LocalCopyInitialized[role] = true;
         }
         return ready;
     }
@@ -898,6 +903,11 @@ struct CompiledFrameGraph::Runtime
         PreparePassExternalResources(*pass.Pass, executionContext, frameResources);
         for (const auto& port : pass.Ports)
         { if (!port.AliasOutput) { ApplyPortState(commandList, port); } }
+        for (auto* output : pass.Outputs)
+        {
+            output->HasUpdatedDepthArrayElements = false;
+            output->UpdatedDepthArrayElements.clear();
+        }
         pass.Pass->Execute(executionContext);
         // Alias outputs take their final state (e.g. PRESENT) after the pass has used their inputs.
         for (const auto& port : pass.Ports) { ApplyPortState(commandList, port); }
