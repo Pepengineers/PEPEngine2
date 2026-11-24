@@ -141,8 +141,15 @@ class SceneLocalShadows
 	void UpdateCasters(UINT slot);
 	void Gather(UINT node, const GDX12LocalLightConstants&, const std::array<GDX12LocalShadowFrustum, 6>&,
 	            UINT faceMask, std::array<FaceCommands, 6>&) const;
+	struct ScreenCoverage
+	{
+		bool Full = false;
+		std::vector<std::array<float, 4>> Rectangles;
+		void Add(const BoundingBox& receiver, const BoundingBox& influence, const XMFLOAT4X4& camera);
+		double Area() const;
+	};
 	UINT NeededFaces(UINT node, const GDX12LocalLightConstants&, const std::array<GDX12LocalShadowFrustum, 6>&,
-	                 UINT faceMask, const Slot&, const BoundingBox& influence, std::array<uint64_t, 36>& coverage) const;
+	                 UINT faceMask, const Slot&, const BoundingBox& influence, ScreenCoverage& coverage) const;
 	void RebuildCasters(UINT slot);
 	Input ReadInput(UINT slot, UINT command) const;
 	void PrepareAtlas(Slot&, UINT resolution, UINT slices);

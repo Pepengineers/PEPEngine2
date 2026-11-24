@@ -177,7 +177,6 @@ struct SceneLighting::RemoteShadows
 	std::unordered_map<UINT, UINT> StaticSlots;
 	std::vector<uint64_t> StaticVersions;
 	std::vector<std::pair<UINT, uint64_t>> PendingStaticVersions;
-	uint64_t StaticPlacement = 0, StaticLayout = 0;
 	std::shared_ptr<ShadowPublication> Publication;
 	Graph Plan;
 	NativeWork Work;
@@ -1012,26 +1011,39 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 			}
 		};
 		UINT64 resultCopy = 0, stageDepth = 0;
+		std::unordered_map<UINT, UINT> staticSlots;
+		std::vector<std::pair<UINT, UINT>> staticRestore;
+		std::vector<std::pair<UINT, uint64_t>> staticUpdates;
+		bool replaceStatic = false;
 		if (!batch.empty())
 		{
 			const UINT count = UINT(batch.size());
 			resultCopy = ShadowMemory::TransferBytes(*_resources.Device, ownerDevice, resolution, count);
-			const auto& previous = owners.find(lane);
+			const auto previous = owners.find(lane);
 			const auto* cached = previous == owners.end() ? nullptr : previous->second.get();
-			const bool reuseStatic = cached && cached->StaticDepth && cached->StaticPlacement == _localPlacementEpoch &&
-			    cached->StaticLayout == source.LayoutRevision &&
-			    std::all_of(batch.begin(), batch.end(), [=](const auto& view) { return cached->StaticSlots.count(view.Slice); });
-			const auto staticCapacity = cached && cached->StaticPlacement == _localPlacementEpoch &&
-			    cached->StaticLayout == source.LayoutRevision ? UINT(cached->StaticSlots.size()) : 0;
-			UINT missing = count;
-			if (staticCapacity)
-				missing -= UINT(std::count_if(batch.begin(), batch.end(), [=](const auto& view)
-					{ return cached->StaticSlots.count(view.Slice); }));
+			if (cached) staticSlots = cached->StaticSlots;
+			for (const auto& view : batch)
+			{
+				const auto slot = staticSlots.try_emplace(view.Slice, UINT(staticSlots.size())).first->second;
+				staticRestore.emplace_back(slot, UINT(staticRestore.size()));
+			}
+			replaceStatic = !cached || !cached->StaticDepth || cached->StaticVersions.size() < staticSlots.size();
+			// A rendered static slice receives a new version, including after a change of layout.
+			const auto& versions = _staticShadows->_slots[_slot].Atlases.at(resolution).StaticDepthVersions;
+			for (UINT i = 0; i < count; ++i)
+			{
+				const UINT slot = staticRestore[i].first;
+				const auto version = versions[batch[i].Slice];
+				if (replaceStatic || cached->StaticVersions[slot] != version)
+					staticUpdates.emplace_back(i, version);
+			}
+			const auto staticCopy = staticUpdates.empty() ? 0 : ShadowMemory::TransferBytes(*_resources.Device, ownerDevice,
+			                                                               resolution, UINT(staticUpdates.size()));
 			const bool reuseAtlas = cached && cached->Local->_slots.front().Atlases.count(resolution) &&
 			    cached->Local->_slots.front().Atlases.at(resolution).Slices == count;
 			const auto ownerDepth = reuseAtlas ? 0 : ShadowMemory::Size(ownerDevice, ShadowMemory::Depth(resolution, count));
-			const auto staticDepth = reuseStatic ? 0 : ShadowMemory::Size(ownerDevice,
-			    ShadowMemory::Depth(resolution, staticCapacity + missing, D3D12_RESOURCE_FLAG_NONE));
+			const auto staticDepth = replaceStatic ? ShadowMemory::Size(ownerDevice,
+			    ShadowMemory::Depth(resolution, UINT(staticSlots.size()), D3D12_RESOURCE_FLAG_NONE)) : 0;
 			stageDepth = (lane.second || std::none_of(batch.begin(), batch.end(),
 			    [&](const auto& view) { return source.Cache[view.Light].Latest; })) ? 0 :
 			    ShadowMemory::Size(*_resources.Device, ShadowMemory::Depth(resolution, count, D3D12_RESOURCE_FLAG_NONE));
@@ -1039,8 +1051,8 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 			const auto* vertices = scene.Geometry.VertexResource;
 			const auto baselineBytes = baseline != _shadowVertexBaselines.end() && baseline->second->Source.Get() == vertices
 			    ? 0 : ShadowMemory::Size(ownerDevice, CD3DX12_RESOURCE_DESC::Buffer(scene.Geometry.Vertices.SizeInBytes));
-			if (!ShadowMemory::Fits(*_resources.Device, 2 * resultCopy + stageDepth) ||
-			    !ShadowMemory::Fits(ownerDevice, 2 * resultCopy + ownerDepth + staticDepth + baselineBytes))
+			if (!ShadowMemory::Fits(*_resources.Device, resultCopy + staticCopy + stageDepth) ||
+			    !ShadowMemory::Fits(ownerDevice, resultCopy + staticCopy + ownerDepth + staticDepth + baselineBytes))
 			{
 				fallback();
 				continue;
@@ -1114,43 +1126,21 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 		if (!batch.empty())
 		{
 			auto& statics = _staticShadows->_slots[_slot].Atlases.at(resolution);
-			if (remote.StaticPlacement != _localPlacementEpoch || remote.StaticLayout != source.LayoutRevision)
+			remote.StaticSlots = std::move(staticSlots);
+			if (replaceStatic)
 			{
-				remote.StaticSlots.clear();
-				remote.StaticPlacement = _localPlacementEpoch;
-				remote.StaticLayout = source.LayoutRevision;
-				remote.StaticVersions.clear();
-			}
-			std::vector<std::pair<UINT, UINT>> restore;
-			for (const auto& view : batch)
-			{
-				const UINT slice = view.Slice;
-				const auto slot = remote.StaticSlots.try_emplace(slice, UINT(remote.StaticSlots.size())).first->second;
-				restore.emplace_back(slot, UINT(restore.size()));
-			}
-			if (!remote.StaticDepth || remote.StaticDepth->GetDesc().Width != resolution ||
-			    remote.StaticVersions.size() < remote.StaticSlots.size())
-			{
-				const auto desc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R32_TYPELESS, resolution,
-				    resolution, UINT16(remote.StaticSlots.size()), 1);
-				remote.StaticDepth = remote.Resources.Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc,
-				                                                            D3D12_RESOURCE_STATE_COMMON);
+				const auto desc = ShadowMemory::Depth(resolution, UINT(remote.StaticSlots.size()), D3D12_RESOURCE_FLAG_NONE);
+				remote.StaticDepth = ownerDevice.CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc, D3D12_RESOURCE_STATE_COMMON);
 				remote.StaticDepthMemory.Set(ownerDevice, ShadowMemory::Size(ownerDevice, desc));
 				remote.StaticVersions.assign(remote.StaticSlots.size(), 0);
 			}
 			std::vector<UINT> primarySlices, ownerSlices;
-			for (UINT i = 0; i < batch.size(); ++i)
+			for (const auto& [index, version] : staticUpdates)
 			{
-				const auto& view = batch[i];
-				const UINT slice = view.Slice;
-				const auto version = statics.StaticDepthVersions[slice];
-				const UINT slot = restore[i].first;
-				if (remote.StaticVersions[slot] != version)
-				{
-					primarySlices.push_back(slice);
-					ownerSlices.push_back(slot);
-					remote.PendingStaticVersions.emplace_back(slot, version);
-				}
+				const UINT slot = staticRestore[index].first;
+				primarySlices.push_back(batch[index].Slice);
+				ownerSlices.push_back(slot);
+				remote.PendingStaticVersions.emplace_back(slot, version);
 			}
 			if (!primarySlices.empty())
 			{
@@ -1162,7 +1152,7 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 				                                             std::move(ownerSlices), false);
 			}
 			CopyShadowSlices(graph, bindings, work, remote.StaticDepth.Get(), target.Atlases.at(resolution).Texture.GetResource()->D3DResource.Get(),
-			                 std::move(restore), "restore static shadow depth");
+			                 std::move(staticRestore), "restore static shadow depth");
 		}
 		const auto producer = baselineExports.find(owner);
 		std::vector<Access> restore;

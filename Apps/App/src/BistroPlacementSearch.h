@@ -622,15 +622,10 @@ private:
 
     static bool SameImage(const Result& a, const Result& b)
     {
-        if (a.Activity[LocalShadowQuality] || b.Activity[LocalShadowQuality])
-        {
-            const auto comparable = [](double left, double right) {
-                return left >= 0 && right >= 0 && std::abs(left - right) <= 0.01 * (std::max)(left, right);
-            };
-            if (!a.ShadowTexels || !b.ShadowTexels || !comparable(*a.ShadowTexels, *b.ShadowTexels) ||
-                !std::equal(a.SectionShadowTexels.begin(), a.SectionShadowTexels.end(), b.SectionShadowTexels.begin(), comparable))
-                return false;
-        }
+        // Route totals cannot establish that the same lights received the same maps.
+        if (a.Activity[LocalShadowQuality] || b.Activity[LocalShadowQuality] ||
+            a.Settings.Levels[LocalShadowQuality] != Off || b.Settings.Levels[LocalShadowQuality] != Off)
+            return false;
         return a.Output == b.Output && a.Render == b.Render && a.Settings.Provider == b.Settings.Provider &&
             a.Settings.Preset == b.Settings.Preset && a.Activity == b.Activity && a.Settings.Levels == b.Settings.Levels &&
             a.Settings.Owners[Wind] == b.Settings.Owners[Wind];
