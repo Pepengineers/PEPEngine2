@@ -380,7 +380,8 @@ class BistroApplication final : public App
 		bool limited = false;
 		for (;;)
 		{
-			const auto result = _videoMemory.Apply(*console, *scenes, *Locator.GetModule<RenderModule>(), _adapters, width, height);
+			const auto result = _videoMemory.Apply(*console, *scenes, *Locator.GetModule<RenderModule>(),
+			    *_bistroPipeline, _adapters, width, height);
 			if (result == BistroVideoMemory::Result::RetireLocalShadows)
 			{
 				_bistroPipeline->RetireLocalShadows();

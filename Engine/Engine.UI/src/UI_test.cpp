@@ -36,6 +36,7 @@ namespace Engine::UI
         bool DebugReconstructionStatusVisible = true;
         bool SettingsEditingEnabled = true;
         std::map<std::wstring, std::vector<int>> AvailableLevels;
+        std::string LocalShadowDistribution;
 #ifdef _DEBUG
         bool DebugEnabled = true;
 #else
@@ -164,7 +165,13 @@ namespace Engine::UI
                     {
                         return variable.GetEnumCount() ? std::string(variable.GetEnumValueName(v)) : std::to_string(v);
                     };
-                    if (levels != AvailableLevels.end() && !levels->second.empty())
+                    if (Name == L"Render.Shadows.Local.Resolution")
+                    {
+                        ImGui::Text("Requested face-size ceiling: %d", activeValue);
+                        if (!LocalShadowDistribution.empty())
+                            ImGui::TextWrapped("Allocated maps (lights/layers/bytes): %s", LocalShadowDistribution.c_str());
+                    }
+                    else if (levels != AvailableLevels.end() && !levels->second.empty())
                         ImGui::Text("VRAM budget allows up to %s", label(levels->second.back()).c_str());
                     ImGui::SetNextItemWidth(-1);
                     if (ImGui::BeginCombo("##value", label(activeValue).c_str()))
@@ -884,6 +891,7 @@ namespace Engine::UI
     void ShutdownUI()
     {
         AvailableLevels.clear();
+        LocalShadowDistribution.clear();
         ScreenAtlasCaptures.clear();
         ScreenAtlasGeneration = 0;
         ScreenAtlasFrame = -1;
@@ -917,6 +925,7 @@ namespace Engine::UI
     }
 
     void EnableApplicationUIInput() { ApplicationUIInput = true; }
+    void SetLocalShadowDistribution(std::string layout) { LocalShadowDistribution = std::move(layout); }
     void SetDebugReconstructionStatusVisible(bool visible) { DebugReconstructionStatusVisible = visible; }
     void SetAvailableSettingLevels(std::map<std::wstring, std::vector<int>> levels)
     {

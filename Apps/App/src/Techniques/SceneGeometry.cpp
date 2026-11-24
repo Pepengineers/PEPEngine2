@@ -1,4 +1,5 @@
 #include "SceneGeometry.h"
+#include "SceneEnvironment.h"
 #include "Techniques/UI/BistroUIPosters.h"
 #include "NativeWork.h"
 #include "ProbeInputMirror.h"
@@ -1049,6 +1050,30 @@ std::unordered_set<ID3D12Resource*> SceneGeometry::LiveProbeInputs() const
 	return live;
 }
 
+std::unordered_set<ID3D12Resource*> SceneGeometry::LiveProbeCaptureInputs(
+    SceneEnvironment& environment, std::vector<GDX12Texture*>* materialTextures) const
+{
+	auto live = LiveProbeInputs();
+	for (const auto& frame : _resources.FrameConstants)
+		live.insert(frame->SkyCB->GetResource().D3DResource.Get());
+	for (UINT i = 0; i < 4; ++i)
+	{
+		auto* link = environment.Output(i);
+		if (link && link->IsInitialized()) live.insert(link->GetTexture()->GetResource()->D3DResource.Get());
+	}
+	if (auto* transmittance = environment.CaptureTransmittance())
+		live.insert(transmittance->GetResource()->D3DResource.Get());
+	for (const auto& [name, texture] : _resources.Textures)
+	{
+		const UINT index = texture->GetSRV()->HeapIndex;
+		if (index < Texture2D_StartIndex || index >= Texture2D_StartIndex + Texture2D_RangeLength) continue;
+		live.insert(texture->GetResource()->D3DResource.Get());
+		if (materialTextures) materialTextures->push_back(texture.get());
+	}
+	live.erase(nullptr);
+	return live;
+}
+
 void SceneGeometry::RemoteProbeVegetation::Forget(ID3D12Resource* retired)
 {
 	for (auto view = Views.lower_bound({retired, 0}); view != Views.end() && view->first.first == retired;)
@@ -1106,12 +1131,12 @@ void SceneGeometry::AppendVegetationView(Graph& primary, std::vector<ID3D12Resou
 		                                                                    D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
 	}
 	_grass->AppendProbeCapture(remote, remoteBindings, work, vegetation.Grass, slot, target, remoteMaterials,
-	                           mainAddress, localLights, mirror);
+	                           mainAddress, localLights, mirror, inputs);
 	if (scene.Linden)
 	{
 		if (!vegetation.Linden) vegetation.Linden = std::make_unique<LindenDraw>(owner, true);
 		const auto pose = mirror(scene.LindenPose.Current->GetResource(), sizeof(LindenPoseVertex));
-		const LindenDraw::CaptureInputs capture{pose.Resource, material, main, pose.Srv, localLights, mainAddress};
+		const LindenDraw::CaptureInputs capture{pose.Resource, material, main, pose.Srv, localLights, mainAddress, inputs};
 		vegetation.Linden->Append(remote, remoteBindings, work, slot, target, remoteMaterials, scene.Linden,
 		                          scene.LindenPose, &capture);
 	}

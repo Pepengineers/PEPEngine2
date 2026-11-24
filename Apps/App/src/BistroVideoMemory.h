@@ -2,6 +2,7 @@
 
 #include "BistroReflections.h"
 #include "BistroScene.h"
+#include "Rendering/BistroRenderPipeline.h"
 #include "Techniques/ShadowMemory.h"
 #include "Techniques/Linden/LindenMesh.h"
 #include "Techniques/UI/BistroUICanvases.h"
@@ -30,6 +31,8 @@ class BistroVideoMemory
 
     std::map<std::wstring, Charges> _accepted;
     Charges _base, _lastBudget, _lastUsage, _lastShadows;
+    Charges _replacementPeak;
+    uint64_t _replacementUntil = 0;
     uint64_t _revision = UINT64_MAX;
     uint32_t _size = 0;
     std::chrono::steady_clock::time_point _nextCheck{};
@@ -39,10 +42,15 @@ public:
     std::wstring LastLimit;
 
     Result Apply(ConsoleModule& console, SceneManagerModule& scenes, RenderModule& render,
-                 const std::vector<DeviceDesc>& adapters, uint16_t width, uint16_t height)
+                 BistroRenderPipeline& pipeline, const std::vector<DeviceDesc>& adapters, uint16_t width, uint16_t height)
     {
         const auto now = std::chrono::steady_clock::now();
         const uint32_t size = (uint32_t(width) << 16) | height;
+        if (!_replacementPeak.empty() && pipeline.PresentedFrames() >= _replacementUntil)
+        {
+            _replacementPeak.clear();
+            _revision = UINT64_MAX;
+        }
         if (!width || !height || (_revision == IConsoleVariable::ValueRevision() && size == _size && now < _nextCheck))
             return Result::Fits;
         _nextCheck = now + std::chrono::seconds(1);
@@ -56,7 +64,7 @@ public:
             const auto hr = adapters[i].Adapter->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &info);
             shadows[i] = BistroRender::ShadowMemory::For(adapters[i].AdapterLuid).Allocated;
             usage[i] = SUCCEEDED(hr) ? info.CurrentUsage - (std::min)(info.CurrentUsage, shadows[i]) : 0;
-            const Bytes available = info.Budget ? info.Budget : adapters[i].DedicatedVideoMemory;
+            const Bytes available = SUCCEEDED(hr) ? info.Budget : adapters[i].DedicatedVideoMemory;
             raw[i] = available;
             budget[i] = available - available / 10; // Leave space for driver heaps and transient allocations.
         }
@@ -178,9 +186,22 @@ public:
         pass(L"Render.Water.Enabled", L"Render.Water.Quality", water * BistroWater::Count.GetValue() *
              (128 + 16 * frames), L"Render.Water.Adapter");
         const Bytes face = BistroReflections::Resolution.GetValue();
+        const UINT probes = BistroReflections::Count.GetValue();
+        const UINT sunSide = value(L"Render.Shadows.Sun.Resolution");
         pass(L"Render.ReflectionProbes.Enabled", L"Render.ReflectionProbes.Quality",
-             BistroReflections::Count.GetValue() ? face * face * 6 * (32 * BistroReflections::Count.GetValue() + 32) : 0,
-             L"Render.ReflectionProbes.First.Adapter");
+             probes ? face * face * 6 * (32 * probes + 32) + depthBytes(sunSide / 2, 1) : 0);
+        const auto probeKey = L"Render.ReflectionProbes.First.Adapter";
+        const int probeAdapter = value(probeKey);
+        if (probes && value(L"Render.ReflectionProbes.Enabled") && value(L"Render.ReflectionProbes.Quality") &&
+            owner(probeAdapter) != primary)
+        {
+            const auto mirror = pipeline.EstimateRemoteProbe(probeAdapter, UINT(face), sunSide);
+            add(probeKey, {-1, probeAdapter}, [&](int index) {
+                auto cost = charge(index < 0 ? 0 : mirror.Primary, primary);
+                if (index >= 0) cost[owner(index)] = mirror.Owner;
+                return cost;
+            });
+        }
         // Full output dimensions bound render-sized histories even when reconstruction is enabled.
         pass(L"Render.AO.Enabled", L"Render.AO.Quality", pixels * (value(L"Render.AO.Resolution") ? 4 : 16) * frames, L"Render.AO.Adapter");
         pass(L"Render.SSR.Enabled", L"Render.SSR.Quality", pixels * 64);
@@ -218,14 +239,18 @@ public:
         placement(L"Render.Sky.SkyView.Adapter", 512 * 256 * 8 * frames);
         placement(L"Render.Sky.AerialPerspective.Adapter", 32 * 32 * 64 * 16 * frames);
         features.push_back({L"", {{0, charge(pixels * 44 * frames + maskBytes, primary)}}});
-        return Admit(console, features, adapters, usage, budget, raw, shadows, size);
+        return Admit(console, features, adapters, usage, budget, raw, shadows, size, pipeline.PresentedFrames());
     }
 
 private:
     Result Admit(ConsoleModule& console, std::vector<Feature>& features, const std::vector<DeviceDesc>& adapters,
-                 const Charges& usage, const Charges& budget, const Charges& raw, const Charges& shadows, uint32_t size)
+                 const Charges& usage, const Charges& budget, const Charges& raw, const Charges& shadows, uint32_t size,
+                 uint64_t presented)
     {
         const Bytes frames = console.FindConsoleVariable(L"Render.NumFrames").GetUInt();
+        Charges occupied = usage;
+        for (size_t i = 0; i < _replacementPeak.size(); ++i)
+            occupied[i] = (std::max)(occupied[i], _replacementPeak[i]);
         Charges total, growth;
         for (;;)
         {
@@ -239,13 +264,17 @@ private:
                 {
                     total[i] += costs[i];
                     const Bytes old = previous == _accepted.end() ? 0 : previous->second[i];
-                    if (costs[i] > old)
-                        growth[i] += costs[i]; // CurrentUsage may still contain all slots of the previous configuration.
+                    if (costs[i] != old)
+                    {
+                        // Sun atlases shrink one retired slot at a time. The first replacement is the peak.
+                        const bool shrinkingSun = costs[i] < old && std::wstring_view(f.Key) == L"Render.Shadows.Sun.Resolution";
+                        growth[i] += shrinkingSun ? (costs[i] + frames - 1) / frames : costs[i];
+                    }
                 }
             }
             size_t gpu = 0;
             while (gpu < budget.size() && (total[gpu] == _base[gpu] ||
-                   (total[gpu] <= budget[gpu] && (!growth[gpu] || usage[gpu] + growth[gpu] <= budget[gpu])))) ++gpu;
+                   (total[gpu] <= budget[gpu] && (!growth[gpu] || occupied[gpu] + growth[gpu] <= budget[gpu])))) ++gpu;
             if (gpu == budget.size()) break;
             Feature* best = nullptr;
             size_t next = 0;
@@ -281,9 +310,10 @@ private:
             best->Selected = next;
         }
         bool reclaim = false;
+        Charges peaks(adapters.size());
         for (size_t i = 0; i < adapters.size(); ++i)
         {
-            const Bytes peak = (std::max)(total[i], usage[i] + growth[i]);
+            const Bytes peak = peaks[i] = (std::max)(total[i], occupied[i] + growth[i]);
             auto& account = BistroRender::ShadowMemory::For(adapters[i].AdapterLuid);
             account.Limit = raw[i] > peak ? raw[i] - peak : 0;
             reclaim |= growth[i] && shadows[i] > account.Limit;
@@ -307,7 +337,7 @@ private:
                     if (candidate.Cost[i] <= selected[i]) continue;
                     const Bytes extra = candidate.Cost[i] - selected[i];
                     if (total[i] + extra > budget[i] ||
-                        usage[i] + growth[i] + extra + selected[i] / frames > budget[i]) fits = false;
+                        occupied[i] + growth[i] + extra + selected[i] / frames > budget[i]) fits = false;
                 }
                 if (fits) available[f.Key].push_back(candidate.Value);
             }
@@ -329,6 +359,11 @@ private:
         {
             const auto result = console.ApplyPatch(patch);
             if (!result.Error.empty()) throw ConsoleConfigError(result.Error);
+        }
+        if (std::any_of(growth.begin(), growth.end(), [](Bytes bytes) { return bytes != 0; }))
+        {
+            _replacementPeak = std::move(peaks);
+            _replacementUntil = presented + frames;
         }
         _accepted.clear();
         for (const auto& f : features) _accepted.emplace(f.Key, f.Levels[f.Selected].Cost);

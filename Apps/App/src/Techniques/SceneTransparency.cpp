@@ -4,7 +4,7 @@
 namespace BistroRender
 {
 GDX12Texture* SceneTransparency::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, SceneGeometry& geometry,
-                                        UINT slot, GDX12Texture* hdr, SceneEnvironment& environment, const LocalShadows& shadows)
+                                        UINT slot, GDX12Texture* hdr, SceneEnvironment& environment, const PublishedShadows& shadows)
 {
 	auto& frame = _frames.at(slot);
 	if (_remote) AppendRemote(graph, bindings, geometry, slot, frame, hdr, shadows);
@@ -18,7 +18,7 @@ GDX12Texture* SceneTransparency::Append(Graph& graph, std::vector<ID3D12Resource
 }
 GDX12Texture* SceneTransparency::AppendPhase(Graph& graph, std::vector<ID3D12Resource*>& bindings,
                                              SceneGeometry& geometry, UINT slot, Frame& phase, GDX12Texture* hdr,
-                                             SceneEnvironment& environment, const LocalShadows& shadows)
+                                             SceneEnvironment& environment, const PublishedShadows& shadows)
 {
 	auto& scene = geometry._slots.at(slot);
 	auto& constants = *_resources.FrameConstants.at(slot);

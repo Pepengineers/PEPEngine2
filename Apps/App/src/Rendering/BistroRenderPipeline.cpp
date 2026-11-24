@@ -1,4 +1,5 @@
 #include "BistroRenderPipeline.h"
+#include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.RendererDX12/GDX12SwapChain.h"
 #include "Engine.Core/BenchmarkEngine.h"
 #include "Engine.Core/Logging/Logger.h"
@@ -46,6 +47,43 @@ void BistroRenderPipeline::Initialize(RenderPipelineContext& c, const std::vecto
 	_lighting->SetWaterRetirement([this] { _executor->Drain(); });
 	_environment->SetRetirement([this] { _executor->Drain(); });
 	Log::Info("Renderer", "Bistro packet renderer initialized; one rendering path");
+}
+
+BistroRenderPipeline::ProbeMemory BistroRenderPipeline::EstimateRemoteProbe(int hardwareIndex, UINT side, UINT sunSide) const
+{
+	auto& submit = *_executor->Submissions();
+	const auto owner = submit.SelectAdapter(hardwareIndex);
+	if (!owner) return {};
+	auto& remote = submit.Device(owner);
+	auto& primary = submit.Device(0);
+	const auto footprints = [&](const D3D12_RESOURCE_DESC& shape)
+	{
+		UINT64 bytes = 0;
+		primary.GetDevice()->GetCopyableFootprints(&shape, 0, UINT(shape.MipLevels) * shape.DepthOrArraySize,
+		                                         0, nullptr, nullptr, nullptr, &bytes);
+		return bytes;
+	};
+	ProbeMemory cost;
+	UINT64 inputBytes = 0;
+	for (auto* input : _geometry->LiveProbeCaptureInputs(*_environment))
+	{
+		auto shape = input->GetDesc();
+		const UINT64 bytes = shape.Dimension == D3D12_RESOURCE_DIMENSION_BUFFER ? shape.Width : footprints(shape);
+		inputBytes += (bytes + D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT - 1) & ~UINT64(D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT - 1);
+		shape.Alignment = 0;
+		shape.Flags = D3D12_RESOURCE_FLAG_NONE;
+		cost.Owner += BistroRender::ShadowMemory::Size(remote, shape);
+	}
+	const auto cube = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R16G16B16A16_FLOAT, side, side, 6,
+	                                               UINT16(GDX12RenderHelpers::MipCount(side)));
+	const auto shared = BistroRender::ShadowMemory::TransferBytes(primary, remote, (std::max)(UINT64(1), inputBytes)) +
+	                    BistroRender::ShadowMemory::TransferBytes(primary, remote, footprints(cube));
+	cost.Primary = shared + BistroRender::ShadowMemory::Size(primary, cube);
+	// Owner-local capture, convolution and baked textures, plus the shader-visible scene heap.
+	cost.Owner += shared + UINT64(side) * side * 6 * 64 +
+	    UINT64(remote.GetDevice()->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)) * 1000000 +
+	    BistroRender::ShadowMemory::Size(remote, BistroRender::ShadowMemory::Depth((std::max)(1u, sunSide / 2), 1));
+	return cost;
 }
 
 void BistroRenderPipeline::UpdateFrameSettings(RenderPipelineContext& c)
@@ -120,12 +158,14 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 		return std::make_pair(owner, &submissions->Device(owner));
 	});
 	_geometry->Freeze(slot, c.Common.ActiveCameraCBufferIndex, std::move(skin), submissions);
-	const auto transparencyOwner = _transparencyOwner = _lighting->Transparency().Begin(submissions, slot, _frameNumber);
+	const auto requestedTransparency = _lighting->Transparency().RequestedOwner(submissions, slot);
 	const auto scenes = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
 	const auto* world = scenes->GetWorld();
 	const double delta = c.Common.GameTimer ? c.Common.GameTimer->DeltaTime() : 0;
 	_environment->Freeze(world && !world->IsPaused() ? delta * world->GetTimeScale() : 0, *_executor, _frameNumber);
-	_lighting->Freeze(*_geometry, slot, submissions, submissions->SelectAdapter(_aoAdapter), transparencyOwner);
+	_lighting->Freeze(*_geometry, slot, submissions, submissions->SelectAdapter(_aoAdapter), requestedTransparency);
+	const auto transparencyOwner = _transparencyOwner = _lighting->Transparency().Begin(submissions, slot, _frameNumber,
+	    requestedTransparency, _lighting->PublishedLocalShadows());
 	auto& particles = _lighting->Particles();
 	auto& water = _lighting->Water();
 	auto& grass = _geometry->Grass();

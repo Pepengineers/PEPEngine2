@@ -867,6 +867,8 @@ private:
                 world.GetTimeScale() << ' ' << _characters->Seed() << ' ' << _startupLayout;
             for (const auto& [outputWidth, outputHeight] : _placementSearch.Resolutions())
                 conditions << ' ' << outputWidth << 'x' << outputHeight;
+            for (auto level : {BistroPlacement::Off, BistroPlacement::Medium, BistroPlacement::High, BistroPlacement::Epic})
+                conditions << ' ' << _placementSearch.QualityValue(BistroPlacement::LocalShadowQuality, level);
             auto renderConditions = RenderConfig(console);
             std::sort(renderConditions.begin(), renderConditions.end());
             const auto controls = [](const auto& entries, const auto& name) {

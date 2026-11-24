@@ -1,11 +1,11 @@
 #include "SceneReflections.h"
 #include "ProbeInputMirror.h"
 #include "ProbeTransfer.h"
+#include "PublishedShadowMirror.h"
 #include "ShadowGeometry.h"
 #include "ShadowMemory.h"
 #include "Engine.Core/Logging/Logger.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
-#include "Common/GameTimer.h"
 #include <cstring>
 namespace BistroRender
 {
@@ -23,39 +23,16 @@ struct SceneReflections::CaptureInputs
     GDX12GeometryBuffer::RecordingBinding Geometry{};
     UINT Draws = 0, Batches = 0, Instances = 0;
     D3D12_GPU_VIRTUAL_ADDRESS Main = 0, Sky = 0;
-    D3D12_GPU_DESCRIPTOR_HANDLE Lights{}, StaticLights{};
+    struct LocalLighting
+    {
+        D3D12_GPU_DESCRIPTOR_HANDLE Lights{};
+        GDX12Texture* ShadowMap = nullptr;
+        std::vector<Access> Reads;
+    };
+    LocalLighting Static, Final;
     std::array<GDX12Texture*, 4> Environment{};
-    GDX12Texture* StaticShadows = nullptr;
-    GDX12Texture* DynamicShadows = nullptr;
     std::vector<Access> Reads;
     std::function<void(const GeometryTarget&)> Vegetation;
-};
-
-struct SceneReflections::CaptureLighting
-{
-    CaptureLighting(GDX12DeviceResources& resources)
-        : Main(resources.Device, 1), Lights(resources.Device, 1, EBufferType::Upload, false)
-    {
-        auto* heap = resources.SRV_UAV_Heap.get();
-        Lights.CreateSRV(heap, heap->GetAvailableIndex(SceneDescriptorStart));
-    }
-    void Copy(const GDX12MainConstants& main, const std::vector<GDX12LocalLightConstants>& lights)
-    {
-        auto snapshot = main;
-        snapshot.SunShadowFlags = 0;
-        snapshot.LocalLightCount = UINT(lights.size());
-        Main.CopyData(0, snapshot);
-        Lights.Resize((std::max)(1u, snapshot.LocalLightCount));
-        for (UINT i = 0; i < lights.size(); ++i)
-        {
-            auto light = lights[i];
-            light.ShadowFirstSlice = UINT_MAX;
-            light.ShadowFlags = 0;
-            Lights.CopyData(i, light);
-        }
-    }
-    GDX12UploadBuffer<GDX12MainConstants> Main;
-    GDX12UploadBuffer<GDX12LocalLightConstants> Lights;
 };
 
 namespace
@@ -93,11 +70,9 @@ struct SceneReflections::Remote
     {
         Resources.Initialize(&submissions->Device(id));
         Pass.Setup(&Resources, &Common);
-        Pass._captureSunShadows = false;
         Pass.Initialize();
         Vegetation = std::make_unique<SceneGeometry::RemoteProbeVegetation>(Resources);
         InitializeShadowFallback(Resources, ShadowFallback);
-        Lighting = std::make_unique<CaptureLighting>(Resources);
     }
 
     ~Remote()
@@ -115,7 +90,12 @@ struct SceneReflections::Remote
     GDX12ReflectionProbePass Pass;
     std::unique_ptr<SceneGeometry::RemoteProbeVegetation> Vegetation;
     GDX12Texture ShadowFallback;
-    std::unique_ptr<CaptureLighting> Lighting;
+    struct LocalLighting
+    {
+        PublishedShadowMirror Shadows;
+        std::unique_ptr<GDX12UploadBuffer<GDX12LocalLightConstants>> Lights;
+    };
+    LocalLighting Static, Final;
     std::array<GDX12Descriptor, 4> SceneViews;
     std::array<std::unique_ptr<GDX12Texture>, 4> Environment;
     NativeWork Work;
@@ -133,16 +113,14 @@ struct SceneReflections::Remote
 };
 
 SceneReflections::SceneReflections(GDX12DeviceResources& r, RenderPipelineCommonData& c)
-    : _resources(r), _common(c), _captureLighting(r.FrameConstants.size())
+    : _resources(r), _common(c)
 {
 
     {
         auto& p = _passes;
         p = std::make_unique<GDX12ReflectionProbePass>();
         p->Setup(&r, &c);
-        p->_captureSunShadows = false;
         p->Initialize();
-        InitializeShadowFallback(r, _shadowFallback);
         p->CreatePublishedTexture(1, 1);
         _black.D3DResource = r.Device->CreateResource(D3D12_HEAP_TYPE_UPLOAD, CD3DX12_RESOURCE_DESC::Buffer(256),
                                                             D3D12_RESOURCE_STATE_GENERIC_READ);
@@ -166,10 +144,21 @@ void SceneReflections::Reset()
         if (!_remotes.empty()) _resources.Device->GetCommandQueue()->Flush();
         _remotes.clear();
         _owners.clear();
+        _shadowFallbackOwners.clear();
         _transferProbe = 0;
         _passes->ResetHistory();
         _publications.clear();
     }
+}
+void SceneReflections::RetireLocalShadows()
+{
+    for (auto& [id, remote] : _remotes)
+    {
+        remote->GPU.Drain();
+        remote->Static.Shadows.Clear();
+        remote->Final.Shadows.Clear();
+    }
+    _shadowFallbackOwners.clear();
 }
 bool SceneReflections::Record(Id id, ID3D12GraphicsCommandList* cmd) const
 {
@@ -204,7 +193,8 @@ void SceneReflections::AppendPublishedOwners(std::vector<std::pair<std::string, 
             owners.emplace_back("Probe " + std::to_string(i), _owners[i]);
 }
 void SceneReflections::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, SceneGeometry& geometry,
-                              SceneEnvironment& environment, UINT slot)
+                              SceneEnvironment& environment, UINT slot, const PublishedShadows& staticShadows,
+                              const PublishedShadows& finalShadows)
 {
     auto& p = *_passes;
     auto& work = _work;
@@ -216,6 +206,21 @@ void SceneReflections::Append(Graph& graph, std::vector<ID3D12Resource*>& bindin
     if (_settings.Enabled)
         for (const auto& probe : _resources.ReflectionProbes)
             owners.push_back(_submissions->SelectAdapter(probe.Adapter));
+    const auto now = std::chrono::steady_clock::now();
+    for (auto it = _shadowFallbackOwners.begin(); it != _shadowFallbackOwners.end();)
+    {
+        auto& retry = it->second;
+        const bool requested = std::find(owners.begin(), owners.end(), it->first) != owners.end();
+        if (!requested || (now >= retry.NextCheck && PublishedShadowMirror::CanRecreate(*_submissions, it->first,
+                {retry.Static ? &staticShadows : nullptr, retry.Final ? &finalShadows : nullptr})))
+        {
+            it = _shadowFallbackOwners.erase(it);
+            continue;
+        }
+        if (now >= retry.NextCheck) retry.NextCheck = now + std::chrono::seconds(1);
+        std::replace(owners.begin(), owners.end(), it->first, Id{0});
+        ++it;
+    }
     if (_owners != owners)
     {
         for (auto& [id, remote] : _remotes) remote->GPU.Drain();
@@ -232,8 +237,7 @@ void SceneReflections::Append(Graph& graph, std::vector<ID3D12Resource*>& bindin
         _transferProbe = 0;
     }
     p._ownsCapture = [this](UINT index) { return _owners.at(index) == 0; };
-    p.SetInputs({environment.Output(0), environment.Output(1), environment.Output(2), environment.Output(3),
-                 &_shadowFallback});
+    p.SetInputs({environment.Output(0), environment.Output(1), environment.Output(2), environment.Output(3)});
     const auto history = _common.HistoryRevision;
     const bool reset = _common.ResetHistory, upscalerReset = _common.ResetUpscalerHistory,
                requestReset = _common.RequestHistoryReset;
@@ -322,21 +326,25 @@ void SceneReflections::Append(Graph& graph, std::vector<ID3D12Resource*>& bindin
         in.Draws = scene.Draws;
         in.Batches = scene.Batches;
         in.Instances = scene.InstanceCount;
-        auto& capture = _captureLighting[slot];
-        if (!capture) capture = std::make_unique<CaptureLighting>(_resources);
-        capture->Copy(_resources.Lighting, _resources.LocalLights);
-        in.Main = capture->Main.GetElementAddress(0);
+        in.Main = scene.Main;
         in.Sky = constants.SkyCB->GetElementAddress(0);
-        in.StaticLights = in.Lights = capture->Lights.GetSRV()->GPUHandle;
-        in.StaticShadows = in.DynamicShadows = &_shadowFallback;
+        const auto bindLights = [&](const PublishedShadows& published, CaptureInputs::LocalLighting& local) {
+            local.Lights = published.Lights.GetSRV()->GPUHandle;
+            local.ShadowMap = published.Fallback;
+            local.Reads.push_back({resource(&published.Lights.GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
+            for (auto* atlas : published.Atlases) local.Reads.push_back(texture(atlas, Mode::Read, read));
+            if (published.Atlases.empty()) local.Reads.push_back(texture(local.ShadowMap, Mode::Read, read));
+        };
+        bindLights(staticShadows, in.Static);
+        bindLights(finalShadows, in.Final);
         for (UINT i = 0; i < 4; ++i) in.Environment[i] = environment.Output(i)->GetTexture();
         in.Reads = environment.Reads(graph, bindings);
-        for (auto* input : {&capture->Main.GetResource(), &capture->Lights.GetResource(), &constants.SkyCB->GetResource()})
+        for (auto* input : {&constants.MainCB->GetResource(), &constants.SkyCB->GetResource()})
             in.Reads.push_back({resource(input), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
         in.Vegetation = [&](const GeometryTarget& target) { geometry.AppendVegetationView(graph, bindings, slot, target); };
         AppendCapture(graph, bindings, work, p, _resources, in, publicationOperations, _publishing);
     }
-    AppendRemote(graph, bindings, geometry, environment, slot, publicationOperations, replaced);
+    AppendRemote(graph, bindings, geometry, environment, slot, publicationOperations, replaced, staticShadows, finalShadows);
     for (UINT i = 0; i < MaxReflectionProbes; ++i)
     {
         GDX12ReflectionProbeData data;
@@ -375,7 +383,8 @@ void SceneReflections::Append(Graph& graph, std::vector<ID3D12Resource*>& bindin
 }
 void SceneReflections::AppendRemote(Graph& primary, std::vector<ID3D12Resource*>& primaryBindings,
                                     SceneGeometry& geometry, SceneEnvironment& environment, UINT slot,
-                                    std::vector<Id>& publications, bool arrayReplaced)
+                                    std::vector<Id>& publications, bool arrayReplaced,
+                                    const PublishedShadows& staticShadows, const PublishedShadows& finalShadows)
 {
     if (!_passes->_enabled) return;
     if (arrayReplaced && !_remotes.empty())
@@ -398,21 +407,8 @@ void SceneReflections::AppendRemote(Graph& primary, std::vector<ID3D12Resource*>
     }
     if (_remotes.empty()) return;
 
-    auto live = geometry.LiveProbeInputs();
-    for (const auto& frame : _resources.FrameConstants)
-        live.insert(frame->SkyCB->GetResource().D3DResource.Get());
-    for (UINT i = 0; i < 4; ++i)
-        live.insert(environment.Output(i)->GetTexture()->GetResource()->D3DResource.Get());
-    if (auto* transmittance = environment.CaptureTransmittance())
-        live.insert(transmittance->GetResource()->D3DResource.Get());
     std::vector<GDX12Texture*> materialTextures;
-    for (const auto& [name, texture] : _resources.Textures)
-    {
-        const UINT index = texture->GetSRV()->HeapIndex;
-        if (index < Texture2D_StartIndex || index >= Texture2D_StartIndex + Texture2D_RangeLength) continue;
-        live.insert(texture->GetResource()->D3DResource.Get());
-        materialTextures.push_back(texture.get());
-    }
+    const auto live = geometry.LiveProbeCaptureInputs(environment, &materialTextures);
 
     for (auto& [id, entry] : _remotes)
     {
@@ -481,7 +477,8 @@ void SceneReflections::AppendRemote(Graph& primary, std::vector<ID3D12Resource*>
         r.ReflectionStaticGeometryRevision = _resources.ReflectionStaticGeometryRevision;
         r.ReflectionEnvironmentRevision = _resources.ReflectionEnvironmentRevision;
         r.Lighting = _resources.Lighting;
-        r.Lighting.SunShadowFlags = 0;
+        r.ShadowQuality = _resources.ShadowQuality;
+        r.ReflectionSceneBounds = _resources.ReflectionSceneBounds;
         remote.Common.CameraView = _common.CameraView;
         p._externalSettings = &_settings;
         p._frameNumber = _passes->_frameNumber - 1;
@@ -489,11 +486,37 @@ void SceneReflections::AppendRemote(Graph& primary, std::vector<ID3D12Resource*>
             const auto& generation = remote.Probes.at(remote.Indices[index]);
             return !generation.Filtered && !generation.Imported;
         };
-        p.SetInputs({environment.Output(0), environment.Output(1), environment.Output(2), environment.Output(3),
-                     &remote.ShadowFallback});
+        p.SetInputs({environment.Output(0), environment.Output(1), environment.Output(2), environment.Output(3)});
         p.Prepare();
         p._planPrepared = false;
         if (!p._capturePlanned) continue;
+
+        bool needsStatic = false, needsFinal = false;
+        for (const auto& view : p._views)
+        {
+            if (!view.Selected || view.Context.Stage != GDX12GeometryStage::ReflectionCapture) continue;
+            if (view.Filter == p.StaticGeometry) needsStatic = true;
+            else needsFinal = true;
+        }
+        auto* heap = r.SRV_UAV_Heap.get();
+        const auto prepare = [&](Remote::LocalLighting& local, const PublishedShadows& source,
+                                 Remote::LocalLighting* unused) {
+            if (local.Shadows.Prepare(*_submissions, id, *heap, source)) return true;
+            if (!unused) return false;
+            unused->Shadows.Clear();
+            return local.Shadows.Prepare(*_submissions, id, *heap, source);
+        };
+        if ((needsStatic && !prepare(remote.Static, staticShadows, needsFinal ? nullptr : &remote.Final)) ||
+            (needsFinal && !prepare(remote.Final, finalShadows, needsStatic ? nullptr : &remote.Static)))
+        {
+            remote.Static.Shadows.Clear();
+            remote.Final.Shadows.Clear();
+            _shadowFallbackOwners[id] = {needsStatic, needsFinal,
+                std::chrono::steady_clock::now() + std::chrono::seconds(1)};
+            Log::Info("RenderGraph", "Reflection capture moved to GPU0: GPU=", _submissions->AdapterLabel(id),
+                      " cannot mirror the camera shadow layout");
+            continue;
+        }
 
         CaptureInputs in;
         const auto mirror = [&](Id source, bool refresh) {
@@ -502,7 +525,6 @@ void SceneReflections::AppendRemote(Graph& primary, std::vector<ID3D12Resource*>
         const auto bind = [&](ID3D12Resource* resource) {
             return NativeWork::ResourceFor(graph, bindings, resource, "remote probe input");
         };
-        auto* heap = r.SRV_UAV_Heap.get();
         constexpr UINT strides[]{sizeof(GDX12InstanceData), sizeof(GDX12IndirectDrawArgs),
                                  sizeof(GDX12MaterialConstants), sizeof(GDX12TransformConstants)};
         for (UINT i = 0; i < 4; ++i)
@@ -534,21 +556,39 @@ void SceneReflections::AppendRemote(Graph& primary, std::vector<ID3D12Resource*>
         in.Draws = scene.Draws;
         in.Batches = scene.Batches;
         in.Instances = scene.InstanceCount;
-        auto main = _resources.Lighting;
-        main.RenderTargetSize = {float(_common.DownscaledWidth), float(_common.DownscaledHeight)};
-        main.TotalTime = _common.GameTimer->TotalTime();
-        main.DeltaTime = _common.GameTimer->DeltaTime();
-        remote.Lighting->Copy(main, _resources.LocalLights);
-        in.Main = remote.Lighting->Main.GetElementAddress(0);
+        auto& main = *r.FrameConstants.at(slot)->MainCB;
+        main.CopyData(0, constants.MainCB->GetCPUData()[0]);
+        in.Main = main.GetElementAddress(0);
         auto* skyBuffer = constants.SkyCB->GetResource().D3DResource.Get();
         auto* sky = mirror(NativeWork::ResourceFor(primary, primaryBindings, skyBuffer, "probe sky constants"), true);
         in.Sky = sky->GetGPUVirtualAddress();
-        in.StaticLights = in.Lights = remote.Lighting->Lights.GetSRV()->GPUHandle;
-        in.StaticShadows = in.DynamicShadows = &remote.ShadowFallback;
-        const Id mainResource = bind(remote.Lighting->Main.GetResource().D3DResource.Get());
-        for (const auto buffer : {mainResource, bind(remote.Lighting->Lights.GetResource().D3DResource.Get())})
-            in.Reads.push_back({buffer, Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
+        const Id mainResource = bind(main.GetResource().D3DResource.Get());
+        in.Reads.push_back({mainResource, Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
         in.Reads.push_back({bind(sky), Mode::Read, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER});
+        std::vector<Id> shadowExports, shadowImports;
+        const auto bindLights = [&](Remote::LocalLighting& owner, const PublishedShadows& published,
+                                    CaptureInputs::LocalLighting& local) {
+            owner.Shadows.Append(primary, primaryBindings, _work, graph, bindings, work, published,
+                                 shadowExports, shadowImports, local.Reads);
+            local.ShadowMap = owner.Shadows.Fallback(remote.ShadowFallback);
+            if (local.Reads.empty())
+                local.Reads.push_back({bind(local.ShadowMap->GetResource()->D3DResource.Get()), Mode::Read,
+                                       D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
+            if (!owner.Lights)
+            {
+                owner.Lights = std::make_unique<GDX12UploadBuffer<GDX12LocalLightConstants>>(
+                    r.Device, (std::max)(1u, published.LightCount), EBufferType::Upload, false);
+                owner.Lights->CreateSRV(heap, heap->GetAvailableIndex(SceneDescriptorStart));
+            }
+            owner.Lights->Resize((std::max)(1u, published.LightCount));
+            for (UINT i = 0; i < published.LightCount; ++i)
+                owner.Lights->CopyData(i, owner.Shadows.Remap(published.Lights.GetCPUData()[i], published));
+            local.Lights = owner.Lights->GetSRV()->GPUHandle;
+            local.Reads.push_back({bind(owner.Lights->GetResource().D3DResource.Get()), Mode::Read,
+                                   D3D12_RESOURCE_STATE_GENERIC_READ});
+        };
+        if (needsStatic) bindLights(remote.Static, staticShadows, in.Static);
+        if (needsFinal) bindLights(remote.Final, finalShadows, in.Final);
 
         const auto textureInput = [&](GDX12Texture& texture) {
             auto* native = texture.GetResource()->D3DResource.Get();
@@ -616,14 +656,20 @@ void SceneReflections::AppendRemote(Graph& primary, std::vector<ID3D12Resource*>
         in.Vegetation = [&](const GeometryTarget& target) {
             geometry.AppendVegetationView(primary, primaryBindings, remote.Mirror, graph, bindings, work,
                                           *remote.Vegetation, slot, target, remote.SceneViews[2],
-                                          in.Scene[2], mainResource, in.Main, in.Lights);
+                                          in.Scene[2], mainResource, in.Main,
+                                          target.View.CaptureLighting ? target.View.CaptureLighting->LocalLightSrv :
+                                                                        D3D12_GPU_DESCRIPTOR_HANDLE{});
         };
         std::vector<Id> captureCopies;
         AppendCapture(graph, bindings, work, p, r, in, captureCopies, remote.Filtered);
         remote.RemoteImport = remote.Mirror.AppendImport(graph, bindings, work, true);
+        // Prepending the scene import shifts every shadow import one operation forward.
+        for (Id imported : shadowImports) graph.Operations.at(imported + 1).Dependencies.push_back(remote.RemoteImport);
         // GPU0 bindless draws sample these textures outside per-texture graph declarations.
         remote.PrimaryExport = remote.Mirror.AppendExport(primary, primaryBindings, _work,
             restoreMaterials.empty() ? Queue::Copy : Queue::Direct);
+        auto& dependencies = primary.Operations.at(remote.PrimaryExport).Dependencies;
+        dependencies.insert(dependencies.end(), shadowExports.begin(), shadowExports.end());
         if (!restoreMaterials.empty())
             _work.Add(primary, "restore GPU0 bindless material textures", std::move(restoreMaterials), [](auto*) {},
                       {remote.PrimaryExport});
@@ -748,6 +794,7 @@ void SceneReflections::AppendCapture(Graph& graph, std::vector<ID3D12Resource*>&
     };
     const State read = D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE;
     auto& frame = p._frames.at(resources.CurrFrameConstantsIndex);
+    auto& capture = p._capture.value();
     const UINT captureMips = GDX12RenderHelpers::MipCount(p._captureTextureResolution);
     auto* heap = resources.SRV_UAV_Heap->GetHeap().Get();
     const UINT count = in.Draws;
@@ -772,7 +819,7 @@ void SceneReflections::AppendCapture(Graph& graph, std::vector<ID3D12Resource*>&
         {
             const auto dsv = p._sunDSV[0]->CPUHandle;
             work.Add(graph, "initialize probe sun-shadow fallback",
-                     {texture(&p._sunShadow, Mode::Write, D3D12_RESOURCE_STATE_DEPTH_WRITE)},
+                     {texture(&capture.SunShadow, Mode::Write, D3D12_RESOURCE_STATE_DEPTH_WRITE)},
                      [dsv](auto* cmd) { cmd->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1, 0, 0, nullptr); });
             p._sunShadowNeedsClear = false;
         }
@@ -788,7 +835,7 @@ void SceneReflections::AppendCapture(Graph& graph, std::vector<ID3D12Resource*>&
         const auto camera = frame.Cameras->GetElementAddress(view.Probe * 6 + face),
                    shadowCB = frame.Shadow->GetElementAddress(0);
         auto* color = view.Bake ? state.BakedColor.get() : state.Raw.get();
-        auto* depth = shadow ? &p._sunShadow : (view.Bake ? state.BakedDepth.get() : &p._depth);
+        auto* depth = shadow ? &capture.SunShadow : (view.Bake ? state.BakedDepth.get() : &capture.Depth);
         const auto dsv =
             shadow ? p._sunDSV[0]->CPUHandle : (view.Bake ? state.BakedDSVs[face] : p._depthDSVs[slice])->CPUHandle;
         const auto rtv = shadow ? D3D12_CPU_DESCRIPTOR_HANDLE{}
@@ -877,8 +924,9 @@ void SceneReflections::AppendCapture(Graph& graph, std::vector<ID3D12Resource*>&
             drawCommands = resources[1];
             visible = batch->VisibleInstancesAddress();
         }
-        view.Lighting.LocalShadows = view.Filter == p.StaticGeometry ? in.StaticShadows : in.DynamicShadows;
-        view.Lighting.LocalLightSrv = view.Filter == p.StaticGeometry ? in.StaticLights : in.Lights;
+        const auto& local = view.Filter == p.StaticGeometry ? in.Static : in.Final;
+        view.Lighting.LocalShadows = local.ShadowMap;
+        view.Lighting.LocalLightSrv = local.Lights;
         view.Lighting.Irradiance = in.Environment[0];
         view.Lighting.Prefiltered = in.Environment[1];
         view.Lighting.BRDF = in.Environment[2];
@@ -889,8 +937,8 @@ void SceneReflections::AppendCapture(Graph& graph, std::vector<ID3D12Resource*>&
         reads.push_back({resource(&frame.Shadow->GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
         if (!shadow)
         {
-            reads.push_back(texture(&p._sunShadow, Mode::Read, read));
-            if (view.Lighting.LocalShadows) reads.push_back(texture(view.Lighting.LocalShadows, Mode::Read, read));
+            reads.push_back(texture(&capture.SunShadow, Mode::Read, read));
+            reads.insert(reads.end(), local.Reads.begin(), local.Reads.end());
         }
         std::vector<Access> draws = reads;
         for (UINT id : {0u, 2u, 3u})
@@ -913,7 +961,7 @@ void SceneReflections::AppendCapture(Graph& graph, std::vector<ID3D12Resource*>&
         auto* meshPSO = shadow ? p._shadowPSO.Get() : p._capturePSO.Get();
         auto* skyPSO = p._skyPSO.Get();
         auto* signature = p._signature.Get();
-        const UINT resolution = shadow ? p._sunShadow.GetWidth() : p._resolution;
+        const UINT resolution = shadow ? capture.SunShadow.GetWidth() : p._resolution;
         const auto main = in.Main, sky = in.Sky;
         const auto vb = in.Geometry.Vertices;
         const auto ib = in.Geometry.Indices;
@@ -921,11 +969,11 @@ void SceneReflections::AppendCapture(Graph& graph, std::vector<ID3D12Resource*>&
         srvs[0] = in.SceneViews[2];
         srvs[1] = in.SceneViews[3];
         srvs[2] = in.SceneViews[0];
-        srvs[3] = p._sunShadow.GetSRV()->GPUHandle;
+        srvs[3] = capture.SunShadow.GetSRV()->GPUHandle;
         for (UINT i = 0; i < 3; ++i)
             srvs[4 + i] = in.Environment[i]->GetSRV()->GPUHandle;
         srvs[7] = view.Lighting.LocalLightSrv;
-        srvs[8] = view.Lighting.LocalShadows->GetSRV()->GPUHandle;
+        if (!shadow) srvs[8] = local.ShadowMap->GetSRV()->GPUHandle;
         srvs[9] = in.Environment[3]->GetSRV()->GPUHandle;
         srvs[10] = resources.SkyTransmittanceSRV.GPUHandle;
         srvs[11] = resources.SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex);
@@ -1011,7 +1059,7 @@ void SceneReflections::AppendCapture(Graph& graph, std::vector<ID3D12Resource*>&
             const float roughness = float(mip) / (mips - 1);
             const auto output = p._filterUAVs[base + mip]->GPUHandle;
             work.Add(graph, "probe GGX prefilter mip " + std::to_string(mip),
-                     {texture(state.Raw.get(), Mode::Read, read), texture(&p._filtered, Mode::Write, UnorderedAccess)},
+                     {texture(state.Raw.get(), Mode::Read, read), texture(&capture.Filtered, Mode::Write, UnorderedAccess)},
                      [=](auto* cmd) {
                          cmd->SetDescriptorHeaps(1, &heap);
                          cmd->SetComputeRootSignature(root->GetRootSignature().Get());
@@ -1028,13 +1076,13 @@ void SceneReflections::AppendCapture(Graph& graph, std::vector<ID3D12Resource*>&
                          cmd->Dispatch((size + 7) / 8, (size + 7) / 8, 6);
                      });
         }
-        auto* source = p._filtered.GetResource()->D3DResource.Get();
+        auto* source = capture.Filtered.GetResource()->D3DResource.Get();
         auto* destination = p._published.GetResource()->D3DResource.Get();
         const UINT publishedMips = p._publishedMips;
         const UINT publishedBaseMip = publishedMips - mips;
         publicationOperations.push_back(
             work.Add(graph, "probe publication copy",
-                     {texture(&p._filtered, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE),
+                     {texture(&capture.Filtered, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE),
                       texture(&p._published, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST)},
                      [=](auto* cmd) {
                          for (UINT face = 0; face < 6; ++face)

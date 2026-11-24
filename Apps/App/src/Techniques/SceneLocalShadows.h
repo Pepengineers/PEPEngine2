@@ -17,7 +17,7 @@ class QueueSubmission;
 class SceneLocalShadows
 {
   public:
-	SceneLocalShadows(GDX12DeviceResources&, RenderPipelineCommonData&, bool staticOnly = false);
+	SceneLocalShadows(GDX12DeviceResources&, RenderPipelineCommonData&, bool staticOnly = false, bool remote = false);
 	~SceneLocalShadows();
 	void Freeze(UINT slot, const std::vector<GDX12RenderPrimitive>& grass, UINT width, UINT height);
 	void Complete(UINT slot);
@@ -34,6 +34,8 @@ class SceneLocalShadows
 	bool Record(UINT slot, Id id, ID3D12GraphicsCommandList* cmd) const { return _slots.at(slot).Work.Record(id, cmd); }
 	GDX12Texture* Output(UINT slot);
 	std::vector<GDX12Texture*> Outputs(UINT slot);
+	const std::vector<uint64_t>& ContentVersions(UINT slot, UINT resolution) const
+	{ return _slots.at(slot).Atlases.at(resolution).ContentVersions; }
 	std::string Distribution(UINT slot);
 	UINT64 ShadowTexels(UINT slot) const;
 
@@ -101,13 +103,31 @@ class SceneLocalShadows
 		ShadowMemory::Charge Memory;
 		GDX12Texture Texture;
 		std::vector<std::unique_ptr<GDX12Descriptor>> Dsvs;
-		std::vector<uint64_t> StaticDepthVersions;
+		std::vector<uint64_t> ContentVersions;
 		UINT Slices = 0;
 	};
 	struct ShadowLayout
 	{
 		std::vector<UINT> Sizes, Starts;
 		std::map<UINT, UINT> Capacities;
+	};
+	struct BudgetRange
+	{
+		UINT64 Minimum = 0, Maximum = UINT64_MAX;
+		bool Fits(UINT64 available, UINT64 required);
+		bool Contains(UINT64 value) const { return value >= Minimum && value <= Maximum; }
+	};
+	struct AllocationPlan
+	{
+		UINT Ceiling = 0;
+		Id TransparencyOwner = 0;
+		uint64_t PlacementRevision = 0;
+		std::vector<std::pair<UINT, float>> Receivers;
+		std::map<Id, BudgetRange> Budgets;
+		BudgetRange RetiredSlot;
+		std::vector<UINT> Tiers;
+		bool Limited = false, Settled = false;
+		std::string Limit;
 	};
 	struct Slot
 	{
@@ -129,6 +149,7 @@ class SceneLocalShadows
 		std::unique_ptr<GDX12UploadBuffer<GDX12IndirectDrawArgs>> CommandUpload, Commands;
 		std::map<UINT, Atlas> Atlases, StagedAtlases;
 		std::optional<ShadowLayout> StagedLayout;
+		std::optional<AllocationPlan> Plan;
 		auto& AtlasFor(UINT resolution, bool staged) { return (staged ? StagedAtlases : Atlases).at(resolution); }
 		const auto& AtlasFor(UINT resolution, bool staged) const { return (staged ? StagedAtlases : Atlases).at(resolution); }
 		std::string Limit;
@@ -163,6 +184,7 @@ class SceneLocalShadows
 	void RebuildCasters(UINT slot);
 	Input ReadInput(UINT slot, UINT command) const;
 	void PrepareAtlas(Slot&, UINT resolution, UINT slices, bool staged = false);
+	void MarkDepthWritten(UINT slot, UINT resolution, UINT slice, bool staged = false);
 	void Allocate(UINT slot, SceneLocalShadows& staticPass, const QueueSubmission& submissions, Id transparencyOwner);
 	void ApplyLayout(Slot&, const std::vector<UINT>& sizes, const std::vector<UINT>& slices);
 	void Pack(Slot&);
@@ -175,7 +197,7 @@ class SceneLocalShadows
 		uint64_t Generation;
 	};
 	std::map<std::pair<UINT, uint64_t>, Placement> _previousResolution;
-	uint64_t _generation = 0;
+	uint64_t _generation = 0, _placementRevision = 0;
 	GDX12DeviceResources& _resources;
 	RenderPipelineCommonData& _common;
 	std::unique_ptr<GDX12DescriptorHeap> _dsvHeap;
@@ -195,7 +217,7 @@ class SceneLocalShadows
 	std::vector<UINT> _positions, _leaves;
 	bool _treeReady = false, _castersRebuilt = false;
 	bool _staticOnly = false;
-	uint64_t _staticDepthVersion = 0;
+	uint64_t _depthVersion = 0;
 	uint64_t _sceneRevision = 0, _geometryRevision = 0, _meshRevision = 0, _textureRevision = 0;
 	uint64_t _grassReceiverRevision = 0;
 	uint64_t _grassCasterRevision = 0;

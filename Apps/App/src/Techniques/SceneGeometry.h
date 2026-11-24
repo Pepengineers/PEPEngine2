@@ -15,6 +15,7 @@ namespace BistroRender
 {
 class SceneLighting;
 class SceneReflections;
+class SceneEnvironment;
 class ProbeInputMirror;
 struct CanvasRead;
 // Owner-only Freeze/Resize. Record uses immutable slot data and native commands;
@@ -29,6 +30,8 @@ class SceneGeometry
 	std::vector<GDX12RenderPrimitive> VegetationPrimitives() const;
 	void AppendVegetationView(Graph&, std::vector<ID3D12Resource*>&, UINT slot, const GeometryTarget&);
 	std::unordered_set<ID3D12Resource*> LiveProbeInputs() const;
+	std::unordered_set<ID3D12Resource*> LiveProbeCaptureInputs(SceneEnvironment&,
+	    std::vector<GDX12Texture*>* materialTextures = nullptr) const;
 	class RemoteProbeVegetation
 	{
 	  public:

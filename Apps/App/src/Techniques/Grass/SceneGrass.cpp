@@ -2,6 +2,7 @@
 #include "BistroGrass.h"
 #include "Techniques/Linden/LindenSimulation.h"
 #include "Techniques/NativeWork.h"
+#include "Techniques/ProbeInputMirror.h"
 #include "Engine.Core/BenchmarkEngine.h"
 #include "Engine.Core/Logging/Logger.h"
 #include "App.Base/Modules/RenderModule.h"
@@ -1010,7 +1011,8 @@ void SceneGrass::Append(Graph& g, UINT slot, std::vector<ID3D12Resource*>& all, 
 void SceneGrass::AppendProbeCapture(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work,
                                     ProbeCapture& capture, UINT slot, const GeometryTarget& target,
                                     const GDX12Descriptor& materials, D3D12_GPU_VIRTUAL_ADDRESS main,
-                                    D3D12_GPU_DESCRIPTOR_HANDLE localLights, const MirrorVegetationBuffer& mirror)
+                                    D3D12_GPU_DESCRIPTOR_HANDLE localLights, const MirrorVegetationBuffer& mirror,
+                                    ProbeInputMirror& inputs)
 {
 	auto& gpu = *_gpu;
 	if (!gpu.PatchCount() || target.View.Filter == GDX12GeometryFilter::Static) return;
@@ -1035,6 +1037,8 @@ void SceneGrass::AppendProbeCapture(Graph& graph, std::vector<ID3D12Resource*>& 
 		const bool firstCapture = !capture.Root;
 		if (firstCapture)
 		{
+			capture.ScratchMemory = inputs.ReserveShadowBuffers({8 * sizeof(UINT), sizeof(float)},
+			    D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
 			owner.InitializeGraphics(true);
 			CreateGrassGeometry(capture.Owner.Device, capture.Root, capture.Clear, capture.Cull);
 			capture.Indices.resize(_frames.size());
@@ -1042,9 +1046,15 @@ void SceneGrass::AppendProbeCapture(Graph& graph, std::vector<ID3D12Resource*>& 
 			capture.HiZ = std::make_unique<GDX12UploadBuffer<float>>(capture.Owner.Device, 1, EBufferType::Default, false);
 			capture.HiZ->CreateSRV(descriptors, descriptors->GetAvailableIndex(SceneDescriptorStart));
 		}
-		auto& indices = capture.Indices.at(slot);
+		auto& allocation = capture.Indices.at(slot);
+		auto& indices = allocation.Buffer;
 		if (!indices || indices->GetElementCount() < gpu._indices->GetElementCount())
+		{
+			auto memory = inputs.ReserveShadowBuffers({UINT64(gpu._indices->GetElementCount()) * sizeof(UINT)},
+			    D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
 			indices = owner.Buffer<UINT>(gpu._indices->GetElementCount(), false, true);
+			allocation.Memory = std::move(memory);
+		}
 		const auto& state = view->State;
 		// Capture uses the same all-LOD wind/interaction-deformed vertices as the scene.
 		const auto vertices = mirror(built[patch].Vertices->GetResource(), sizeof(GDX12GrassRenderer::Vertex));

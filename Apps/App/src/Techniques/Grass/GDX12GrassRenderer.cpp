@@ -89,6 +89,7 @@ void GDX12GrassRenderer::Initialize()
 void GDX12GrassRenderer::InitializeGraphics(bool captureOnly)
 {
     GDX12RootSignatureDesc graphics;
+    graphics.IndexedLocalShadows = true;
     graphics.VolatileSRVData = true;
     graphics.NumSingleCBVSlots = 4;
     graphics.NumSingleSRVSlots = 8;

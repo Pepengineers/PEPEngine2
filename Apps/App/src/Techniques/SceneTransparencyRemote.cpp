@@ -2,7 +2,6 @@
 #include "ProbeInputMirror.h"
 #include "WboitMeshDraw.h"
 #include "WboitTransfer.h"
-#include "ShadowDepthTransfer.h"
 #include "Common/ConsoleVariables.h"
 #include "Engine.Core/Logging/Logger.h"
 #include "Common/GameTimer.h"
@@ -41,6 +40,13 @@ bool WboitVisible(const std::array<XMVECTOR, 6>& planes, const GDX12InstanceData
 		if (distance + radius < 0) return false;
 	}
 	return true;
+}
+
+auto WboitPlanes(const XMFLOAT4X4& viewProjection)
+{
+	const auto m = XMLoadFloat4x4(&viewProjection);
+	return std::array<XMVECTOR, 6>{m.r[3] + m.r[0], m.r[3] - m.r[0], m.r[3] + m.r[1],
+	                              m.r[3] - m.r[1], m.r[2], m.r[3] - m.r[2]};
 }
 
 AutoConsoleVariable<int> WboitAdapter(L"Render.WBOIT.Adapter", -1, L"DXGI adapter for exact Bistro WBOIT accumulation; -1 uses GPU0.",
@@ -100,13 +106,7 @@ struct SceneTransparency::Remote
 	SceneParticles::RemoteRaster Particles;
 	GDX12WBOITTransparencyPass Draw;
 	GDX12WBOITCompositionPass Compose;
-	struct ShadowAtlas
-	{
-		ShadowMemory::Charge Memory;
-		GDX12Texture Depth;
-		std::unique_ptr<ShadowDepthTransfer> Transfer;
-	};
-	std::map<UINT, ShadowAtlas> Shadows;
+	PublishedShadowMirror Shadows;
 	std::unique_ptr<GDX12UploadBuffer<GDX12LocalLightConstants>> Lights;
 	GDX12Descriptor ShadowFallback;
 	ShadowMemory::Bytes ShadowBytes = 0;
@@ -144,16 +144,16 @@ struct SceneTransparency::Remote
 	}
 };
 
-Id SceneTransparency::Begin(const std::shared_ptr<QueueSubmission>& submit, UINT slot, uint64_t frame)
+Id SceneTransparency::RequestedOwner(const std::shared_ptr<QueueSubmission>& submit, UINT slot)
 {
-	_frame = frame;
-	_work.Commands.clear();
+	_visibleMesh = false;
 	Id owner = submit->SelectAdapter(WboitAdapter.GetValue());
 	constexpr unsigned SkinnedTransparent = 1, InteractionFieldEmitter = 2, IncompatibleShadowBinding = 4;
 	unsigned fallback = 0;
 	if (owner)
 	{
 		const auto& constants = *_resources.FrameConstants.at(slot);
+		const auto planes = WboitPlanes(constants.CameraCB->GetCPUData()[_common.ActiveCameraCBufferIndex].ViewProj);
 		const auto* cmds = _resources.IndirectCommandsCache->GetCPUData();
 		const auto* instances = constants.InstanceCache->GetCPUData();
 		const auto* materials = constants.MaterialCache->GetCPUData();
@@ -162,8 +162,9 @@ Id SceneTransparency::Begin(const std::shared_ptr<QueueSubmission>& submit, UINT
 			if (!cmds[i].InstanceCount || !cmds[i].IndexCountPerInstance) continue;
 			const auto& instance = instances[cmds[i].InstanceID];
 			const auto& material = materials[instance.MaterialIndex];
-			if (instance.SkinOutputVertex != UINT_MAX && material.RenderLayer == UINT(MaterialType::Transparent) &&
-			    !material.ReflectionProbePreview)
+			if (material.RenderLayer != UINT(MaterialType::Transparent) || material.ReflectionProbePreview) continue;
+			_visibleMesh |= WboitVisible(planes, instance);
+			if (instance.SkinOutputVertex != UINT_MAX)
 			{
 				fallback |= SkinnedTransparent;
 				break;
@@ -185,28 +186,49 @@ Id SceneTransparency::Begin(const std::shared_ptr<QueueSubmission>& submit, UINT
 		if (fallback) owner = 0;
 	}
 	_fallbackReasons = fallback;
+	return owner;
+}
+
+Id SceneTransparency::Begin(const std::shared_ptr<QueueSubmission>& submit, UINT slot, uint64_t frame,
+                            Id owner, const PublishedShadows& shadows)
+{
+	_frame = frame;
+	_work.Commands.clear();
+	auto& entry = _remoteSlots.at(slot);
+	if (entry) entry->Report(); // BeginFrame has retired this slot.
+	std::shared_ptr<Shared> shared;
+	bool budgetFallback = false;
+	if (owner)
+	{
+		if (_shared && _shared->Owner == owner) shared = _shared;
+		if (entry && entry->SharedInputs != shared) entry.reset();
+		// A rejected slot has no remote context. Price its shadow mirror before recreating heaps and pipelines.
+		budgetFallback = !entry && _visibleMesh && !PublishedShadowMirror::CanRecreate(*submit, owner, {&shadows});
+		if (!budgetFallback)
+		{
+			if (!shared) shared = std::make_shared<Shared>(submit->Device(owner), _remoteSlots.size());
+			shared->Owner = owner;
+			if (!entry) entry = std::make_unique<Remote>(submit, owner, _common, shared);
+			if (!_visibleMesh) entry->Shadows.Clear();
+			else budgetFallback = !entry->Shadows.Prepare(*submit, owner, *entry->Resources.SRV_UAV_Heap, shadows);
+		}
+		if (budgetFallback)
+		{
+			owner = 0;
+			shared.reset();
+		}
+	}
+	if (budgetFallback && !_shadowBudgetFallback)
+		Log::Warning("RenderGraph", "WBOIT running on the primary GPU: published shadow arrays exceed the transfer budget");
+	_shadowBudgetFallback = budgetFallback;
 	const Id previousOwner = _shared ? _shared->Owner : 0;
 	if (owner != previousOwner)
 	{
-		if (_shared)
-			_particles.PreserveConsumedBursts(_shared->Simulation);
-		else if (_resources.ParticleSimulation)
-			_particles.PreserveConsumedBursts(*_resources.ParticleSimulation);
+		if (_shared) _particles.PreserveConsumedBursts(_shared->Simulation);
+		else if (_resources.ParticleSimulation) _particles.PreserveConsumedBursts(*_resources.ParticleSimulation);
 	}
-	auto& entry = _remoteSlots.at(slot);
-	if (entry)
-	{
-		entry->Report(); // the primary executor already retired this frame slot
-		if (owner != entry->Owner) entry.reset();
-	}
-	if (!owner) _shared.reset();
-	if (owner && (!_shared || _shared->Owner != owner))
-	{
-		_shared = std::make_shared<Shared>(submit->Device(owner), _remoteSlots.size());
-		_shared->Owner = owner;
-	}
-	if (owner && (!entry || entry->SharedInputs != _shared))
-		entry = std::make_unique<Remote>(submit, owner, _common, _shared);
+	if (!owner) entry.reset();
+	_shared = std::move(shared);
 	_remote = entry.get();
 	return owner;
 }
@@ -324,12 +346,12 @@ SceneTransparency::~SceneTransparency()
 void SceneTransparency::RetireLocalShadows()
 {
 	for (auto& remote : _remoteSlots)
-		if (remote) remote->Shadows.clear();
+		if (remote) remote->Shadows.Clear();
 }
 
 void SceneTransparency::AppendRemote(Graph& primary, std::vector<ID3D12Resource*>& primaryBindings,
                                     SceneGeometry& geometry, UINT slot, Frame& frame, GDX12Texture* hdr,
-                                    const LocalShadows& shadows)
+                                    const PublishedShadows& shadows)
 {
 	auto& r = *_remote;
 	auto& submit = *r.GPU.Submissions();
@@ -510,9 +532,7 @@ void SceneTransparency::AppendRemote(Graph& primary, std::vector<ID3D12Resource*
 	else r.Geometry.reset();
 
 	// ViewProj is stored transposed for HLSL. Its CPU rows are the columns used in Culling.hlsl.
-	const auto m = XMLoadFloat4x4(&camera.ViewProj);
-	const std::array<XMVECTOR, 6> planes{m.r[3] + m.r[0], m.r[3] - m.r[0], m.r[3] + m.r[1],
-	    m.r[3] - m.r[1], m.r[2], m.r[3] - m.r[2]};
+	const auto planes = WboitPlanes(camera.ViewProj);
 	std::vector<GDX12IndirectDrawArgs> draws;
 	std::vector<GDX12InstanceData> instances;
 	std::vector<GDX12TransformConstants> transforms;
@@ -540,18 +560,6 @@ void SceneTransparency::AppendRemote(Graph& primary, std::vector<ID3D12Resource*
 	}
 	r.TransparentDraws = mesh.Draws = UINT(draws.size());
 	r.ShadowBytes = 0;
-	std::map<UINT, UINT> descriptorMap;
-	for (auto it = r.Shadows.begin(); it != r.Shadows.end();)
-	{
-		const bool used = mesh.Draws && std::any_of(shadows.Atlases.begin(), shadows.Atlases.end(),
-		    [&](auto* atlas) { return atlas->GetWidth() == it->first; });
-		if (!used) it = r.Shadows.erase(it);
-		else
-		{
-			it->second.Transfer.reset();
-			++it;
-		}
-	}
 	if (mesh.Draws)
 	{
 		mesh.Geometry = r.Geometry->Binding;
@@ -561,59 +569,9 @@ void SceneTransparency::AppendRemote(Graph& primary, std::vector<ID3D12Resource*
 		mesh.Args = cpu(5, draws.data(), UINT64(draws.size()) * sizeof(draws.front()));
 		const auto* metadata = shadows.Lights.GetCPUData();
 		const UINT count = main.LocalLightCount;
-		const bool indexed = device.GetDeviceFeatures().Features.HighestShaderModel() >= D3D_SHADER_MODEL_6_6;
-		std::vector<Id> inputs{r.DepthExport};
-		for (auto* atlas : shadows.Atlases)
-		{
-			if (!indexed && atlas != shadows.Fallback) continue;
-			const auto shape = native(atlas)->GetDesc();
-			const UINT size = UINT(shape.Width), layers = shape.DepthOrArraySize;
-			const UINT sourceDescriptor = atlas->GetSRV()->HeapIndex;
-			std::vector<UINT> slices;
-			for (UINT i = 0; i < count; ++i)
-			{
-				const auto& light = metadata[i];
-				if (light.ShadowFirstSlice == UINT_MAX) continue;
-				const UINT address = light.ShadowFlags & LocalShadowAtlasIndex ? light.ShadowFlags >> 4 :
-				                     shadows.Fallback->GetSRV()->HeapIndex;
-				if (address != sourceDescriptor) continue;
-				for (UINT face = 0; face < LocalShadowFaceCount(light); ++face)
-					if (light._padding[2] & (1u << face)) slices.push_back(light.ShadowFirstSlice + face);
-			}
-			if (slices.empty()) continue;
-
-			auto& local = r.Shadows[size];
-			const bool replace = !local.Depth.IsInitialized() ||
-			    native(&local.Depth)->GetDesc().DepthOrArraySize != layers;
-			const auto desc = ShadowMemory::Depth(size, layers, D3D12_RESOURCE_FLAG_NONE);
-			const auto allocation = replace ? ShadowMemory::Size(device, desc) : 0;
-			const auto copy = ShadowMemory::TransferBytes(*_resources.Device, device, size, UINT(slices.size()));
-			if (!ShadowMemory::Fits(*_resources.Device, copy) || !ShadowMemory::Fits(device, copy + allocation))
-			{
-				r.Shadows.erase(size);
-				continue;
-			}
-			if (replace)
-			{
-				GDX12TextureDesc texture{};
-				texture.Width = texture.Height = size;
-				texture.Format = DXGI_FORMAT_R32_FLOAT;
-				texture.SRVDesc = ShadowMemory::View(layers);
-				texture.SRV_UAV_Heap = heap;
-				texture.ExternalResource = device.CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc, D3D12_RESOURCE_STATE_COMMON);
-				texture.SRVHeapIndex = local.Depth.IsInitialized() ? local.Depth.GetSRV()->HeapIndex :
-				    heap->GetAvailableIndex(SceneDescriptorStart);
-				local.Depth.Initialize(texture);
-				local.Memory.Set(device, allocation);
-			}
-			local.Transfer = std::make_unique<ShadowDepthTransfer>(submit, r.Owner, size, UINT(slices.size()));
-			inputs.push_back(local.Transfer->Append(primary, primaryBindings, _work, native(atlas), slices, true));
-			const Id imported = local.Transfer->Append(plan, bindings, work, native(&local.Depth), std::move(slices), false);
-			plan.Operations[imported].Dependencies.push_back(depthImport);
-			descriptorMap.emplace(sourceDescriptor, local.Depth.GetSRV()->HeapIndex);
-			addRead(native(&local.Depth));
-			r.ShadowBytes += copy;
-		}
+		std::vector<Id> inputs{r.DepthExport}, imports;
+		r.ShadowBytes = r.Shadows.Append(primary, primaryBindings, _work, plan, bindings, work, shadows, inputs, imports, accesses);
+		for (Id imported : imports) plan.Operations[imported].Dependencies.push_back(depthImport);
 		if (inputs.size() > 1)
 		{
 			r.DepthExport = inputs.back();
@@ -629,23 +587,9 @@ void SceneTransparency::AppendRemote(Graph& primary, std::vector<ID3D12Resource*
 		}
 		r.Lights->Resize((std::max)(1u, count));
 		for (UINT i = 0; i < count; ++i)
-		{
-			auto light = metadata[i];
-			if (light.ShadowFirstSlice != UINT_MAX)
-			{
-				const bool indexedSource = (light.ShadowFlags & LocalShadowAtlasIndex) != 0;
-				const UINT address = indexedSource ? light.ShadowFlags >> 4 : shadows.Fallback->GetSRV()->HeapIndex;
-				const auto found = descriptorMap.find(address);
-				if (found == descriptorMap.end()) light.ShadowFirstSlice = UINT_MAX;
-				else if (indexed) SetLocalShadowAtlas(light, found->second);
-				else light.ShadowFlags &= 7u;
-			}
-			r.Lights->CopyData(i, light);
-		}
+			r.Lights->CopyData(i, r.Shadows.Remap(metadata[i], shadows));
 		mesh.Views[7] = r.Lights->GetSRV()->GPUHandle;
-		mesh.Views[8] = view(r.ShadowFallback, nullptr, ShadowMemory::View(1));
-		if (!indexed && !descriptorMap.empty())
-			mesh.Views[8] = heap->GetGPUHandle(descriptorMap.begin()->second);
+		mesh.Views[8] = r.Shadows.Fallback(view(r.ShadowFallback, nullptr, ShadowMemory::View(1)));
 		addRead(r.Lights->GetResource().D3DResource.Get(), D3D12_RESOURCE_STATE_GENERIC_READ);
 		addRead(mesh.Geometry.VertexResource, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 		addRead(mesh.Geometry.IndexResource, D3D12_RESOURCE_STATE_INDEX_BUFFER);

@@ -6,6 +6,8 @@
 class GDX12DeviceResources;
 namespace BistroRender
 {
+namespace ShadowMemory { class Charge; }
+class ProbeInputMirror;
 struct LindenMesh;
 struct LindenDisplayedPose;
 struct NativeWork;
@@ -19,6 +21,7 @@ class LindenDraw
 		Id Pose, Materials, Main;
 		D3D12_GPU_DESCRIPTOR_HANDLE PoseSrv, LocalLights;
 		D3D12_GPU_VIRTUAL_ADDRESS MainAddress;
+		ProbeInputMirror& Inputs;
 	};
 	void Append(Graph&, std::vector<ID3D12Resource*>&, NativeWork&, UINT slot, const GeometryTarget&,
 	            const GDX12Descriptor& materials, const std::shared_ptr<const LindenMesh>&, const LindenDisplayedPose&,
@@ -32,6 +35,7 @@ class LindenDraw
 	std::shared_ptr<const LindenMesh> _mesh;
 	struct Buffers
 	{
+		std::shared_ptr<ShadowMemory::Charge> Memory;
 		GDX12UploadBuffer<UINT> Indices;
 		GDX12UploadBuffer<Vector2> UVs;
 		Buffers(GDX12Device* device, UINT indices, UINT vertices, EBufferType type)

@@ -199,12 +199,12 @@ double SceneLocalShadows::ScreenCoverage::Area() const
 	return area;
 }
 
-SceneLocalShadows::SceneLocalShadows(GDX12DeviceResources& r, RenderPipelineCommonData& common, bool staticOnly)
-    : _resources(r), _common(common), _slots(r.FrameConstants.size()), _staticOnly(staticOnly)
+SceneLocalShadows::SceneLocalShadows(GDX12DeviceResources& r, RenderPipelineCommonData& common, bool staticOnly, bool remote)
+    : _resources(r), _common(common), _slots(remote ? 1 : r.FrameConstants.size()), _staticOnly(staticOnly)
 {
 	_dsvHeap = std::make_unique<GDX12DescriptorHeap>(
 	    r.Device, D3D12_DESCRIPTOR_HEAP_TYPE_DSV,
-	    UINT(r.FrameConstants.size()) * D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION * 8, D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
+	    UINT(_slots.size()) * D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION * 8, D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
 	GDX12RootSignatureDesc root;
 	root.Constants = {2};
 	root.NumSingleSRVSlots = 4;
@@ -245,6 +245,7 @@ SceneLocalShadows::SceneLocalShadows(GDX12DeviceResources& r, RenderPipelineComm
 		frame.Cull.Frame = &frame;
 		frame.Indexed = r.Device->GetDeviceFeatures().Features.HighestShaderModel() >= D3D_SHADER_MODEL_6_6;
 	}
+	if (remote) return;
 	r.IndirectCommandsCache->TrackElementChanges();
 	for (auto& frame : r.FrameConstants)
 	{
@@ -860,6 +861,7 @@ void SceneLocalShadows::UpdateLights(Slot& frame)
 	}
 	if (!sameLights)
 	{
+		frame.Plan.reset();
 		frame.StagedLayout.reset();
 		++frame.LayoutRevision;
 		frame.Cache.clear();
@@ -878,13 +880,16 @@ void SceneLocalShadows::UpdateLights(Slot& frame)
 		const bool latest = owner && std::find(_latestPlacements.begin(), _latestPlacements.end(),
 		                                      GetLocalShadowKey(source)) != _latestPlacements.end();
 		if (cached.Owner != owner || cached.Latest != latest)
+		{
+			frame.Plan.reset();
 			cached.MapsValid = cached.LocalFallback = 0;
+		}
 		cached.Owner = owner;
 		cached.Latest = latest;
 		if (ShouldRenderLocalShadow(source, cached.HasLight ? &cached.Light : nullptr) ||
 		    (source.ShadowFlags & ShadowEnabled) != (cached.Light.ShadowFlags & ShadowEnabled))
 		{
-			cached.ListsValid = cached.MapsValid = cached.StagedFaces = cached.StagedValid = 0;
+			cached.ListsValid = cached.MapsValid = cached.StagedValid = 0;
 			cached.SelectionDirty = true;
 			cached.Frusta = std::array<GDX12LocalShadowFrustum, 6>{
 			    GDX12LocalShadowFrustum(source.ShadowViewProj[0]), GDX12LocalShadowFrustum(source.ShadowViewProj[1]),
@@ -957,13 +962,11 @@ void SceneLocalShadows::Complete(UINT slot)
 	for (const bool staged : {false, true})
 		for (auto& [resolution, atlas] : (staged ? frame.StagedAtlases : frame.Atlases))
 		{
-			if (_staticOnly) atlas.StaticDepthVersions.resize(atlas.Slices);
 			std::vector<bool> updated(atlas.Slices);
 			for (const auto& view : frame.Views)
 			{
 				if (view.Resolution != resolution || view.Staged != staged) continue;
 				updated[view.Slice] = true;
-				if (_staticOnly) atlas.StaticDepthVersions[view.Slice] = ++_staticDepthVersion;
 				auto& descriptor = atlas.Dsvs[view.Slice];
 				if (descriptor) continue;
 				descriptor = std::make_unique<GDX12Descriptor>();
@@ -1019,6 +1022,18 @@ void SceneLocalShadows::ApplyLayout(Slot& frame, const std::vector<UINT>& sizes,
 	}
 }
 
+bool SceneLocalShadows::BudgetRange::Fits(UINT64 available, UINT64 required)
+{
+	// The same fit decisions hold throughout this interval, including when other slots allocate or retire.
+	if (required <= available)
+	{
+		Minimum = (std::max)(Minimum, required);
+		return true;
+	}
+	Maximum = (std::min)(Maximum, required - 1);
+	return false;
+}
+
 void SceneLocalShadows::Allocate(UINT slot, SceneLocalShadows& staticPass, const QueueSubmission& submissions, Id transparencyOwner)
 {
 	using ShadowMemory::Bytes;
@@ -1026,6 +1041,44 @@ void SceneLocalShadows::Allocate(UINT slot, SceneLocalShadows& staticPass, const
 	auto& statics = staticPass._slots.at(slot);
 	frame.Ready.Complete();
 	const UINT ceiling = frame.Ceiling;
+	const auto& primaryBudget = ShadowMemory::For(_resources.Device->GetAdapterLuid());
+	Bytes otherAllocations = primaryBudget.Allocated;
+	for (const auto* current : {&frame, &statics})
+		for (const auto* atlases : {&current->Atlases, &current->StagedAtlases})
+			for (const auto& [side, atlas] : *atlases)
+				otherAllocations -= atlas.Memory.Size();
+	const Bytes retiredHeadroom = primaryBudget.Limit - (std::min)(primaryBudget.Limit, otherAllocations);
+	const auto& cachedPlan = frame.Plan;
+	const bool reusePlan = cachedPlan && cachedPlan->Ceiling == ceiling && cachedPlan->TransparencyOwner == transparencyOwner &&
+	    cachedPlan->PlacementRevision == _placementRevision && cachedPlan->Tiers.size() == frame.Cache.size() &&
+	    cachedPlan->RetiredSlot.Contains(retiredHeadroom) &&
+	    std::all_of(cachedPlan->Budgets.begin(), cachedPlan->Budgets.end(), [&](const auto& budget)
+	    {
+		    auto& device = budget.first ? submissions.Device(budget.first) : *_resources.Device;
+		    return budget.second.Contains(ShadowMemory::For(device.GetAdapterLuid()).Limit);
+	    }) &&
+	    std::equal(frame.Cache.begin(), frame.Cache.end(), cachedPlan->Receivers.begin(), cachedPlan->Receivers.end(),
+	        [](const LightCache& light, const auto& receiver)
+	        { return light.Needed == receiver.first && light.ScreenPixels == receiver.second; });
+	if (reusePlan && cachedPlan->Settled)
+	{
+		frame.Limit = cachedPlan->Limit;
+		frame.MigrationTexels = 0;
+		Pack(frame);
+		staticPass.Pack(statics);
+		return;
+	}
+	if (!reusePlan)
+	{
+		auto& plan = frame.Plan.emplace();
+		plan.Ceiling = ceiling;
+		plan.TransparencyOwner = transparencyOwner;
+		plan.PlacementRevision = _placementRevision;
+		plan.Receivers.reserve(frame.Cache.size());
+		for (const auto& light : frame.Cache) plan.Receivers.emplace_back(light.Needed, light.ScreenPixels);
+	}
+	auto& plan = *frame.Plan;
+	const uint64_t initialLayout = frame.LayoutRevision;
 	std::vector<UINT> tiers{0};
 	if (ceiling)
 	{
@@ -1140,108 +1193,115 @@ void SceneLocalShadows::Allocate(UINT slot, SceneLocalShadows& staticPass, const
 	};
 	const auto fitsRetiredSlot = [&]()
 	{
-		const auto& primary = ShadowMemory::For(_resources.Device->GetAdapterLuid());
-		Bytes existing = primary.Allocated, replacement = 0;
-		for (const auto* current : {&frame, &statics})
-			for (const auto* atlases : {&current->Atlases, &current->StagedAtlases})
-				for (const auto& [side, atlas] : *atlases)
-					existing -= atlas.Memory.Size();
+		Bytes replacement = 0;
 		for (UINT tier = 1; tier < demand.size(); ++tier)
 			if (demand[tier].Slices)
 				replacement += 2 * depth(0, tiers[tier], capacity(tier), true);
-		return replacement == 0 || (existing <= primary.Limit && replacement <= primary.Limit - existing);
+		return plan.RetiredSlot.Fits(retiredHeadroom, replacement);
 	};
 	const auto fits = [&](const auto& charges)
 	{
 		for (const auto& [owner, bytes] : charges)
-			if (bytes > ShadowMemory::For(devices.at(owner)->GetAdapterLuid()).Limit) return false;
+			if (bytes == UINT64_MAX ||
+			    !plan.Budgets[owner].Fits(ShadowMemory::For(devices.at(owner)->GetAdapterLuid()).Limit, bytes))
+				return false;
 		return fitsRetiredSlot();
 	};
 
-	bool limited = false;
-	for (const auto& c : candidates)
+	bool limited = plan.Limited;
+	if (reusePlan)
 	{
-		adjust(c, 1, 1);
-		if (fits(cost())) selected[c.Index] = 1;
-		else
-		{
-			adjust(c, 1, -1);
-			limited = true;
-		}
-	}
-	if (!frame.Indexed && tiers.size() > 2)
-	{
-		UINT desired = 1;
-		for (const auto& c : candidates)
-			if (selected[c.Index]) desired = (std::max)(desired, c.Desired);
-		// The legacy shader binds one array. Preserve the minimum allocation for every admitted light.
-		for (UINT tier = desired; tier > 1; --tier)
-		{
-			std::swap(demand[1], demand[tier]);
-			if (fits(cost()))
-			{
-				for (auto& level : selected)
-					if (level) level = tier;
-				break;
-			}
-			std::swap(demand[1], demand[tier]);
-			limited = true;
-		}
+		selected = plan.Tiers;
+		for (const auto& c : candidates) adjust(c, selected[c.Index], 1);
 	}
 	else
 	{
-		for (;;)
+		for (const auto& c : candidates)
 		{
-			const auto baseline = cost();
-			const Candidate* best = nullptr;
-			double bestRatio = -1;
-			struct Upgrade
+			adjust(c, 1, 1);
+			if (fits(cost())) selected[c.Index] = 1;
+			else
 			{
-				Bytes Extra = 0;
-				bool Admitted = false;
-			};
-			std::map<std::tuple<UINT, UINT, Id, bool>, Upgrade> upgrades;
-			for (const auto& c : candidates)
-			{
-				const UINT tier = selected[c.Index];
-				if (!tier || tier >= c.Desired) continue;
-				const auto& cache = frame.Cache[c.Index];
-				auto [it, inserted] = upgrades.try_emplace({tier, c.Faces, cache.Owner, cache.Latest});
-				auto& estimate = it->second;
-				if (inserted)
-				{
-					adjust(c, tier, -1);
-					adjust(c, tier + 1, 1);
-					const auto trial = cost();
-					estimate.Admitted = fits(trial);
-					if (estimate.Admitted)
-					{
-						for (const auto& [owner, bytes] : trial)
-						{
-							const auto old = baseline.find(owner);
-							const Bytes previous = old == baseline.end() ? 0 : old->second;
-							if (bytes > previous) estimate.Extra += bytes - previous;
-						}
-					}
-					adjust(c, tier + 1, -1);
-					adjust(c, tier, 1);
-				}
-				if (!estimate.Admitted) { limited = true; continue; }
-				const double gain = (std::min)(double(c.Pixels), double(tiers[tier + 1]) * tiers[tier + 1]) -
-				                    (std::min)(double(c.Pixels), double(tiers[tier]) * tiers[tier]);
-				const double ratio = gain / (std::max)(Bytes(1), estimate.Extra);
-				if (ratio > bestRatio || (ratio == bestRatio && c.Key < best->Key))
-				{
-					best = &c;
-					bestRatio = ratio;
-				}
+				adjust(c, 1, -1);
+				limited = true;
 			}
-			if (!best) break;
-			auto& tier = selected[best->Index];
-			adjust(*best, tier, -1);
-			adjust(*best, tier + 1, 1);
-			++tier;
 		}
+		if (!frame.Indexed && tiers.size() > 2)
+		{
+			UINT desired = 1;
+			for (const auto& c : candidates)
+				if (selected[c.Index]) desired = (std::max)(desired, c.Desired);
+			// The legacy shader binds one array. Preserve the minimum allocation for every admitted light.
+			for (UINT tier = desired; tier > 1; --tier)
+			{
+				std::swap(demand[1], demand[tier]);
+				if (fits(cost()))
+				{
+					for (auto& level : selected)
+						if (level) level = tier;
+					break;
+				}
+				std::swap(demand[1], demand[tier]);
+				limited = true;
+			}
+		}
+		else
+		{
+			for (;;)
+			{
+				const auto baseline = cost();
+				const Candidate* best = nullptr;
+				double bestRatio = -1;
+				struct Upgrade
+				{
+					Bytes Extra = 0;
+					bool Admitted = false;
+				};
+				std::map<std::tuple<UINT, UINT, Id, bool>, Upgrade> upgrades;
+				for (const auto& c : candidates)
+				{
+					const UINT tier = selected[c.Index];
+					if (!tier || tier >= c.Desired) continue;
+					const auto& cache = frame.Cache[c.Index];
+					auto [it, inserted] = upgrades.try_emplace({tier, c.Faces, cache.Owner, cache.Latest});
+					auto& estimate = it->second;
+					if (inserted)
+					{
+						adjust(c, tier, -1);
+						adjust(c, tier + 1, 1);
+						const auto trial = cost();
+						estimate.Admitted = fits(trial);
+						if (estimate.Admitted)
+						{
+							for (const auto& [owner, bytes] : trial)
+							{
+								const auto old = baseline.find(owner);
+								const Bytes previous = old == baseline.end() ? 0 : old->second;
+								if (bytes > previous) estimate.Extra += bytes - previous;
+							}
+						}
+						adjust(c, tier + 1, -1);
+						adjust(c, tier, 1);
+					}
+					if (!estimate.Admitted) { limited = true; continue; }
+					const double gain = (std::min)(double(c.Pixels), double(tiers[tier + 1]) * tiers[tier + 1]) -
+					                    (std::min)(double(c.Pixels), double(tiers[tier]) * tiers[tier]);
+					const double ratio = gain / (std::max)(Bytes(1), estimate.Extra);
+					if (ratio > bestRatio || (ratio == bestRatio && c.Key < best->Key))
+					{
+						best = &c;
+						bestRatio = ratio;
+					}
+				}
+				if (!best) break;
+				auto& tier = selected[best->Index];
+				adjust(*best, tier, -1);
+				adjust(*best, tier + 1, 1);
+				++tier;
+			}
+		}
+		plan.Tiers = selected;
+		plan.Limited = limited;
 	}
 	for (UINT tier = 1; tier < tiers.size(); ++tier)
 	{
@@ -1347,8 +1407,33 @@ void SceneLocalShadows::Allocate(UINT slot, SceneLocalShadows& staticPass, const
 		const auto& target = *frame.StagedLayout;
 		const bool newReceiver = std::any_of(candidates.begin(), candidates.end(), [&](const Candidate& c)
 		{ return selected[c.Index] && !target.Sizes[c.Index]; });
-		if (mustEvict || newReceiver || !ShadowMemory::Fits(primary, 0) ||
-		    (!target.Capacities.empty() && target.Capacities.rbegin()->first > ceiling))
+		const auto targetFits = [&]
+		{
+			// The target may predate a budget reduction, a new owner or a change of ceiling.
+			auto proposedDemand = std::move(demand);
+			auto proposedRetained = std::move(retained);
+			demand.assign(tiers.size(), {});
+			retained.assign(tiers.size(), 0);
+			bool supported = true;
+			for (const auto& [side, count] : target.Capacities)
+			{
+				const auto tier = std::find(tiers.begin(), tiers.end(), side);
+				if (tier == tiers.end()) { supported = false; break; }
+				retained[tier - tiers.begin()] = count;
+			}
+			for (UINT i = 0; supported && i < target.Sizes.size(); ++i)
+			{
+				if (!target.Sizes[i]) continue;
+				if (!frame.Cache[i].Needed) { supported = false; break; }
+				const auto tier = std::find(tiers.begin(), tiers.end(), target.Sizes[i]);
+				adjust({i, LocalShadowFaceCount(frame.Lights[i]), 0, 0, {}}, UINT(tier - tiers.begin()), 1);
+			}
+			const bool valid = supported && fits(cost());
+			demand.swap(proposedDemand);
+			retained.swap(proposedRetained);
+			return valid;
+		};
+		if (mustEvict || newReceiver || !ShadowMemory::Fits(primary, 0) || !targetFits())
 			discardStage();
 	}
 	else if (!frame.StagedAtlases.empty())
@@ -1390,14 +1475,32 @@ void SceneLocalShadows::Allocate(UINT slot, SceneLocalShadows& staticPass, const
 
 	bool holdingPublished = bool(frame.StagedLayout);
 	bool adoptingStage = false;
+	Bytes cutoverWork = 0;
+	const auto extraRepairs = [&](const Candidate& c)
+	{
+		const auto& now = frame.Cache[c.Index];
+		const auto& staticDepth = statics.Cache[c.Index];
+		const UINT required = protectedFaces[c.Index];
+		const UINT staticRepairs = required & ~staticDepth.StagedValid & staticDepth.MapsValid;
+		const UINT finalRepairs = (frame.Lights[c.Index].ShadowFlags & ShadowEveryFrame) ? 0 :
+		    required & ~(now.StagedValid & staticDepth.StagedValid) & now.MapsValid & staticDepth.MapsValid;
+		return std::make_pair(staticRepairs, finalRepairs);
+	};
 	if (holdingPublished)
 	{
 		const auto& target = *frame.StagedLayout;
 		adoptingStage = std::all_of(candidates.begin(), candidates.end(), [&](const Candidate& c)
 		{
-			if (!frame.StagedAtlases.count(target.Sizes[c.Index])) return true;
+			const UINT side = target.Sizes[c.Index];
+			if (!frame.StagedAtlases.count(side)) return true;
 			const auto& now = frame.Cache[c.Index];
-			return (now.Needed & ~(now.StagedValid & statics.Cache[c.Index].StagedValid)) == 0;
+			const auto& staticDepth = statics.Cache[c.Index];
+			const UINT required = protectedFaces[c.Index];
+			if (required & ~(now.StagedFaces & staticDepth.StagedFaces)) return false;
+			// Published dirty faces already need a draw this frame. Direct it to the new address.
+			const auto [staticRepairs, finalRepairs] = extraRepairs(c);
+			cutoverWork += UINT64(side) * side * (__popcnt(staticRepairs) + __popcnt(finalRepairs));
+			return cutoverWork <= transitionBudget;
 		});
 		if (adoptingStage)
 		{
@@ -1413,9 +1516,9 @@ void SceneLocalShadows::Allocate(UINT slot, SceneLocalShadows& staticPass, const
 				auto& current = frame.Cache[i];
 				auto& staticDepth = statics.Cache[i];
 				staticDepth.MapsValid = staticDepth.StagedValid;
-				staticDepth.ResidentFaces = staticDepth.StagedFaces;
+				staticDepth.ResidentFaces = staticDepth.StagedValid | protectedFaces[i];
 				current.MapsValid = current.StagedValid & staticDepth.StagedValid;
-				current.ResidentFaces = current.StagedFaces;
+				current.ResidentFaces = current.MapsValid | protectedFaces[i];
 				current.LocalFallback = current.Owner ? current.MapsValid : 0;
 			}
 			for (auto* current : {&frame, &statics})
@@ -1503,6 +1606,7 @@ void SceneLocalShadows::Allocate(UINT slot, SceneLocalShadows& staticPass, const
 		buildLayout();
 	}
 	decltype(_previousResolution) placements;
+	const uint64_t previousGeneration = _generation;
 	for (const auto& c : candidates)
 	{
 		auto& cache = frame.Cache[c.Index];
@@ -1515,6 +1619,7 @@ void SceneLocalShadows::Allocate(UINT slot, SceneLocalShadows& staticPass, const
 			placements.emplace(c.Key, Placement{side, cache.Generation});
 		}
 	}
+	if (previousGeneration != _generation || placements.size() != _previousResolution.size()) ++_placementRevision;
 	_previousResolution.swap(placements);
 
 	if (!holdingPublished && !adoptingStage)
@@ -1545,7 +1650,7 @@ void SceneLocalShadows::Allocate(UINT slot, SceneLocalShadows& staticPass, const
 		staticPass.ApplyLayout(statics, sizes, starts);
 	}
 	// Repair placements that were already visible before admitting cold faces.
-	Bytes work = 0;
+	Bytes work = adoptingStage ? cutoverWork : 0;
 	bool transitioning = deferred || holdingPublished;
 	for (auto* current : {&frame, &statics})
 		for (auto& cache : current->Cache) cache.ReadyFaces = cache.StageThisFrame = 0;
@@ -1578,7 +1683,7 @@ void SceneLocalShadows::Allocate(UINT slot, SceneLocalShadows& staticPass, const
 	}
 	if (holdingPublished)
 	{
-		// Finish the first pass over all faces even if moving casters keep invalidating staged depth.
+		// Build every protected face once. At cutover, normal shadow updates repair moving casters.
 		for (const bool refresh : {false, true})
 		{
 			for (const auto& c : candidates)
@@ -1587,9 +1692,10 @@ void SceneLocalShadows::Allocate(UINT slot, SceneLocalShadows& staticPass, const
 				auto& staticDepth = statics.Cache[c.Index];
 				const UINT side = frame.StagedLayout->Sizes[c.Index];
 				if (!frame.StagedAtlases.count(side)) continue;
-				const UINT ready = refresh ? current.StagedValid & staticDepth.StagedValid
-				                           : current.StagedFaces & staticDepth.StagedFaces;
-				admit(current.Needed & ~ready, side, current.StageThisFrame);
+				const auto [staticRepairs, finalRepairs] = extraRepairs(c);
+				const UINT required = refresh ? staticRepairs | finalRepairs
+				    : protectedFaces[c.Index] & ~(current.StagedFaces & staticDepth.StagedFaces);
+				admit(required, side, current.StageThisFrame);
 				staticDepth.StageThisFrame = current.StageThisFrame;
 			}
 		}
@@ -1615,6 +1721,8 @@ void SceneLocalShadows::Allocate(UINT slot, SceneLocalShadows& staticPass, const
 		if (!frame.Limit.empty()) frame.Limit += ", ";
 		frame.Limit += "single array on Shader Model < 6.6";
 	}
+	plan.Settled = !transitioning && !adoptingStage && !work && initialLayout == frame.LayoutRevision;
+	if (plan.Settled) plan.Limit = frame.Limit;
 	Pack(frame);
 	staticPass.Pack(statics);
 }
@@ -1643,9 +1751,14 @@ void SceneLocalShadows::PrepareAtlas(Slot& frame, UINT resolution, UINT slices, 
 	atlas.Memory.Set(*_resources.Device, ShadowMemory::Size(*_resources.Device, desc));
 	atlas.Dsvs.clear();
 	atlas.Dsvs.resize(slices);
-	atlas.StaticDepthVersions.clear();
+	atlas.ContentVersions.assign(slices, 0);
 	atlas.Slices = slices;
 	++frame.LayoutRevision;
+}
+
+void SceneLocalShadows::MarkDepthWritten(UINT slot, UINT resolution, UINT slice, bool staged)
+{
+	_slots.at(slot).AtlasFor(resolution, staged).ContentVersions.at(slice) = ++_depthVersion;
 }
 
 GDX12Texture* SceneLocalShadows::Output(UINT slot)
@@ -1709,6 +1822,7 @@ void SceneLocalShadows::ResetLayout()
 	_previousResolution.clear();
 	for (auto& frame : _slots)
 	{
+		frame.Plan.reset();
 		frame.Atlases.clear();
 		frame.StagedAtlases.clear();
 		frame.StagedLayout.reset();
@@ -1810,6 +1924,7 @@ void SceneLocalShadows::Append(
 	std::map<std::pair<UINT, bool>, Id> atlases;
 	for (const auto& view : frame.Views)
 	{
+		MarkDepthWritten(slot, view.Resolution, view.Slice, view.Staged);
 		const auto key = std::make_pair(view.Resolution, view.Staged);
 		if (!atlases.count(key))
 			atlases.emplace(key, resource(frame.AtlasFor(view.Resolution, view.Staged).Texture.GetResource()->D3DResource.Get(),

@@ -19,6 +19,20 @@ class ProbeInputMirror
 
     struct ShadowBudgetExceeded {};
 
+    std::shared_ptr<ShadowMemory::Charge> ReserveShadowBuffers(std::initializer_list<UINT64> sizes,
+                                                              D3D12_RESOURCE_FLAGS flags) const
+    {
+        if (!_localShadows) return {};
+        auto& owner = _submit.Device(_remote);
+        UINT64 bytes = 0;
+        for (auto size : sizes)
+            if (size) bytes += ShadowMemory::Size(owner, CD3DX12_RESOURCE_DESC::Buffer(size, flags));
+        if (!ShadowMemory::Fits(owner, _ownerReserve + bytes)) throw ShadowBudgetExceeded{};
+        auto charge = std::make_shared<ShadowMemory::Charge>();
+        charge->Set(owner, bytes);
+        return charge;
+    }
+
     struct BufferPatch
     {
         ID3D12Resource* Source;
@@ -43,21 +57,6 @@ class ProbeInputMirror
         if (!ShadowMemory::Fits(primary, primaryReserve + growth) ||
             !ShadowMemory::Fits(owner, ownerReserve + growth))
             throw ShadowBudgetExceeded{};
-    }
-
-    void Abort(const std::function<void(ID3D12Resource*)>& forgetLocalViews)
-    {
-        Begin();
-        for (auto entry = _mirrors.begin(); entry != _mirrors.end();)
-        {
-            if (entry->second.Initialized)
-            {
-                ++entry;
-                continue;
-            }
-            forgetLocalViews(entry->second.Local.Get());
-            entry = _mirrors.erase(entry);
-        }
     }
 
     void RetireUnused(const std::unordered_set<ID3D12Resource*>& live,

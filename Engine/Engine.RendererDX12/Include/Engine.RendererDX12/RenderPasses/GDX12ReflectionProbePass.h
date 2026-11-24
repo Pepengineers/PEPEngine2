@@ -5,6 +5,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include <array>
 #include <functional>
+#include <optional>
 #include <utility>
 namespace BistroRender { class SceneReflections; }
 
@@ -77,14 +78,12 @@ private:
     std::unique_ptr<GDX12RootSignature> _captureRoot, _cullRoot, _filterRoot;
     ComPtr<ID3D12PipelineState> _capturePSO, _skyPSO, _shadowPSO, _cullPSO, _clearPSO, _filterPSO;
     ComPtr<ID3D12CommandSignature> _signature;
-    // Capture shadows are prepared by the scene graph before probe recording.
-    bool _captureSunShadows = true;
-    GDX12Texture* _externalStaticShadows = nullptr;
-    GDX12Texture* _externalDynamicShadows = nullptr;
     const GDX12ReflectionSettings* _externalSettings = nullptr;
     std::function<bool(UINT)> _ownsCapture;
     std::function<bool(UINT)> _captureAllowed;
-    GDX12Texture _published, _filtered, _depth, _sunShadow;
+    GDX12Texture _published;
+    struct CaptureTextures { GDX12Texture Filtered, Depth, SunShadow; };
+    std::optional<CaptureTextures> _capture;
     bool _sunShadowNeedsClear = true;
     std::vector<std::unique_ptr<GDX12Descriptor>> _depthDSVs, _sunDSV, _filterUAVs;
     Statistics _statistics;

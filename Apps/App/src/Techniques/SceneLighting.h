@@ -67,7 +67,13 @@ class SceneLighting
 	void Submitted(uint64_t fence);
 	void Reset();
 	void RetireLocalShadows();
-	std::string LocalShadowDistribution() const { return _localShadows->Distribution(_slot); }
+	std::string LocalShadowDistribution() const
+	{
+		auto layout = _localShadows->Distribution(_slot);
+		if (_transparency->ShadowBudgetFallback()) layout += " (WBOIT on primary: shadow transfer budget)";
+		return layout;
+	}
+	PublishedShadows PublishedLocalShadows() const { return {*_localShadows, _slot, _frames.at(_slot).LightCount}; }
 	void ReportLocalShadows(uint64_t frame);
 	UINT64 LocalShadowTexels() const { return _localShadows->ShadowTexels(_slot); }
 	SceneTransparency& Transparency() { return *_transparency; }
@@ -98,10 +104,10 @@ class SceneLighting
 	struct RemoteLightGrid;
 	struct ShadowLane
 	{
-		Id first;
-		bool second;
-		UINT Resolution = 0;
-		auto Key() const { return std::tie(first, second, Resolution); }
+		Id Owner;
+		bool Latest;
+		bool Local = true;
+		auto Key() const { return std::tie(Owner, Latest, Local); }
 		bool operator<(const ShadowLane& other) const { return Key() < other.Key(); }
 		bool operator==(const ShadowLane& other) const { return Key() == other.Key(); }
 	};

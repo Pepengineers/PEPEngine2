@@ -42,11 +42,13 @@ class ShadowDepthTransfer
 		}
 	}
 
+	UINT Capacity() const { return UINT(_footprints.size()); }
+
 	Id Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work, ID3D12Resource* depth,
 	          std::vector<UINT> slices, bool exporting) const
 	{
 		const auto shape = depth->GetDesc();
-		if ((graph.Device != _owner && graph.Device != 0) || slices.size() != _footprints.size() ||
+		if ((graph.Device != _owner && graph.Device != 0) || slices.empty() || slices.size() > _footprints.size() ||
 		    shape.Format != DXGI_FORMAT_R32_TYPELESS || shape.Width != _resolution || shape.Height != _resolution ||
 		    shape.MipLevels != 1 || shape.SampleDesc.Count != 1 ||
 		    std::any_of(slices.begin(), slices.end(), [&](UINT slice) { return slice >= shape.DepthOrArraySize; }))
