@@ -1,6 +1,14 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12ShadowMapPass.h"
 #include <algorithm>
 
+void GDX12ShadowMapPass::ValidateShadowMapResolutions(UINT directional, UINT pointSpot)
+{
+    if (directional < 3 || directional > D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION)
+        throw std::invalid_argument("ERROR: DirectionalLightShadowMapResolution must be between 3 and 16384.");
+    if (!pointSpot || pointSpot > D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION)
+        throw std::invalid_argument("ERROR: PointSpotLightShadowMapResolution must be between 1 and 16384.");
+}
+
 GDX12ShadowMapPass::GDX12ShadowMapPass()
 {
     _flags = RENDER_PASS_FLAG_USE_GEOMETRY | RENDER_PASS_FLAG_USE_INSTANCES |
@@ -9,6 +17,9 @@ GDX12ShadowMapPass::GDX12ShadowMapPass()
 
 void GDX12ShadowMapPass::Describe(PassDescription& description) const
 {
+    description.AddParameter("DirectionalLightShadowMapResolution", ShadowMapSystem::DefaultDirectionalLightShadowMapResolution);
+    description.AddParameter("PointSpotLightShadowMapResolution", ShadowMapSystem::DefaultPointSpotLightShadowMapResolution);
+
     auto& directional = description.AddInputDrawStream(InDirectionalDrawStream);
     directional.Stride = sizeof(GDX12ShadowDrawArgs);
     directional.Layout = ShadowDrawStreamLayout;
@@ -29,19 +40,22 @@ void GDX12ShadowMapPass::Describe(PassDescription& description) const
 
     auto& directionalMaps = description.AddOutputTexture(OutDirectionalMaps, ResourceType::Texture2DArray);
     directionalMaps.Formats = {DXGI_FORMAT_D32_FLOAT};
-    directionalMaps.Size = Extent::Fixed({ShadowMapSystem::CascadeResolution, ShadowMapSystem::CascadeResolution});
     directionalMaps.Usages = ResourceUsage::DepthWrite;
     directionalMaps.ClearColor = {1, 0, 0, 0};
 
     auto& pointSpotMaps = description.AddOutputTexture(OutPointSpotMaps, ResourceType::Texture2DArray);
     pointSpotMaps.Formats = {DXGI_FORMAT_D32_FLOAT};
-    pointSpotMaps.Size = Extent::Fixed({ShadowMapSystem::PointSpotResolution, ShadowMapSystem::PointSpotResolution});
     pointSpotMaps.Usages = ResourceUsage::DepthWrite | ResourceUsage::CopyDest;
     pointSpotMaps.ClearColor = {1, 0, 0, 0};
 }
 
 void GDX12ShadowMapPass::ResolveResourceRequirements(PassResourceRequirementsContext& context)
 {
+    const auto directional = context.GetParameter<UINT>("DirectionalLightShadowMapResolution");
+    const auto pointSpot = context.GetParameter<UINT>("PointSpotLightShadowMapResolution");
+    ValidateShadowMapResolutions(directional, pointSpot);
+    context.RequireTextureSize(OutDirectionalMaps, {directional, directional});
+    context.RequireTextureSize(OutPointSpotMaps, {pointSpot, pointSpot});
     const auto& shadows = context.GetFrameData()->ShadowSystem;
     context.SetOutputTextureArraySize(OutDirectionalMaps, (std::max)(1u, shadows.DirectionalArraySize));
     context.SetOutputTextureArraySize(OutPointSpotMaps, (std::max)(1u, shadows.PointSpotArraySize));
@@ -193,14 +207,20 @@ void GDX12ShadowMapPass::Execute(PassExecutionContext& context)
 
 void GDX12ShadowMapPass::CreatePointSpotCache(PassInitContext& context)
 {
-    const auto arraySize = context.GetOutputResourceDescription(OutPointSpotMaps).ArraySize;
-    if (_pointSpotStaticCache && _pointSpotStaticCache->GetDescription().ArraySize == arraySize) return;
+    const auto& output = context.GetOutputResourceDescription(OutPointSpotMaps);
+    const auto size = output.GetSize();
+    if (_pointSpotStaticCache)
+    {
+        const auto& cached = _pointSpotStaticCache->GetDescription();
+        if (cached.Width == size.x && cached.Height == size.y && cached.ArraySize == output.ArraySize) return;
+    }
     auto* resources = context.GetDeviceResources();
     GDX12TextureDesc description;
     description.Device = resources->Device;
-    description.Width = description.Height = ShadowMapSystem::PointSpotResolution;
-    description.ArraySize = arraySize;
-    description.Format = DXGI_FORMAT_D32_FLOAT;
+    description.Width = size.x;
+    description.Height = size.y;
+    description.ArraySize = output.ArraySize;
+    description.Format = output.Format;
     description.CreateSRV = false;
     description.CreateDSV = true;
     description.DSVHeap = resources->DSVHeap.get();

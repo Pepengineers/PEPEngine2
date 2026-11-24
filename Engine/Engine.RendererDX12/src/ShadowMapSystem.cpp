@@ -118,8 +118,8 @@ void ShadowMapSystem::UpdateDirectionalViews(const GDX12LightConstants& light, c
         center /= 8.f;
         float radius = 0;
         for (const auto& corner : corners) radius = (std::max)(radius, Vector3::Distance(center, corner));
-        radius = std::ceil(radius / 16.f) * 16.f * CascadeResolution / (CascadeResolution - 2.f);
-        const float texelSize = 2.f * radius / CascadeResolution;
+        radius = std::ceil(radius / 16.f) * 16.f * DirectionalLightShadowMapResolution / (DirectionalLightShadowMapResolution - 2.f);
+        const float texelSize = 2.f * radius / DirectionalLightShadowMapResolution;
         center = Vector3::Transform(center, lightView);
         center.x = std::floor(center.x / texelSize) * texelSize;
         center.y = std::floor(center.y / texelSize) * texelSize;
@@ -171,7 +171,7 @@ void ShadowMapSystem::UpdatePointSpotViews(const GDX12LightConstants& light)
         ShadowView view{};
         XMStoreFloat4x4(&view.ViewProj, (viewMatrix * projection).Transpose());
         view.Type = light.Type;
-        view.NormalBias = light.Range / PointSpotResolution;
+        view.NormalBias = light.Range / PointSpotLightShadowMapResolution;
         Views[light.FirstShadowViewIndex + face] = view;
     }
 }

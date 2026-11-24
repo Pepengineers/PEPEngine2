@@ -14,6 +14,10 @@ public:
     static constexpr const char* OutDirectionalMaps = "OutDirectionalMaps";
     static constexpr const char* OutPointSpotMaps = "OutPointSpotMaps";
 
+    // Checks texture limits and the minimum size required for directional texel snapping.
+    // RenderModule validates the configuration before changing the shared CPU settings.
+    static void ValidateShadowMapResolutions(UINT directional, UINT pointSpot);
+
     GDX12ShadowMapPass();
     void Describe(PassDescription& description) const override;
     void ResolveResourceRequirements(PassResourceRequirementsContext& context) override;

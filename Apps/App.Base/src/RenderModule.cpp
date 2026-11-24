@@ -801,6 +801,22 @@ void RenderModule::CompileFrameGraph(FrameGraph& graph)
     }
     if (!presentRole) { throw std::invalid_argument("ERROR: Given Render pipeline has no presentation pass. Add GDX12OutputToScreenPass to the pipeline."); }
 
+    const auto shadowPasses = graph.GetPassNodes<GDX12ShadowMapPass>();
+    UINT directionalResolution = ShadowMapSystem::DefaultDirectionalLightShadowMapResolution;
+    UINT pointSpotResolution = ShadowMapSystem::DefaultPointSpotLightShadowMapResolution;
+    if (!shadowPasses.empty())
+    {
+        directionalResolution = shadowPasses.front().GetParameter<UINT>("DirectionalLightShadowMapResolution");
+        pointSpotResolution = shadowPasses.front().GetParameter<UINT>("PointSpotLightShadowMapResolution");
+        GDX12ShadowMapPass::ValidateShadowMapResolutions(directionalResolution, pointSpotResolution);
+        for (const auto& pass : shadowPasses)
+        {
+            if (pass.GetParameter<UINT>("DirectionalLightShadowMapResolution") != directionalResolution ||
+                pass.GetParameter<UINT>("PointSpotLightShadowMapResolution") != pointSpotResolution)
+                throw std::invalid_argument("ERROR: All Shadow Map passes must use the same resolutions because they share ShadowMapSystem projections.");
+        }
+    }
+
     if (_frameGraph) { _frameGraph->WaitForGPUCompletion(); }
     const auto primaryFlags = graph.GetDevicePassFlags(DEVICE_ROLE_PRIMARY);
     const auto secondaryFlags = graph.GetDevicePassFlags(DEVICE_ROLE_SECONDARY);
@@ -848,6 +864,8 @@ void RenderModule::CompileFrameGraph(FrameGraph& graph)
     if (dualGPUMode) { UploadSceneResources(_secondaryResources, secondaryFlags); }
     graph.SetDeviceResources(&_primaryResources, dualGPUMode ? &_secondaryResources : nullptr, &_RPcommonData);
 
+    _RPcommonData.ShadowSystem.DirectionalLightShadowMapResolution = directionalResolution;
+    _RPcommonData.ShadowSystem.PointSpotLightShadowMapResolution = pointSpotResolution;
     _frameGraph = graph.Compile();
     MarkSceneDataDirty();
 }

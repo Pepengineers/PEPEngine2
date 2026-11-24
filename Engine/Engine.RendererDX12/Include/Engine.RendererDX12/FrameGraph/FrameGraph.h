@@ -19,6 +19,13 @@ class NodeHandle
 public:
     InputPinRef GetInput(const PinId& id) const;
     OutputPinRef GetOutput(const PinId& id) const;
+    // Reads the configured value, or the default declared by the pass.
+    template<class T> T GetParameter(const std::string& name) const
+    {
+        const auto definition = _definition.lock();
+        if (!definition) { throw std::logic_error("ERROR: Given FrameGraph handle refers to a destroyed graph."); }
+        return definition->Nodes.at(_id).Description.GetParameter<T>(name);
+    }
     template<class T> void SetParameter(const std::string& name, T value) const
     {
         const auto definition = _definition.lock();

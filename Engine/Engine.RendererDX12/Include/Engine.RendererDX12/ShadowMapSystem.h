@@ -16,8 +16,12 @@
 class ShadowMapSystem
 {
 public:
-    static constexpr UINT CascadeResolution = 2048;
-    static constexpr UINT PointSpotResolution = 256;
+    static constexpr UINT DefaultDirectionalLightShadowMapResolution = 2048;
+    static constexpr UINT DefaultPointSpotLightShadowMapResolution = 1024;
+
+    // RenderModule applies the pass parameters before compiling a new pipeline.
+    UINT DirectionalLightShadowMapResolution = DefaultDirectionalLightShadowMapResolution;
+    UINT PointSpotLightShadowMapResolution = DefaultPointSpotLightShadowMapResolution;
 
     // Records the active camera for projection building after all worlds have updated their casters.
     void SetCamera(const Matrix& view, const Matrix& projection, float nearPlane, float farPlane);
