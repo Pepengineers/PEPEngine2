@@ -12,7 +12,7 @@ namespace
         L"Texels per sun cascade: 0 Off, 512, 1024, 2048 or 4096. Applies at the frame boundary.",
         EConsoleVariableFlags::Default, [](UINT value) { return value == 0 || IsSunShadowResolution(value); });
     AutoConsoleVariable<UINT> LocalShadowSize(L"Render.Shadows.Local.Resolution", LocalShadowResolution,
-        L"Texels per point or spot shadow face: 0 Off, 128, 256, 384, 512 or 1024. Applies at the frame boundary.",
+        L"Point and spot shadow face resolution. In Bistro this caps adaptive maps. 0 Off, 128, 256, 384, 512 or 1024.",
         EConsoleVariableFlags::Default, [](UINT value) { return value == 0 || IsLocalShadowResolution(value); });
     AutoConsoleVariable<UINT> SunCascadeCount(L"Render.Shadows.Sun.CascadeCount", 4u,
         L"Number of sun cascades, 1..4. Applies at the frame boundary.",

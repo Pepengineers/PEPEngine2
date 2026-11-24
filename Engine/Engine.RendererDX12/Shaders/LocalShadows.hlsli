@@ -3,8 +3,13 @@
 float LocalVisibility(LocalLight light, float3 position, float3 normal, float nDotL)
 {
     if (light.ShadowFirstSlice == 0xffffffffu || (light.ShadowFlags & 1u) == 0u) return 1;
+    Texture2DArray<float> maps = LocalShadowMaps;
+#if LOCAL_SHADOW_HEAP_INDEXED && (__SHADER_TARGET_MAJOR > 6 || (__SHADER_TARGET_MAJOR == 6 && __SHADER_TARGET_MINOR >= 6))
+    if (light.ShadowFlags & 8u)
+        maps = ResourceDescriptorHeap[NonUniformResourceIndex(light.ShadowFlags >> 4)];
+#endif
     uint width, height, slices;
-    LocalShadowMaps.GetDimensions(width, height, slices);
+    maps.GetDimensions(width, height, slices);
     float bias = light.Range / width * (0.1f + 0.2f * (1.0f - nDotL));
     float3 biasedPosition = position + normal * bias;
     uint face = 0;
@@ -25,7 +30,7 @@ float LocalVisibility(LocalLight light, float3 position, float3 normal, float nD
     float visibility = 0;
     [unroll] for (int y = -1; y <= 1; ++y)
         [unroll] for (int x = -1; x <= 1; ++x)
-            visibility += LocalShadowMaps.SampleCmpLevelZero(samShadow,
+            visibility += maps.SampleCmpLevelZero(samShadow,
                 float3(clamp(uv + float2(x, y) / float2(width, height),
                     0.5f / float2(width, height), 1 - 0.5f / float2(width, height)), light.ShadowFirstSlice + face), projected.z - 0.00001f);
     return visibility / 9.0f;

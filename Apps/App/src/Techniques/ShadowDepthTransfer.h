@@ -2,6 +2,7 @@
 
 #include "Graph/QueueSubmission.h"
 #include "NativeWork.h"
+#include "ShadowMemory.h"
 
 namespace BistroRender
 {
@@ -9,7 +10,7 @@ namespace BistroRender
 class ShadowDepthTransfer
 {
   public:
-	ShadowDepthTransfer(const QueueSubmission& submit, Id owner, UINT resolution, UINT count)
+	ShadowDepthTransfer(const QueueSubmission& submit, Id owner, UINT resolution, UINT count, bool localShadow = true)
 	    : _owner(owner), _resolution(resolution), _footprints(count)
 	{
 		const auto shape = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R32_TYPELESS, resolution, resolution,
@@ -33,6 +34,12 @@ class ShadowDepthTransfer
 				throw std::runtime_error("Incompatible shadow transfer footprint");
 		}
 		_buffer = submit.CreateTransferBuffer(owner, primaryBytes);
+		if (localShadow)
+		{
+			const auto bytes = _buffer.Heaps[1]->GetDesc().SizeInBytes;
+			_primaryMemory.Set(submit.Device(0), bytes);
+			_ownerMemory.Set(submit.Device(owner), bytes);
+		}
 	}
 
 	Id Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work, ID3D12Resource* depth,
@@ -69,6 +76,7 @@ class ShadowDepthTransfer
 	Id _owner;
 	UINT _resolution;
 	std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> _footprints;
+	ShadowMemory::Charge _primaryMemory, _ownerMemory;
 	QueueSubmission::TransferBuffer _buffer;
 };
 } // namespace BistroRender

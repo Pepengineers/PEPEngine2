@@ -93,6 +93,14 @@ class BistroRenderPipeline final : public IRenderPipeline
 		_benchmarkLocalSkinning = seconds.has_value() && localSkinning;
 	}
 	void ResetBenchmarkClouds() { _environment->ResetClouds(); }
+	void RetireLocalShadows()
+	{
+		if (!_lighting || !_executor) return;
+		_executor->Drain();
+		_lighting->RetireLocalShadows();
+	}
+	std::string LocalShadowDistribution() const { return _lighting->LocalShadowDistribution(); }
+	UINT64 LocalShadowTexels() const { return _lighting->LocalShadowTexels(); }
 	std::function<void()> CaptureBenchmarkPhysics(World&);
 	std::vector<std::pair<std::string, std::string>> BenchmarkAdapters() const;
 	const auto& BenchmarkSubmissions() const { return *_executor->Submissions(); }

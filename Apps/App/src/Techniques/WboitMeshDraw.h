@@ -10,7 +10,7 @@ struct WboitMeshDraw
 	ID3D12CommandSignature* Signature;
 	ID3D12DescriptorHeap* Heap;
 	D3D12_GPU_VIRTUAL_ADDRESS Main, Camera;
-	std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 3> Views;
+	std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 9> Views;
 	D3D12_GPU_DESCRIPTOR_HANDLE Textures;
 	GDX12GeometryBuffer::RecordingBinding Geometry;
 	D3D12_CPU_DESCRIPTOR_HANDLE Depth;
@@ -33,7 +33,7 @@ struct WboitMeshDraw
 		cmd->SetGraphicsRootConstantBufferView(Root->GetBRootParamIndex(2), Camera);
 		for (UINT i = 0; i < Views.size(); ++i)
 		{
-			cmd->SetGraphicsRootDescriptorTable(Root->GetTRootParamIndex(i), Views[i]);
+			if (Views[i].ptr) cmd->SetGraphicsRootDescriptorTable(Root->GetTRootParamIndex(i), Views[i]);
 		}
 		cmd->SetGraphicsRootDescriptorTable(Root->GetTRootParamIndex(16), Textures);
 		cmd->SetGraphicsRootShaderResourceView(Root->GetGeometryRootParamIndex(),

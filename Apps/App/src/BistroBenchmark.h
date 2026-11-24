@@ -921,6 +921,10 @@ private:
         _trialIntervals.clear();
         _trialTransferBytes = {};
         _trialOwners.clear();
+        _trialFirstShadowLayout.clear();
+        _trialShadowLimits.clear();
+        _trialShadowTexels = _trialShadowSamples = 0;
+        _trialLastShadowLayout.clear();
         _trialPublications.clear();
         if (_calibrating) _placementSeenOnRoute = {};
         _trialWindowCount = _windows.size();
@@ -932,6 +936,9 @@ private:
         _trialPrefix = "Trial." + std::to_string(_trial.Id) + ".";
         _csv.Config(_trialPrefix + "Source", _trial.Source);
         _csv.Config(_trialPrefix + "Scope", _trial.Full ? "full route" : "common windows");
+        const auto shadowCeiling = _manualPlacement ? console.FindConsoleVariable(L"Render.Shadows.Local.Resolution").GetInt() :
+            _placementSearch.QualityValue(BistroPlacement::LocalShadowQuality, _trial.Settings.Levels[BistroPlacement::LocalShadowQuality]);
+        _csv.Config(_trialPrefix + "RequestedLocalShadowCeiling", std::to_string(shadowCeiling));
         if (!_manualPlacement)
         {
             if (!first) Apply(console, _placementSearch.Patch(_trial.Settings));
@@ -1049,6 +1056,13 @@ private:
             activity[17] |= starts("sun atlas ") || name == "publish dirty remote CSM tiles on GPU0";
             activity[18] |= name == "local shadow CPU lists ExecuteIndirect" || name == "import shadow depth slices";
         };
+        const auto shadowTexels = pipeline.LocalShadowTexels();
+        _trialShadowTexels += shadowTexels;
+        ++_trialShadowSamples;
+        _trialLastShadowLayout = pipeline.LocalShadowDistribution();
+        const auto limit = _trialLastShadowLayout.find(" (");
+        if (limit != std::string::npos) _trialShadowLimits.insert(_trialLastShadowLayout.substr(limit + 1));
+        if (_trialFirstShadowLayout.empty()) _trialFirstShadowLayout = _trialLastShadowLayout;
         const auto& schedule = pipeline.BenchmarkSchedule();
         if (_observedSchedule != schedule)
         {
@@ -1069,6 +1083,7 @@ private:
         effectiveActivity[10] |= skySource == SkySource::SkyAtmosphere;
         effectiveActivity[11] = skySource == SkySource::SkyBox && !effectiveActivity[5];
         effectiveActivity[13] |= hud != Invalid;
+        effectiveActivity[BistroPlacement::LocalShadowQuality] = shadowTexels != 0;
         for (size_t i = 0; i < activity.size(); ++i)
         {
             _trialResult.Activity[i] |= effectiveActivity[i] && (_manualPlacement || _trial.Settings.Levels[i] != BistroPlacement::Off);
@@ -1213,6 +1228,7 @@ private:
     void CompletePlacementTrial(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline)
     {
         _trialResult.Remote = !_trialPublications.empty();
+        if (_trialShadowSamples) _trialResult.ShadowTexels = double(_trialShadowTexels) / _trialShadowSamples;
         const bool remote = _placementSearch.RemotePhase();
         if (!_manualPlacement && remote != _trialResult.Remote && _trialReason.empty())
             _trialReason = remote ? "no frame consumer observed on the requested placement" : "unexpected cross-GPU work";
@@ -1276,6 +1292,10 @@ private:
     {
         for (const auto& [name, adapter] : _trialOwners)
             _csv.Config(_trialPrefix + name, adapter);
+        _csv.Config(_trialPrefix + "FirstLocalShadowLayout", _trialFirstShadowLayout);
+        _csv.Config(_trialPrefix + "LastLocalShadowLayout", _trialLastShadowLayout);
+        _csv.Config(_trialPrefix + "MeanLocalShadowTexels", Csv::Number(_trialResult.ShadowTexels));
+        for (const auto& limit : _trialShadowLimits) _csv.Config(_trialPrefix + "LocalShadowLimit", limit);
         constexpr std::array transferNames{"PostSceneInputBytes", "PostHUDBytes", "PostInspectorBytes", "PostReturnBytes"};
         for (size_t i = 0; i < transferNames.size(); ++i)
             _csv.Config(_trialPrefix + transferNames[i], std::to_string(_trialTransferBytes[i]));
@@ -1472,6 +1492,7 @@ private:
                 const auto& restore = _trial.Full ? (_manualPlacement ? _initialScene : _replayScene) :
                     _placementPhysics[_placementWindowIndex];
                 restore();
+                pipeline.RetireLocalShadows();
             }
             else if (_stage == Stage::FinalControl || _stage == Stage::Final || _stage == Stage::Exhaustive) _initialScene();
             else if (_stage != Stage::Baseline)
@@ -2413,6 +2434,9 @@ private:
     std::array<bool, std::size(BistroPlacement::Techniques)> _packetActivity{};
     std::shared_ptr<const BistroRender::Schedule> _observedSchedule;
     std::set<std::pair<std::string, std::string>> _trialOwners;
+    std::string _trialFirstShadowLayout, _trialLastShadowLayout;
+    std::set<std::string> _trialShadowLimits;
+    uint64_t _trialShadowTexels = 0, _trialShadowSamples = 0;
     std::vector<double> _trialIntervals;
     std::array<uint64_t, 4> _trialTransferBytes{};
     Config _trialConfig;

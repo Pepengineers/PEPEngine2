@@ -2,6 +2,7 @@
 
 #include "BistroReflections.h"
 #include "BistroScene.h"
+#include "Techniques/ShadowMemory.h"
 #include "Techniques/Linden/LindenMesh.h"
 #include "Techniques/UI/BistroUICanvases.h"
 #include "Techniques/Grass/BistroGrass.h"
@@ -28,18 +29,17 @@ class BistroVideoMemory
     };
 
     std::map<std::wstring, Charges> _accepted;
-    Charges _base, _lastBudget, _lastUsage;
+    Charges _base, _lastBudget, _lastUsage, _lastShadows;
     uint64_t _revision = UINT64_MAX;
     uint32_t _size = 0;
     std::chrono::steady_clock::time_point _nextCheck{};
 
 public:
-    enum class Result { Fits, Limited, SmallerOutputRequired };
+    enum class Result { Fits, Limited, RetireLocalShadows, SmallerOutputRequired };
     std::wstring LastLimit;
 
-    template<class ShadowOwner>
     Result Apply(ConsoleModule& console, SceneManagerModule& scenes, RenderModule& render,
-                 const std::vector<DeviceDesc>& adapters, uint16_t width, uint16_t height, ShadowOwner shadowOwner)
+                 const std::vector<DeviceDesc>& adapters, uint16_t width, uint16_t height)
     {
         const auto now = std::chrono::steady_clock::now();
         const uint32_t size = (uint32_t(width) << 16) | height;
@@ -49,21 +49,24 @@ public:
         const auto value = [&](const wchar_t* key) { return console.FindConsoleVariable(key).GetInt(); };
         const size_t primary = value(L"Render.PrimaryAdapter");
         const auto owner = [&](int index) { return index >= 0 && size_t(index) < adapters.size() ? size_t(index) : primary; };
-        Charges usage(adapters.size()), budget(adapters.size());
+        Charges usage(adapters.size()), budget(adapters.size()), raw(adapters.size()), shadows(adapters.size());
         for (size_t i = 0; i < adapters.size(); ++i)
         {
             DXGI_QUERY_VIDEO_MEMORY_INFO info{};
             const auto hr = adapters[i].Adapter->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &info);
-            usage[i] = SUCCEEDED(hr) ? info.CurrentUsage : 0;
+            shadows[i] = BistroRender::ShadowMemory::For(adapters[i].AdapterLuid).Allocated;
+            usage[i] = SUCCEEDED(hr) ? info.CurrentUsage - (std::min)(info.CurrentUsage, shadows[i]) : 0;
             const Bytes available = info.Budget ? info.Budget : adapters[i].DedicatedVideoMemory;
+            raw[i] = available;
             budget[i] = available - available / 10; // Leave space for driver heaps and transient allocations.
         }
         // Stable settings need only a periodic DXGI poll, even on a crowded adapter. New allocations
         // are checked against current usage below, including resources left resident by earlier passes.
-        if (_revision == IConsoleVariable::ValueRevision() && _size == size && budget == _lastBudget && usage == _lastUsage)
+        if (_revision == IConsoleVariable::ValueRevision() && _size == size && budget == _lastBudget && usage == _lastUsage && shadows == _lastShadows)
             return Result::Fits;
         _lastBudget = budget;
         _lastUsage = usage;
+        _lastShadows = shadows;
         if (_base.empty()) _base = usage;
         const Bytes frames = value(L"Render.NumFrames"), pixels = Bytes(width) * height;
         const auto charge = [&](Bytes bytes, size_t gpu)
@@ -97,16 +100,6 @@ public:
                 throw std::logic_error("VRAM estimate is missing a legal setting level");
             features.push_back(std::move(feature));
         };
-        // Two independent D32 arrays per slot. Point fixtures have six faces, spot fixtures one.
-        Charges remoteFaces(adapters.size());
-        UINT16 faceCount = 0;
-        for (const auto& fixture : BistroLightPlacements)
-        {
-            const Bytes faces = fixture.Kind == BistroFixtureKind::Point ? 6 : 1;
-            faceCount += static_cast<UINT16>(faces);
-            const size_t gpu = owner(shadowOwner(fixture.Name));
-            if (gpu != primary) remoteFaces[gpu] += faces;
-        }
         const auto depthBytes = [&](int side, UINT16 layers)
         {
             const UINT r = (std::max)(1, side);
@@ -115,18 +108,6 @@ public:
             return render.GetPrimaryDevice()->GetDevice()->GetResourceAllocationInfo(0, 1, &desc).SizeInBytes;
         };
         const Bytes geometry = render.GetPrimaryGeometryBytes();
-        add(L"Render.Shadows.Local.Resolution", {0,128,256,384,512,1024}, [&](int r)
-        {
-            auto cost = charge(2 * depthBytes(r, faceCount) * frames, primary);
-            for (size_t gpu = 0; r && gpu < cost.size(); ++gpu)
-            {
-                if (!remoteFaces[gpu]) continue;
-                const Bytes remoteAtlas = depthBytes(r, static_cast<UINT16>(remoteFaces[gpu])) * frames;
-                cost[gpu] += 4 * remoteAtlas + geometry * frames;
-                cost[primary] += 2 * remoteAtlas;
-            }
-            return cost;
-        });
         add(L"Render.Shadows.Sun.Resolution", {0,512,1024,2048,4096}, [&](int r)
         {
             const Bytes atlas = depthBytes(2 * r, 1) * frames;
@@ -237,12 +218,12 @@ public:
         placement(L"Render.Sky.SkyView.Adapter", 512 * 256 * 8 * frames);
         placement(L"Render.Sky.AerialPerspective.Adapter", 32 * 32 * 64 * 16 * frames);
         features.push_back({L"", {{0, charge(pixels * 44 * frames + maskBytes, primary)}}});
-        return Admit(console, features, usage, budget, size);
+        return Admit(console, features, adapters, usage, budget, raw, shadows, size);
     }
 
 private:
-    Result Admit(ConsoleModule& console, std::vector<Feature>& features, const Charges& usage,
-                 const Charges& budget, uint32_t size)
+    Result Admit(ConsoleModule& console, std::vector<Feature>& features, const std::vector<DeviceDesc>& adapters,
+                 const Charges& usage, const Charges& budget, const Charges& raw, const Charges& shadows, uint32_t size)
     {
         const Bytes frames = console.FindConsoleVariable(L"Render.NumFrames").GetUInt();
         Charges total, growth;
@@ -259,7 +240,7 @@ private:
                     total[i] += costs[i];
                     const Bytes old = previous == _accepted.end() ? 0 : previous->second[i];
                     if (costs[i] > old)
-                        growth[i] += costs[i] - old + old / frames; // One old slot can overlap its replacement.
+                        growth[i] += costs[i]; // CurrentUsage may still contain all slots of the previous configuration.
                 }
             }
             size_t gpu = 0;
@@ -299,7 +280,21 @@ private:
                 "; current MiB=", usage[gpu] >> 20, "; usable MiB=", budget[gpu] >> 20);
             best->Selected = next;
         }
+        bool reclaim = false;
+        for (size_t i = 0; i < adapters.size(); ++i)
+        {
+            const Bytes peak = (std::max)(total[i], usage[i] + growth[i]);
+            auto& account = BistroRender::ShadowMemory::For(adapters[i].AdapterLuid);
+            account.Limit = raw[i] > peak ? raw[i] - peak : 0;
+            reclaim |= growth[i] && shadows[i] > account.Limit;
+        }
+        if (reclaim)
+        {
+            _revision = UINT64_MAX; // Re-evaluate actual usage after the shadow generations retire.
+            return Result::RetireLocalShadows;
+        }
         std::map<std::wstring, std::vector<int>> available;
+        available[L"Render.Shadows.Local.Resolution"] = {0, 128, 256, 384, 512, 1024};
         for (const auto& f : features)
         {
             if (!f.ShowLevels) continue;

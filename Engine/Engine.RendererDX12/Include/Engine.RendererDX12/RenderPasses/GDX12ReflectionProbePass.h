@@ -78,6 +78,7 @@ private:
     ComPtr<ID3D12PipelineState> _capturePSO, _skyPSO, _shadowPSO, _cullPSO, _clearPSO, _filterPSO;
     ComPtr<ID3D12CommandSignature> _signature;
     // Capture shadows are prepared by the scene graph before probe recording.
+    bool _captureSunShadows = true;
     GDX12Texture* _externalStaticShadows = nullptr;
     GDX12Texture* _externalDynamicShadows = nullptr;
     const GDX12ReflectionSettings* _externalSettings = nullptr;

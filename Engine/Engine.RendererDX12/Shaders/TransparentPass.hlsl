@@ -41,8 +41,12 @@ SamplerComparisonState samShadow : register(s6);
 #define LOCAL_REFLECTION_PROBES 1
 #include "ReflectionProbes.hlsli"
 #endif
+#define LOCAL_SHADOW_HEAP_INDEXED 1
 #if TRANSPARENT_SIMPLE_LIGHTING
 #include "PBRSurface.hlsli"
+#if TRANSPARENT_LOCAL_LIGHTS
+#include "PBRLighting.hlsli"
+#endif
 #else
 #include "PBR.hlsli"
 #endif
@@ -125,6 +129,12 @@ PSOutput ShadeTransparency(VS_OUTPUT_PS_INPUT pin, uint partition)
     light *= rsqrt(max(dot(light, light), 1e-6f));
     float3 normal = normalize(pin.Normal);
     float3 litColor = color.rgb * (0.2f + CBMain.LightRadiance * saturate(dot(normal, light)));
+#if TRANSPARENT_LOCAL_LIGHTS
+    PBRSurface surface = SamplePBRSurface(material, color.rgb, pin.PosW, pin.Normal, pin.TexC);
+    float3 view = SafeNormalize(CBCamera.CameraLocation - pin.PosW);
+    for (uint i = 0; i < CBMain.LocalLightCount; ++i)
+        litColor += ShadeLocalLight(surface, pin.PosW, view, LocalLights[i]);
+#endif
 #else
     float3 litColor = ShadePBR(material, color.rgb, pin.PosW, pin.Normal, pin.TexC);
 #endif

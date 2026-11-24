@@ -32,6 +32,7 @@ public:
     // instance ID and must not use the opaque compact-batch remap.
     void SetUnbatchedDraws(bool enabled) { _unbatchedDraws = enabled; }
     void SetStaticIBLOnly(bool enabled) { _staticIBLOnly = enabled; }
+    void SetLocalLights(bool enabled) { _localLights = enabled; }
     void SetSimpleLighting(bool enabled) { _simpleLighting = enabled; }
     void SetAtmosphereEnabled(bool enabled) { _atmosphereEnabled = enabled; }
 	void Initialize() override
@@ -59,13 +60,15 @@ public:
         const D3D_SHADER_MACRO defines[] = {{"TRANSPARENT_UNBATCHED", _unbatchedDraws ? "1" : "0"},
             {"TRANSPARENT_STATIC_IBL_ONLY", _staticIBLOnly ? "1" : "0"},
             {"TRANSPARENT_ATMOSPHERE", !_simpleLighting && (!_staticIBLOnly || _atmosphereEnabled) ? "1" : "0"},
-            {"TRANSPARENT_SIMPLE_LIGHTING", _simpleLighting ? "1" : "0"}, {nullptr, nullptr}};
+            {"TRANSPARENT_SIMPLE_LIGHTING", _simpleLighting ? "1" : "0"},
+            {"TRANSPARENT_LOCAL_LIGHTS", _localLights ? "1" : "0"}, {nullptr, nullptr}};
 		_transparencyVS = shaderCompiler.CompileShader(_resources->Device, SHADERS_FOLDER "TransparentPass.hlsl", defines, "VS", "vs");
 		_transparencyPS = shaderCompiler.CompileShader(_resources->Device, SHADERS_FOLDER "TransparentPass.hlsl", defines, _partition == DepthPartition::Far ? "PSFar" :
             _partition == DepthPartition::Near ? "PSNear" : "PS", "ps");
 
 		// Root Signatures
 		GDX12RootSignatureDesc RSDesc1;
+		RSDesc1.IndexedLocalShadows = true;
         RSDesc1.InstancedGeometry = true;
 		RSDesc1.NumSingleCBVSlots = 4;
 		RSDesc1.NumSingleSRVSlots = 16;
@@ -185,5 +188,6 @@ private:
     bool _unbatchedDraws = false;
     bool _staticIBLOnly = false;
     bool _simpleLighting = false;
+    bool _localLights = false;
     bool _atmosphereEnabled = false;
 };

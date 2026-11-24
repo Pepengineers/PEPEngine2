@@ -133,13 +133,16 @@ GDX12RootSignature::GDX12RootSignature(GDX12Device* device, const GDX12RootSigna
         }
     }
 
+    auto flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+    if (desc.IndexedLocalShadows && device->GetDeviceFeatures().Features.HighestShaderModel() >= D3D_SHADER_MODEL_6_6)
+        flags |= D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED;
     CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc;
     rootSignatureDesc.Init_1_1(
         static_cast<UINT>(rootParameters.size()),
         rootParameters.data(),
         static_cast<UINT>(desc.StaticSamplers.size()),
         desc.StaticSamplers.empty() ? nullptr : desc.StaticSamplers.data(),
-        D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+        flags);
 
     ComPtr<ID3DBlob> signatureBlob, errorBlob;
     HRESULT hr = D3D12SerializeVersionedRootSignature(&rootSignatureDesc, &signatureBlob, &errorBlob);

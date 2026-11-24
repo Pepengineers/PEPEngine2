@@ -16,6 +16,7 @@ struct GDX12RootSignatureDesc
 {
     bool VolatileSRVData = false;
     bool InstancedGeometry = false;
+    bool IndexedLocalShadows = false;
 	UINT NumSingleCBVSlots = 0;
 	UINT NumSingleSRVSlots = 0;
 	UINT NumSingleUAVSlots = 0;

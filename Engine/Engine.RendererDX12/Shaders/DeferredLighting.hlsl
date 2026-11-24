@@ -33,6 +33,7 @@ cbuffer VisibleSkyViewSampling : register(b5)
 #include "PBRSurface.hlsli"
 #define REFLECTION_PROBE_BINDINGS_DEFERRED 1
 #include "ReflectionProbes.hlsli"
+#define LOCAL_SHADOW_HEAP_INDEXED 1
 #include "PBRLighting.hlsli"
 
 #ifndef DEFERRED_WAVE_OPS

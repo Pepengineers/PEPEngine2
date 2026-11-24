@@ -97,7 +97,7 @@ struct Result
     size_t Id = 0;
     Config Settings;
     Size Output{}, Render{};
-    double Fps = 0, P95 = 0, ThresholdFps = 0;
+    double Fps = 0, P95 = 0, ThresholdFps = 0, ShadowTexels = 0;
     bool Valid = false, Remote = false;
     std::array<bool, std::size(Techniques)> Activity{};
     std::string SourceCsv;
@@ -216,7 +216,8 @@ public:
         }
         // The renderer exposes shadow quality as a discrete resolution.
         _values[SunShadowQuality] = {0, 1024, 2048, 4096};
-        _values[LocalShadowQuality] = {0, 256, 512, 1024};
+        const int localCeiling = console.FindConsoleVariable(Techniques[LocalShadowQuality].Quality).GetInt();
+        _values[LocalShadowQuality] = {0, localCeiling == 128 || localCeiling == 384 ? localCeiling : 256, 512, 1024};
         _values[SkinningQuality][Epic] = _values[SkinningQuality][High];
         if (!usesSkinningPreset)
             _values[SkinningQuality][Medium] = _values[SkinningQuality][High];
@@ -841,7 +842,7 @@ private:
     {
         size_t high = 0, medium = 0;
         for (size_t i = 0; i < active.size(); ++i)
-            if (active[i] && HasQualityScale(i))
+            if (i != LocalShadowQuality && active[i] && HasQualityScale(i))
             {
                 high += config.Levels[i] >= High;
                 medium += config.Levels[i] == Medium;
@@ -859,7 +860,7 @@ private:
         {
             size_t n = 0;
             for (size_t i = 0; i < r.Activity.size(); ++i)
-                n += r.Activity[i] && r.Settings.Levels[i] >= level;
+                n += r.Activity[i] && (i == LocalShadowQuality ? level == Medium : r.Settings.Levels[i] >= level);
             return n;
         };
         const auto activeA = count(a, Medium), activeB = count(b, Medium);
@@ -871,7 +872,7 @@ private:
             const bool resolutionFirst = _profile == Performance && KeepsComposition(r.Settings) &&
                 HighMajority(r.Settings, r.Activity);
             const auto pixels = uint64_t(r.Output.first) * r.Output.second;
-            return std::tuple{resolutionFirst, resolutionFirst ? pixels : 0, high, pixels, epic,
+            return std::tuple{resolutionFirst, resolutionFirst ? pixels : 0, high, pixels, epic, r.ShadowTexels,
                 uint64_t(r.Render.first) * r.Render.second, r.Fps, -r.P95};
         };
         return rank(a) > rank(b);
@@ -881,12 +882,13 @@ private:
     {
         if (a.Settings.Provider != b.Settings.Provider || a.Settings.Preset != b.Settings.Preset ||
             a.Fps < b.Fps || a.Output.first < b.Output.first || a.Output.second < b.Output.second ||
-            a.Render.first < b.Render.first || a.Render.second < b.Render.second)
+            a.Render.first < b.Render.first || a.Render.second < b.Render.second || a.ShadowTexels < b.ShadowTexels)
             return false;
         // Keep layouts whose short-window results are indistinguishable within measurement noise.
         if (a.Fps <= b.Fps * 1.04) return false;
         for (size_t i = 0; i < a.Activity.size(); ++i)
         {
+            if (i == LocalShadowQuality) continue;
             const auto left = a.Activity[i] ? a.Settings.Levels[i] : Off;
             const auto right = b.Activity[i] ? b.Settings.Levels[i] : Off;
             if (left < right) return false;

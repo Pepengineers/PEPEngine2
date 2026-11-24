@@ -22,6 +22,7 @@ public:
         GDX12RenderHelpers::InitializeComputeTexture(*_color, *_resources,
             _inputs[0]->GetTexture()->GetWidth(), _inputs[0]->GetTexture()->GetHeight(), DXGI_FORMAT_R16G16B16A16_FLOAT, true);
         GDX12RootSignatureDesc root;
+        root.IndexedLocalShadows = true;
         root.NumSingleCBVSlots = _opaqueOnly ? 6 : 5;
         root.NumSingleSRVSlots = 18;
         root.NumSingleUAVSlots = 1;

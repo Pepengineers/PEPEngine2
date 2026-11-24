@@ -125,7 +125,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	const auto* world = scenes->GetWorld();
 	const double delta = c.Common.GameTimer ? c.Common.GameTimer->DeltaTime() : 0;
 	_environment->Freeze(world && !world->IsPaused() ? delta * world->GetTimeScale() : 0, *_executor, _frameNumber);
-	_lighting->Freeze(*_geometry, slot, submissions, submissions->SelectAdapter(_aoAdapter));
+	_lighting->Freeze(*_geometry, slot, submissions, submissions->SelectAdapter(_aoAdapter), transparencyOwner);
 	auto& particles = _lighting->Particles();
 	auto& water = _lighting->Water();
 	auto& grass = _geometry->Grass();
@@ -356,6 +356,7 @@ void BistroRenderPipeline::FramePresented()
 	_lighting->Particles().Presented(_frameNumber);
 	_lighting->AOPresented(_frameNumber, _executor->Completions());
 	_lighting->LightGridPresented(_frameNumber, *_schedule, _executor->Completions());
+	_lighting->ReportLocalShadows(_frameNumber);
 	if (_reportedDepthNormals || !_geometry->PrepassNormals(_executorSlot)) return;
 	_reportedDepthNormals = true;
 	for (size_t i = 0; i < _schedule->Packets.size(); ++i)

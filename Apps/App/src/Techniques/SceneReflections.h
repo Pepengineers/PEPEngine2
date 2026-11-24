@@ -17,9 +17,7 @@ class SceneReflections
         _settings = GetReflectionSettings();
         _historyBase = _common.HistoryRevision;
     }
-    void Append(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, SceneEnvironment&, UINT slot,
-                GDX12Texture* localShadows, GDX12Texture* staticLocalShadows,
-                GDX12UploadBuffer<GDX12LocalLightConstants>& staticLights);
+    void Append(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, SceneEnvironment&, UINT slot);
     bool Record(Id, ID3D12GraphicsCommandList*) const;
     void Submitted(uint64_t fence);
     void AddExchanges(const Schedule&, std::vector<PacketWait>&, std::vector<Executor::PacketExchange>&);
@@ -44,6 +42,7 @@ class SceneReflections
   private:
     struct CaptureInputs;
     struct Remote;
+    struct CaptureLighting;
     void AppendCapture(Graph&, std::vector<ID3D12Resource*>&, NativeWork&, GDX12ReflectionProbePass&,
                        GDX12DeviceResources&, const CaptureInputs&, std::vector<Id>&, std::vector<UINT>&);
     void AppendRemote(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, SceneEnvironment&, UINT,
@@ -60,6 +59,8 @@ class SceneReflections
     std::vector<UINT> _publishing;
     std::vector<Publication> _publications;
     GDX12Resource _black;
+    GDX12Texture _shadowFallback;
+    std::vector<std::unique_ptr<CaptureLighting>> _captureLighting;
     GDX12Descriptor _radiance;
     uint64_t _history = 0;
     GDX12ReflectionSettings _settings;

@@ -2,6 +2,7 @@
 #include "ProbeInputMirror.h"
 #include "WboitMeshDraw.h"
 #include "WboitTransfer.h"
+#include "ShadowDepthTransfer.h"
 #include "Common/ConsoleVariables.h"
 #include "Engine.Core/Logging/Logger.h"
 #include "Common/GameTimer.h"
@@ -78,6 +79,7 @@ struct SceneTransparency::Remote
 		Draw.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
 		Draw.SetUnbatchedDraws(true);
 		Draw.SetSimpleLighting(true);
+		Draw.SetLocalLights(true);
 		Compose.Setup(&Resources, &common);
 		Compose.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
 	}
@@ -98,6 +100,16 @@ struct SceneTransparency::Remote
 	SceneParticles::RemoteRaster Particles;
 	GDX12WBOITTransparencyPass Draw;
 	GDX12WBOITCompositionPass Compose;
+	struct ShadowAtlas
+	{
+		ShadowMemory::Charge Memory;
+		GDX12Texture Depth;
+		std::unique_ptr<ShadowDepthTransfer> Transfer;
+	};
+	std::map<UINT, ShadowAtlas> Shadows;
+	std::unique_ptr<GDX12UploadBuffer<GDX12LocalLightConstants>> Lights;
+	GDX12Descriptor ShadowFallback;
+	ShadowMemory::Bytes ShadowBytes = 0;
 	GDX12Texture Depth;
 	std::array<GDX12Descriptor, 3> SceneViews;
 	std::shared_ptr<TransparentGeometry> Geometry;
@@ -126,7 +138,7 @@ struct SceneTransparency::Remote
 		    " motion=0",
 		    " weightedEmitters=", EmitterCounts[0], " sortedEmitters=", EmitterCounts[1], " additiveEmitters=", EmitterCounts[2],
 		    " transparentSceneCommands=", TransparentDraws, " inputBytes=", DepthBytes, " depthSource=opaque-prepass depthBytes=", DepthBytes,
-		    " opaqueHdrBytes=0 shadowBytes=0 particlePoolBytes=0 hostGeometryUploadBytes=", GeometryBytes,
+		    " opaqueHdrBytes=0 shadowBytes=", ShadowBytes, " particlePoolBytes=0 hostGeometryUploadBytes=", GeometryBytes,
 		    " layerBytes=", Transfer->Bytes, " finalResultBytes=", Transfer->Bytes, " ownerMeshFence=", MeshDone.Value, " ownerResolveFence=", Resolved.Value, " ownerExportFence=", Produced.Value,
 		    " primaryImportFence=", Imported.Value, " primaryApplyFence=", Applied.Value, " completedFrameFence=", Consumer.Value);
 	}
@@ -289,6 +301,7 @@ SceneTransparency::SceneTransparency(GDX12DeviceResources& resources, RenderPipe
 		frame.Draw.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
 		frame.Draw.SetUnbatchedDraws(true);
 		frame.Draw.SetSimpleLighting(true);
+		frame.Draw.SetLocalLights(true);
 		frame.Compose.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
 		frame.Compose.SetApplyOpaqueAerialPerspective(true);
 	}
@@ -303,7 +316,15 @@ SceneTransparency::~SceneTransparency()
 		frame.Draw.ClearDenendencies();
 	}
 }
-void SceneTransparency::AppendRemote(SceneGeometry& geometry, UINT slot, Frame& frame, GDX12Texture* hdr)
+void SceneTransparency::RetireLocalShadows()
+{
+	for (auto& remote : _remoteSlots)
+		if (remote) remote->Shadows.clear();
+}
+
+void SceneTransparency::AppendRemote(Graph& primary, std::vector<ID3D12Resource*>& primaryBindings,
+                                    SceneGeometry& geometry, UINT slot, Frame& frame, GDX12Texture* hdr,
+                                    const LocalShadows& shadows)
 {
 	auto& r = *_remote;
 	auto& submit = *r.GPU.Submissions();
@@ -341,7 +362,7 @@ void SceneTransparency::AppendRemote(SceneGeometry& geometry, UINT slot, Frame& 
 	};
 	auto* ownerDepth = r.DepthResource;
 	if (!ownerDepth || r.DepthExport == Invalid) throw std::logic_error("WBOIT missing opaque prepass snapshot");
-	r.DepthMirror.AppendImport(plan, bindings, work);
+	const Id depthImport = r.DepthMirror.AppendImport(plan, bindings, work);
 	wrap(r.Depth, depth, ownerDepth);
 	const bool resized = r.Width != hdr->GetWidth() || r.Height != hdr->GetHeight();
 	const bool fresh = !r.Width;
@@ -498,6 +519,10 @@ void SceneTransparency::AppendRemote(SceneGeometry& geometry, UINT slot, Frame& 
 		if (!WboitVisible(planes, instance)) continue;
 		const auto& material = materials.GetCPUData()[instance.MaterialIndex];
 		indices.insert(material.DiffuseIndex);
+		if (material.Flags & 1u) indices.insert(material.NormalIndex);
+		if (material.Flags & 2u) indices.insert(material.SpecularIndex);
+		if (material.Flags & 4u) indices.insert(material.RoughnessIndex);
+		if (material.Flags & 8u) indices.insert(material.EmissiveIndex);
 		draw.InstanceID = UINT(instances.size());
 		transforms.push_back(sourceTransforms[instance.TransformIndex]);
 		drawMaterials.push_back(material);
@@ -509,6 +534,19 @@ void SceneTransparency::AppendRemote(SceneGeometry& geometry, UINT slot, Frame& 
 		instances.push_back(instance);
 	}
 	r.TransparentDraws = mesh.Draws = UINT(draws.size());
+	r.ShadowBytes = 0;
+	std::map<UINT, UINT> descriptorMap;
+	for (auto it = r.Shadows.begin(); it != r.Shadows.end();)
+	{
+		const bool used = mesh.Draws && std::any_of(shadows.Atlases.begin(), shadows.Atlases.end(),
+		    [&](auto* atlas) { return atlas->GetWidth() == it->first; });
+		if (!used) it = r.Shadows.erase(it);
+		else
+		{
+			it->second.Transfer.reset();
+			++it;
+		}
+	}
 	if (mesh.Draws)
 	{
 		mesh.Geometry = r.Geometry->Binding;
@@ -516,6 +554,94 @@ void SceneTransparency::AppendRemote(SceneGeometry& geometry, UINT slot, Frame& 
 		structured(1, transforms);
 		structured(2, instances);
 		mesh.Args = cpu(5, draws.data(), UINT64(draws.size()) * sizeof(draws.front()));
+		const auto* metadata = shadows.Lights.GetCPUData();
+		const UINT count = main.LocalLightCount;
+		const bool indexed = device.GetDeviceFeatures().Features.HighestShaderModel() >= D3D_SHADER_MODEL_6_6;
+		std::vector<Id> inputs{r.DepthExport};
+		for (auto* atlas : shadows.Atlases)
+		{
+			if (!indexed && atlas != shadows.Fallback) continue;
+			const auto shape = native(atlas)->GetDesc();
+			const UINT size = UINT(shape.Width), layers = shape.DepthOrArraySize;
+			const UINT sourceDescriptor = atlas->GetSRV()->HeapIndex;
+			std::vector<UINT> slices;
+			for (UINT i = 0; i < count; ++i)
+			{
+				const auto& light = metadata[i];
+				if (light.ShadowFirstSlice == UINT_MAX) continue;
+				const UINT address = light.ShadowFlags & LocalShadowAtlasIndex ? light.ShadowFlags >> 4 :
+				                     shadows.Fallback->GetSRV()->HeapIndex;
+				if (address != sourceDescriptor) continue;
+				for (UINT face = 0; face < LocalShadowFaceCount(light); ++face)
+					if (light._padding[2] & (1u << face)) slices.push_back(light.ShadowFirstSlice + face);
+			}
+			if (slices.empty()) continue;
+
+			auto& local = r.Shadows[size];
+			const bool replace = !local.Depth.IsInitialized() ||
+			    native(&local.Depth)->GetDesc().DepthOrArraySize != layers;
+			const auto desc = ShadowMemory::Depth(size, layers, D3D12_RESOURCE_FLAG_NONE);
+			const auto allocation = replace ? ShadowMemory::Size(device, desc) : 0;
+			const auto copy = ShadowMemory::TransferBytes(*_resources.Device, device, size, UINT(slices.size()));
+			if (!ShadowMemory::Fits(*_resources.Device, copy) || !ShadowMemory::Fits(device, copy + allocation))
+			{
+				r.Shadows.erase(size);
+				continue;
+			}
+			if (replace)
+			{
+				GDX12TextureDesc texture{};
+				texture.Width = texture.Height = size;
+				texture.Format = DXGI_FORMAT_R32_FLOAT;
+				texture.SRVDesc = ShadowMemory::View(layers);
+				texture.SRV_UAV_Heap = heap;
+				texture.ExternalResource = device.CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc, D3D12_RESOURCE_STATE_COMMON);
+				texture.SRVHeapIndex = local.Depth.IsInitialized() ? local.Depth.GetSRV()->HeapIndex :
+				    heap->GetAvailableIndex(SceneDescriptorStart);
+				local.Depth.Initialize(texture);
+				local.Memory.Set(device, allocation);
+			}
+			local.Transfer = std::make_unique<ShadowDepthTransfer>(submit, r.Owner, size, UINT(slices.size()));
+			inputs.push_back(local.Transfer->Append(primary, primaryBindings, _work, native(atlas), slices, true));
+			const Id imported = local.Transfer->Append(plan, bindings, work, native(&local.Depth), std::move(slices), false);
+			plan.Operations[imported].Dependencies.push_back(depthImport);
+			descriptorMap.emplace(sourceDescriptor, local.Depth.GetSRV()->HeapIndex);
+			addRead(native(&local.Depth));
+			r.ShadowBytes += copy;
+		}
+		if (inputs.size() > 1)
+		{
+			r.DepthExport = inputs.back();
+			inputs.pop_back();
+			auto& dependencies = primary.Operations[r.DepthExport].Dependencies;
+			dependencies.insert(dependencies.end(), inputs.begin(), inputs.end());
+		}
+
+		if (!r.Lights)
+		{
+			r.Lights = std::make_unique<GDX12UploadBuffer<GDX12LocalLightConstants>>(&device, 1, EBufferType::Upload, false);
+			r.Lights->CreateSRV(heap, heap->GetAvailableIndex(SceneDescriptorStart));
+		}
+		r.Lights->Resize((std::max)(1u, count));
+		for (UINT i = 0; i < count; ++i)
+		{
+			auto light = metadata[i];
+			if (light.ShadowFirstSlice != UINT_MAX)
+			{
+				const bool indexedSource = (light.ShadowFlags & LocalShadowAtlasIndex) != 0;
+				const UINT address = indexedSource ? light.ShadowFlags >> 4 : shadows.Fallback->GetSRV()->HeapIndex;
+				const auto found = descriptorMap.find(address);
+				if (found == descriptorMap.end()) light.ShadowFirstSlice = UINT_MAX;
+				else if (indexed) SetLocalShadowAtlas(light, found->second);
+				else light.ShadowFlags &= 7u;
+			}
+			r.Lights->CopyData(i, light);
+		}
+		mesh.Views[7] = r.Lights->GetSRV()->GPUHandle;
+		mesh.Views[8] = view(r.ShadowFallback, nullptr, ShadowMemory::View(1));
+		if (!indexed && !descriptorMap.empty())
+			mesh.Views[8] = heap->GetGPUHandle(descriptorMap.begin()->second);
+		addRead(r.Lights->GetResource().D3DResource.Get(), D3D12_RESOURCE_STATE_GENERIC_READ);
 		addRead(mesh.Geometry.VertexResource, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 		addRead(mesh.Geometry.IndexResource, D3D12_RESOURCE_STATE_INDEX_BUFFER);
 	}

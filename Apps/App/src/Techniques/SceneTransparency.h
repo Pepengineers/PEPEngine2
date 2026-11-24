@@ -18,10 +18,17 @@ class SceneTransparency
 	void AddExchange(const Schedule&, std::vector<Executor::PacketExchange>&);
 	void Submitted(const std::vector<CompletionToken>&);
 	void Presented();
+	void RetireLocalShadows();
 	SceneWater& Water() { return _water; }
 	void SetWaterRetirement(std::function<void()> retire) { _water.SetRetirement(std::move(retire)); }
 	SceneParticles& Particles() { return _particles; }
-	GDX12Texture* Append(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, UINT slot, GDX12Texture* hdr, SceneEnvironment&);
+	struct LocalShadows
+	{
+		GDX12Texture* Fallback;
+		std::vector<GDX12Texture*> Atlases;
+		const GDX12UploadBuffer<GDX12LocalLightConstants>& Lights;
+	};
+	GDX12Texture* Append(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, UINT slot, GDX12Texture* hdr, SceneEnvironment&, const LocalShadows&);
 	using OpaqueContinuation = std::function<GDX12Texture*(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture*,
 	                                                       GDX12Texture*, GDX12Texture*)>;
 	void SetOpaqueContinuation(OpaqueContinuation append, std::function<GDX12Texture*()> depth,
@@ -59,9 +66,10 @@ class SceneTransparency
 		bool Initialized = false;
 	};
 	GDX12Texture* ApplyRemote(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, UINT, Frame&, GDX12Texture*, SceneEnvironment&);
-	void AppendRemote(SceneGeometry&, UINT, Frame&, GDX12Texture*);
+	void AppendRemote(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, UINT, Frame&, GDX12Texture*,
+	                  const LocalShadows&);
 	GDX12Texture* AppendPhase(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, UINT slot, Frame&,
-	                          GDX12Texture* hdr, SceneEnvironment&);
+	                          GDX12Texture* hdr, SceneEnvironment&, const LocalShadows&);
 	GDX12DeviceResources& _resources;
 	RenderPipelineCommonData& _common;
 	std::vector<Frame> _frames;

@@ -78,7 +78,7 @@ class SunShadowTileTransfer
 		uav.Texture2DArray.ArraySize = count;
 		_uav.InitAsUAV(_ownerTiles.Get(), nullptr, &uav, &_ownerHeap, _uav.HeapIndex == UINT_MAX
 		    ? _ownerHeap.GetAvailableIndex(SceneDescriptorStart) : _uav.HeapIndex);
-		_transfer = std::make_unique<ShadowDepthTransfer>(_submit, _owner, resolution, count);
+		_transfer = std::make_unique<ShadowDepthTransfer>(_submit, _owner, resolution, count, false);
 	}
 
 	void Export(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work, GDX12Texture& atlas)

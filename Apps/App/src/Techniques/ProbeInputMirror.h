@@ -2,6 +2,7 @@
 
 #include "Graph/QueueSubmission.h"
 #include "NativeWork.h"
+#include "ShadowMemory.h"
 #include <cassert>
 #include <unordered_map>
 #include <unordered_set>
@@ -13,7 +14,35 @@ namespace BistroRender
 class ProbeInputMirror
 {
   public:
-    ProbeInputMirror(QueueSubmission& submit, Id remote) : _submit(submit), _remote(remote) {}
+    ProbeInputMirror(QueueSubmission& submit, Id remote, bool localShadows = false)
+        : _submit(submit), _remote(remote), _localShadows(localShadows) {}
+
+    struct Growth
+    {
+        UINT64 OwnerImages = 0, TransferHeap = 0;
+    };
+
+    static Growth EstimateGrowth(GDX12Device& primary, GDX12Device& owner,
+        const ProbeInputMirror* existing, const std::unordered_set<ID3D12Resource*>& sources)
+    {
+        Growth growth;
+        UINT64 transferBytes = 0;
+        for (auto* source : sources)
+        {
+            if (!source) continue;
+            const auto desc = source->GetDesc();
+            UINT64 bytes = desc.Width;
+            if (desc.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE2D)
+                primary.GetDevice()->GetCopyableFootprints(&desc, 0, UINT(desc.MipLevels) * desc.DepthOrArraySize,
+                    0, nullptr, nullptr, nullptr, &bytes);
+            transferBytes = Align(transferBytes) + bytes;
+            if (!existing || !existing->Contains(source))
+                growth.OwnerImages += ShadowMemory::Size(owner, LocalShape(desc, false));
+        }
+        if (transferBytes && (!existing || transferBytes > existing->_capacity))
+            growth.TransferHeap = ShadowMemory::TransferBytes(primary, owner, transferBytes);
+        return growth;
+    }
 
     struct BufferPatch
     {
@@ -125,6 +154,7 @@ class ProbeInputMirror
     struct Image
     {
         ComPtr<ID3D12Resource> Source;
+        ShadowMemory::Charge ShadowAllocation;
         GDX12ResourceHandle Local;
         std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> Footprints;
         UINT64 Bytes = 0;
@@ -196,6 +226,13 @@ class ProbeInputMirror
         return (bytes + alignmentMask) & ~alignmentMask;
     }
 
+    static D3D12_RESOURCE_DESC LocalShape(D3D12_RESOURCE_DESC shape, bool depthTarget)
+    {
+        shape.Alignment = 0;
+        shape.Flags = depthTarget ? D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL : D3D12_RESOURCE_FLAG_NONE;
+        return shape;
+    }
+
     void Initialize(Image& mirror, ID3D12Resource* source, bool depthTarget)
     {
         auto shape = source->GetDesc();
@@ -234,10 +271,10 @@ class ProbeInputMirror
             throw std::invalid_argument("Probe capture expects buffer or non-MSAA Texture2D inputs");
         }
         mirror.Source = source;
-        shape.Alignment = 0;
-        shape.Flags = depthTarget ? D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL : D3D12_RESOURCE_FLAG_NONE;
-        mirror.Local = _submit.Device(_remote).CreateResource(D3D12_HEAP_TYPE_DEFAULT, shape,
-                                                               D3D12_RESOURCE_STATE_COMMON, nullptr);
+        shape = LocalShape(shape, depthTarget);
+        auto& owner = _submit.Device(_remote);
+        mirror.Local = owner.CreateResource(D3D12_HEAP_TYPE_DEFAULT, shape, D3D12_RESOURCE_STATE_COMMON);
+        if (_localShadows) mirror.ShadowAllocation.Set(owner, ShadowMemory::Size(owner, shape));
     }
 
     Id Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work, bool importing, Queue queue)
@@ -252,6 +289,12 @@ class ProbeInputMirror
             auto replacement = _submit.CreateTransferBuffer(_remote, bytes);
             std::swap(_transfer, replacement);
             _capacity = bytes;
+            if (_localShadows)
+            {
+                const auto allocation = _transfer.Heaps[1]->GetDesc().SizeInBytes;
+                _shadowExport.Set(_submit.Device(0), allocation);
+                _shadowImport.Set(_submit.Device(_remote), allocation);
+            }
         }
         auto* shared = _transfer.Resources[importing ? 1 : 0].Get();
         constexpr State copySource = D3D12_RESOURCE_STATE_COPY_SOURCE;
@@ -329,8 +372,10 @@ class ProbeInputMirror
 
     QueueSubmission& _submit;
     Id _remote;
+    bool _localShadows;
     std::unordered_map<ID3D12Resource*, Image> _mirrors;
     std::unordered_map<ID3D12Resource*, Pending> _pending;
+    ShadowMemory::Charge _shadowExport, _shadowImport;
     QueueSubmission::TransferBuffer _transfer;
     UINT64 _capacity = 0;
     UINT64 _bytes = 0;

@@ -1,6 +1,7 @@
 #pragma once
 #include "NativeWork.h"
 #include "GeometryTarget.h"
+#include "ShadowMemory.h"
 #include "Engine.Core/Jobs/JobSystem.h"
 #include "Engine.RendererDX12/GDX12DeviceResources.h"
 #include <optional>
@@ -11,12 +12,14 @@ class RenderPipelineCommonData;
 
 namespace BistroRender
 {
+class QueueSubmission;
+
 class SceneLocalShadows
 {
   public:
 	SceneLocalShadows(GDX12DeviceResources&, RenderPipelineCommonData&, bool staticOnly = false);
 	~SceneLocalShadows();
-	void Freeze(UINT slot, const std::vector<GDX12RenderPrimitive>& grass = {}, bool allReceivers = false);
+	void Freeze(UINT slot, const std::vector<GDX12RenderPrimitive>& grass, UINT width, UINT height);
 	void Complete(UINT slot);
 	void Submitted(UINT slot);
 	uint64_t SceneRevision() const { return _sceneRevision; }
@@ -29,12 +32,15 @@ class SceneLocalShadows
 	    const std::function<void(const GeometryTarget&, Graph&, std::vector<ID3D12Resource*>&)>& appendGrass = {},
 	    const std::array<Id, 5>* inputs = nullptr, const std::vector<Access>& materialTextures = {});
 	bool Record(UINT slot, Id id, ID3D12GraphicsCommandList* cmd) const { return _slots.at(slot).Work.Record(id, cmd); }
-	GDX12Texture* Output(UINT slot) { return &_slots.at(slot).Atlas; }
+	GDX12Texture* Output(UINT slot);
+	std::vector<GDX12Texture*> Outputs(UINT slot);
+	std::string Distribution(UINT slot);
+	UINT64 ShadowTexels(UINT slot) const;
 
   private:
 	friend class SceneLighting;
 	using GrassAppender = std::function<void(const GeometryTarget&, Graph&, std::vector<ID3D12Resource*>&)>;
-	void AppendGrassViews(Graph& graph, std::vector<ID3D12Resource*>& bindings, UINT slot, Id atlas,
+	void AppendGrassViews(Graph& graph, std::vector<ID3D12Resource*>& bindings, UINT slot, const std::map<UINT, Id>& atlases,
 	                      const GrassAppender& appendGrass);
 	struct Input
 	{
@@ -67,7 +73,10 @@ class SceneLocalShadows
 		GDX12LocalLightConstants Light;
 		std::array<FaceCommands, 6> Faces;
 		std::optional<std::array<GDX12LocalShadowFrustum, 6>> Frusta;
-		UINT FirstSlice = UINT_MAX, Needed = 0, ListsValid = 0, MapsValid = 0;
+		UINT FirstSlice = UINT_MAX, Resolution = 0, Needed = 0, ListsValid = 0, MapsValid = 0;
+		float ScreenPixels = 0;
+		UINT LocalFallback = 0;
+		uint64_t Generation = 0;
 		Id Owner = 0;
 		bool Latest = false;
 		bool HasLight = false;
@@ -75,7 +84,7 @@ class SceneLocalShadows
 	};
 	struct View
 	{
-		UINT Light, Face, Slice, First, OpaqueCount, MaskedCount;
+		UINT Light, Face, Slice, First, OpaqueCount, MaskedCount, Resolution;
 		bool Dirty = true;
 	};
 	struct Slot;
@@ -85,10 +94,13 @@ class SceneLocalShadows
 		Slot* Frame = nullptr;
 		void Execute(size_t index) override;
 	};
-	struct PackJob final : ParallelJob
+	struct Atlas
 	{
-		Slot* Frame = nullptr;
-		void Execute(size_t) override;
+		ShadowMemory::Charge Memory;
+		GDX12Texture Texture;
+		std::vector<std::unique_ptr<GDX12Descriptor>> Dsvs;
+		std::vector<uint64_t> StaticDepthVersions;
+		UINT Slices = 0;
 	};
 	struct Slot
 	{
@@ -96,21 +108,20 @@ class SceneLocalShadows
 		std::vector<LightCache> Cache;
 		std::vector<View> Views;
 		std::vector<View> RemoteViews;
-		std::vector<uint64_t> StaticDepthVersions;
 		std::vector<GDX12IndirectDrawArgs> Packed;
 		std::optional<GDX12LocalShadowFrustum> Camera;
 		XMFLOAT4X4 CameraMatrix{};
-		bool SelectionChanged = true, AllReceivers = false;
+		bool SelectionChanged = true;
+		UINT Width = 0, Height = 0, Ceiling = 0;
+		bool Indexed = false;
 		std::array<XMFLOAT4, 6> CameraPlanes;
 		std::array<XMFLOAT3, 8> CameraCorners;
 		CullJob Cull;
-		PackJob Pack;
 		JobHandle Ready;
 		std::unique_ptr<GDX12UploadBuffer<GDX12LocalLightConstants>> LightUpload;
 		std::unique_ptr<GDX12UploadBuffer<GDX12IndirectDrawArgs>> CommandUpload, Commands;
-		GDX12Texture Atlas;
-		std::vector<std::unique_ptr<GDX12Descriptor>> Dsvs;
-		UINT Resolution = 0, Slices = 0, NextSlice = 0;
+		std::map<UINT, Atlas> Atlases;
+		std::string Limit;
 		uint64_t SceneRevision = 0, GrassReceiverRevision = 0, GrassCasterRevision = 0;
 		uint64_t LayoutRevision = 0;
 		NativeWork Work;
@@ -120,7 +131,7 @@ class SceneLocalShadows
 	                            ID3D12PipelineState* maskedPipeline, bool clearDepth);
 	void UpdateCaster(UINT position, const Input& current);
 	void UpdateCamera(Slot&);
-	UINT UpdateLights(Slot&);
+	void UpdateLights(Slot&);
 	UINT BuildNode(UINT first, UINT count, UINT parent = UINT_MAX);
 	void Refit(UINT caster);
 	void InvalidateBounds(const BoundingBox&, bool listsChanged);
@@ -131,10 +142,23 @@ class SceneLocalShadows
 	void Gather(UINT node, const GDX12LocalLightConstants&, const std::array<GDX12LocalShadowFrustum, 6>&,
 	            UINT faceMask, std::array<FaceCommands, 6>&) const;
 	UINT NeededFaces(UINT node, const GDX12LocalLightConstants&, const std::array<GDX12LocalShadowFrustum, 6>&,
-	                 UINT faceMask, const Slot&) const;
+	                 UINT faceMask, const Slot&, const BoundingBox& influence, float& pixels) const;
 	void RebuildCasters(UINT slot);
 	Input ReadInput(UINT slot, UINT command) const;
-	void PrepareAtlas(Slot&, UINT slices);
+	void PrepareAtlas(Slot&, UINT resolution, UINT slices);
+	void Allocate(UINT slot, SceneLocalShadows& staticPass, const QueueSubmission& submissions, Id transparencyOwner);
+	void ApplyLayout(Slot&, const std::vector<UINT>& sizes, const std::vector<UINT>& slices);
+	void Pack(Slot&);
+	void GatherMissing(Slot&, UINT lightIndex);
+	void ResetLayout();
+	GDX12Texture _fallback;
+	struct Placement
+	{
+		UINT Resolution;
+		uint64_t Generation;
+	};
+	std::map<std::pair<UINT, uint64_t>, Placement> _previousResolution;
+	uint64_t _generation = 0;
 	GDX12DeviceResources& _resources;
 	RenderPipelineCommonData& _common;
 	std::unique_ptr<GDX12DescriptorHeap> _dsvHeap;

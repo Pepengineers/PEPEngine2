@@ -280,7 +280,7 @@ void GDX12ReflectionProbePass::CreateCaptureTextures(UINT resolution)
     }
     if (!resolution) return;
 
-    const UINT sunSize = (std::max)(1u, _resources->ShadowQuality.SunResolution / 2);
+    const UINT sunSize = (std::max)(1u, _captureSunShadows ? _resources->ShadowQuality.SunResolution / 2 : 0u);
     if (!_sunShadow.IsInitialized() || _sunShadow.GetWidth() != sunSize)
     {
         if (_sunShadow.IsInitialized()) _resources->Device->GetCommandQueue()->Flush();
@@ -506,7 +506,7 @@ void GDX12ReflectionProbePass::Prepare()
     }
     _views.resize(_probes.size() * 14);
     auto& frame = _frames[_resources->CurrFrameConstantsIndex];
-    const bool sunShadow = (_resources->Lighting.SunShadowFlags & 1u) != 0;
+    const bool sunShadow = _captureSunShadows && (_resources->Lighting.SunShadowFlags & 1u) != 0;
     const auto shadowSettings = sunShadow ? ProbeSunShadow(*_resources, _sunShadow.GetWidth()) : GDX12ShadowConstants{};
     frame.Shadow->CopyData(0, shadowSettings);
     for (UINT index = 0; index < _probes.size(); ++index)

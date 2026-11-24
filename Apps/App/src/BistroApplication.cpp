@@ -336,6 +336,11 @@ class BistroApplication final : public App
 		std::wstring status;
 		if (_benchmark.Active()) status = _benchmark.Caption() + L" | Esc: cancel | ";
 		if (!_videoMemory.LastLimit.empty()) status += L"Last VRAM limit: " + _videoMemory.LastLimit + L" | ";
+		if (_bistroPipeline && _bistroPipeline->PresentedFrames() && !_benchmark.Active())
+		{
+			const auto layout = _bistroPipeline->LocalShadowDistribution();
+			status += L"Local shadow arrays: " + std::wstring(layout.begin(), layout.end()) + L" | ";
+		}
 		return status + L"F1: CVars | F6: compact | F7: full | F8: textures";
 	}
 	bool OnKeyReleased(WPARAM key) override
@@ -375,10 +380,12 @@ class BistroApplication final : public App
 		bool limited = false;
 		for (;;)
 		{
-			const auto result = _videoMemory.Apply(*console, *scenes, *Locator.GetModule<RenderModule>(), _adapters, width, height, [](const char* name)
+			const auto result = _videoMemory.Apply(*console, *scenes, *Locator.GetModule<RenderModule>(), _adapters, width, height);
+			if (result == BistroVideoMemory::Result::RetireLocalShadows)
 			{
-				return LocalShadowSettings.at(name)->Adapter.GetValue();
-			});
+				_bistroPipeline->RetireLocalShadows();
+				continue;
+			}
 			limited |= result != BistroVideoMemory::Result::Fits;
 			if (result != BistroVideoMemory::Result::SmallerOutputRequired) break;
 			const auto oldWidth = width, oldHeight = height;

@@ -6,6 +6,13 @@
 #include <array>
 
 inline constexpr UINT LocalShadowResolution = 256;
+inline constexpr UINT LocalShadowFaceMask = 4u;
+inline constexpr UINT LocalShadowAtlasIndex = 8u;
+
+inline void SetLocalShadowAtlas(GDX12LocalLightConstants& light, UINT descriptorIndex)
+{
+    light.ShadowFlags = (light.ShadowFlags & 7u) | LocalShadowAtlasIndex | (descriptorIndex << 4);
+}
 inline constexpr UINT SunShadowCascadeResolution = 2048;
 
 struct GDX12SunCascadeSettings

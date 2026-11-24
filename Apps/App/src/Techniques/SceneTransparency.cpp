@@ -4,21 +4,21 @@
 namespace BistroRender
 {
 GDX12Texture* SceneTransparency::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, SceneGeometry& geometry,
-                                        UINT slot, GDX12Texture* hdr, SceneEnvironment& environment)
+                                        UINT slot, GDX12Texture* hdr, SceneEnvironment& environment, const LocalShadows& shadows)
 {
 	auto& frame = _frames.at(slot);
-	if (_remote) AppendRemote(geometry, slot, frame, hdr);
+	if (_remote) AppendRemote(graph, bindings, geometry, slot, frame, hdr, shadows);
 	_water.AppendDraw(graph, bindings, hdr, geometry._slots.at(slot).Dsv.CPUHandle);
 	if (_opaqueContinuation)
 	{
 		hdr = _opaqueContinuation(graph, bindings, hdr, _water.Depth(), _water.Motion());
 	}
 	if (_remote) return ApplyRemote(graph, bindings, geometry, slot, frame, hdr, environment);
-	return AppendPhase(graph, bindings, geometry, slot, frame, hdr, environment);
+	return AppendPhase(graph, bindings, geometry, slot, frame, hdr, environment, shadows);
 }
 GDX12Texture* SceneTransparency::AppendPhase(Graph& graph, std::vector<ID3D12Resource*>& bindings,
                                              SceneGeometry& geometry, UINT slot, Frame& phase, GDX12Texture* hdr,
-                                             SceneEnvironment& environment)
+                                             SceneEnvironment& environment, const LocalShadows& shadows)
 {
 	auto& scene = geometry._slots.at(slot);
 	auto& constants = *_resources.FrameConstants.at(slot);
@@ -83,9 +83,15 @@ GDX12Texture* SceneTransparency::AppendPhase(Graph& graph, std::vector<ID3D12Res
 	auto* signature = draw._transparencyCS.Get();
 	auto* heap = _resources.SRV_UAV_Heap->GetHeap().Get();
 	const auto main = scene.Main, camera = scene.Camera, sky = constants.SkyCB->GetElementAddress(0);
-	const std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 3> srvs{scene.Buffers[2].Srv.GPUHandle,
-	                                                      scene.Buffers[3].Srv.GPUHandle,
-	                                                      scene.Buffers[0].Srv.GPUHandle};
+	std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 9> srvs{scene.Buffers[2].Srv.GPUHandle,
+	                                                    scene.Buffers[3].Srv.GPUHandle,
+	                                                    scene.Buffers[0].Srv.GPUHandle};
+	srvs[7] = constants.ShadowLights->GetSRV()->GPUHandle;
+	srvs[8] = shadows.Fallback->GetSRV()->GPUHandle;
+	accesses.push_back({resource(constants.ShadowLights->GetResource().D3DResource.Get()), Mode::Read, read});
+	accesses.push_back(texture(shadows.Fallback, Mode::Read, read));
+	for (auto* atlas : shadows.Atlases)
+		if (atlas != shadows.Fallback) accesses.push_back(texture(atlas, Mode::Read, read));
 	const std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 3> atmosphere{_resources.SkyTransmittanceSRV.GPUHandle,
 	                                                            _resources.SkyAerialRadianceSRV.GPUHandle,
 	                                                            _resources.SkyAerialTransmittanceSRV.GPUHandle};
