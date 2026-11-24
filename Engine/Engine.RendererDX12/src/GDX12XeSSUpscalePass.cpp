@@ -23,11 +23,14 @@ void GDX12XeSSUpscalePass::Describe(PassDescription& s) const
 	auto& velocity = s.AddInputTexture(InVelocityBuffer);
 	velocity.Formats = {DXGI_FORMAT_R16G16_FLOAT};
 	velocity.Usages = ResourceUsage::NonPixelShaderRead;
+	auto& mask = s.AddInputTexture(InTransparencyMask);
+	mask.Formats = {DXGI_FORMAT_R8_UNORM};
+	mask.Usages = ResourceUsage::NonPixelShaderRead;
 	auto& color = s.AddOutputTexture(OutColorTexture);
 	color.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
 	color.Size = Extent::Display();
 	color.Usages = ResourceUsage::UnorderedAccess;
-	s.RequireSameTextureSize({InColorTexture, InDepthBuffer, InVelocityBuffer});
+	s.RequireSameTextureSize({InColorTexture, InDepthBuffer, InVelocityBuffer, InTransparencyMask});
 }
 
 void GDX12XeSSUpscalePass::ResolveResourceRequirements(PassResourceRequirementsContext& context)
@@ -40,7 +43,8 @@ void GDX12XeSSUpscalePass::ResolveResourceRequirements(PassResourceRequirementsC
 	xess_d3d12_init_params_t params = {};
 	params.outputResolution = {displaySize.x, displaySize.y};
 	params.qualitySetting = quality;
-	params.initFlags = XESS_INIT_FLAG_INVERTED_DEPTH | XESS_INIT_FLAG_LDR_INPUT_COLOR | XESS_INIT_FLAG_USE_NDC_VELOCITY;
+	params.initFlags = XESS_INIT_FLAG_INVERTED_DEPTH | XESS_INIT_FLAG_LDR_INPUT_COLOR |
+		XESS_INIT_FLAG_USE_NDC_VELOCITY | XESS_INIT_FLAG_RESPONSIVE_PIXEL_MASK;
 	Check(xessD3D12Init(_context, &params), "initialize context");
 	xess_2d_t recommended{}, minimum{}, maximum{};
 	Check(xessGetOptimalInputResolution(_context, &params.outputResolution, quality,
@@ -51,6 +55,7 @@ void GDX12XeSSUpscalePass::ResolveResourceRequirements(PassResourceRequirementsC
 	context.RequireTextureSize(InColorTexture, renderSize);
 	context.RequireTextureSize(InDepthBuffer, renderSize);
 	context.RequireTextureSize(InVelocityBuffer, renderSize);
+	context.RequireTextureSize(InTransparencyMask, renderSize);
 	_resetHistory = true;
 }
 
@@ -63,6 +68,7 @@ void GDX12XeSSUpscalePass::Execute(PassExecutionContext& context)
 	params.pColorTexture = context.GetInputTexture(InColorTexture).GetTexture()->GetResource()->D3DResource.Get();
 	params.pDepthTexture = context.GetInputTexture(InDepthBuffer).GetTexture()->GetResource()->D3DResource.Get();
 	params.pVelocityTexture = context.GetInputTexture(InVelocityBuffer).GetTexture()->GetResource()->D3DResource.Get();
+	params.pResponsivePixelMaskTexture = context.GetInputTexture(InTransparencyMask).GetTexture()->GetResource()->D3DResource.Get();
 	params.pOutputTexture = context.GetOutputTexture(OutColorTexture).GetTexture()->GetResource()->D3DResource.Get();
 	params.jitterOffsetX = -frame->ActiveCameraJitterOffsetX;
 	params.jitterOffsetY = -frame->ActiveCameraJitterOffsetY;

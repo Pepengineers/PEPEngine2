@@ -64,6 +64,7 @@ namespace
         graph.ConnectNodes(transparency.GetOutput("OutAccumulationTexture"), composition.GetInput("InAccumulationTexture"));
         graph.ConnectNodes(transparency.GetOutput("OutRevealageTexture"), composition.GetInput("InRevealageTexture"));
         graph.ConnectNodes(composition.GetOutput("OutColorTexture"), upscale.GetInput("InColorTexture"));
+        graph.ConnectNodes(composition.GetOutput("OutTransparencyMask"), upscale.GetInput("InTransparencyMask"));
         graph.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), upscale.GetInput("InDepthBuffer"));
         graph.ConnectNodes(skyBox.GetOutput("OutVelocityBuffer"), upscale.GetInput("InVelocityBuffer"));
         graph.ConnectNodes(upscale.GetOutput("OutColorTexture"), output.GetInput("InColorTexture"));
@@ -117,6 +118,7 @@ namespace
         graph.ConnectNodes(transparency.GetOutput("OutAccumulationTexture"), composition.GetInput("InAccumulationTexture"));
         graph.ConnectNodes(transparency.GetOutput("OutRevealageTexture"), composition.GetInput("InRevealageTexture"));
         graph.ConnectNodes(composition.GetOutput("OutColorTexture"), upscale.GetInput("InColorTexture"));
+        graph.ConnectNodes(composition.GetOutput("OutTransparencyMask"), upscale.GetInput("InTransparencyMask"));
         graph.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), upscale.GetInput("InDepthBuffer"));
         graph.ConnectNodes(skyBox.GetOutput("OutVelocityBuffer"), upscale.GetInput("InVelocityBuffer"));
         graph.ConnectNodes(upscale.GetOutput("OutColorTexture"), output.GetInput("InColorTexture"));

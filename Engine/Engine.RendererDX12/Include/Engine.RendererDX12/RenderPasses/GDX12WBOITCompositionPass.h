@@ -8,6 +8,8 @@ public:
 	static constexpr const char* InAccumulationTexture = "InAccumulationTexture";
 	static constexpr const char* InRevealageTexture = "InRevealageTexture";
 	static constexpr const char* OutColorTexture = "OutColorTexture";
+	// Accumulated transparency coverage: 0 for opaque-only pixels, 1 for full coverage.
+	static constexpr const char* OutTransparencyMask = "OutTransparencyMask";
 
 	void Describe(PassDescription& s) const override;
 	void Initialize(PassInitContext& context) override;

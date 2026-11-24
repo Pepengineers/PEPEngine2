@@ -28,11 +28,14 @@ void GDX12FSRUpscalePass::Describe(PassDescription& s) const
 	auto& velocity = s.AddInputTexture(InVelocityBuffer);
 	velocity.Formats = {DXGI_FORMAT_R16G16_FLOAT};
 	velocity.Usages = read;
+	auto& mask = s.AddInputTexture(InTransparencyMask);
+	mask.Formats = {DXGI_FORMAT_R8_UNORM};
+	mask.Usages = read;
 	auto& color = s.AddOutputTexture(OutColorTexture);
 	color.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
 	color.Size = Extent::Display();
 	color.Usages = ResourceUsage::UnorderedAccess;
-	s.RequireSameTextureSize({InColorTexture, InDepthBuffer, InVelocityBuffer});
+	s.RequireSameTextureSize({InColorTexture, InDepthBuffer, InVelocityBuffer, InTransparencyMask});
 }
 
 void GDX12FSRUpscalePass::ResolveResourceRequirements(PassResourceRequirementsContext& context)
@@ -70,6 +73,7 @@ void GDX12FSRUpscalePass::ResolveResourceRequirements(PassResourceRequirementsCo
 	context.RequireTextureSize(InColorTexture, renderSize);
 	context.RequireTextureSize(InDepthBuffer, renderSize);
 	context.RequireTextureSize(InVelocityBuffer, renderSize);
+	context.RequireTextureSize(InTransparencyMask, renderSize);
 	_resetHistory = true;
 }
 
@@ -104,7 +108,9 @@ void GDX12FSRUpscalePass::Execute(PassExecutionContext& context)
 	dispatch.preExposure = 1.f;
 	dispatch.viewSpaceToMetersFactor = 1.f;
 	dispatch.exposure = ffxApiGetResourceDX12(nullptr, FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
-	dispatch.reactive = ffxApiGetResourceDX12(nullptr, FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
+	// Coverage controls accumulation; the separate lock-protection mask is not needed here.
+	dispatch.reactive = ffxApiGetResourceDX12(context.GetInputTexture(InTransparencyMask).GetTexture()->GetResource()->D3DResource.Get(),
+		FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
 	dispatch.transparencyAndComposition = ffxApiGetResourceDX12(nullptr, FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
 	cmdList->BeginPixEvent("FSR Upscale", Colors::Blue);
 	Check(ffxDispatch(&_context, &dispatch.header), "dispatch");

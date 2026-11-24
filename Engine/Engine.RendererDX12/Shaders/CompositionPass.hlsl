@@ -7,7 +7,13 @@ Texture2D<float4> OpaqueTexture : register(t0);
 Texture2D<float4> AccumTexture : register(t1);
 Texture2D<float> RevealageTexture : register(t2);
 
-float4 PS(VSOutput input) : SV_TARGET
+struct PS_OUTPUT
+{
+    float4 Color : SV_TARGET0;
+    float TransparencyMask : SV_TARGET1;
+};
+
+PS_OUTPUT PS(VSOutput input)
 {
     float2 uv = input.TexCoord;
     
@@ -19,5 +25,9 @@ float4 PS(VSOutput input) : SV_TARGET
     // Deferred lighting has already tone-mapped the opaque background.
     float3 finalColor = lerp(ToneMapToSRGB(transparentColor), opaqueColor, revealage);
     
-    return float4(finalColor, 1.0f);
+    PS_OUTPUT output;
+    output.Color = float4(finalColor, 1.0f);
+    // WBOIT revealage is the fraction of the background that remains visible.
+    output.TransparencyMask = 1.0f - revealage;
+    return output;
 }

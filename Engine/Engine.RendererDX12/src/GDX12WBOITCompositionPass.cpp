@@ -19,6 +19,11 @@ void GDX12WBOITCompositionPass::Describe(PassDescription& s) const
 	color.Size = Extent::SameAs(InOpaqueTexture);
 	color.Usages = ResourceUsage::RenderTarget;
 	color.AllowShared = true;
+	auto& mask = s.AddOutputTexture(OutTransparencyMask);
+	mask.Formats = {DXGI_FORMAT_R8_UNORM};
+	mask.Size = Extent::SameAs(InOpaqueTexture);
+	mask.Usages = ResourceUsage::RenderTarget;
+	mask.AllowShared = true;
 	s.RequireSameTextureSize({InOpaqueTexture, InAccumulationTexture, InRevealageTexture});
 }
 
@@ -49,8 +54,9 @@ void GDX12WBOITCompositionPass::Initialize(PassInitContext& context)
 	PSODesc1.RasterizerState.FrontCounterClockwise = TRUE;
 	PSODesc1.SampleMask = UINT_MAX;
 	PSODesc1.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-	PSODesc1.NumRenderTargets = 1;
+	PSODesc1.NumRenderTargets = 2;
 	PSODesc1.RTVFormats[0] = context.GetOutputResourceDescription(OutColorTexture).Format;
+	PSODesc1.RTVFormats[1] = context.GetOutputResourceDescription(OutTransparencyMask).Format;
 
 	PSODesc1.SampleDesc.Count = 1;
 	PSODesc1.SampleDesc.Quality = 0;
@@ -76,7 +82,7 @@ void GDX12WBOITCompositionPass::Execute(PassExecutionContext& context)
 	cmdList->SetGraphicsRootSignature(_compositionRS.get());
 	cmdList->SetPipelineState(_compositionPSO.Get());
 	cmdList->SetDescriptorHeaps({ resources->SRV_UAV_Heap.get() });
-	cmdList->SetRenderTargets({ OUT_Result }, nullptr);
+	cmdList->SetRenderTargets({ OUT_Result, context.GetOutputTexture(OutTransparencyMask).GetTexture() }, nullptr);
 	cmdList->ClearRenderTargetView(OUT_Result);
 	cmdList->SetGraphicsSRV(0, opaqueAccum->GetSRV()->GPUHandle);
 	cmdList->SetGraphicsSRV(1, transparencyAccum->GetSRV()->GPUHandle);

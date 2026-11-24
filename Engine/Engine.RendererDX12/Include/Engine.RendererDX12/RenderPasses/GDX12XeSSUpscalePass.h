@@ -8,6 +8,7 @@ public:
 	static constexpr const char* InColorTexture = "InColorTexture";
 	static constexpr const char* InDepthBuffer = "InDepthBuffer";
 	static constexpr const char* InVelocityBuffer = "InVelocityBuffer";
+	static constexpr const char* InTransparencyMask = "InTransparencyMask";
 	static constexpr const char* OutColorTexture = "OutColorTexture";
 
 	explicit GDX12XeSSUpscalePass(xess_quality_settings_t quality = XESS_QUALITY_SETTING_ULTRA_QUALITY_PLUS);

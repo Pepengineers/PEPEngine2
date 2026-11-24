@@ -9,6 +9,7 @@ public:
 	static constexpr const char* InColorTexture = "InColorTexture";
 	static constexpr const char* InDepthBuffer = "InDepthBuffer";
 	static constexpr const char* InVelocityBuffer = "InVelocityBuffer";
+	static constexpr const char* InTransparencyMask = "InTransparencyMask";
 	static constexpr const char* OutColorTexture = "OutColorTexture";
 
 	explicit GDX12DLSSUpscalePass(sl::DLSSMode quality = sl::DLSSMode::eMaxQuality);

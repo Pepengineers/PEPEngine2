@@ -24,11 +24,14 @@ void GDX12DLSSUpscalePass::Describe(PassDescription& s) const
 	auto& velocity = s.AddInputTexture(InVelocityBuffer);
 	velocity.Formats = {DXGI_FORMAT_R16G16_FLOAT};
 	velocity.Usages = ResourceUsage::NonPixelShaderRead;
+	auto& mask = s.AddInputTexture(InTransparencyMask);
+	mask.Formats = {DXGI_FORMAT_R8_UNORM};
+	mask.Usages = ResourceUsage::NonPixelShaderRead;
 	auto& color = s.AddOutputTexture(OutColorTexture);
 	color.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
 	color.Size = Extent::Display();
 	color.Usages = ResourceUsage::UnorderedAccess;
-	s.RequireSameTextureSize({InColorTexture, InDepthBuffer, InVelocityBuffer});
+	s.RequireSameTextureSize({InColorTexture, InDepthBuffer, InVelocityBuffer, InTransparencyMask});
 }
 
 void GDX12DLSSUpscalePass::ResolveResourceRequirements(PassResourceRequirementsContext& context)
@@ -57,6 +60,7 @@ void GDX12DLSSUpscalePass::ResolveResourceRequirements(PassResourceRequirementsC
 	context.RequireTextureSize(InColorTexture, renderSize);
 	context.RequireTextureSize(InDepthBuffer, renderSize);
 	context.RequireTextureSize(InVelocityBuffer, renderSize);
+	context.RequireTextureSize(InTransparencyMask, renderSize);
 	_resetHistory = true;
 }
 
@@ -85,6 +89,7 @@ void GDX12DLSSUpscalePass::Execute(PassExecutionContext& context)
 	auto* source = context.GetInputTexture(InColorTexture).GetTexture();
 	auto* depth = context.GetInputTexture(InDepthBuffer).GetTexture();
 	auto* velocity = context.GetInputTexture(InVelocityBuffer).GetTexture();
+	auto* mask = context.GetInputTexture(InTransparencyMask).GetTexture();
 	auto* output = context.GetOutputTexture(OutColorTexture).GetTexture();
 	sl::Resource sourceResource{sl::ResourceType::eTex2d, source->GetResource()->D3DResource.Get(),
 		nullptr, nullptr, static_cast<uint32_t>(source->GetResource()->GetCurrentState())};
@@ -92,6 +97,8 @@ void GDX12DLSSUpscalePass::Execute(PassExecutionContext& context)
 		nullptr, nullptr, static_cast<uint32_t>(depth->GetResource()->GetCurrentState())};
 	sl::Resource velocityResource{sl::ResourceType::eTex2d, velocity->GetResource()->D3DResource.Get(),
 		nullptr, nullptr, static_cast<uint32_t>(velocity->GetResource()->GetCurrentState())};
+	sl::Resource maskResource{sl::ResourceType::eTex2d, mask->GetResource()->D3DResource.Get(),
+		nullptr, nullptr, static_cast<uint32_t>(mask->GetResource()->GetCurrentState())};
 	sl::Resource outputResource{sl::ResourceType::eTex2d, output->GetResource()->D3DResource.Get(),
 		nullptr, nullptr, static_cast<uint32_t>(output->GetResource()->GetCurrentState())};
 	sl::Extent inputExtent{};
@@ -104,6 +111,8 @@ void GDX12DLSSUpscalePass::Execute(PassExecutionContext& context)
 		{&sourceResource, sl::kBufferTypeScalingInputColor, sl::ResourceLifecycle::eValidUntilEvaluate, &inputExtent},
 		{&depthResource, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilEvaluate, &inputExtent},
 		{&velocityResource, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eValidUntilEvaluate, &inputExtent},
+		// DLSS consumes history bias through this tag, rather than the FSR reactive-mask tag.
+		{&maskResource, sl::kBufferTypeBiasCurrentColorHint, sl::ResourceLifecycle::eValidUntilEvaluate, &inputExtent},
 		{&outputResource, sl::kBufferTypeScalingOutputColor, sl::ResourceLifecycle::eValidUntilEvaluate, &outputExtent}};
 	cmdList->BeginPixEvent("DLSS Upscale", Colors::Blue);
 	Check(sdk.SetTagForFrame(*frame, _viewportHandle, tags, _countof(tags), cmdList->GetCommandList().Get()), "set resource tags");
