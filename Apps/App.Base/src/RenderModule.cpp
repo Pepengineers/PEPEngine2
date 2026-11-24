@@ -205,7 +205,7 @@ GPUTexture* RenderModule::CreateTexture(const std::string& name, const Texture* 
 GDX12Texture* RenderModule::GetSkyBoxMap(EDeviceRole role)
 {
     auto& resources = GetDeviceResources(role);
-    const std::string name = "Environment/grasscube1024.dds";
+    const std::string name = "Environment/kloofendal_48d_partly_cloudy_puresky_4096.dds";
     auto found = resources.Textures.find(name);
     if (found != resources.Textures.end()) { return found->second.get(); }
 
