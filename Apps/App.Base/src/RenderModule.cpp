@@ -567,15 +567,13 @@ void RenderModule::SubmitSky(World& world)
     _primaryResources.Sky = std::move(sky);
 }
 
-void RenderModule::SubmitLights(std::vector<GDX12LocalLightConstants> lights, const GDX12MainConstants& settings,
-                                std::vector<GDX12LocalShadowPlacement> placements)
+void RenderModule::SubmitLights(std::vector<GDX12LocalLightConstants> lights, const GDX12MainConstants& settings)
 {
     uint16_t width, height;
     _window->GetWindowSize(width, height);
     const auto upload = [&](GDX12DeviceResources& resources)
     {
         resources.LocalLights = lights;
-        resources.LocalShadowPlacements = std::move(placements);
         resources.Lighting = settings;
         const auto& sky = _primaryResources.Sky;
         if (sky.Source == SkySource::SkyAtmosphere)
@@ -949,7 +947,8 @@ void RenderModule::OnUpdate()
 {
     if (!_gpu) throw std::logic_error("Renderer device domain is quarantined");
     const auto shadowQuality = ReadShadowQuality();
-    ReadLocalShadowPageAdapters(_primaryResources.LocalShadowPageAdapters, shadowQuality.LocalAtlasCount);
+    ReadLocalShadowPageSettings(_primaryResources.LocalShadowPageAdapters, _primaryResources.LocalShadowPageSync,
+                                shadowQuality.LocalAtlasCount);
     if (!(shadowQuality == _primaryResources.ShadowQuality))
     {
         DrainFrameWork();

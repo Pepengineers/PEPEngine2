@@ -116,7 +116,7 @@ struct SceneParticles::Remote
 	{
 		QueueSubmission::TransferBuffer Transfer;
 		CompletionToken Ready, Reader;
-		uint64_t Generation = 0, Version = 0, InputVersion = 0;
+		uint64_t Generation = 0, DisplayGeneration = 0, Version = 0, InputVersion = 0;
 		std::vector<GDX12ParticleEmitter> Snapshot;
 		double SimulatedSeconds = 0;
 		bool Writing = false;
@@ -124,6 +124,7 @@ struct SceneParticles::Remote
 	struct ImportedEmitter
 	{
 		std::array<GDX12Resource, 4> Buffers;
+		std::array<UINT64, 4> Bytes{};
 		std::array<GDX12Descriptor, 3> Views;
 		GDX12ParticleRenderSource Bindings;
 	};
@@ -143,6 +144,7 @@ struct SceneParticles::Remote
 	Executor GPU1;
 	std::vector<ImportedEmitter> Imported;
 	std::vector<Publication> Ring;
+	UINT64 SnapshotBytes = 0;
 	std::vector<InputSlot> InputsRing;
 	GDX12Resource InputField;
 	GDX12Resource InputCamera;
@@ -157,6 +159,7 @@ struct SceneParticles::Remote
 	UINT NextUpload = 0, NextOutput = 0;
 	Publication *Selected = nullptr, *LastOrder = nullptr;
 	uint64_t Generation = 0, Ordered = 0, PresentedVersion = 0;
+	uint64_t DisplayGeneration = 0;
 	uint64_t CachedVersion = 0;
 	std::vector<GDX12ParticleEmitter> PresentedSnapshot;
 	struct Statistics
@@ -166,7 +169,7 @@ struct SceneParticles::Remote
 	} Stats;
 	double GameTime = 0;
 	int Mode = 1;
-	bool Enabled = false;
+	bool Enabled = false, DrawEnabled = false, WaitForSelected = false;
 
 	struct ProducerInput
 	{
@@ -174,6 +177,7 @@ struct SceneParticles::Remote
 		GDX12ParticleSettings Settings{};
 		double GameClock = 0;
 		uint64_t Generation = 0;
+		uint64_t DisplayGeneration = 0;
 		bool Advancing = false;
 	};
 	std::mutex Mutex;
@@ -208,14 +212,13 @@ struct SceneParticles::Remote
 		Revisions.clear(); // Force fresh publication history at the next step.
 		Imported.clear();
 		Ring.clear();
+		SnapshotBytes = 0;
 		Secondary.ParticleEmitters = snapshot;
+		const bool display = settings.Enabled && settings.DrawEnabled;
 		settings.Enabled = true; // Reconcile the pools even while simulation is disabled.
 		Solver.BeginFrame(&Secondary, settings, false);
-		auto* heap = primary.SRV_UAV_Heap.get();
 		const auto frame = Solver.RenderFrame();
 		Imported.resize(frame.Sources.size());
-		Ring.resize(primary.FrameConstants.size() + 1);
-		UINT64 bytes = 0;
 		for (size_t i = 0; i < Imported.size(); ++i)
 		{
 			auto& dest = Imported[i];
@@ -228,19 +231,14 @@ struct SceneParticles::Remote
 			const auto sources = SnapshotResources(source);
 			for (size_t field = 0; field < sources.size(); ++field)
 			{
-				const auto width = sources[field]->D3DResource->GetDesc().Width;
-				const auto desc = CD3DX12_RESOURCE_DESC::Buffer(width);
-				auto& resource = dest.Buffers[field];
-				resource.D3DResource = primary.Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc, D3D12_RESOURCE_STATE_COMMON);
-				bytes += width;
-				if (field >= dest.Views.size()) continue;
-				BindSourceSRV(dest.Bindings, field, resource.D3DResource.Get(), dest.Views[field], heap);
+				dest.Bytes[field] = sources[field]->D3DResource->GetDesc().Width;
+				SnapshotBytes += dest.Bytes[field];
 			}
 		}
-		for (auto& slot : Ring) slot.Transfer = Submit->CreateTransferBuffer(DeviceId, bytes);
+		if (display) PrepareDisplayTransport(primary);
 		const auto gpu = Submit->Device(DeviceId).GetAdapterLuid();
 		Log::Info("RenderGraph", "Particles MGPU solver GPU1 LUID=", gpu.HighPart, ":", gpu.LowPart,
-		    " emitters=", Imported.size(), " snapshotBytes=", bytes);
+		    " emitters=", Imported.size(), " snapshotBytes=", Ring.empty() ? 0 : SnapshotBytes);
 		if (LogSnapshots.GetValue())
 			for (const auto& source : frame.Sources)
 			{
@@ -248,6 +246,24 @@ struct SceneParticles::Remote
 				Log::Info("RenderGraph", "Particles MGPU snapshot source id=", e.Id, " blend=", unsigned(e.Blend),
 				    " capacity=", e.MaxParticles, " origin=", e.World._41, ",", e.World._42, ",", e.World._43);
 			}
+	}
+
+	void PrepareDisplayTransport(GDX12DeviceResources& primary)
+	{
+		std::lock_guard lock(Mutex);
+		if (!Ring.empty() || !SnapshotBytes) return;
+		auto* heap = primary.SRV_UAV_Heap.get();
+		for (auto& dest : Imported)
+			for (size_t field = 0; field < dest.Buffers.size(); ++field)
+			{
+				const auto desc = CD3DX12_RESOURCE_DESC::Buffer(dest.Bytes[field]);
+				auto& resource = dest.Buffers[field];
+				resource.D3DResource = primary.Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc, D3D12_RESOURCE_STATE_COMMON);
+				if (field < dest.Views.size())
+					BindSourceSRV(dest.Bindings, field, resource.D3DResource.Get(), dest.Views[field], heap);
+			}
+		Ring.resize(primary.FrameConstants.size() + 1);
+		for (auto& slot : Ring) slot.Transfer = Submit->CreateTransferBuffer(DeviceId, SnapshotBytes);
 	}
 
 	void Drain()
@@ -400,15 +416,15 @@ struct SceneParticles::Remote
 
 	bool LatestReady() const { return Mode == 2 || Mode == 3; }
 
-	void Configure(const std::vector<GDX12ParticleEmitter>& emitters, int mode, bool enabled)
+	void Configure(const std::vector<GDX12ParticleEmitter>& emitters, int mode, const GDX12ParticleSettings& settings)
 	{
 		std::vector<uint64_t> revisions;
 		for (const auto& emitter : emitters) revisions.push_back(emitter.ResetRevision);
-		if (revisions != Revisions || mode != Mode || enabled != Enabled)
+		if (revisions != Revisions || mode != Mode || settings.Enabled != Enabled)
 		{
 			Revisions = std::move(revisions);
 			Mode = mode;
-			Enabled = enabled;
+			Enabled = settings.Enabled;
 			++Generation;
 			Ordered = PresentedVersion = CachedVersion = 0;
 			PresentedSnapshot.clear();
@@ -421,13 +437,23 @@ struct SceneParticles::Remote
 				ControlSpace.notify_all();
 			}
 		}
+		const bool draw = settings.Enabled && settings.DrawEnabled;
+		if (DrawEnabled != draw)
+		{
+			DrawEnabled = draw;
+			++DisplayGeneration;
+			LastOrder = nullptr;
+			PresentedVersion = CachedVersion = 0;
+			PresentedSnapshot.clear();
+		}
 	}
 
 	Publication* NewestCompleted()
 	{
 		Publication* latest = nullptr;
 		for (auto& slot : Ring)
-			if (!slot.Writing && slot.Generation == Generation && slot.Ready && (!latest || slot.Version > latest->Version) &&
+			if (!slot.Writing && slot.Generation == Generation && slot.DisplayGeneration == DisplayGeneration &&
+			    slot.Ready && (!latest || slot.Version > latest->Version) &&
 			    Submit->Complete(slot.Ready))
 				latest = &slot;
 		return latest;
@@ -448,7 +474,9 @@ struct SceneParticles::Remote
 				++Stats.OutputWaits;
 				Submit->Wait(output.Reader);
 			}
+			output.Ready = {};
 			output.Reader = {};
+			output.DisplayGeneration = DisplayGeneration;
 			output.Writing = true;
 			return &output;
 		}
@@ -457,15 +485,26 @@ struct SceneParticles::Remote
 
 	void Step(const std::vector<GDX12ParticleEmitter>& emitters, const GDX12ParticleSettings& settings, int mode)
 	{
-		Configure(emitters, mode, settings.Enabled);
-		Selected = LatestReady() ? NewestCompleted() : Mode == 0 ? LastOrder : nullptr;
-		auto* output = ReserveOutput();
-		if (!LatestReady() && !output) throw std::logic_error("No slot for exact particle snapshot");
+		const bool drewPreviously = DrawEnabled;
+		Configure(emitters, mode, settings);
+		Selected = DrawEnabled ? (LatestReady() ? NewestCompleted() : Mode == 0 ? LastOrder : nullptr) : nullptr;
+		const bool bootstrap = DrawEnabled && (!LatestReady() || (!drewPreviously && Ordered));
+		WaitForSelected = DrawEnabled && !LatestReady();
+		auto* output = DrawEnabled ? ReserveOutput() : nullptr;
+		while (bootstrap && !Selected && !output)
+		{
+			auto retiring = OutputRetirement();
+			if (!retiring) throw std::logic_error("No slot for particle display bootstrap");
+			++Stats.OutputWaits;
+			Submit->Wait(retiring);
+			output = ReserveOutput();
+		}
+		if (DrawEnabled && !LatestReady() && !output) throw std::logic_error("No slot for exact particle snapshot");
 		if (External())
 		{
-			Deferred = {emitters, settings, 0, Generation, false};
+			Deferred = {emitters, settings, 0, Generation, DisplayGeneration, false};
 			DeferredOutput = output;
-			if (!LatestReady() && !Selected)
+			if (bootstrap && output && !Selected)
 			{
 				output->Version = Ordered + 1;
 				output->Snapshot = emitters;
@@ -475,14 +514,18 @@ struct SceneParticles::Remote
 					emitter.Paused |= !settings.SimulationEnabled;
 				}
 				Selected = output;
+				WaitForSelected = true;
 			}
 		}
 		else
 		{
 			CommitStep(output, Simulate(GPU1, emitters, settings, output), Generation);
-			if (!LatestReady() && !Selected) Selected = LastOrder;
+			if (bootstrap && output && !Selected)
+			{
+				Selected = LastOrder;
+				WaitForSelected = true;
+			}
 		}
-		if (!settings.DrawEnabled) Selected = nullptr;
 	}
 
 	struct StepResult
@@ -616,12 +659,13 @@ struct SceneParticles::Remote
 		GameTime += result.Elapsed;
 		Stats.InputWaits += result.InputWaited;
 		Stats.InputCopies += result.CopiedInput;
-		if (output)
+		if (output && output->DisplayGeneration == DisplayGeneration)
 		{
 			output->Version = Ordered;
 			output->SimulatedSeconds = GameTime;
 			LastOrder = output;
 			++Stats.Exports;
+			ControlSpace.notify_all();
 		}
 	}
 
@@ -638,7 +682,7 @@ struct SceneParticles::Remote
 	static bool NeedsControl(const ProducerInput& prior, const ProducerInput& next)
 	{
 		// The latest snapshot carries the cumulative burst, including while disabled.
-		if (prior.Generation != next.Generation || prior.Advancing != next.Advancing ||
+		if (prior.Generation != next.Generation || prior.DisplayGeneration != next.DisplayGeneration || prior.Advancing != next.Advancing ||
 		    prior.Settings.Enabled != next.Settings.Enabled) return true;
 		for (size_t i = 0; i < next.Emitters.size(); ++i)
 			if (Paused(prior, i) != Paused(next, i))
@@ -726,8 +770,10 @@ struct SceneParticles::Remote
 					sleep(incoming);
 					continue;
 				}
-				auto* output = ReserveOutput();
-				if (!output)
+				const auto& next = control ? Controls.front() : LatestInput;
+				const bool display = DrawEnabled && next.DisplayGeneration == DisplayGeneration;
+				auto* output = display ? ReserveOutput() : nullptr;
+				if (display && !output)
 				{
 					sleep(OutputRetirement());
 					continue;
@@ -809,6 +855,7 @@ struct SceneParticles::Remote
 		{
 			StopWorker();
 			Selected = nullptr;
+			WaitForSelected = false;
 			if (settings.Enabled) Step(emitters, settings, mode);
 			return;
 		}
@@ -832,9 +879,10 @@ struct SceneParticles::Remote
 		}
 		std::unique_lock lock(Mutex);
 		if (WorkerFailure) std::rethrow_exception(WorkerFailure);
-		Configure(emitters, mode, settings.Enabled);
+		const bool drewPreviously = DrawEnabled;
+		Configure(emitters, mode, settings);
 		const bool active = settings.Enabled && settings.SimulationEnabled && worldRate > 0;
-		ProducerInput next{emitters, settings, 0, Generation, active};
+		ProducerInput next{emitters, settings, 0, Generation, DisplayGeneration, active};
 		// The previous frame has already registered its copy fence. Drop its pin
 		// before any input back pressure, including with a two-slot output ring.
 		Selected = nullptr;
@@ -853,8 +901,25 @@ struct SceneParticles::Remote
 		ClockRate = active ? worldRate : 0;
 		if (NeedsControl(LatestInput, next)) Controls.push_back(next);
 		LatestInput = std::move(next);
-		Selected = settings.Enabled && settings.DrawEnabled ? NewestCompleted() : nullptr;
+		Selected = DrawEnabled ? NewestCompleted() : nullptr;
+		WaitForSelected = false;
 		SetEvent(Wake.get());
+		// The first visible frame may need the producer to publish a fresh snapshot.
+		// An external input from this frame is not available until GPU0 submits it.
+		const bool hasInput = !External() || std::any_of(InputsRing.begin(), InputsRing.end(), [&](const auto& slot) {
+			return !slot.Writing && slot.Generation == Generation && bool(slot.Ready);
+		});
+		if (DrawEnabled && !drewPreviously && Ordered && !Selected && hasInput)
+		{
+			ControlSpace.wait(lock, [this] { return LastOrder || WorkerFailure; });
+			if (WorkerFailure) std::rethrow_exception(WorkerFailure);
+			Selected = NewestCompleted();
+			if (!Selected)
+			{
+				Selected = LastOrder;
+				WaitForSelected = true;
+			}
+		}
 	}
 
 	void AppendSources(GDX12ParticleRenderFrame& frame) const
@@ -1065,9 +1130,22 @@ void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, 
 		auto& lane = _remote[i];
 		auto& emitters = remoteEmitters[i];
 		const bool create = !lane.Solver && requested && !emitters.empty() && settings.Enabled && !lane.Attempted;
-		if (create || (lane.Solver && (rebuild[i] || replaceInput[i])))
+		const bool display = lane.Solver && settings.Enabled && settings.DrawEnabled && lane.Solver->Ring.empty();
+		if (create || (lane.Solver && (rebuild[i] || replaceInput[i] || display)))
 		{
 			lane.Attempted = true;
+			const auto fallback = [&] {
+				if (display && !rebuild[i] && !replaceInput[i])
+				{
+					primary.Drain();
+					lane.Solver->Drain();
+					lane.Generation = lane.Solver->Generation;
+					for (auto& emitter : _resources.ParticleEmitters)
+						emitter.BurstBaseline = (std::max)(emitter.BurstBaseline,
+						    lane.Solver->Solver.ConsumedBurst(emitter.Id, emitter.ResetRevision));
+				}
+				lane.Solver.reset();
+			};
 			for (auto& emitter : emitters)
 			{
 				const auto& live = *std::find_if(_resources.ParticleEmitters.begin(), _resources.ParticleEmitters.end(),
@@ -1089,15 +1167,16 @@ void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, 
 				else if (rebuild[i])
 					lane.Solver->RebuildTransport(_resources, emitters, settings);
 				if (create || replaceInput[i]) lane.Solver->RebuildInput(inputs[i]);
+				if (display) lane.Solver->PrepareDisplayTransport(_resources);
 			}
 			catch (const DxException& e)
 			{
-				lane.Solver.reset();
+				fallback();
 				Log::Warning("RenderGraph", "Local particles fallback: ", e.ToString());
 			}
 			catch (const std::exception& e)
 			{
-				lane.Solver.reset();
+				fallback();
 				Log::Warning("RenderGraph", "Local particles fallback: ", e.what());
 			}
 		}
@@ -1149,19 +1228,22 @@ void SceneParticles::AddExchanges(const Schedule& schedule, std::vector<PacketWa
 		auto* remote = lane.Solver.get();
 		lane.ImportPacket = findPacket(lane.Import);
 		const auto producerPacket = findPacket(lane.Export);
-		const auto waitPacket = remote->LatestReady() ? Invalid : lane.ImportPacket;
+		const auto waitPacket = remote->WaitForSelected ? lane.ImportPacket : Invalid;
+		const bool independent = remote->Mode == 2;
 		if (producerPacket != Invalid)
-			exchanges.push_back({producerPacket, waitPacket, [remote](CompletionToken token) { return remote->SubmitInput(token); }});
-		else if (waitPacket != Invalid)
+			exchanges.push_back({producerPacket, independent ? Invalid : waitPacket,
+			    [remote](CompletionToken token) { return remote->SubmitInput(token); }});
+		if (waitPacket != Invalid && (producerPacket == Invalid || independent))
 			waits.push_back({waitPacket, remote->Selected->Ready});
 	}
 }
 
 Id SceneParticles::ExecutionDevice() const
 {
-    for (const auto& lane : _remote)
-        if (lane.Solver) return lane.Solver->DeviceId;
-    return 0;
+	if (GetParticleSettings().Enabled)
+		for (const auto& lane : _remote)
+			if (lane.Solver && !lane.Layout.empty()) return lane.Solver->DeviceId;
+	return 0;
 }
 
 void SceneParticles::Submitted(const std::vector<CompletionToken>& completions)
@@ -1479,30 +1561,37 @@ void SceneParticles::AppendRemoteWeighted(Graph& graph, std::vector<ID3D12Resour
 	raster.Frame = simulation.RenderFrame();
 	if (raster.Frame.Sources.empty()) return;
 
-	auto* simHeap = simulationResources.SRV_UAV_Heap.get();
-	auto* depthResource = depth->GetResource();
-	auto depthView = depth->ShaderViewDescription();
-	auto& descriptor = raster.SimulationDepth;
-	descriptor.InitAsSRV(depthResource->D3DResource.Get(), &depthView, simHeap,
-	    descriptor.HeapIndex == UINT_MAX ? simHeap->GetAvailableIndex() : descriptor.HeapIndex);
-	const GDX12ParticleDepthInput input{depthResource, descriptor.GPUHandle, camera, depth->GetWidth(), depth->GetHeight()};
-	const State cameraState = graph.Resources.at(cameraId).Memory == Heap::Upload ? D3D12_RESOURCE_STATE_GENERIC_READ
-	    : D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
+	auto* depthResource = depth ? depth->GetResource() : nullptr;
+	const State cameraState = cameraId != Invalid && graph.Resources.at(cameraId).Memory == Heap::Upload ?
+	    D3D12_RESOURCE_STATE_GENERIC_READ : D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
 	const Access cameraAccess{cameraId, Mode::Read, cameraState};
-	const auto depthAccess = ResourceAccess(graph, bindings, depthResource, Mode::Read,
-	    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 	std::vector<Access> pools;
 	AddResources(graph, bindings, pools, simulation.GetPoolResources(), Mode::ReadWrite);
 	Packet(graph, bindings, "owner initialize transparent particle pools", pools,
 	    [&simulation, &simulationResources](auto* cmd) { simulation.InitializePools(cmd, &simulationResources); },
 	    Queue::Direct, &work);
 	AddResources(graph, bindings, pools, simulation.GetConstantResources(slot), Mode::Read);
-	pools.push_back(depthAccess);
-	pools.push_back(cameraAccess);
+	GDX12ParticleDepthInput input{};
+	if (std::any_of(raster.Frame.Sources.begin(), raster.Frame.Sources.end(),
+	        [](const auto& source) { return source.Emitter.DepthCollision; }))
+	{
+		if (!depthResource || cameraId == Invalid) throw std::logic_error("Owner particle collision requires prepass depth and camera");
+		auto* simHeap = simulationResources.SRV_UAV_Heap.get();
+		auto depthView = depth->ShaderViewDescription();
+		auto& descriptor = raster.SimulationDepth;
+		descriptor.InitAsSRV(depthResource->D3DResource.Get(), &depthView, simHeap,
+		    descriptor.HeapIndex == UINT_MAX ? simHeap->GetAvailableIndex() : descriptor.HeapIndex);
+		input = {depthResource, descriptor.GPUHandle, camera, depth->GetWidth(), depth->GetHeight()};
+		pools.push_back(ResourceAccess(graph, bindings, depthResource, Mode::Read,
+		    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
+		pools.push_back(cameraAccess);
+	}
 	Packet(graph, bindings, "owner simulate transparent particles", std::move(pools),
 	    [&simulation, &simulationResources, input](auto* cmd) { simulation.ExecuteWithDepth(cmd, &simulationResources, input); },
 	    Queue::Direct, &work);
 	if (!settings.DrawEnabled) return;
+	if (!depthResource || !accum || !reveal || cameraId == Invalid)
+		throw std::logic_error("Owner particle raster requires WBOIT targets and opaque depth");
 
 	raster.Pass.Setup(&owner, &raster.Common);
 	raster.Pass.SetReadOnlyDepthEnabled(false);

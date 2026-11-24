@@ -15,6 +15,7 @@ class SceneTransparency
 	~SceneTransparency();
 	Id RequestedOwner(const std::shared_ptr<QueueSubmission>&, UINT slot);
 	Id Begin(const std::shared_ptr<QueueSubmission>&, UINT slot, uint64_t frame, Id owner);
+	Id BenchmarkExecutionDevice() const;
 	void PrepareOpaqueDepth(Graph&, std::vector<ID3D12Resource*>&, UINT slot, GDX12Texture*);
 	void AddExchange(const Schedule&, std::vector<Executor::PacketExchange>&);
 	void Submitted(const std::vector<CompletionToken>&);
@@ -49,6 +50,7 @@ class SceneTransparency
 	Remote* _remote = nullptr;
 	uint64_t _frame = 0;
 	unsigned _fallbackReasons = 0;
+	bool _remoteWork = false, _remoteDepth = false, _remoteDraw = false;
 	struct Frame
 	{
 		GDX12WBOITTransparencyPass Draw;

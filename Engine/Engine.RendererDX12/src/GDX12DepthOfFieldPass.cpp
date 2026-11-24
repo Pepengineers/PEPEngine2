@@ -63,9 +63,13 @@ void GDX12DepthOfFieldPass::DestroyContext()
 
 bool GDX12DepthOfFieldPass::IsActive() const
 {
-    auto* color = _inputs[0]->GetTexture();
+    return IsActive(*_inputs[0]->GetTexture());
+}
+
+bool GDX12DepthOfFieldPass::IsActive(GDX12Texture& color) const
+{
     // The SDK's four bilateral mip levels require at least 8 half-resolution texels.
-    return GetDepthOfFieldSettings().Enabled && color->GetWidth() >= 16 && color->GetHeight() >= 16;
+    return GetDepthOfFieldSettings().Enabled && color.GetWidth() >= 16 && color.GetHeight() >= 16;
 }
 
 void GDX12DepthOfFieldPass::PrepareRecording()

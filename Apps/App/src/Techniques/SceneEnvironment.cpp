@@ -1003,6 +1003,20 @@ std::array<Id, 2> SceneEnvironment::AtmosphereDevices() const
 {
 	return {_remoteSkyView ? _remoteSkyView->Device : 0, _remoteAerial ? _remoteAerial->Device : 0};
 }
+std::array<Id, 2> SceneEnvironment::BenchmarkAtmosphereConsumers() const
+{
+	std::array<Id, 2> owners{Invalid, Invalid};
+	if (_environment._source != SkySource::SkyAtmosphere) return owners;
+	const std::array remotes{_remoteSkyView.get(), _remoteAerial.get()};
+	for (size_t i = 0; i < remotes.size(); ++i)
+	{
+		const auto* remote = remotes[i];
+		if (!remote) owners[i] = 0;
+		else if (remote->Consumer != Invalid && remote->Displayed && remote->Displayed->Version)
+			owners[i] = remote->Device;
+	}
+	return owners;
+}
 void SceneEnvironment::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings)
 {
 	if (graph.Resources.size() != bindings.size())

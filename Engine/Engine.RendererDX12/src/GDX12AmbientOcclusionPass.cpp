@@ -3,19 +3,6 @@
 #include "../../../External/External.Libraries/XeGTAO/XeGTAO.h"
 #define FFX_CACAO_ENABLE_D3D12
 #include "../../../External/External.Libraries/cacao/inc/ffx_cacao_impl.h"
-#include <algorithm>
-#include <cstring>
-#include <stdexcept>
-
-namespace
-{
-    void CheckCACAO(const FFX_CACAO_Status status)
-    {
-        if (status != FFX_CACAO_STATUS_OK)
-            throw std::runtime_error("FidelityFX CACAO failed: " + std::to_string(status));
-    }
-
-}
 
 GDX12AmbientOcclusionPass::GDX12AmbientOcclusionPass()
 {
@@ -27,12 +14,11 @@ GDX12AmbientOcclusionPass::GDX12AmbientOcclusionPass()
 
 GDX12AmbientOcclusionPass::~GDX12AmbientOcclusionPass()
 {
-    for (auto& grid : _grids) DestroyCACAO(grid);
+    ResetGrid();
 }
 
 void GDX12AmbientOcclusionPass::Initialize()
 {
-    CreateTextures();
     const UINT frames = static_cast<UINT>(_resources->FrameConstants.size());
     _constants = std::make_unique<GDX12UploadBuffer<ShaderConstants>>(_resources->Device, frames);
     _xeConstants = std::make_unique<GDX12UploadBuffer<XeGTAO::GTAOConstants>>(_resources->Device, frames);
@@ -51,7 +37,7 @@ GDX12AmbientOcclusionPass::Pipelines::Pipelines(GDX12Device* device)
     Root = std::make_unique<GDX12RootSignature>(device, root);
     const char* entries[PipelineCount] = { "PrepareNormalsCS", "SSAOCS", "HBAOCS", "BlurCS", "ResolveCS",
         "XePrefilterCS", "XeMainCS", "XeDenoiseCS", "NeutralCS", "PrepareHalfCS", "UpsampleCS",
-        "PadCACAOCS", "ReprojectCS", "PackFullCS", "ReprojectXeCS" };
+        "PadCACAOCS", "ReprojectCS", "PackFullCS", "ReprojectXeCS", "ResolveXeCS" };
     for (UINT i = 0; i < PipelineCount; ++i)
     {
         States[i] = GDX12RenderHelpers::CreateComputePipeline(device, Root.get(),
@@ -82,37 +68,41 @@ void GDX12AmbientOcclusionPass::CreateTexture(GDX12Texture& texture, const DXGI_
     texture.Initialize(desc);
 }
 
-void GDX12AmbientOcclusionPass::CreateTextures()
+bool GDX12AmbientOcclusionPass::SetOutputSize(UINT width, UINT height)
 {
-    const UINT width = _inputs[0]->GetTexture()->GetWidth(), height = _inputs[0]->GetTexture()->GetHeight();
-    if (width == 0 || height == 0 || _inputs[1]->GetTexture()->GetWidth() != width || _inputs[1]->GetTexture()->GetHeight() != height)
-        throw std::invalid_argument("AO requires equally sized, nonempty depth and normal textures");
+    if (_output.IsInitialized() && _output.GetWidth() == width && _output.GetHeight() == height)
+        return false;
     CreateTexture(_output, DXGI_FORMAT_R32_FLOAT, width, height);
-    CreateGrid(_grids[0], width, height, false);
-    if (_grids[1].Normals.IsInitialized())
-        CreateGrid(_grids[1], (width + 1) / 2, (height + 1) / 2, true);
+    return true;
 }
 
-void GDX12AmbientOcclusionPass::CreateGrid(WorkGrid& grid, UINT width, UINT height, bool half)
+void GDX12AmbientOcclusionPass::PrepareGrid(UINT width, UINT height, UINT resources)
 {
-    if (half)
-    {
-        CreateTexture(grid.Depth, DXGI_FORMAT_R32_FLOAT, width, height);
-        CreateTexture(grid.Visibility, DXGI_FORMAT_R32_FLOAT, width, height);
-    }
+    if (_grid && _grid->Width == width && _grid->Height == height && _grid->Resources == resources)
+        return;
+    ResetGrid();
+    auto& grid = *(_grid = std::make_unique<WorkGrid>());
+    grid.Width = width;
+    grid.Height = height;
+    grid.Resources = resources;
+    if (resources & HalfDepth) CreateTexture(grid.Depth, DXGI_FORMAT_R32_FLOAT, width, height);
+    if (resources & HalfVisibility) CreateTexture(grid.Visibility, DXGI_FORMAT_R32_FLOAT, width, height);
     CreateTexture(grid.Normals, DXGI_FORMAT_R16G16B16A16_FLOAT, width, height);
-    for (auto& texture : grid.Scratch) CreateTexture(texture, DXGI_FORMAT_R32_FLOAT, width, height);
-    for (auto& texture : grid.XeTerms) CreateTexture(texture, DXGI_FORMAT_R8_UINT, width, height);
-    CreateTexture(grid.XeEdges, DXGI_FORMAT_R8_UNORM, width, height);
-    // Every prefilter group writes a complete 16x16 tile through five mips.
-    CreateTexture(grid.XeDepth, DXGI_FORMAT_R32_FLOAT, (width + 15) / 16 * 16, (height + 15) / 16 * 16, 5);
-    if ((std::max)(width, height) < 16)
+    if (resources & VisibilityScratch) CreateTexture(grid.Scratch[0], DXGI_FORMAT_R32_FLOAT, width, height);
+    if (resources & FilterScratch) CreateTexture(grid.Scratch[1], DXGI_FORMAT_R32_FLOAT, width, height);
+    if (resources & XeTerm) CreateTexture(grid.XeTerms[0], DXGI_FORMAT_R8_UINT, width, height);
+    if (resources & XeFilter) CreateTexture(grid.XeTerms[1], DXGI_FORMAT_R8_UINT, width, height);
+    if (resources & XeEdge) CreateTexture(grid.XeEdges, DXGI_FORMAT_R8_UNORM, width, height);
+    if (resources & PaddedInputs)
     {
         // The native CACAO deinterleaved depth needs four mips, so extend one axis.
         CreateTexture(grid.CacaoDepth, DXGI_FORMAT_R32_FLOAT, 16, height);
         CreateTexture(grid.CacaoNormals, DXGI_FORMAT_R16G16B16A16_FLOAT, 16, height);
-        CreateTexture(grid.CacaoVisibility, DXGI_FORMAT_R32_FLOAT, 16, height);
     }
+    if (resources & PaddedVisibility) CreateTexture(grid.CacaoVisibility, DXGI_FORMAT_R32_FLOAT, 16, height);
+    if (!(resources & XePyramid)) return;
+    // Every prefilter group writes a complete 16x16 tile through five mips.
+    CreateTexture(grid.XeDepth, DXGI_FORMAT_R32_FLOAT, (width + 15) / 16 * 16, (height + 15) / 16 * 16, 5);
     for (UINT mip = 0; mip < 5; ++mip)
     {
         D3D12_UNORDERED_ACCESS_VIEW_DESC view = {};
@@ -120,35 +110,34 @@ void GDX12AmbientOcclusionPass::CreateGrid(WorkGrid& grid, UINT width, UINT heig
         view.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
         view.Texture2D.MipSlice = mip;
         auto* heap = _resources->SRV_UAV_Heap.get();
-        const UINT index = grid.DepthUAVs[mip].DescType != DESC_TYPE_NONE ? grid.DepthUAVs[mip].HeapIndex :
-            heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
+        const UINT index = heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
         grid.DepthUAVs[mip].InitAsUAV(grid.XeDepth.GetResource()->D3DResource.Get(), nullptr, &view, heap, index);
     }
 }
 
 void GDX12AmbientOcclusionPass::DestroyCACAO(WorkGrid& grid)
 {
-    if (grid.CacaoScreenReady) FFX_CACAO_D3D12DestroyScreenSizeDependentResources(grid.Cacao);
+    if (grid.CacaoScreenDepth) FFX_CACAO_D3D12DestroyScreenSizeDependentResources(grid.Cacao);
     if (grid.Cacao) FFX_CACAO_D3D12DestroyContext(grid.Cacao);
-    grid.CacaoScreenReady = false;
+    grid.CacaoScreenDepth.Reset();
     grid.Cacao = nullptr;
     grid.CacaoMemory.clear();
 }
 
+void GDX12AmbientOcclusionPass::ResetGrid()
+{
+    if (_grid) DestroyCACAO(*_grid);
+    _grid.reset();
+}
+
 void GDX12AmbientOcclusionPass::Resize()
 {
-    // Renderer drains the queue before replacing size-dependent resources.
-    for (auto& grid : _grids)
-    {
-        if (grid.CacaoScreenReady) CheckCACAO(FFX_CACAO_D3D12DestroyScreenSizeDependentResources(grid.Cacao));
-        grid.CacaoScreenReady = false;
-    }
-    CreateTextures();
+    ResetGrid();
     _hasPrevious = false;
 }
 
 void GDX12AmbientOcclusionPass::ClearDenendencies()
 {
-    for (auto& grid : _grids) DestroyCACAO(grid);
+    ResetGrid();
     GDX12RenderPass::ClearDenendencies();
 }

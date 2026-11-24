@@ -81,9 +81,9 @@ class SceneLocalShadows
 		std::array<uint64_t, 6> ContentVersions{}, PublicationOrders{};
 		UINT Resolution = 0, Needed = 0, ListsValid = 0, MapsValid = 0;
 		float ScreenPixels = 0;
-		UINT LocalFallback = 0, ResidentFaces = 0, ReadyFaces = 0;
+		UINT LocalFallback = 0, ResidentFaces = 0, ReadyFaces = 0, RemoteFaces = 0;
 		uint64_t Generation = 0;
-		bool Latest = false;
+		UINT LatestFaces = 0;
 		bool HasLight = false;
 		bool SelectionDirty = true;
 	};
@@ -161,7 +161,8 @@ class SceneLocalShadows
 	void PrepareAtlas(Slot&, UINT pageSide, UINT pages);
 	void PrepareAtlases(UINT pageSide, UINT pages);
 	void MarkDepthWritten(UINT slot, UINT light, UINT face);
-	void Allocate(UINT slot, SceneLocalShadows& staticPass, UINT effectiveCeiling);
+	void Allocate(UINT slot, SceneLocalShadows& staticPass, UINT effectiveCeiling,
+	              const std::vector<ShadowCrossSync>& pageSync);
 	void UpdateLayout(const Slot&, UINT effectiveCeiling);
 	void Pack(Slot&);
 	void GatherMissing(Slot&, UINT lightIndex, UINT faces);
@@ -209,7 +210,6 @@ class SceneLocalShadows
 	std::vector<UINT> _commandGeneration, _materialGeneration;
 	UINT _changeGeneration = 0;
 	std::vector<GDX12RenderPrimitive> _grass;
-	std::vector<GDX12LocalShadowKey> _latestPlacements;
 	std::unordered_map<UINT, std::vector<UINT>> _instances, _transforms, _materials;
 	std::vector<UINT> _positions, _leaves;
 	bool _treeReady = false, _castersRebuilt = false;

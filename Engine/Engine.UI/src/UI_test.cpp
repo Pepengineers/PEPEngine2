@@ -125,14 +125,15 @@ namespace Engine::UI
                 const bool worldCanvas = Name.rfind(L"App.UI.WorldCanvas.", 0) == 0;
                 const bool canvasAdapter = worldCanvas && Name.substr(Name.find_last_of(L'.') + 1) == L"Adapter";
                 const bool localShadowPage = LocalShadowPageAdapterIndex(Name).has_value();
-                const bool namedAdapter = canvasAdapter || localShadowPage;
+                const bool localShadowSync = LocalShadowPageCrossSyncIndex(Name).has_value();
+                const bool namedSetting = canvasAdapter || localShadowPage || localShadowSync;
                 const auto active = variable.GetString();
                 if (Draft == Current) Draft = active;
                 Current = active;
 
                 ImGui::PushID(name.c_str());
-                ImGui::TextWrapped("%s", namedAdapter ? description.c_str() : name.c_str());
-                if (!description.empty() && !namedAdapter) ImGui::TextWrapped("%s", description.c_str());
+                ImGui::TextWrapped("%s", namedSetting ? description.c_str() : name.c_str());
+                if (!description.empty() && !namedSetting) ImGui::TextWrapped("%s", description.c_str());
                 ImGui::Spacing();
                 if (variable.GetFlags() == EConsoleVariableFlags::ReadOnly)
                 {
@@ -146,6 +147,22 @@ namespace Engine::UI
                 }
                 else if (Name.substr(Name.find_last_of(L'.') + 1) == L"Adapter")
                     DrawAdapter(variable, localShadowPage);
+                else if (localShadowSync)
+                {
+                    constexpr int exact = int(ShadowCrossSync::Exact), latest = int(ShadowCrossSync::Latest);
+                    const int mode = variable.GetInt();
+                    ImGui::SetNextItemWidth(-1);
+                    if (ImGui::BeginCombo("##cross-sync", mode == latest ? "Latest" : "Exact"))
+                    {
+                        if (ImGui::Selectable("Exact", mode == exact) && mode != exact)
+                            Apply(variable, std::to_string(exact));
+                        if (mode == exact) ImGui::SetItemDefaultFocus();
+                        if (ImGui::Selectable("Latest", mode == latest) && mode != latest)
+                            Apply(variable, std::to_string(latest));
+                        if (mode == latest) ImGui::SetItemDefaultFocus();
+                        ImGui::EndCombo();
+                    }
+                }
                 else if (worldCanvas && Name.substr(Name.find_last_of(L'.') + 1) == L"CrossSync")
                 {
                     const int mode = variable.GetInt();
@@ -251,7 +268,7 @@ namespace Engine::UI
                     ? console.FindConsoleVariable(L"Render.Shadows.Local.AtlasCount").GetUInt() : 0u;
                 const auto inactiveShadowPage = [shadowPages](std::wstring_view name)
                 {
-                    const auto page = LocalShadowPageAdapterIndex(name);
+                    const auto page = LocalShadowPageSettingsIndex(name);
                     return page && *page >= shadowPages;
                 };
                 uint64_t revision;

@@ -69,7 +69,7 @@ void GDX12ReflectionProbePass::Initialize()
     cull.NumSingleUAVSlots = 2;
     _cullRoot = std::make_unique<GDX12RootSignature>(_resources->Device, cull);
     GDX12RootSignatureDesc filter;
-    filter.Constants.push_back(3);
+    filter.Constants.push_back(4);
     filter.NumSingleSRVSlots = 1;
     filter.NumSingleUAVSlots = 1;
     filter.StaticSamplers.emplace_back(0, D3D12_FILTER_MIN_MAG_MIP_LINEAR,
@@ -237,7 +237,7 @@ void GDX12ReflectionProbePass::CreateCaptureTextures(UINT resolution)
         probe.Raw.reset();
         probe.BakedColor.reset();
         probe.BakedDepth.reset();
-        probe.CapturedFaces = probe.BakedFaces = probe.NextFace = 0;
+        probe.CapturedFaces = probe.RawFaces = probe.BakedFaces = probe.NextFace = 0;
         probe.RebakePending = false;
     }
     if (!resolution)
@@ -284,7 +284,7 @@ void GDX12ReflectionProbePass::CreateCaptureTextures(UINT resolution)
         if (!probe.Raw) probe.Raw = std::make_unique<GDX12Texture>();
         CreateTexture(*probe.Raw, resolution, 6, captureMips, D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET, false);
         CreateFaceViews(*probe.Raw, probe.RawRTVs, false);
-        probe.CapturedFaces = probe.NextFace = 0;
+        probe.CapturedFaces = probe.RawFaces = probe.NextFace = 0;
         _scheduler.Reset();
         probe.RawMipSRVs.clear();
         for (UINT mip = 0; mip < captureMips; ++mip)
@@ -349,6 +349,8 @@ void GDX12ReflectionProbePass::Prepare()
                 probe.LastUpdate = 0;
             }
             CreateCaptureTextures(0);
+            // Release the old array after its GPU readers, leaving a valid neutral cube.
+            CreatePublishedTexture(1, 1);
         }
         if (_enabled) { _commonData->ResetHistory = true; ++_commonData->HistoryRevision; }
         _enabled = false;
@@ -398,7 +400,7 @@ void GDX12ReflectionProbePass::Prepare()
             if (probe.Source.Adapter != submitted[i].Adapter) probe.Ready = false;
             _commonData->ResetHistory = true;
             ++_commonData->HistoryRevision;
-            probe.CapturedFaces = probe.BakedFaces = probe.NextFace = 0;
+            probe.CapturedFaces = probe.RawFaces = probe.BakedFaces = probe.NextFace = 0;
             probe.RebakePending = false;
             probe.LastUpdate = 0;
         }
@@ -529,7 +531,7 @@ void GDX12ReflectionProbePass::ResetHistory()
     for (auto& probe : _probes)
     {
         probe.Ready = false;
-        probe.CapturedFaces = probe.BakedFaces = probe.NextFace = 0;
+        probe.CapturedFaces = probe.RawFaces = probe.BakedFaces = probe.NextFace = 0;
         probe.LastUpdate = 0;
         probe.RebakePending = false;
     }

@@ -72,10 +72,16 @@ class ScenePostUI
 
   private:
 	struct CapturedScreen;
+	struct InputNeeds
+	{
+		bool DoF, Motion, CompleteMotion;
+		bool Depth() const { return DoF || Motion; }
+	};
+	InputNeeds RequiredInputs(GDX12Texture& hdr);
 	Id AppendFrameGeneration(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* depth, Id dependency);
 	Id AppendReconstruction(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* hdr, GDX12Texture* depth,
 	                        GDX12Texture* motion, GDX12Texture* featureMotion, GDX12Texture* target,
-	                        std::vector<Id> dependencies = {});
+	                        bool completeMotionRequired, std::vector<Id> dependencies);
 	void AppendScreen(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* target,
 	                  const std::function<void(GDX12CommandList*)>& finish, Id dependency, const CapturedScreen&);
 	Id Packet(Graph&, std::vector<ID3D12Resource*>&, const char*, std::vector<std::pair<GDX12Resource*, Mode>>,
@@ -85,9 +91,10 @@ class ScenePostUI
 	CapturedScreen CaptureScreen(Graph&, std::vector<ID3D12Resource*>&, ID3D12Resource*,
 	                             const SceneTextureInspector::Input* post = nullptr);
 	Id AppendStack(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* hdr, GDX12Texture* depth,
-	               GDX12Texture* motion, GDX12Texture* featureMotion, GDX12Texture* target, std::vector<Id> = {});
+	               GDX12Texture* motion, GDX12Texture* featureMotion, GDX12Texture* target,
+	               const InputNeeds&, std::vector<Id> = {});
 	void AppendRemotePost(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture*, GDX12Texture*, GDX12Texture*,
-	                      GDX12Texture*, GDX12Texture*, const std::function<void(GDX12CommandList*)>&);
+	                      GDX12Texture*, GDX12Texture*, const InputNeeds&, const std::function<void(GDX12CommandList*)>&);
 	Id CompositeScreen(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture*, GDX12Texture*, Id,
 	                   const SceneTextureInspector::Atlases&, const std::shared_ptr<const Engine::UI::DrawData>&, bool);
 	struct RemotePost;

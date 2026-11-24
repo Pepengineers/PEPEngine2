@@ -286,16 +286,6 @@ void GDX12ParticlesPass::BeginFrame(GDX12Texture* depth, const GDX12ParticleRend
 {
     _resources->ParticleMotion = nullptr;
     const auto global = GetParticleSettings();
-    if (global.Enabled && frame.Sources.empty())
-    {
-        if (_state)
-        {
-            _resources->Device->GetCommandQueue()->Flush();
-            _state.reset();
-            _commonData->ResetUpscalerHistory = true;
-        }
-        return;
-    }
     if (!global.Enabled || !global.DrawEnabled)
     {
         if (_state)
@@ -303,6 +293,16 @@ void GDX12ParticlesPass::BeginFrame(GDX12Texture* depth, const GDX12ParticleRend
             _state->Active = false;
             if (_state->WasEnabled) _commonData->ResetUpscalerHistory = true;
             _state->WasEnabled = false;
+        }
+        return;
+    }
+    if (frame.Sources.empty())
+    {
+        if (_state)
+        {
+            _resources->Device->GetCommandQueue()->Flush();
+            _state.reset();
+            _commonData->ResetUpscalerHistory = true;
         }
         return;
     }

@@ -108,7 +108,10 @@ void CS(uint3 dispatch : SV_DispatchThreadID)
     s.F0 = f0.rgb; s.Baked = f0.a > 0.5f;
     s.Emissive = emissive.rgb;
     float3 v = SafeNormalize(CBCamera.CameraLocation - position);
-    float3 result = ShadeSunAndIBL(s, position, v, AmbientOcclusion[pixel]);
+    uint aoWidth, aoHeight;
+    AmbientOcclusion.GetDimensions(aoWidth, aoHeight);
+    float ao = AmbientOcclusion[min(pixel, uint2(aoWidth, aoHeight) - 1)];
+    float3 result = ShadeSunAndIBL(s, position, v, ao);
     if (s.Baked != 0)
     {
         SceneColor[pixel] = float4(result, 1);

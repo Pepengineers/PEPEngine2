@@ -17,6 +17,7 @@ public:
 	static void SetVisible(bool visible);
 	bool NeedsReadback() const { return !_readbackName.empty(); }
 	bool NeedsReadback(std::string_view name) const { return _readbackName == name; }
+	bool RequestsTexture(std::string_view name) const;
 	struct Input
 	{
 		SceneTextureInspector& Inspector;

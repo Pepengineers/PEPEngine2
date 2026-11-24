@@ -13,6 +13,7 @@ namespace
 AutoConsoleVariable<int> TransferMode(L"Render.ReflectionProbes.TransferMode", 0,
     L"Remote transfer schedule: 0 all ready cubemaps, 1 one cubemap, 2 one face per frame",
     EConsoleVariableFlags::Default, [](int value) { return value >= 0 && value <= 2; });
+constexpr UINT AllProbeFaces = (1u << 6) - 1;
 }
 struct SceneReflections::CaptureInputs
 {
@@ -38,14 +39,14 @@ struct SceneReflections::Remote
         CompletionToken Captured, Imported;
         CompletionToken FirstMaterialFrame;
         Id ImportOperation = Invalid;
-        UINT Faces = 0, SourceCube = 0, ObservedRevision = 0;
+        UINT FilteredFaces = 0, PendingFaces = 0, SourceCube = 0;
         uint64_t Number = 0;
         uint64_t StaticGeometryRevision = 0;
-        bool Publish = false, Reported = false;
+        bool Reported = false;
     };
 
     Remote(const std::shared_ptr<QueueSubmission>& submissions, Id id, UINT slots)
-        : Device(id), GPU(submissions, id, slots), Mirror(*submissions, id)
+        : Device(id), GPU(submissions, id, slots), Mirror(*submissions, id), SceneVersions(slots)
     {
         Resources.Initialize(&submissions->Device(id));
         Pass.Setup(&Resources, &Common);
@@ -69,23 +70,24 @@ struct SceneReflections::Remote
     std::unique_ptr<SceneGeometry::RemoteProbeVegetation> Vegetation;
     std::unique_ptr<GDX12UploadBuffer<GDX12LocalLightConstants>> Lights;
     std::array<GDX12Descriptor, 4> SceneViews;
+    std::vector<std::array<uint64_t, 4>> SceneVersions;
     std::array<std::unique_ptr<GDX12Texture>, 4> Environment;
     NativeWork Work;
     Graph Plan;
     std::vector<ID3D12Resource*> Bindings;
     std::map<UINT, Generation> Probes;
-    std::vector<UINT> Indices, Filtered;
+    std::vector<UINT> Indices;
+    std::vector<FilteredFaces> Filtered;
     std::vector<Id> PrimaryImports;
     CompletionToken LastWork;
     Id PrimaryExport = Invalid, RemoteImport = Invalid;
-    uint64_t EnvironmentRevision = UINT64_MAX, TextureRevision = UINT64_MAX, MeshRevision = UINT64_MAX;
+    uint64_t EnvironmentRevision = UINT64_MAX, MeshRevision = UINT64_MAX;
     uint64_t VertexDeformationRevision = UINT64_MAX;
-    bool RefreshMaterialTextures = false;
     bool WorkPlanned = false;
 };
 
 SceneReflections::SceneReflections(GDX12DeviceResources& r, RenderPipelineCommonData& c)
-    : _resources(r), _common(c)
+    : _resources(r), _common(c), _metadata(r.FrameConstants.size())
 {
 
     {
@@ -129,8 +131,22 @@ void SceneReflections::Submitted(uint64_t fence)
 {
     if (!fence)
         throw std::invalid_argument("Probe publication requires a submitted fence");
-    for (auto probe : _publishing)
-        _publications.at(probe).Fence = fence;
+    for (const auto& publication : _publishing)
+    {
+        auto& readiness = _publications.at(publication.Probe);
+        // Incremental refreshes must not move a still-pending bootstrap fence forward.
+        if (!readiness.Fence && !readiness.Ready) readiness.Fence = fence;
+    }
+    if (_metadataChanges.empty()) return;
+    auto& uploaded = _metadata.at(_metadataSlot);
+    const auto* data = _resources.FrameConstants[_metadataSlot]->ReflectionProbesUpload->GetCPUData();
+    for (const auto& [first, end] : _metadataChanges)
+        for (UINT i = first; i < end; ++i)
+        {
+            uploaded.Initialized[i] = true;
+            uploaded.Data[i] = data[i];
+        }
+    _metadataChanges.clear();
 }
 std::pair<size_t, size_t> SceneReflections::Readiness() const
 {
@@ -175,7 +191,7 @@ void SceneReflections::Append(Graph& graph, std::vector<ID3D12Resource*>& bindin
             if (owners[i] != _owners[i] && i < p._probes.size())
             {
                 p._probes[i].Ready = false;
-                p._probes[i].CapturedFaces = p._probes[i].BakedFaces = p._probes[i].NextFace = 0;
+                p._probes[i].CapturedFaces = p._probes[i].RawFaces = p._probes[i].BakedFaces = p._probes[i].NextFace = 0;
                 p._probes[i].LastUpdate = 0;
             }
         _owners = std::move(owners);
@@ -283,7 +299,15 @@ void SceneReflections::Append(Graph& graph, std::vector<ID3D12Resource*>& bindin
         AppendCapture(graph, bindings, work, p, _resources, in, publicationOperations, _publishing);
     }
     AppendRemote(graph, bindings, geometry, environment, slot, publicationOperations, replaced);
-    for (UINT i = 0; i < MaxReflectionProbes; ++i)
+    const UINT count = p._enabled ? UINT(p._probes.size()) : 1;
+    auto* source = constants.ReflectionProbesUpload->GetResource().D3DResource.Get();
+    auto* target = constants.ReflectionProbes->GetResource().D3DResource.Get();
+    auto& uploaded = _metadata.at(slot);
+    if (uploaded.Target != target) uploaded = {target};
+    _metadataSlot = slot;
+    auto& changed = _metadataChanges;
+    changed.clear();
+    for (UINT i = 0; i < count; ++i)
     {
         GDX12ReflectionProbeData data;
         if (p._enabled && i < p._probes.size() && p._probes[i].Ready)
@@ -298,27 +322,36 @@ void SceneReflections::Append(Graph& graph, std::vector<ID3D12Resource*>& bindin
             data.MaxMip = float(p._publishedMips - 1);
             data.MinMip = float(p._publishedMips - GDX12RenderHelpers::MipCount(source.Resolution));
         }
+        if (uploaded.Initialized[i] && std::memcmp(&uploaded.Data[i], &data, sizeof(data)) == 0) continue;
         constants.ReflectionProbesUpload->CopyData(i, data);
+        if (!changed.empty() && changed.back().second == i) ++changed.back().second;
+        else changed.emplace_back(i, i + 1);
     }
-    auto* source = constants.ReflectionProbesUpload->GetResource().D3DResource.Get();
-    auto* target = constants.ReflectionProbes->GetResource().D3DResource.Get();
-    auto* metadata = constants.ReflectionProbes->GetSRV();
-    D3D12_SHADER_RESOURCE_VIEW_DESC probeView{};
-    probeView.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
-    probeView.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    probeView.Buffer.StructureByteStride = sizeof(GDX12ReflectionProbeData);
-    probeView.Buffer.NumElements = p._enabled ? UINT(p._probes.size()) : 1;
-    metadata->InitAsSRV(target, &probeView, _resources.SRV_UAV_Heap.get(), metadata->HeapIndex);
-    work.Add(
-        graph, "probe metadata upload (GPU ordered)",
-        {{resource(&constants.ReflectionProbesUpload->GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ},
-         {resource(&constants.ReflectionProbes->GetResource()), Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
-        [source, target](auto* cmd) {
-            cmd->CopyBufferRegion(target, 0, source, 0, UINT64(MaxReflectionProbes) * sizeof(GDX12ReflectionProbeData));
-        },
-        publicationOperations);
+    if (uploaded.Count != count)
+    {
+        auto* metadata = constants.ReflectionProbes->GetSRV();
+        D3D12_SHADER_RESOURCE_VIEW_DESC probeView{};
+        probeView.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+        probeView.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        probeView.Buffer.StructureByteStride = sizeof(GDX12ReflectionProbeData);
+        probeView.Buffer.NumElements = count;
+        metadata->InitAsSRV(target, &probeView, _resources.SRV_UAV_Heap.get(), metadata->HeapIndex);
+        uploaded.Count = count;
+    }
+    if (!changed.empty())
+        work.Add(
+            graph, "probe metadata upload (GPU ordered)",
+            {{resource(&constants.ReflectionProbesUpload->GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ},
+             {resource(&constants.ReflectionProbes->GetResource()), Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
+            [source, target, changed](auto* cmd) {
+                constexpr UINT64 stride = sizeof(GDX12ReflectionProbeData);
+                for (const auto& [first, end] : changed)
+                    cmd->CopyBufferRegion(target, first * stride, source, first * stride, (end - first) * stride);
+            },
+            publicationOperations);
     p._planPrepared = false;
 }
+
 void SceneReflections::AppendRemote(Graph& primary, std::vector<ID3D12Resource*>& primaryBindings,
                                     SceneGeometry& geometry, SceneEnvironment& environment, UINT slot,
                                     std::vector<Id>& publications, bool arrayReplaced)
@@ -345,7 +378,7 @@ void SceneReflections::AppendRemote(Graph& primary, std::vector<ID3D12Resource*>
     if (_remotes.empty()) return;
 
     std::vector<GDX12Texture*> materialTextures;
-    const auto live = geometry.LiveProbeCaptureInputs(environment, &materialTextures);
+    const auto live = geometry.LiveProbeCaptureInputs(environment, slot, &materialTextures);
 
     for (auto& [id, entry] : _remotes)
     {
@@ -376,8 +409,6 @@ void SceneReflections::AppendRemote(Graph& primary, std::vector<ID3D12Resource*>
         for (auto& [index, generation] : remote.Probes)
         {
             const auto& source = _passes->_probes[index].Source;
-            remote.RefreshMaterialTextures |= generation.ObservedRevision != source.Revision;
-            generation.ObservedRevision = source.Revision;
             if (generation.FirstMaterialFrame && _submissions->Complete(generation.FirstMaterialFrame))
             {
                 Log::Info("RenderGraph", "GPU0 completed remote reflection probe id=", generation.Source.Id,
@@ -392,15 +423,14 @@ void SceneReflections::AppendRemote(Graph& primary, std::vector<ID3D12Resource*>
             if (generation.Imported && !generation.FirstMaterialFrame && _submissions->Complete(generation.Imported))
             {
                 generation.Imported = {};
-                if (generation.Publish) generation.Filtered.Reset();
+                if (!generation.PendingFaces) generation.Filtered.Reset();
             }
             const bool staticChanged = source.Implementation == 2 &&
                 generation.StaticGeometryRevision != _resources.ReflectionStaticGeometryRevision;
             if ((!SameReflectionCapture(generation.Source, source) || staticChanged) && !generation.Imported)
             {
                 generation.Filtered.Reset();
-                generation.Publish = false;
-                generation.Faces = 0;
+                generation.FilteredFaces = generation.PendingFaces = 0;
                 if (!generation.Transfer || generation.Source.Resolution != source.Resolution)
                     generation.Transfer = std::make_unique<ProbeTransfer>(*_submissions, id, source.Resolution);
                 generation.Source = source;
@@ -438,7 +468,16 @@ void SceneReflections::AppendRemote(Graph& primary, std::vector<ID3D12Resource*>
                                  sizeof(GDX12MaterialConstants), sizeof(GDX12TransformConstants)};
         for (UINT i = 0; i < 4; ++i)
         {
-            auto* local = mirror(i, true);
+            const auto& buffer = scene.Buffers[i];
+            auto* native = primaryBindings.at(i);
+            auto& previous = remote.SceneVersions.at(slot)[i];
+            std::vector<ProbeInputMirror::BufferRange> ranges;
+            if (previous + 1 == buffer.ContentRevision && buffer.Upload && remote.Mirror.Contains(native))
+                for (const auto& [first, end] : buffer.Ranges)
+                    ranges.push_back({UINT64(first) * strides[i], UINT64(end - first) * strides[i]});
+            const bool refresh = previous != buffer.ContentRevision && ranges.empty();
+            auto* local = remote.Mirror.Mirror(primary, primaryBindings, native, i, refresh, {}, std::move(ranges));
+            previous = buffer.ContentRevision;
             in.Scene[i] = bind(local);
             auto& descriptor = remote.SceneViews[i];
             D3D12_SHADER_RESOURCE_VIEW_DESC view{};
@@ -526,22 +565,17 @@ void SceneReflections::AppendRemote(Graph& primary, std::vector<ID3D12Resource*>
             r.SkyTransmittanceSRV.InitAsSRV(texture, &view, heap, r.SkyTransmittanceSRV.HeapIndex);
             in.Reads.push_back({bind(texture), Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
         }
-        const bool materialsChanged = remote.RefreshMaterialTextures || remote.TextureRevision != _resources.TextureRevision;
-        remote.RefreshMaterialTextures = false;
-        remote.TextureRevision = _resources.TextureRevision;
         std::vector<Access> restoreMaterials;
         for (auto* texture : materialTextures)
         {
             const UINT index = texture->GetSRV()->HeapIndex;
             const Id source = textureInput(*texture);
             auto* native = primaryBindings[source];
-            const bool newMirror = !remote.Mirror.Contains(native);
-            auto* local = mirror(source, materialsChanged);
-            if (materialsChanged || newMirror)
-            {
-                auto view = texture->ShaderViewDescription();
-                r.Device->GetDevice()->CreateShaderResourceView(local, &view, heap->GetCPUHandle(index));
-            }
+            const bool canvas = std::find(scene.ProbeCanvases.begin(), scene.ProbeCanvases.end(), texture) !=
+                scene.ProbeCanvases.end();
+            auto* local = mirror(source, canvas);
+            auto view = texture->ShaderViewDescription();
+            r.Device->GetDevice()->CreateShaderResourceView(local, &view, heap->GetCPUHandle(index));
             if (remote.Mirror.PendingCopy(native) && std::none_of(restoreMaterials.begin(), restoreMaterials.end(),
                                                                   [=](auto access) { return access.Resource == source; }))
                 restoreMaterials.push_back({source, Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
@@ -579,36 +613,49 @@ void SceneReflections::AppendRemote(Graph& primary, std::vector<ID3D12Resource*>
         if (remote.LastWork && !_submissions->Complete(remote.LastWork)) continue;
         auto& generation = remote.Probes.at(index);
         auto& destination = _passes->_probes[index];
-        if (!generation.Filtered || generation.Imported || !generation.Captured ||
+        if (!generation.Filtered || !generation.PendingFaces || generation.Imported || !generation.Captured ||
             !_submissions->Complete(generation.Captured) || !SameReflectionCapture(generation.Source, destination.Source))
             continue;
-        const UINT first = generation.Faces;
-        const UINT faces = mode == 2 ? 1 : 6 - first;
         if (remote.PrimaryExport == Invalid)
             remote.PrimaryExport = _work.Add(primary, "dispatch remote reflection probe",
                 {{scene.FrameIds[0], Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ}}, [](auto*) {});
-        generation.Transfer->AppendExport(remote.Plan, remote.Bindings, remote.Work,
-            generation.Filtered.Get(), first, faces, generation.SourceCube);
-        const Id imported = generation.Transfer->AppendImport(primary, primaryBindings, _work, first, faces);
-        primary.Operations[imported].Dependencies.push_back(remote.PrimaryImports.empty()
-            ? remote.PrimaryExport : remote.PrimaryImports.front());
-        remote.PrimaryImports.push_back(imported);
-        generation.ImportOperation = imported;
-        generation.Faces += faces;
-        generation.Publish = generation.Faces == 6;
-        if (generation.Publish)
+        auto* published = _passes->_published.GetResource()->D3DResource.Get();
+        for (UINT first = 0; first < 6; ++first)
         {
-            generation.ImportOperation = generation.Transfer->AppendPublication(primary, primaryBindings, _work,
-                _passes->_published.GetResource()->D3DResource.Get(), index);
+            if (!(generation.PendingFaces & (1u << first))) continue;
+            UINT faces = 1;
+            if (mode != 2)
+                while (first + faces < 6 && (generation.PendingFaces & (1u << (first + faces)))) ++faces;
+            generation.Transfer->AppendExport(remote.Plan, remote.Bindings, remote.Work,
+                generation.Filtered.Get(), first, faces, generation.SourceCube);
+            const Id imported = generation.Transfer->AppendImport(primary, primaryBindings, _work, published, first, faces, index);
+            primary.Operations[imported].Dependencies.push_back(remote.PrimaryImports.empty()
+                ? remote.PrimaryExport : remote.PrimaryImports.front());
+            remote.PrimaryImports.push_back(imported);
+            generation.ImportOperation = imported;
+            generation.PendingFaces &= ~(((1u << faces) - 1) << first);
+            if (mode == 2) break;
+            first += faces - 1;
+        }
+        const bool finished = generation.PendingFaces == 0;
+        const bool compatible = destination.Ready && SameReflectionCapture(destination.Published, generation.Source);
+        if (!compatible) _publications[index] = {};
+        if (compatible || (finished && generation.FilteredFaces == AllProbeFaces))
+        {
             publications.push_back(generation.ImportOperation);
             destination.Published = generation.Source;
             destination.Ready = true;
-            _publishing.push_back(index);
+            _publishing.push_back({index, generation.FilteredFaces});
+        }
+        else
+        {
+            // The first six faces fill the array in place, but metadata must hide the partial cube.
+            destination.Ready = false;
         }
         remote.WorkPlanned = true;
         if (mode != 0)
         {
-            _transferProbe = generation.Publish ? (index + 1) % count : index;
+            _transferProbe = finished ? (index + 1) % count : index;
             break;
         }
     }
@@ -644,15 +691,14 @@ void SceneReflections::AddExchanges(const Schedule& primary, std::vector<PacketW
             if (inputImport != Invalid) waits.push_back({inputImport, source});
             remote.GPU.Execute(schedule, remote.Bindings, record, nullptr, nullptr, nullptr, waits);
             remote.LastWork = remote.GPU.Completions().back();
-            for (const UINT slot : remote.Filtered)
+            for (const auto& filtered : remote.Filtered)
             {
-                auto& generation = remote.Probes.at(remote.Indices[slot]);
-                generation.Source = remote.Pass._probes[slot].Published;
+                auto& generation = remote.Probes.at(remote.Indices[filtered.Probe]);
+                generation.Source = remote.Pass._probes[filtered.Probe].Published;
                 generation.Filtered = remote.Pass._published.GetResource()->D3DResource;
-                generation.SourceCube = slot;
+                generation.SourceCube = filtered.Probe;
                 generation.Captured = remote.LastWork;
-                generation.Faces = 0;
-                generation.Publish = false;
+                generation.FilteredFaces = generation.PendingFaces = filtered.Mask;
                 ++generation.Number;
             }
             return remote.LastWork;
@@ -667,7 +713,8 @@ void SceneReflections::RemoteSubmitted(const std::vector<CompletionToken>& compl
             if (generation.ImportOperation != Invalid)
             {
                 generation.Imported = completions.at(generation.ImportOperation);
-                if (generation.Imported && generation.Publish && !generation.Reported)
+                if (generation.Imported && !generation.PendingFaces &&
+                    generation.FilteredFaces == AllProbeFaces && !generation.Reported)
                     generation.FirstMaterialFrame = completions.back();
                 generation.ImportOperation = Invalid;
             }
@@ -676,7 +723,7 @@ void SceneReflections::RemoteSubmitted(const std::vector<CompletionToken>& compl
 void SceneReflections::AppendCapture(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work,
                                      GDX12ReflectionProbePass& p, GDX12DeviceResources& resources,
                                      const CaptureInputs& in, std::vector<Id>& publicationOperations,
-                                     std::vector<UINT>& publishing)
+                                     std::vector<FilteredFaces>& publishing)
 {
     const auto resource = [&](GDX12Resource* value) {
         return NativeWork::ResourceFor(graph, bindings, value->D3DResource.Get(), "probe resource");
@@ -690,6 +737,8 @@ void SceneReflections::AppendCapture(Graph& graph, std::vector<ID3D12Resource*>&
     const UINT captureMips = GDX12RenderHelpers::MipCount(p._captureTextureResolution);
     auto* heap = resources.SRV_UAV_Heap->GetHeap().Get();
     const UINT count = in.Draws;
+    std::array<UINT, MaxReflectionProbes> capturedNow{};
+    std::array<bool, MaxReflectionProbes> needsFullFilter{};
     if (p._capturePlanned)
     {
         if (!frame.Commands || frame.Commands->GetElementCount() < (std::max)(count, 1u))
@@ -894,6 +943,10 @@ void SceneReflections::AppendCapture(Graph& graph, std::vector<ID3D12Resource*>&
         }
         else
         {
+            if (!capturedNow[view.Probe])
+                needsFullFilter[view.Probe] = state.RawFaces != AllProbeFaces || !state.Ready;
+            capturedNow[view.Probe] |= 1u << face;
+            state.RawFaces |= 1u << face;
             state.CapturedFaces |= 1u << face;
             ++p._statistics.CapturedFaces;
         }
@@ -901,8 +954,12 @@ void SceneReflections::AppendCapture(Graph& graph, std::vector<ID3D12Resource*>&
     for (UINT probe = 0; probe < p._probes.size(); ++probe)
     {
         auto& state = p._probes[probe];
-        if (state.CapturedFaces != 63)
+        if (!capturedNow[probe] || state.RawFaces != AllProbeFaces)
             continue;
+        const UINT filtered = needsFullFilter[probe] ? AllProbeFaces : capturedNow[probe];
+        UINT faceCount = 0;
+        for (UINT face = 0; face < 6; ++face)
+            if (filtered & (1u << face)) ++faceCount;
         p.SelectProbe(probe);
         const UINT base = captureMips - p._mips, mips = p._mips;
         auto* root = p._filterRoot.get();
@@ -925,11 +982,12 @@ void SceneReflections::AppendCapture(Graph& graph, std::vector<ID3D12Resource*>&
                              UINT Size;
                              float Roughness;
                              UINT Samples;
-                         } c{size, roughness, samples};
-                         cmd->SetComputeRoot32BitConstants(0, 3, &c, 0);
+                             UINT Faces;
+                         } c{size, roughness, samples, filtered};
+                         cmd->SetComputeRoot32BitConstants(0, 4, &c, 0);
                          cmd->SetComputeRootDescriptorTable(root->GetTRootParamIndex(0), input);
                          cmd->SetComputeRootDescriptorTable(root->GetURootParamIndex(0), output);
-                         cmd->Dispatch((size + 7) / 8, (size + 7) / 8, 6);
+                         cmd->Dispatch((size + 7) / 8, (size + 7) / 8, faceCount);
                      });
         }
         auto* source = capture.Filtered.GetResource()->D3DResource.Get();
@@ -942,26 +1000,33 @@ void SceneReflections::AppendCapture(Graph& graph, std::vector<ID3D12Resource*>&
                       texture(&p._published, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST)},
                      [=](auto* cmd) {
                          for (UINT face = 0; face < 6; ++face)
+                         {
+                             if (!(filtered & (1u << face))) continue;
                              for (UINT mip = 0; mip < mips; ++mip)
                              {
                                  const CD3DX12_TEXTURE_COPY_LOCATION src(source, face * captureMips + base + mip),
                                      dst(destination, (probe * 6 + face) * publishedMips + publishedBaseMip + mip);
                                  cmd->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
                              }
+                         }
                      }));
-        state.CapturedFaces = 0;
-        if (state.RebakePending)
-        {
-            state.BakedFaces = 0;
-            state.RebakePending = false;
-        }
         state.Ready = true;
         state.Published = state.Source;
-        state.LastUpdate = p._frameNumber;
         ++p._statistics.PublishedProbes;
-        publishing.push_back(probe);
-        if (!p._settings.Scheduled)
-            p._roundRobinProbe = (probe + 1) % UINT(p._probes.size());
+        publishing.push_back({probe, filtered});
+        // Sweep completion controls scheduling only. Once bootstrapped, each captured face publishes immediately.
+        if (state.CapturedFaces == AllProbeFaces)
+        {
+            state.CapturedFaces = 0;
+            if (state.RebakePending)
+            {
+                state.BakedFaces = 0;
+                state.RebakePending = false;
+            }
+            state.LastUpdate = p._frameNumber;
+            if (!p._settings.Scheduled)
+                p._roundRobinProbe = (probe + 1) % UINT(p._probes.size());
+        }
     }
 }
 } // namespace BistroRender

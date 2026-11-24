@@ -100,8 +100,7 @@ public:
 
     void SetActiveCamera(CameraComponent* camera);
     void SubmitSky(World& world);
-    void SubmitLights(std::vector<GDX12LocalLightConstants> lights, const GDX12MainConstants& settings,
-                      std::vector<GDX12LocalShadowPlacement> placements);
+    void SubmitLights(std::vector<GDX12LocalLightConstants> lights, const GDX12MainConstants& settings);
     void SubmitCameraShadows(const GDX12ShadowConstants& shadows);
     const GDX12MainConstants& GetLightingSettings() const { return _primaryResources.Lighting; }
     

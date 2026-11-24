@@ -50,6 +50,7 @@ class SceneLighting
 	void UpdateLightGridOwner(Executor& primary);
 	Id LightGridDevice() const;
 	void AppendPanelOwners(std::vector<std::pair<std::string, Id>>&) const;
+	void AppendBenchmarkShadowOwners(std::vector<std::pair<std::string, Id>>&) const;
 	Id SunShadowDevice() const { return _sunOwner; }
 	void AppendPublishedProbes(std::vector<std::pair<std::string, Id>>& owners) const
 	{
@@ -142,6 +143,7 @@ class SceneLighting
 	GDX12AmbientOcclusionPass::Pipelines _aoPipelines;
 	std::vector<Frame> _frames;
 	std::vector<Id> _localPageOwners, _effectiveLocalPageOwners;
+	std::vector<ShadowCrossSync> _localPageSync;
 	std::vector<UINT> _localStaticSlices;
 	std::map<Id, std::shared_ptr<ShadowVertexBaseline>> _shadowVertexBaselines;
 	std::map<UINT, std::array<std::shared_ptr<ShadowPublication>, 6>> _latestLocalShadows;

@@ -26,7 +26,6 @@
 #include <stdexcept>
 #include <algorithm>
 #include <cmath>
-#include <unordered_map>
 #include <WindowsX.h>
 #include <shellapi.h>
 #include "Engine.UI/UI_test.h"
@@ -49,28 +48,20 @@ bool SkipAutomaticBenchmark()
 }
 #endif
 
-const auto LocalShadowSync = []
+bool IsLegacyLocalShadowPlacement(const std::wstring& key)
 {
-	std::unordered_map<std::string, std::unique_ptr<AutoConsoleVariable<int>>> settings;
-	for (const auto& fixture : BistroLightPlacements)
+	constexpr std::wstring_view prefix = L"Render.Shadows.Local.";
+	if (_wcsnicmp(key.c_str(), prefix.data(), prefix.size()) != 0) return false;
+	const auto suffix = key.find_last_of(L'.');
+	if (suffix <= prefix.size() ||
+	    (_wcsicmp(key.c_str() + suffix, L".Adapter") != 0 && _wcsicmp(key.c_str() + suffix, L".CrossSync") != 0))
+		return false;
+	const auto fixtureName = key.substr(prefix.size(), suffix - prefix.size());
+	return std::any_of(std::begin(BistroLightPlacements), std::end(BistroLightPlacements), [&](const auto& fixture)
 	{
-		const std::string name = fixture.Name;
-		settings.emplace(name, std::make_unique<AutoConsoleVariable<int>>(
-		    L"Render.Shadows.Local." + std::wstring(name.begin(), name.end()) + L".CrossSync",
-		    1, L"Remote shadow freshness: 1 Exact, 3 Latest",
-		    EConsoleVariableFlags::Default, [](int mode) { return mode == 1 || mode == 3; }));
-	}
-	return settings;
-}();
-
-void UpdateLocalShadowSettings(World& world)
-{
-	world.GetECS().ForEach<NameComponent, LightComponent>([](Entity, const NameComponent& name, LightComponent& light)
-	{
-		if (light.Type == LightType::Directional) return;
-		const auto setting = LocalShadowSync.find(name.value);
-		if (setting != LocalShadowSync.end())
-			light.CrossSync = static_cast<ShadowCrossSync>(setting->second->GetValue());
+		const std::string_view name(fixture.Name);
+		const std::wstring wide(name.begin(), name.end());
+		return _wcsicmp(wide.c_str(), fixtureName.c_str()) == 0;
 	});
 }
 
@@ -160,18 +151,13 @@ std::vector<DeviceDesc> PrepareStartup()
 	}, [](std::wstring& key)
 	{
 		MigrateBistroIniKey(key);
-		if (const auto page = LocalShadowPageAdapterIndex(key))
+		if (const auto page = LocalShadowPageSettingsIndex(key))
 		{
-			RegisterLocalShadowPageAdapter(*page);
+			RegisterLocalShadowPageSettings(*page);
 			return;
 		}
-		constexpr std::wstring_view local = L"Render.Shadows.Local.", adapter = L".Adapter";
-		if (key.size() <= local.size() + adapter.size() || _wcsnicmp(key.c_str(), local.data(), local.size()) != 0 ||
-		    _wcsicmp(key.c_str() + key.size() - adapter.size(), adapter.data()) != 0) return;
-		IConsoleVariable* sync = nullptr;
-		// Legacy per-light ownership has no stable mapping to a physical page. Preserve its sync CVar.
-		if (ConsoleModule{}.TryFindConsoleVariable(key.substr(0, key.size() - adapter.size()) + L".CrossSync", sync))
-			key.clear();
+		// Fixture placement has no stable mapping to a physical page.
+		if (IsLegacyLocalShadowPlacement(key)) key.clear();
 	});
 	if (!overlay.empty())
 		Log::Info("BistroBenchmark", "Loaded startup queue defaults from ", overlay.u8string());
@@ -212,7 +198,6 @@ class BistroApplication final : public App
 
 		auto& world = *scenes->GetWorld();
 		world.SetPaused(false);
-		UpdateLocalShadowSettings(world);
 		InitializeSky(world);
 		_bistroReflections.Update(world, 0);
 		UpdateSky(world);
@@ -277,7 +262,6 @@ class BistroApplication final : public App
 		}
 		_runActive = _benchmark.Active();
 		Engine::UI::SetSettingsEditingEnabled(!_runActive);
-		UpdateLocalShadowSettings(world);
 		_bistroReflections.Update(world, timer.DeltaTime());
 		const float sceneDelta = world.IsPaused() ? 0.f : timer.DeltaTime() * world.GetTimeScale();
 		UpdateSky(world, sceneDelta);

@@ -5,6 +5,7 @@
 #include "../../../../External/External.Libraries/XeGTAO/XeGTAO.h"
 #define FFX_CACAO_ENABLE_D3D12
 #include "../../../../External/External.Libraries/cacao/inc/ffx_cacao_impl.h"
+#include <algorithm>
 #include <cassert>
 #include <cstring>
 namespace BistroRender
@@ -298,8 +299,7 @@ struct SceneAO::Remote
 
     enum XeResource : Id
     {
-        SharedDepth, SharedNormals, LocalDepth, LocalNormals, DepthPyramid, Terms0, Terms1, LocalEdges,
-        SharedTerms, SharedEdges
+        SharedDepth, SharedNormals, LocalDepth, LocalNormals, DepthPyramid, Terms0, LocalEdges, SharedTerms
     };
 
     void InitializeXe()
@@ -332,7 +332,7 @@ struct SceneAO::Remote
         Normals = allocate(normals);
         terms.Flags = edges.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
         Visibility[0] = allocate(terms);
-        Visibility[1] = allocate(terms);
+        if (BlurPasses) Visibility[1] = allocate(terms);
         Edges = allocate(edges);
         Pyramid = allocate(CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R32_FLOAT,
             (Width + 15) / 16 * 16, (Height + 15) / 16 * 16, 1, 5, 1, 0,
@@ -358,7 +358,7 @@ struct SceneAO::Remote
         ID3D12Resource* srvs[] = {Depth.Get(), Normals.Get(), Pyramid.Get(),
                                   Visibility[0].Get(), Visibility[1].Get(), Edges.Get()};
         for (UINT i = 0; i < std::size(srvs); ++i)
-            native->CreateShaderResourceView(srvs[i], nullptr, Heap->GetCPUHandle(i));
+            if (srvs[i]) native->CreateShaderResourceView(srvs[i], nullptr, Heap->GetCPUHandle(i));
         D3D12_UNORDERED_ACCESS_VIEW_DESC mip{};
         mip.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
         mip.Format = DXGI_FORMAT_R32_FLOAT;
@@ -368,7 +368,7 @@ struct SceneAO::Remote
             native->CreateUnorderedAccessView(Pyramid.Get(), nullptr, &mip, Heap->GetCPUHandle(6 + i));
         }
         for (UINT i = 0; i < 2; ++i)
-            native->CreateUnorderedAccessView(Visibility[i].Get(), nullptr, nullptr, Heap->GetCPUHandle(11 + i));
+            if (Visibility[i]) native->CreateUnorderedAccessView(Visibility[i].Get(), nullptr, nullptr, Heap->GetCPUHandle(11 + i));
         native->CreateUnorderedAccessView(Edges.Get(), nullptr, nullptr, Heap->GetCPUHandle(13));
 
         Graph graph;
@@ -377,11 +377,17 @@ struct SceneAO::Remote
         graph.TerminalQueue = Queue::Compute;
         graph.Resources = {{"Xe shared depth", 0, 0, false, true}, {"Xe shared normals", 0, 0, false, true},
             {"Xe depth", 0, 0}, {"Xe normals", 0, 0}, {"Xe depth pyramid", 0, 0, true},
-            {"Xe terms 0", 0, 0, true}, {"Xe terms 1", 0, 0, true}, {"Xe edges", 0, 0, true},
+            {"Xe terms 0", 0, 0, true}, {"Xe edges", 0, 0, true},
             {"Xe shared terms", 0, 0, false, true}};
         Bindings = {DepthTransfer.Resource(1), NormalTransfer.Resource(1), Depth.Get(), Normals.Get(),
-                      Pyramid.Get(), Visibility[0].Get(), Visibility[1].Get(), Edges.Get(),
-                      VisibilityTransfer.Resource(1)};
+                      Pyramid.Get(), Visibility[0].Get(), Edges.Get(), VisibilityTransfer.Resource(1)};
+        const Id terms1 = Id(graph.Resources.size());
+        if (BlurPasses)
+        {
+            graph.Resources.push_back({"Xe terms 1", 0, 0, true});
+            Bindings.push_back(Visibility[1].Get());
+        }
+        const Id outputTerms[] = {Terms0, terms1};
         graph.Operations = {
             {"XeGTAO GPU1 import inputs", {{SharedDepth, Mode::Read, CopyRead}, {SharedNormals, Mode::Read, CopyRead},
                 {LocalDepth, Mode::Write, CopyWrite}, {LocalNormals, Mode::Write, CopyWrite}}},
@@ -391,16 +397,17 @@ struct SceneAO::Remote
                 {LocalEdges, Mode::Write, UnorderedAccess}}}};
         for (int pass = 0; pass < BlurPasses; ++pass)
             graph.Operations.push_back({"XeGTAO GPU1 denoise", {{LocalDepth, Mode::Read, Read},
-                {Id(Terms0 + pass % 2), Mode::Read, Read}, {LocalEdges, Mode::Read, Read},
-                {Id(Terms0 + 1 - pass % 2), Mode::Write, UnorderedAccess}}});
+                {outputTerms[pass % 2], Mode::Read, Read}, {LocalEdges, Mode::Read, Read},
+                {outputTerms[1 - pass % 2], Mode::Write, UnorderedAccess}}});
         graph.Operations.push_back({"XeGTAO GPU1 export terms",
-            {{Id(Terms0 + BlurPasses % 2), Mode::Read, CopyRead}, {SharedTerms, Mode::Write, CopyWrite}}});
+            {{outputTerms[BlurPasses % 2], Mode::Read, CopyRead}, {SharedTerms, Mode::Write, CopyWrite}}});
         if (LocalXePasses)
         {
+            const Id sharedEdges = Id(graph.Resources.size());
             graph.Resources.push_back({"Xe shared edges", 0, 0, false, true});
             Bindings.push_back(EdgeTransfer.Resource(1));
             graph.Operations.back().Accesses.push_back({LocalEdges, Mode::Read, CopyRead});
-            graph.Operations.back().Accesses.push_back({SharedEdges, Mode::Write, CopyWrite});
+            graph.Operations.back().Accesses.push_back({sharedEdges, Mode::Write, CopyWrite});
         }
         for (auto& operation : graph.Operations) operation.Target = Queue::Compute;
         ScheduleGPU1 = Compile(graph);
@@ -555,6 +562,102 @@ bool SceneAO::SupportsRemote(const GDX12AOSettings& settings, bool depthNormals)
           (settings.Implementation == 2 && settings.Resolution == GDX12AOResolution::Full))));
 }
 
+UINT SceneAO::GridResources(const GDX12AOSettings& settings, UINT width, UINT height,
+                            bool remote, bool delayed, bool secondaryBlur)
+{
+    using Grid = GDX12AmbientOcclusionPass;
+    const bool half = settings.Resolution == GDX12AOResolution::Half;
+    const bool packDepth = remote && (delayed || settings.Implementation != 1);
+    const bool reproject = remote && delayed;
+    UINT resources = half ? Grid::HalfVisibility | (packDepth ? 0u : Grid::HalfDepth) : 0u;
+    if (settings.Implementation == 2)
+    {
+        const bool localDenoise = settings.DenoisePasses && (!remote || !secondaryBlur);
+        resources |= Grid::XeTerm;
+        if (!remote) resources |= Grid::XePyramid;
+        if (!remote || localDenoise) resources |= Grid::XeEdge;
+        if (localDenoise) resources |= Grid::XeFilter;
+        if (reproject) resources |= Grid::VisibilityScratch;
+    }
+    else if (settings.Implementation == 3)
+    {
+        const bool pad = PadCacao(width, height);
+        if (pad) resources |= Grid::PaddedInputs | Grid::PaddedVisibility;
+        if (!pad || reproject) resources |= Grid::VisibilityScratch;
+        if (!pad && reproject) resources |= Grid::FilterScratch;
+    }
+    else
+    {
+        resources |= Grid::VisibilityScratch;
+        if (reproject || (settings.DenoisePasses && (!remote || !secondaryBlur))) resources |= Grid::FilterScratch;
+    }
+    return resources;
+}
+
+SceneAO::MemoryEstimate SceneAO::EstimateMemory(const GDX12AOSettings& settings, UINT fullWidth, UINT fullHeight,
+                                               UINT frames, bool remote, bool delayed, bool secondaryBlur)
+{
+    using Grid = GDX12AmbientOcclusionPass;
+    const auto align = [](uint64_t value, uint64_t alignment) { return (value + alignment - 1) / alignment * alignment; };
+    const auto texture = [&](UINT w, UINT h, UINT bytes, UINT mips = 1, UINT layers = 1) {
+        uint64_t size = 0;
+        for (UINT mip = 0; mip < mips; ++mip)
+            size += align(uint64_t((std::max)(w >> mip, 1u)) * bytes, D3D12_TEXTURE_DATA_PITCH_ALIGNMENT) *
+                    (std::max)(h >> mip, 1u);
+        return align(size * layers, D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT);
+    };
+    if (!fullWidth || !fullHeight || !frames) return {};
+    const bool half = settings.Resolution == GDX12AOResolution::Half;
+    const UINT w = half ? (fullWidth + 1) / 2 : fullWidth;
+    const UINT h = half ? (fullHeight + 1) / 2 : fullHeight;
+    if (!settings.IsActive() || (w == 1 && h == 1))
+        return {texture(1, 1, 4) * frames, 0};
+
+    const auto resources = GridResources(settings, w, h, remote, delayed, secondaryBlur);
+    const auto depth = texture(w, h, 4);
+    const auto normals = texture(w, h, 8);
+    const auto terms = texture(w, h, 1);
+    const auto pyramid = [&] { return texture((w + 15) / 16 * 16, (h + 15) / 16 * 16, 4, 5); };
+    const bool cacao = settings.Implementation == 3;
+    const UINT transferWidth = cacao && PadCacao(w, h) ? 16 : w;
+    uint64_t primary = texture(fullWidth, fullHeight, 4) + normals;
+    for (const UINT bit : {Grid::HalfDepth, Grid::HalfVisibility, Grid::VisibilityScratch, Grid::FilterScratch})
+        if (resources & bit) primary += depth;
+    if (resources & Grid::XePyramid) primary += pyramid();
+    for (const UINT bit : {Grid::XeTerm, Grid::XeFilter, Grid::XeEdge})
+        if (resources & bit) primary += terms;
+    if (resources & Grid::PaddedInputs) primary += texture(16, h, 4) + texture(16, h, 8);
+    if (resources & Grid::PaddedVisibility) primary += texture(16, h, 4);
+
+    uint64_t cacaoScreen = 0;
+    if (cacao)
+    {
+        FFX_CACAO_BufferSizeInfo b{};
+        FFX_CACAO_UpdateBufferSizeInfo(transferWidth, h, 0, &b);
+        cacaoScreen = texture(b.deinterleavedDepthBufferWidth, b.deinterleavedDepthBufferHeight, 2, 4, 4) +
+            texture(b.ssaoBufferWidth, b.ssaoBufferHeight, 4, 1, 4) +
+            2 * texture(b.ssaoBufferWidth, b.ssaoBufferHeight, 2, 1, 4) +
+            2 * texture(b.importanceMapWidth, b.importanceMapHeight, 1) +
+            texture(b.downsampledSsaoBufferWidth, b.downsampledSsaoBufferHeight, 1) + texture(1, 1, 4);
+    }
+    if (!remote) return {(primary + cacaoScreen) * frames, 0};
+
+    const bool xe = settings.Implementation == 2;
+    const bool sendsNormals = settings.Implementation != 1;
+    const bool extraBlur = secondaryBlur && settings.DenoisePasses && !cacao;
+    const auto remoteDepth = texture(transferWidth, h, 4);
+    const auto remoteNormals = sendsNormals ? texture(transferWidth, h, 8) : 0;
+    const auto remoteOutput = texture(transferWidth, h, xe ? 1 : 4);
+    const auto shared = remoteDepth + remoteNormals + remoteOutput +
+        (xe && settings.DenoisePasses && !secondaryBlur ? terms : 0);
+    const auto inputDepth = delayed || sendsNormals ? depth : 0;
+    const auto secondary = (remoteDepth + remoteNormals + remoteOutput +
+        (extraBlur ? remoteOutput : 0) + (xe ? pyramid() + terms : 0) + cacaoScreen);
+    // A previous publication can remain referenced while a fresh generation starts.
+    const uint64_t remoteFrames = frames + unsigned(delayed);
+    return {primary * frames + (shared + inputDepth) * remoteFrames, (secondary + shared) * remoteFrames};
+}
+
 void SceneAO::Freeze(GDX12Texture* depth, GDX12Texture* normals, GDX12Texture* motion,
                      GDX12Texture* earlyNormals, UINT& temporalIndex,
                      const std::shared_ptr<QueueSubmission>& submit, Id remoteDevice, History& history)
@@ -566,11 +669,9 @@ void SceneAO::Freeze(GDX12Texture* depth, GDX12Texture* normals, GDX12Texture* m
     _depthExport = _visibilityImport = _reproject = _importPacket = _reprojectPacket = Invalid;
     auto& p = _pass;
     p.SetInputs({depth, normals});
-    if (p._output.GetWidth() != depth->GetWidth() || p._output.GetHeight() != depth->GetHeight())
-    {
-        p.Resize();
-        _outputIsNeutral = false;
-    }
+    const UINT fullWidth = depth->GetWidth(), fullHeight = depth->GetHeight();
+    if (!fullWidth || !fullHeight || normals->GetWidth() != fullWidth || normals->GetHeight() != fullHeight)
+        throw std::invalid_argument("AO requires equally sized, nonempty depth and normal textures");
     _settings = GetAmbientOcclusionSettings();
     const auto& s = _settings;
     if (!p._hasPrevious || std::memcmp(&p._previous, &s, sizeof(s)))
@@ -578,12 +679,13 @@ void SceneAO::Freeze(GDX12Texture* depth, GDX12Texture* normals, GDX12Texture* m
     p._previous = s;
     p._hasPrevious = true;
     _half = s.Resolution == GDX12AOResolution::Half;
-    _width = _half ? (depth->GetWidth() + 1) / 2 : depth->GetWidth();
-    _height = _half ? (depth->GetHeight() + 1) / 2 : depth->GetHeight();
-    auto& grid = p._grids[_half];
+    _width = _half ? (fullWidth + 1) / 2 : fullWidth;
+    _height = _half ? (fullHeight + 1) / 2 : fullHeight;
+    const bool neutral = UsesNeutralOutput();
+    if (p.SetOutputSize(neutral ? 1 : fullWidth, neutral ? 1 : fullHeight))
+        _outputIsNeutral = false;
     const Id device = (remoteDevice && SupportsRemote(s, earlyNormals != nullptr) && (_width > 1 || _height > 1))
         ? remoteDevice : 0;
-    const UINT fullWidth = depth->GetWidth(), fullHeight = depth->GetHeight();
     const bool delayed = CrossSync.GetValue() == 0;
     const bool secondaryBlur = s.Implementation != 3 && BlurOnSecondary.GetValue();
     if (!device || history.CameraRevision != _common.HistoryRevision ||
@@ -645,11 +747,16 @@ void SceneAO::Freeze(GDX12Texture* depth, GDX12Texture* normals, GDX12Texture* m
         history.Last.reset();
     if (_offload != bool(_remote)) _common.ResetUpscalerHistory = true;
     _offload = bool(_remote);
-    if (UsesNeutralOutput())
+    if (neutral)
+    {
+        p.ResetGrid();
         return;
+    }
     _outputIsNeutral = false;
-    if (!grid.Normals.IsInitialized())
-        p.CreateGrid(grid, _width, _height, _half);
+    // Begin retired this primary slot; publications read by other slots are owned by Remote.
+    p.PrepareGrid(_width, _height, GridResources(s, _width, _height, _offload, delayed, secondaryBlur));
+    auto& grid = *p._grid;
+    if (grid.Cacao && (s.Implementation != 3 || _offload)) p.DestroyCACAO(grid);
     const UINT slot = _resources.CurrFrameConstantsIndex;
     GDX12AmbientOcclusionPass::ShaderConstants constants = {s.RadiusCm,
                                                             s.Intensity,
@@ -717,15 +824,21 @@ void SceneAO::Freeze(GDX12Texture* depth, GDX12Texture* normals, GDX12Texture* m
         if (!grid.Cacao)
         {
             grid.CacaoMemory.resize(FFX_CACAO_D3D12GetContextSize());
-            grid.Cacao = reinterpret_cast<FFX_CACAO_D3D12Context*>(grid.CacaoMemory.data());
-            CheckCACAO(FFX_CACAO_D3D12InitContext(grid.Cacao, _resources.Device->GetDevice().Get(),
-                                                  UINT(_resources.FrameConstants.size())));
+            auto* context = reinterpret_cast<FFX_CACAO_D3D12Context*>(grid.CacaoMemory.data());
+            CheckCACAO(FFX_CACAO_D3D12InitContext(context, _resources.Device->GetDevice().Get(), 1));
+            grid.Cacao = context;
         }
-        if (!grid.CacaoScreenReady)
+        const auto& screenDepth = cacaoDepth.GetResource()->D3DResource;
+        if (grid.CacaoScreenDepth.Get() != screenDepth.Get())
         {
-            InitCacaoScreen(grid.Cacao, cacaoDepth.GetResource()->D3DResource.Get(),
+            if (grid.CacaoScreenDepth)
+            {
+                CheckCACAO(FFX_CACAO_D3D12DestroyScreenSizeDependentResources(grid.Cacao));
+                grid.CacaoScreenDepth.Reset();
+            }
+            InitCacaoScreen(grid.Cacao, screenDepth.Get(),
                             cacaoNormals.GetResource()->D3DResource.Get(), output.GetResource()->D3DResource.Get());
-            grid.CacaoScreenReady = true;
+            grid.CacaoScreenDepth = screenDepth;
         }
         const auto settings = CacaoSettings(s);
         CheckCACAO(FFX_CACAO_D3D12UpdateSettings(grid.Cacao, &settings));
@@ -752,7 +865,7 @@ struct SceneAO::Plan
                   std::vector<Access> accesses, std::array<GDX12Texture*, 9> srvs,
                   std::array<GDX12Descriptor*, 10> uavs, UINT axis = 0, UINT final = 0,
                   float scale = 1.f, XMFLOAT4 history = {},
-                  GDX12UploadBuffer<XeGTAO::GTAOConstants>* sourceProjection = nullptr, bool decodedVisibility = false)
+                  GDX12UploadBuffer<XeGTAO::GTAOConstants>* sourceProjection = nullptr)
     {
         auto& p = ao._pass;
         const UINT slot = ao._resources.CurrFrameConstantsIndex;
@@ -782,9 +895,9 @@ struct SceneAO::Plan
             {
                 UINT Axis, Final;
                 float Scale;
-                UINT DecodedVisibility;
+                UINT Padding;
                 XMFLOAT4 History;
-            } c{axis, final, scale, decodedVisibility, history};
+            } c{axis, final, scale, 0, history};
             cmd->SetComputeRoot32BitConstants(0, sizeof(c) / sizeof(UINT), &c, 0);
             cmd->SetComputeRootConstantBufferView(root->GetBRootParamIndex(1), camera);
             cmd->SetComputeRootConstantBufferView(root->GetBRootParamIndex(2), constants);
@@ -849,7 +962,7 @@ void SceneAO::AppendXeImport(Plan& plan, GDX12Texture& terms, GDX12Texture& edge
         accesses.push_back(plan.access(&edges, Mode::Write, CopyWrite));
     }
     auto* termsTarget = terms.GetResource()->D3DResource.Get();
-    auto* edgeTarget = edges.GetResource()->D3DResource.Get();
+    auto* edgeTarget = remote->LocalXePasses ? edges.GetResource()->D3DResource.Get() : nullptr;
     _visibilityImport = _work.Add(plan.graph, "XeGTAO GPU0 import terms", std::move(accesses),
         [=](auto* cmd) {
             remote->VisibilityTransfer.Import(cmd, 0, termsTarget);
@@ -895,8 +1008,8 @@ void SceneAO::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings)
     auto* fullDepth = p._inputs[0]->GetTexture();
     auto* fullNormals = p._inputs[1]->GetTexture();
     const auto inputs = !_offload ? AppendPreparation(plan, fullDepth, fullNormals)
-        : PreparedInputs{_remote->InputDepth.IsInitialized() ? &_remote->InputDepth : &p._grids[_half].Depth,
-                         &p._grids[_half].Normals};
+        : PreparedInputs{_remote->InputDepth.IsInitialized() ? &_remote->InputDepth : &p._grid->Depth,
+                         &p._grid->Normals};
     auto* resolved = AppendVisibility(plan, inputs);
     if (_half)
     {
@@ -911,7 +1024,7 @@ void SceneAO::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings)
 SceneAO::PreparedInputs SceneAO::AppendPreparation(Plan& plan, GDX12Texture* fullDepth, GDX12Texture* fullNormals)
 {
     auto& p = _pass;
-    auto& grid = p._grids[_half];
+    auto& grid = *p._grid;
     const bool packDepth = _offload && _remote->InputDepth.IsInitialized();
     auto* depth = packDepth ? &_remote->InputDepth : _half ? &grid.Depth : fullDepth;
     std::vector<Access> prepare{plan.access(fullDepth, Mode::Read, Read), plan.access(fullNormals, Mode::Read, Read),
@@ -928,7 +1041,7 @@ SceneAO::PreparedInputs SceneAO::AppendPreparation(Plan& plan, GDX12Texture* ful
 
 SceneAO::PreparedInputs SceneAO::AppendCacaoPadding(Plan& plan, const PreparedInputs& inputs)
 {
-    auto& grid = _pass._grids[_half];
+    auto& grid = *_pass._grid;
     auto* depth = &grid.CacaoDepth;
     auto* normals = &grid.CacaoNormals;
     plan.dispatch("CACAO pad small grid", _pass.PadCACAO, depth->GetWidth(), depth->GetHeight(),
@@ -958,7 +1071,7 @@ void SceneAO::AppendReprojection(Plan& plan, const PreparedInputs& inputs, GDX12
 GDX12Texture* SceneAO::AppendVisibility(Plan& plan, const PreparedInputs& inputs)
 {
     auto& p = _pass;
-    auto& grid = p._grids[_half];
+    auto& grid = *p._grid;
     auto* depth = inputs.Depth;
     auto* normals = inputs.Normals;
     assert(depth->GetWidth() == _width && depth->GetHeight() == _height &&
@@ -1030,7 +1143,6 @@ GDX12Texture* SceneAO::AppendVisibility(Plan& plan, const PreparedInputs& inputs
             source = target;
         }
         terms = &grid.XeTerms[source];
-        visibility = _offload ? depth : &grid.XeDepth;
         scale = _settings.DenoisePasses ? 1.f : XE_GTAO_OCCLUSION_TERM_SCALE;
         if (previous)
         {
@@ -1061,16 +1173,12 @@ GDX12Texture* SceneAO::AppendVisibility(Plan& plan, const PreparedInputs& inputs
         }
         visibility = &grid.Scratch[source];
     }
-    const bool decodedVisibility = _settings.Implementation == 2 && !terms;
-    if (!terms) terms = &grid.XeTerms[0];
     auto* resolved = _half ? &grid.Visibility : &p._output;
-    std::vector<Access> resolve{plan.access(depth, Mode::Read, Read), plan.access(normals, Mode::Read, Read),
+    std::vector<Access> resolve{plan.access(depth, Mode::Read, Read),
                                 plan.access(resolved, Mode::Write, UnorderedAccess)};
-    if (visibility != depth)
-        resolve.push_back(plan.access(visibility, Mode::Read, Read));
-    resolve.push_back(plan.access(terms, Mode::Read, Read));
-    plan.dispatch("AO resolve", p.Resolve, _width, _height, resolve, {depth, normals, visibility, terms},
-             {resolved->GetUAV()}, 0, 0, scale, {}, nullptr, decodedVisibility);
+    resolve.push_back(plan.access(terms ? terms : visibility, Mode::Read, Read));
+    plan.dispatch("AO resolve", terms ? p.ResolveXe : p.Resolve, _width, _height, std::move(resolve),
+             {depth, nullptr, visibility, terms}, {resolved->GetUAV()}, 0, 0, scale);
     return resolved;
 }
 

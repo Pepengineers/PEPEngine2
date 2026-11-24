@@ -10,7 +10,7 @@ cbuffer DispatchParameters : register(b0)
     uint BlurAxis;
     uint FinalDenoise;
     float XeScale;
-    uint DecodedVisibility;
+    uint DispatchPadding;
     float2 HistoryJitterDelta;
     float2 HistoryDepthUnpack;
 };
@@ -327,23 +327,30 @@ void ReprojectXeCS(uint3 id : SV_DispatchThreadID)
     OutputAO[id.xy] = HistoryPixel(id.xy, previous) ? saturate(XeInput[previous] * (XeScale / 255.0f)) : 1;
 }
 
+float ResolveAO(uint2 p, float visibility)
+{
+    float raw = Depth[p];
+    if (raw <= 0) return 1;
+    float depth = LinearDepth(raw);
+    if (depth >= FadeEndCm) return 1;
+    if (Implementation != 3)
+    {
+        float fade = saturate((FadeEndCm - depth) / (FadeEndCm - FadeStartCm));
+        visibility = 1 - (1 - saturate(visibility)) * Intensity * fade;
+    }
+    return saturate(visibility);
+}
+
 [numthreads(8, 8, 1)]
 void ResolveCS(uint3 id : SV_DispatchThreadID)
 {
-    uint2 p = id.xy;
-    if (!InBounds(p)) return;
-    if (Depth[p] <= 0 || LinearDepth(Depth[p]) >= FadeEndCm)
-    {
-        OutputAO[p] = 1;
-        return;
-    }
-    float visibility = Implementation == 2 && !DecodedVisibility ? XeInput[p] * (XeScale / 255.0f) : InputAO[p];
-    if (Implementation != 3)
-    {
-        float fade = saturate((FadeEndCm - LinearDepth(Depth[p])) / (FadeEndCm - FadeStartCm));
-        visibility = 1 - (1 - saturate(visibility)) * Intensity * fade;
-    }
-    OutputAO[p] = saturate(visibility);
+    if (InBounds(id.xy)) OutputAO[id.xy] = ResolveAO(id.xy, InputAO[id.xy]);
+}
+
+[numthreads(8, 8, 1)]
+void ResolveXeCS(uint3 id : SV_DispatchThreadID)
+{
+    if (InBounds(id.xy)) OutputAO[id.xy] = ResolveAO(id.xy, XeInput[id.xy] * (XeScale / 255.0f));
 }
 
 [numthreads(8, 8, 1)]

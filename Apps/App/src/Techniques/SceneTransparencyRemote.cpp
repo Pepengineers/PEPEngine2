@@ -49,6 +49,27 @@ auto WboitPlanes(const XMFLOAT4X4& viewProjection)
 	                              m.r[3] - m.r[1], m.r[2], m.r[3] - m.r[2]};
 }
 
+std::pair<bool, bool> InspectTransparentMeshes(const GDX12DeviceResources& resources, UINT slot, UINT camera)
+{
+	const auto& constants = *resources.FrameConstants.at(slot);
+	const auto planes = WboitPlanes(constants.CameraCB->GetCPUData()[camera].ViewProj);
+	const auto* cmds = resources.IndirectCommandsCache->GetCPUData();
+	const auto* instances = constants.InstanceCache->GetCPUData();
+	const auto* materials = constants.MaterialCache->GetCPUData();
+	bool visible = false, skinned = false;
+	for (UINT i = 0; i < resources.IndirectCommandsCache->GetElementCount(); ++i)
+	{
+		if (!cmds[i].InstanceCount || !cmds[i].IndexCountPerInstance) continue;
+		const auto& instance = instances[cmds[i].InstanceID];
+		const auto& material = materials[instance.MaterialIndex];
+		if (material.RenderLayer != UINT(MaterialType::Transparent) || material.ReflectionProbePreview) continue;
+		visible = visible || WboitVisible(planes, instance);
+		skinned |= instance.SkinOutputVertex != UINT_MAX;
+		if (visible && skinned) break;
+	}
+	return {visible, skinned};
+}
+
 AutoConsoleVariable<int> WboitAdapter(L"Render.WBOIT.Adapter", -1, L"DXGI adapter for exact Bistro WBOIT accumulation; -1 uses GPU0.",
                                       EConsoleVariableFlags::Default, [](int index) { return index >= -1; });
 Id PacketFor(const Schedule& plan, Id operation)
@@ -144,35 +165,32 @@ struct SceneTransparency::Remote
 Id SceneTransparency::RequestedOwner(const std::shared_ptr<QueueSubmission>& submit, UINT slot)
 {
 	Id owner = submit->SelectAdapter(WboitAdapter.GetValue());
+	_remoteWork = _remoteDepth = _remoteDraw = false;
 	constexpr unsigned SkinnedTransparent = 1, InteractionFieldEmitter = 2;
 	unsigned fallback = 0;
 	if (owner)
 	{
-		const auto& constants = *_resources.FrameConstants.at(slot);
-		const auto* cmds = _resources.IndirectCommandsCache->GetCPUData();
-		const auto* instances = constants.InstanceCache->GetCPUData();
-		const auto* materials = constants.MaterialCache->GetCPUData();
-		for (UINT i = 0; i < _resources.IndirectCommandsCache->GetElementCount(); ++i)
+		const auto [visibleMesh, skinned] = InspectTransparentMeshes(_resources, slot, _common.ActiveCameraCBufferIndex);
+		if (skinned) fallback |= SkinnedTransparent;
+		bool particlePool = false, collision = false;
+		for (const auto& emitter : _resources.ParticleEmitters)
 		{
-			if (!cmds[i].InstanceCount || !cmds[i].IndexCountPerInstance) continue;
-			const auto& instance = instances[cmds[i].InstanceID];
-			const auto& material = materials[instance.MaterialIndex];
-			if (material.RenderLayer != UINT(MaterialType::Transparent) || material.ReflectionProbePreview) continue;
-			if (instance.SkinOutputVertex != UINT_MAX)
-			{
-				fallback |= SkinnedTransparent;
-				break;
-			}
+			if (emitter.Blend == ParticleBlend::Opaque) continue;
+			particlePool = true;
+			collision |= emitter.DepthCollision;
+			if (emitter.InteractionEnabled) fallback |= InteractionFieldEmitter;
 		}
-		if (std::any_of(_resources.ParticleEmitters.begin(), _resources.ParticleEmitters.end(), [](const auto& emitter) {
-			    return emitter.Blend != ParticleBlend::Opaque && emitter.InteractionEnabled;
-		    }))
-			fallback |= InteractionFieldEmitter;
 		if (fallback && fallback != _fallbackReasons)
 			Log::Warning("RenderGraph", "WBOIT uses local rendering on ", submit->AdapterLabel(0),
 			    " because the remote path cannot preserve the requested inputs",
 			    " skinnedTransparent=", bool(fallback & SkinnedTransparent), " interactionFieldEmitter=", bool(fallback & InteractionFieldEmitter));
-		if (fallback) owner = 0;
+		// Even a hidden particle pool can still simulate on the transparency owner.
+		if (fallback || (!visibleMesh && !particlePool)) owner = 0;
+		const auto settings = GetParticleSettings();
+		const bool simulate = particlePool && settings.Enabled;
+		_remoteDraw = visibleMesh || (simulate && settings.DrawEnabled);
+		_remoteDepth = _remoteDraw || (simulate && collision);
+		_remoteWork = _remoteDraw || simulate;
 	}
 	_fallbackReasons = fallback;
 	return owner;
@@ -203,16 +221,29 @@ Id SceneTransparency::Begin(const std::shared_ptr<QueueSubmission>& submit, UINT
 	if (!owner) entry.reset();
 	_shared = std::move(shared);
 	_remote = entry.get();
+	if (_remote && _remoteWork) _remote->GPU.Begin(0);
 	return owner;
+}
+
+Id SceneTransparency::BenchmarkExecutionDevice() const
+{
+	if (_remote) return _remoteWork ? _remote->Owner : Invalid;
+	const auto settings = GetParticleSettings();
+	if (settings.Enabled && settings.DrawEnabled &&
+	    std::any_of(_resources.ParticleEmitters.begin(), _resources.ParticleEmitters.end(),
+	        [](const auto& emitter) { return emitter.Blend != ParticleBlend::Opaque; }))
+		return 0;
+	return InspectTransparentMeshes(_resources, _resources.CurrFrameConstantsIndex,
+	    _common.ActiveCameraCBufferIndex).first ? 0 : Invalid;
 }
 void SceneTransparency::PrepareOpaqueDepth(Graph& primary, std::vector<ID3D12Resource*>& bindings,
     UINT slot, GDX12Texture* depth)
 {
 	auto* source = depth->GetResource()->D3DResource.Get();
+	_frames.at(slot).RasterDepth = depth;
 	if (!_remote)
 	{
 		auto& frame = _frames.at(slot);
-		frame.RasterDepth = depth;
 		if (!_water.DrawsDiagnosticParticles()) return;
 
 		// The later water draw writes the shared depth. Keep the version used by remote WBOIT.
@@ -244,6 +275,9 @@ void SceneTransparency::PrepareOpaqueDepth(Graph& primary, std::vector<ID3D12Res
 	}
 	auto& r = *_remote;
 	r.Early.Commands.clear();
+	r.DepthResource = nullptr;
+	r.DepthExport = Invalid;
+	if (!_remoteDepth) return;
 	r.DepthMirror.Begin();
 	r.DepthMirror.RetireUnused({source}, [](auto*){});
 	const Id sourceId = NativeWork::ResourceFor(primary, bindings, source, "opaque prepass depth");
@@ -258,30 +292,38 @@ bool SceneTransparency::RecordPrepass(Id op, ID3D12GraphicsCommandList* cmd) con
 }
 void SceneTransparency::AddExchange(const Schedule& primary, std::vector<Executor::PacketExchange>& exchanges)
 {
-	if (!_remote) return;
+	if (!_remote || !_remoteWork) return;
 	auto& remote = *_remote;
 	auto schedule = Compile(remote.Plan);
-	const Id input = PacketFor(schedule, 0);
-	const Id resolve = PacketFor(schedule, remote.OwnerResolve), mesh = PacketFor(schedule, remote.Mesh);
-	remote.Apply = PacketFor(primary, remote.Apply);
-	remote.Import = PacketFor(primary, remote.Import);
-	remote.GPU.Begin(0);
+	const Id input = _remoteDepth ? PacketFor(schedule, 0) : Invalid;
+	const Id resolve = _remoteDraw ? PacketFor(schedule, remote.OwnerResolve) : Invalid;
+	const Id mesh = _remoteDraw ? PacketFor(schedule, remote.Mesh) : Invalid;
+	if (_remoteDraw)
+	{
+		remote.Apply = PacketFor(primary, remote.Apply);
+		remote.Import = PacketFor(primary, remote.Import);
+	}
 	remote.GPU.Reserve(schedule);
-	exchanges.push_back({PacketFor(primary, remote.DepthExport), remote.Import,
-	    [&remote, schedule = std::move(schedule), input, resolve, mesh](CompletionToken inputs)
-	    {
-		    remote.GPU.Execute(schedule, remote.Bindings, [&remote](Id op, UINT, ID3D12GraphicsCommandList* cmd)
-		    {
-			    if (!remote.Work.Record(op, cmd)) throw std::logic_error("Missing WBOIT owner work");
-		    }, nullptr, nullptr, nullptr, {{input, inputs}});
-		    remote.MeshDone = remote.GPU.Completions().at(mesh);
-		    remote.Resolved = remote.GPU.Completions().at(resolve);
-		    return remote.Produced = remote.GPU.Completions().back();
-	    }});
+	auto submit = [&remote, schedule = std::move(schedule), input, resolve, mesh](CompletionToken inputs)
+	{
+		std::vector<PacketWait> waits;
+		if (input != Invalid) waits.push_back({input, inputs});
+		remote.GPU.Execute(schedule, remote.Bindings, [&remote](Id op, UINT, ID3D12GraphicsCommandList* cmd)
+		{
+			if (!remote.Work.Record(op, cmd)) throw std::logic_error("Missing WBOIT owner work");
+		}, nullptr, nullptr, nullptr, waits);
+		if (mesh != Invalid) remote.MeshDone = remote.GPU.Completions().at(mesh);
+		if (resolve != Invalid) remote.Resolved = remote.GPU.Completions().at(resolve);
+		return remote.Produced = remote.GPU.Completions().back();
+	};
+	if (!_remoteDepth)
+		submit({});
+	else
+		exchanges.push_back({PacketFor(primary, remote.DepthExport), remote.Import, std::move(submit)});
 }
 void SceneTransparency::Submitted(const std::vector<CompletionToken>& completions)
 {
-	if (!_remote || completions.empty()) return;
+	if (!_remote || !_remoteWork || completions.empty()) return;
 	if (_remote->Import < completions.size()) _remote->Imported = completions[_remote->Import];
 	if (_remote->Apply < completions.size()) _remote->Applied = completions[_remote->Apply];
 	_remote->Consumer = completions.back();
@@ -334,8 +376,9 @@ void SceneTransparency::AppendRemote(SceneGeometry& geometry, UINT slot, Frame& 
 	work.Commands.clear();
 	r.Frame = _frame;
 	r.Bootstrap = !r.SharedInputs->Scheduled;
-	r.SharedInputs->Scheduled = true;
+	r.SharedInputs->Scheduled |= _remoteDraw;
 	r.Consumer = r.Applied = r.Imported = r.Produced = r.Resolved = r.MeshDone = {};
+	r.Import = r.Apply = Invalid;
 	auto* heap = r.Resources.SRV_UAV_Heap.get();
 	const auto view = [&](GDX12Descriptor& d, ID3D12Resource* src, D3D12_SHADER_RESOURCE_VIEW_DESC desc){
 		d.InitAsSRV(src, &desc, heap, d.HeapIndex == UINT_MAX ? heap->GetAvailableIndex(SceneDescriptorStart) : d.HeapIndex);
@@ -353,9 +396,25 @@ void SceneTransparency::AppendRemote(SceneGeometry& geometry, UINT slot, Frame& 
 		out.Initialize(desc);
 	};
 	auto* ownerDepth = r.DepthResource;
-	if (!ownerDepth || r.DepthExport == Invalid) throw std::logic_error("WBOIT missing opaque prepass snapshot");
-	r.DepthMirror.AppendImport(plan, bindings, work);
-	wrap(r.Depth, depth, ownerDepth);
+	if (_remoteDepth)
+	{
+		if (!ownerDepth || r.DepthExport == Invalid) throw std::logic_error("WBOIT missing opaque prepass snapshot");
+		r.DepthMirror.AppendImport(plan, bindings, work);
+		wrap(r.Depth, depth, ownerDepth);
+	}
+	if (!_remoteDraw)
+	{
+		ID3D12Resource* ownerCamera = nullptr;
+		if (_remoteDepth)
+		{
+			const auto& camera = constants.CameraCB->GetCPUData()[_common.ActiveCameraCBufferIndex];
+			ownerCamera = Upload(*r.Resources.Device, r.FrameInputs[1], &camera, sizeof(camera));
+		}
+		_particles.AppendRemoteWeighted(plan, bindings, work, r.Resources, r.SharedInputs->SimulationResources,
+		    r.SharedInputs->Simulation, nullptr, nullptr, ownerDepth ? &r.Depth : nullptr, ownerCamera ? id(ownerCamera) : Invalid,
+		    ownerCamera ? ownerCamera->GetGPUVirtualAddress() : 0, slot, r.Particles, {});
+		return;
+	}
 	const bool resized = r.Width != hdr->GetWidth() || r.Height != hdr->GetHeight();
 	const bool fresh = !r.Width;
 	r.Width = hdr->GetWidth();

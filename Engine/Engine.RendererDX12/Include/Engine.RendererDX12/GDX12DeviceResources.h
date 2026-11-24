@@ -111,8 +111,8 @@ public:
     GDX12ShadowConstants ShadowSettings;
     GDX12ShadowQuality ShadowQuality;
     std::vector<int> LocalShadowPageAdapters;
+    std::vector<ShadowCrossSync> LocalShadowPageSync;
     std::vector<GDX12LocalLightConstants> LocalLights;
-    std::vector<GDX12LocalShadowPlacement> LocalShadowPlacements;
     // When present, these casters plus StaticMeshShadowCasters form the current shadow snapshot.
     std::optional<std::vector<GDX12LocalShadowCaster>> LocalShadowCasters;
     // Advance the revision whenever mesh caster membership, bounds, or signatures change.

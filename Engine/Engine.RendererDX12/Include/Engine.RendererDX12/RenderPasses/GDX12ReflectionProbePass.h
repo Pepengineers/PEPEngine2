@@ -40,7 +40,7 @@ private:
         uint64_t LastUpdate = 0;
         bool Ready = false;
         bool OwnsCapture = false;
-        UINT CapturedFaces = 0, NextFace = 0;
+        UINT CapturedFaces = 0, RawFaces = 0, NextFace = 0;
         bool RebakePending = false;
         std::unique_ptr<GDX12Texture> Raw;
         std::vector<std::unique_ptr<GDX12Descriptor>> RawRTVs, RawMipSRVs;

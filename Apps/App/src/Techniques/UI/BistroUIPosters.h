@@ -16,6 +16,7 @@ struct CanvasRead
 {
     Access Texture;
     UINT MaterialIndex, TextureIndex;
+    GDX12Texture* Image;
 };
 }
 class BistroUIPosters final

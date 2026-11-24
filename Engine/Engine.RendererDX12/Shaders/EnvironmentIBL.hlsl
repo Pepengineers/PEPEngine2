@@ -4,6 +4,9 @@ cbuffer FilterParameters : register(b0) { uint OutputSize; float Roughness;
 #if defined(LOCAL_PROBE_FILTER) || defined(GLOBAL_SKY_FILTER)
 uint PrefilterSamples;
 #endif
+#ifdef LOCAL_PROBE_FILTER
+uint PrefilterFaces;
+#endif
 #ifdef GLOBAL_SKY_FILTER
 float IBLIntensity;
 #endif
@@ -83,6 +86,11 @@ void IrradianceCS(uint3 id : SV_DispatchThreadID)
 void PrefilterCS(uint3 id : SV_DispatchThreadID)
 {
     if (any(id.xy >= OutputSize)) return;
+#ifdef LOCAL_PROBE_FILTER
+    uint faces = PrefilterFaces;
+    for (uint i = 0; i < id.z; ++i) faces &= faces - 1;
+    id.z = firstbitlow(faces);
+#endif
     float3 n = CubeDirection(id);
     if (Roughness == 0.0f)
     {

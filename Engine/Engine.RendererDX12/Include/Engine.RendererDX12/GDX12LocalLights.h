@@ -23,16 +23,22 @@ inline constexpr GDX12LocalShadowProfile LocalShadowProfiles[] = {
 };
 inline constexpr UINT LocalShadowAtlasCount = 4;
 inline constexpr UINT MaxLocalShadowAtlasCount = D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION;
+enum class ShadowCrossSync : std::uint8_t { Exact = 1, Latest = 3 };
 
 inline std::wstring LocalShadowPageAdapterName(UINT page)
 {
     return L"Render.Shadows.Local.Page" + std::to_wstring(page) + L".Adapter";
 }
 
-// The console registry treats names as case-insensitive.
-inline std::optional<UINT> LocalShadowPageAdapterIndex(std::wstring_view name)
+inline std::wstring LocalShadowPageCrossSyncName(UINT page)
 {
-    constexpr std::wstring_view prefix = L"Render.Shadows.Local.Page", suffix = L".Adapter";
+    return L"Render.Shadows.Local.Page" + std::to_wstring(page) + L".CrossSync";
+}
+
+// The console registry treats names as case-insensitive.
+inline std::optional<UINT> LocalShadowPageIndex(std::wstring_view name, std::wstring_view suffix)
+{
+    constexpr std::wstring_view prefix = L"Render.Shadows.Local.Page";
     if (name.size() <= prefix.size() + suffix.size() ||
         _wcsnicmp(name.data(), prefix.data(), prefix.size()) != 0 ||
         _wcsnicmp(name.data() + name.size() - suffix.size(), suffix.data(), suffix.size()) != 0) return {};
@@ -48,8 +54,24 @@ inline std::optional<UINT> LocalShadowPageAdapterIndex(std::wstring_view name)
     return page;
 }
 
-void RegisterLocalShadowPageAdapter(UINT page);
-void ReadLocalShadowPageAdapters(std::vector<int>& adapters, UINT pages);
+inline std::optional<UINT> LocalShadowPageAdapterIndex(std::wstring_view name)
+{
+    return LocalShadowPageIndex(name, L".Adapter");
+}
+
+inline std::optional<UINT> LocalShadowPageCrossSyncIndex(std::wstring_view name)
+{
+    return LocalShadowPageIndex(name, L".CrossSync");
+}
+
+inline std::optional<UINT> LocalShadowPageSettingsIndex(std::wstring_view name)
+{
+    const auto adapter = LocalShadowPageAdapterIndex(name);
+    return adapter ? adapter : LocalShadowPageCrossSyncIndex(name);
+}
+
+void RegisterLocalShadowPageSettings(UINT page);
+void ReadLocalShadowPageSettings(std::vector<int>& adapters, std::vector<ShadowCrossSync>& sync, UINT pages);
 
 constexpr GDX12LocalShadowProfile GetLocalShadowProfile(GDX12LocalShadowLevel level)
 {
@@ -121,14 +143,6 @@ struct GDX12LocalShadowKey
 
     bool operator==(const GDX12LocalShadowKey& other) const
     { return EntityId == other.EntityId && Generation == other.Generation; }
-};
-
-enum class ShadowCrossSync : std::uint8_t { Exact = 1, Latest = 3 };
-
-struct GDX12LocalShadowPlacement
-{
-    GDX12LocalShadowKey Key;
-    ShadowCrossSync CrossSync = ShadowCrossSync::Exact;
 };
 
 inline void SetLocalShadowGeneration(GDX12LocalLightConstants& light, uint64_t generation)

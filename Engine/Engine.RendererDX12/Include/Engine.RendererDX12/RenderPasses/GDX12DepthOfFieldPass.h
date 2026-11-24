@@ -19,6 +19,7 @@ public:
 
 private:
     friend class BistroRender::ScenePostUI;
+    bool IsActive(GDX12Texture& color) const;
     struct Context;
     void DestroyContext();
     std::unique_ptr<Context> _context;

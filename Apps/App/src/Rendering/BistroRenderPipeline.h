@@ -72,6 +72,7 @@ class BistroRenderPipeline final : public IRenderPipeline
 	const auto& PanelOwners() const { return _panelOwners; }
 	uint64_t PanelRevision() const { return _panelRevision; }
 	const auto& BenchmarkLinks() const { return _benchmarkLinks; }
+	std::vector<std::pair<std::string, BistroRender::Id>> BenchmarkActiveOwners() const;
 	const auto& BenchmarkSchedule() const { return _schedule; }
 	SkySource BenchmarkSkySource() const { return _benchmarkSky; }
 	bool BenchmarkLocalCloudsActive() const { return _environment->LocalCloudsActive(); }
@@ -96,7 +97,7 @@ class BistroRenderPipeline final : public IRenderPipeline
 		_lighting->RetireLocalShadows();
 	}
 	struct ProbeMemory { UINT64 Primary = 0, Owner = 0; };
-	ProbeMemory EstimateRemoteProbe(int hardwareIndex, UINT side, UINT sunSide) const;
+	ProbeMemory EstimateRemoteProbe(int hardwareIndex, UINT side) const;
 	UINT64 LocalShadowTexels() const { return _lighting->LocalShadowTexels(); }
 	std::function<void()> CaptureBenchmarkPhysics(World&);
 	std::vector<std::pair<std::string, std::string>> BenchmarkAdapters() const;

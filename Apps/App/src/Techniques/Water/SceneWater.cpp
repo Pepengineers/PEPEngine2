@@ -71,6 +71,7 @@ struct SceneWater::Remote
 	bool WaitForSelected = true;
 	int Mode = 1;
 	std::map<uint64_t, Seed> Seeds;
+	std::vector<uint64_t> DisplayIds;
 	std::mutex Mutex;
 	std::condition_variable Published;
 	WaterEvent Wake{nullptr, CloseHandle}, Completed{nullptr, CloseHandle};
@@ -100,17 +101,22 @@ struct SceneWater::Remote
 	void Configure(const std::vector<GDX12FluidInstance>& instances, GDX12FluidControls controls, int mode)
 	{
 		std::map<uint64_t, Seed> seeds;
+		std::vector<uint64_t> display;
 		if (controls.Enabled)
 			for (const auto& instance : instances)
 			{
 				const auto& settings = instance.Component.GetSettings();
 				const auto& seed = instance.Component.GetParticles();
 				if (seed && !seed->empty() && (settings.RenderEnabled || settings.SimulationEnabled))
+				{
 					seeds.emplace(instance.Id, Seed{seed, instance.Component.GetResetRevision()});
+					if (settings.RenderEnabled) display.push_back(instance.Id);
+				}
 			}
-		if (Mode != mode || Seeds != seeds)
+		if (Mode != mode || Seeds != seeds || DisplayIds != display)
 		{
 			Seeds = std::move(seeds);
+			DisplayIds = std::move(display);
 			Mode = mode;
 			LastOrder = nullptr;
 			Ordered = TotalSubsteps = DisplayFrames = Imports = Repeats = Skipped = LastShown = 0;
@@ -128,21 +134,23 @@ struct SceneWater::Remote
 		return Pass.NeedsSimulation();
 	}
 
-	Snapshot* PrepareFrameOrder(const std::vector<GDX12FluidInstance>& instances, GDX12FluidControls controls, UINT frameSlot, int mode)
+	bool PrepareFrameOrder(const std::vector<GDX12FluidInstance>& instances, GDX12FluidControls controls,
+	                       UINT frameSlot, int mode, Snapshot*& output)
 	{
 		StopWorker();
 		Configure(instances, controls, mode);
 		WaitForSelected = true;
-		if (!PrepareSolve(GPU1, instances, controls, frameSlot)) return nullptr;
+		if (!PrepareSolve(GPU1, instances, controls, frameSlot)) return false;
+		if (Pass.DrawSources().empty()) return true;
 		if (Mode == 0) Selected = LastOrder;
-		auto* output = &Ring[Next++ % Ring.size()];
+		output = &Ring[Next++ % Ring.size()];
 		// The previous order stays pinned through selection, even before a new read is submitted.
 		if (output == Selected) output = &Ring[Next++ % Ring.size()];
 		auto& slot = *output;
 		if (slot.Ready) Submit->Wait(slot.Ready);
 		if (slot.Reader) Submit->Wait(slot.Reader);
 		PrepareSnapshot(slot, instances, controls);
-		return &slot;
+		return true;
 	}
 
 	void PrepareSnapshot(Snapshot& slot, const std::vector<GDX12FluidInstance>& instances, GDX12FluidControls controls)
@@ -165,8 +173,8 @@ struct SceneWater::Remote
 		}
 	}
 
-	CompletionToken SubmitSnapshot(Executor& executor, Snapshot& slot,
-	                               GDX12FluidParticlePass::SimulationSlices* independent = nullptr)
+	CompletionToken SubmitSolve(Executor& executor, Snapshot* slot,
+	                            GDX12FluidParticlePass::SimulationSlices* independent = nullptr)
 	{
 		Work.Commands.clear();
 		Graph graph;
@@ -176,20 +184,20 @@ struct SceneWater::Remote
 		std::vector<ID3D12Resource*> bindings;
 		Packet(Work, graph, bindings, "GPU1 water seed / SPH hash-sort-density-integrate", Pass.GetSimulationBufferAccesses(),
 		    [this, independent](auto* cmd) { Pass.ExecuteSimulation(cmd, independent); }, Queue::Compute);
-		if (!slot.Ranges.empty())
+		if (slot)
 		{
 			Packet(Work, graph, bindings, "GPU1 pack water position and speed", Pass.GetPackAccesses(),
 			    [this](auto* cmd) { Pass.PackDrawSources(cmd); }, Queue::Compute);
-			auto* shared = slot.Shared.Resources[1].Get();
+			auto* shared = slot->Shared.Resources[1].Get();
 			std::vector<Access> accesses{{NativeWork::ResourceFor(graph, bindings, shared, "shared water display"), Mode::Write, CopyWrite}};
 			for (const auto& source : Pass.DrawSources())
 				accesses.push_back({NativeWork::ResourceFor(graph, bindings, source.Particles->GetResource().D3DResource.Get(),
 				    "water packed display"), Mode::Read, CopyRead});
-			Work.Add(graph, "GPU1 export water display", std::move(accesses), [this, shared, &slot](auto* cmd) {
+			Work.Add(graph, "GPU1 export water display", std::move(accesses), [this, shared, slot](auto* cmd) {
 				const auto& sources = Pass.DrawSources();
 				for (size_t i = 0; i < sources.size(); ++i)
 				{
-					const auto& range = slot.Ranges[i];
+					const auto& range = slot->Ranges[i];
 					cmd->CopyBufferRegion(shared, range.Offset, sources[i].Particles->GetResource().D3DResource.Get(),
 					    0, uint64_t(range.Count) * sizeof(XMFLOAT4));
 				}
@@ -201,20 +209,26 @@ struct SceneWater::Remote
 		return executor.Completions().back();
 	}
 
-	void Commit(Snapshot& slot, CompletionToken ready, uint64_t generation)
+	void Commit(Snapshot* slot, CompletionToken ready, uint64_t generation)
 	{
-		slot.Ready = ready;
-		slot.Writing = false;
-		slot.Generation = generation;
+		if (slot)
+		{
+			slot->Ready = ready;
+			slot->Writing = false;
+			slot->Generation = generation;
+		}
 		if (generation != Generation) return;
-		slot.Version = ++Ordered;
 		TotalSubsteps += Pass.Substeps();
-		LastOrder = &slot;
+		if (slot)
+		{
+			slot->Version = ++Ordered;
+			LastOrder = slot;
+		}
 	}
 
-	void PublishFrameOrder(Snapshot& slot)
+	void PublishFrameOrder(Snapshot* slot)
 	{
-		Commit(slot, SubmitSnapshot(GPU1, slot), Generation);
+		Commit(slot, SubmitSolve(GPU1, slot), Generation);
 		if (!Selected) Selected = LastOrder;
 	}
 
@@ -259,8 +273,10 @@ struct SceneWater::Remote
 			    [](const auto& entry) { return entry.second.Rate > 0; });
 			const bool changed = generation != Generation || revision != Revision;
 			const bool retireOnly = Seeds.empty() && changed;
+			const bool simulate = !Seeds.empty() && (changed || advancing);
+			const bool display = !DisplayIds.empty();
 			if (pending && !Submit->Complete(pending)) wait = pending;
-			else if (!Seeds.empty() && (changed || advancing))
+			else if (simulate && display)
 			{
 				const auto* latest = NewestCompleted();
 				for (auto& slot : Ring)
@@ -271,7 +287,7 @@ struct SceneWater::Remote
 					else { output = &slot; break; }
 				}
 			}
-			if (!output && (wait || !retireOnly))
+			if (!output && (wait || (!retireOnly && (!simulate || display))))
 			{
 				lock.unlock();
 				if (wait && (wait.Device != armed.Device || wait.Target != armed.Target || wait.Value != armed.Value))
@@ -291,7 +307,7 @@ struct SceneWater::Remote
 			auto instances = Inputs;
 			const auto controls = InputControls;
 			GDX12FluidParticlePass::SimulationSlices slices;
-			if (output)
+			if (simulate)
 			{
 				for (const auto& instance : instances)
 				{
@@ -300,14 +316,14 @@ struct SceneWater::Remote
 					    (std::max)(0.0, clock.ActiveSeconds - clock.IntegratedSeconds) : 0;
 					slices.emplace(instance.Id, GDX12FluidParticlePass::SimulationSlice{pendingSeconds});
 				}
-				output->Writing = true;
+				if (output) output->Writing = true;
 			}
 			lock.unlock();
-			if (!PrepareSolve(executor, instances, controls, 0) && output)
+			if (!PrepareSolve(executor, instances, controls, 0) && simulate)
 				throw std::logic_error("Active remote water has no solver work");
-			if (!output) continue;
-			PrepareSnapshot(*output, instances, controls);
-			pending = SubmitSnapshot(executor, *output, &slices);
+			if (!simulate) continue;
+			if (output) PrepareSnapshot(*output, instances, controls);
+			pending = SubmitSolve(executor, output, &slices);
 			lock.lock();
 			for (const auto& instance : instances)
 			{
@@ -316,7 +332,7 @@ struct SceneWater::Remote
 				if (clock != Clocks.end() && clock->second.Source == source)
 					clock->second.IntegratedSeconds += slices.at(instance.Id).IntegratedSeconds;
 			}
-			Commit(*output, pending, generation);
+			Commit(output, pending, generation);
 			Published.notify_all();
 		}
 	}
@@ -405,10 +421,7 @@ struct SceneWater::Remote
 			PrepareSolve(GPU1, instances, controls, 0); // Build the solver pipelines before the worker takes ownership.
 		StartWorker();
 		SetEvent(Wake.get());
-		const bool visible = std::any_of(instances.begin(), instances.end(), [&](const auto& instance) {
-			return Seeds.count(instance.Id) && instance.Component.GetSettings().RenderEnabled;
-		});
-		if (visible)
+		if (!DisplayIds.empty())
 		{
 			const bool bootstrap = !LastOrder;
 			Published.wait(lock, [&] { return LastOrder || WorkerFailure; });
@@ -488,6 +501,7 @@ void SceneWater::Prepare(float delta, Executor& primary, Id device)
 	// Visibility and simulation flags can leave a live instance temporarily idle.
 	if (instances.empty()) RetireRemote(primary);
 	Remote::Snapshot* slot = nullptr;
+	bool solve = false;
 	try
 	{
 		if (device && !_remote && _failedDevice != device && controls.Enabled && !instances.empty())
@@ -496,7 +510,7 @@ void SceneWater::Prepare(float delta, Executor& primary, Id device)
 		{
 			const int mode = CrossSync.GetValue();
 			if (mode == 2) _remote->PrepareIndependent(instances, controls);
-			else slot = _remote->PrepareFrameOrder(instances, controls, _resources.CurrFrameConstantsIndex, mode);
+			else solve = _remote->PrepareFrameOrder(instances, controls, _resources.CurrFrameConstantsIndex, mode, slot);
 		}
 	}
 	catch (const DxException& e)
@@ -511,7 +525,7 @@ void SceneWater::Prepare(float delta, Executor& primary, Id device)
 		_failedDevice = device;
 		Log::Warning("RenderGraph", "Local water fallback: ", e.what());
 	}
-	if (slot) _remote->PublishFrameOrder(*slot);
+	if (solve) _remote->PublishFrameOrder(slot);
 	if (_remote && _remote->Selected)
 		_surface.PrepareFrame(_remote->DisplayInstances(instances), _remote->Selected->Controls,
 		    GDX12FluidParticlePass::Role::Display);
@@ -634,7 +648,7 @@ void SceneWater::AddWaits(const Schedule& schedule, std::vector<PacketWait>& wai
 	if (_remote->WaitForSelected) waits.push_back({_importPacket, _remote->Selected->Ready});
 }
 
-Id SceneWater::ExecutionDevice() const { return _remote ? _remote->DeviceId : 0; }
+Id SceneWater::ExecutionDevice() const { return _remote && !_remote->Seeds.empty() ? _remote->DeviceId : 0; }
 
 void SceneWater::Submitted(const std::vector<CompletionToken>& completions)
 {

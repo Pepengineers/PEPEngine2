@@ -7,13 +7,14 @@ GDX12Texture* SceneTransparency::Append(Graph& graph, std::vector<ID3D12Resource
                                         UINT slot, GDX12Texture* hdr, SceneEnvironment& environment)
 {
 	auto& frame = _frames.at(slot);
-	if (_remote) AppendRemote(geometry, slot, frame, hdr);
+	if (_remote && _remoteWork) AppendRemote(geometry, slot, frame, hdr);
 	_water.AppendDraw(graph, bindings, hdr, geometry._slots.at(slot).Dsv.CPUHandle);
 	if (_opaqueContinuation)
 	{
 		hdr = _opaqueContinuation(graph, bindings, hdr, _water.Depth(), _water.Motion());
 	}
-	if (_remote) return ApplyRemote(graph, bindings, geometry, slot, frame, hdr, environment);
+	if (_remote && _remoteDraw) return ApplyRemote(graph, bindings, geometry, slot, frame, hdr, environment);
+	if (_remote && _opaqueContinuation) return hdr;
 	return AppendPhase(graph, bindings, geometry, slot, frame, hdr, environment);
 }
 GDX12Texture* SceneTransparency::AppendPhase(Graph& graph, std::vector<ID3D12Resource*>& bindings,

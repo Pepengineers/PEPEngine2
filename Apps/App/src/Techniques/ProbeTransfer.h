@@ -20,9 +20,8 @@ class ProbeTransfer
         const auto shape = CD3DX12_RESOURCE_DESC::Tex2D(Format, resolution, resolution, 6, UINT16(_mips));
         _footprints.resize(6 * _mips);
         std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> remoteFootprints(_footprints.size());
-        auto& primary = submissions.Device(0);
         UINT64 remoteBytes = 0;
-        primary.GetDevice()->GetCopyableFootprints(&shape, 0, UINT(_footprints.size()), 0,
+        submissions.Device(0).GetDevice()->GetCopyableFootprints(&shape, 0, UINT(_footprints.size()), 0,
                                                   _footprints.data(), nullptr, nullptr, &_bytes);
         submissions.Device(remote).GetDevice()->GetCopyableFootprints(&shape, 0, UINT(remoteFootprints.size()), 0,
                                                                         remoteFootprints.data(), nullptr, nullptr,
@@ -40,7 +39,6 @@ class ProbeTransfer
         }
 
         _buffer = submissions.CreateTransferBuffer(remote, _bytes);
-        _staging = primary.CreateResource(D3D12_HEAP_TYPE_DEFAULT, shape, D3D12_RESOURCE_STATE_COMMON);
     }
 
     UINT MipCount() const { return _mips; }
@@ -53,38 +51,9 @@ class ProbeTransfer
     }
 
     Id AppendImport(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work,
-                    UINT firstFace, UINT faceCount) const
+                    ID3D12Resource* published, UINT firstFace, UINT faceCount, UINT cubeIndex) const
     {
-        return AppendSharedCopy(graph, bindings, work, _staging.Get(), firstFace, faceCount, 0, false);
-    }
-
-    Id AppendPublication(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work,
-                         ID3D12Resource* published, UINT cubeIndex) const
-    {
-        if (graph.Device != 0)
-            throw std::invalid_argument("Reflection probe publication must run on the primary adapter");
-        const auto target = published->GetDesc();
-        const UINT baseMip = BaseMip(target);
-        if (cubeIndex >= target.DepthOrArraySize / 6)
-            throw std::invalid_argument("Reflection probe publication cube index is out of range");
-
-        auto* staging = _staging.Get();
-        const Id source = NativeWork::ResourceFor(graph, bindings, staging, "GPU0 reflection probe staging cube");
-        const Id destination = NativeWork::ResourceFor(graph, bindings, published, "published reflection probes");
-        const UINT mips = _mips;
-        const UINT targetMips = target.MipLevels;
-        return work.Add(graph, "GPU0 publish complete remote reflection probe",
-                        {{source, Mode::Read, CopySource}, {destination, Mode::Write, CopyDest}},
-                        [=](auto* cmd) {
-                            for (UINT face = 0; face < 6; ++face)
-                                for (UINT mip = 0; mip < mips; ++mip)
-                                {
-                                    const CD3DX12_TEXTURE_COPY_LOCATION src(staging, face * mips + mip);
-                                    const CD3DX12_TEXTURE_COPY_LOCATION dst(published,
-                                        (cubeIndex * 6 + face) * targetMips + baseMip + mip);
-                                    cmd->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
-                                }
-                        });
+        return AppendSharedCopy(graph, bindings, work, published, firstFace, faceCount, cubeIndex, false);
     }
 
   private:
@@ -117,11 +86,11 @@ class ProbeTransfer
         auto* shared = _buffer.Resources[exporting ? 1 : 0].Get();
         const Id sharedId = NativeWork::ResourceFor(graph, bindings, shared, "shared reflection probe radiance");
         const Id textureId = NativeWork::ResourceFor(graph, bindings, texture,
-            exporting ? "remote filtered reflection probe" : "GPU0 reflection probe staging cube");
+            exporting ? "remote filtered reflection probe" : "published reflection probes");
         const std::vector<Access> accesses = exporting
             ? std::vector<Access>{{textureId, Mode::Read, CopySource}, {sharedId, Mode::Write, CopyDest}}
             : std::vector<Access>{{sharedId, Mode::Read, CopySource}, {textureId, Mode::Write, CopyDest}};
-        return work.Add(graph, exporting ? "remote export reflection probe faces" : "GPU0 import reflection probe faces",
+        return work.Add(graph, exporting ? "remote export reflection probe faces" : "GPU0 publish remote reflection probe faces",
                         accesses, [this, shared, texture, firstFace, faceCount, textureMips, baseMip, cubeIndex,
                                    exporting](auto* cmd) {
                             for (UINT face = firstFace; face < firstFace + faceCount; ++face)
@@ -142,6 +111,5 @@ class ProbeTransfer
     UINT64 _bytes = 0;
     std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> _footprints;
     QueueSubmission::TransferBuffer _buffer;
-    GDX12ResourceHandle _staging;
 };
 } // namespace BistroRender

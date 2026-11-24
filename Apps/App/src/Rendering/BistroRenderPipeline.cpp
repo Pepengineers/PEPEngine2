@@ -49,7 +49,7 @@ void BistroRenderPipeline::Initialize(RenderPipelineContext& c, const std::vecto
 	Log::Info("Renderer", "Bistro packet renderer initialized; one rendering path");
 }
 
-BistroRenderPipeline::ProbeMemory BistroRenderPipeline::EstimateRemoteProbe(int hardwareIndex, UINT side, UINT sunSide) const
+BistroRenderPipeline::ProbeMemory BistroRenderPipeline::EstimateRemoteProbe(int hardwareIndex, UINT side) const
 {
 	auto& submit = *_executor->Submissions();
 	const auto owner = submit.SelectAdapter(hardwareIndex);
@@ -65,7 +65,7 @@ BistroRenderPipeline::ProbeMemory BistroRenderPipeline::EstimateRemoteProbe(int 
 	};
 	ProbeMemory cost;
 	UINT64 inputBytes = 0;
-	for (auto* input : _geometry->LiveProbeCaptureInputs(*_environment))
+	for (auto* input : _geometry->LiveProbeCaptureInputs(*_environment, _executorSlot))
 	{
 		auto shape = input->GetDesc();
 		const UINT64 bytes = shape.Dimension == D3D12_RESOURCE_DIMENSION_BUFFER ? shape.Width : footprints(shape);
@@ -78,11 +78,10 @@ BistroRenderPipeline::ProbeMemory BistroRenderPipeline::EstimateRemoteProbe(int 
 	                                               UINT16(GDX12RenderHelpers::MipCount(side)));
 	const auto shared = BistroRender::ShadowMemory::TransferBytes(primary, remote, (std::max)(UINT64(1), inputBytes)) +
 	                    BistroRender::ShadowMemory::TransferBytes(primary, remote, footprints(cube));
-	cost.Primary = shared + BistroRender::ShadowMemory::Size(primary, cube);
+	cost.Primary = shared;
 	// Owner-local capture, convolution and baked textures, plus the shader-visible scene heap.
 	cost.Owner += shared + UINT64(side) * side * 6 * 64 +
-	    UINT64(remote.GetDevice()->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)) * 1000000 +
-	    BistroRender::ShadowMemory::Size(remote, BistroRender::ShadowMemory::Depth((std::max)(1u, sunSide / 2), 1));
+	    UINT64(remote.GetDevice()->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)) * 1000000;
 	return cost;
 }
 
@@ -433,6 +432,46 @@ std::vector<std::pair<std::string, std::string>> BistroRenderPipeline::Benchmark
 	for (const auto& [name, id] : _post->ExecutionDevices())
 		adapters.emplace_back(name, id == BistroRender::Invalid ? "inactive" : devices.AdapterLabel(id));
 	return adapters;
+}
+
+std::vector<std::pair<std::string, BistroRender::Id>> BistroRenderPipeline::BenchmarkActiveOwners() const
+{
+	using BistroRender::Invalid;
+	std::vector<std::pair<std::string, BistroRender::Id>> owners;
+	const auto add = [&](const char* role, BistroRender::Id owner) {
+		if (owner != Invalid) owners.emplace_back(role, owner);
+	};
+	const auto has = [&](std::initializer_list<std::string_view> prefixes) {
+		return std::any_of(_schedule->Packets.begin(), _schedule->Packets.end(), [&](const auto& packet) {
+			return std::any_of(prefixes.begin(), prefixes.end(), [&](std::string_view prefix) {
+				return packet.Name.compare(0, prefix.size(), prefix) == 0;
+			});
+		});
+	};
+	if (has({"AO resolve", "SSAO/HBAO visibility", "CACAO dispatch", "XeGTAO GPU0 import terms", "XeGTAO denoise"}))
+		add("AOAdapter", _lighting->AOExecutionDevice());
+	if (has({"GPU light grid masks", "GPU0 import Exact light grid masks"}))
+		add("LightGridAdapter", _lighting->LightGridDevice());
+	const auto particles = _lighting->Particles().ExecutionDevice();
+	if (particles || has({"particle simulation", "opaque particles G-buffer", "transparent particles cull"}))
+		add("ParticleAdapter", particles);
+	const auto water = _lighting->Water().ExecutionDevice();
+	if (water || has({"water seed", "water draw"})) add("WaterAdapter", water);
+	const auto wind = _geometry->Grass().WindExecutionDevice();
+	if (wind || has({"grass wind stage", "linden wind stage"})) add("GrassWindAdapter", wind);
+	if (_cloudPicture->Image()) add("CloudPictureAdapter", _cloudPicture->ExecutionDevice());
+	const auto [skyView, aerial] = _environment->BenchmarkAtmosphereConsumers();
+	add("SkyViewAdapter", skyView);
+	add("AerialPerspectiveAdapter", aerial);
+	add("TransparencyAdapter", _lighting->Transparency().BenchmarkExecutionDevice());
+	const auto [post, hud] = _post->BenchmarkPublication();
+	add("PostAdapter", post == Invalid ? 0 : post);
+	for (const auto& [name, owner] : _post->ExecutionDevices())
+		if (owner != Invalid && name != "PostAdapter" && name != "PresentationAdapter")
+			owners.emplace_back(name, name == "GameHUDAdapter" && hud != Invalid ? hud : owner);
+	_lighting->AppendBenchmarkShadowOwners(owners);
+	_lighting->AppendPublishedProbes(owners);
+	return owners;
 }
 
 std::vector<std::pair<std::string, std::string>> BistroRenderPipeline::PanelAdapters() const

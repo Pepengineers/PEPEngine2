@@ -30,7 +30,7 @@ class SceneGeometry
 	std::vector<GDX12RenderPrimitive> VegetationPrimitives() const;
 	void AppendVegetationView(Graph&, std::vector<ID3D12Resource*>&, UINT slot, const GeometryTarget&);
 	std::unordered_set<ID3D12Resource*> LiveProbeInputs() const;
-	std::unordered_set<ID3D12Resource*> LiveProbeCaptureInputs(SceneEnvironment&,
+	std::unordered_set<ID3D12Resource*> LiveProbeCaptureInputs(SceneEnvironment&, UINT slot = UINT_MAX,
 	    std::vector<GDX12Texture*>* materialTextures = nullptr) const;
 	class RemoteProbeVegetation
 	{
@@ -94,7 +94,7 @@ class SceneGeometry
 	struct Buffer
 	{
 		GDX12ResourceHandle Source, Data, Origin;
-		uint64_t Revision = 0;
+		uint64_t Revision = 0, ContentRevision = 0;
 		bool Upload = false;
 		std::vector<std::pair<UINT, UINT>> Ranges;
 		UINT64 Bytes = 0;
@@ -140,6 +140,7 @@ class SceneGeometry
 		D3D12_GPU_VIRTUAL_ADDRESS Camera = 0, Main = 0;
 		UINT Draws = 0;
 		std::vector<GDX12IndirectDrawArgs> CanvasDraws;
+		std::vector<GDX12Texture*> ProbeCanvases;
 		Id CanvasOperation = Invalid;
 		std::vector<GDX12SkinningWork> Skin;
 		std::vector<ID3D12Resource*> SkinBindings;

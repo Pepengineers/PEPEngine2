@@ -9,17 +9,29 @@
 
 namespace
 {
-    AutoConsoleVariable<int>& LocalPageAdapter(UINT page)
+    struct LocalShadowPageCVars
+    {
+        explicit LocalShadowPageCVars(UINT page)
+            : Adapter(LocalShadowPageAdapterName(page), -1,
+                L"Local shadow atlas page " + std::to_wstring(page) + L" owner. -1 uses the primary GPU.",
+                EConsoleVariableFlags::Default, [](int index) { return index >= -1; }),
+              CrossSync(LocalShadowPageCrossSyncName(page), int(ShadowCrossSync::Exact),
+                L"Local shadow atlas page " + std::to_wstring(page) + L" synchronization. 1 Exact, 3 Latest.",
+                EConsoleVariableFlags::Default, [](int mode) {
+                    return mode == int(ShadowCrossSync::Exact) || mode == int(ShadowCrossSync::Latest);
+                })
+        {}
+        AutoConsoleVariable<int> Adapter, CrossSync;
+    };
+
+    LocalShadowPageCVars& LocalPageSettings(UINT page)
     {
         static std::mutex mutex;
-        static std::array<std::unique_ptr<AutoConsoleVariable<int>>, MaxLocalShadowAtlasCount> adapters;
+        static std::array<std::unique_ptr<LocalShadowPageCVars>, MaxLocalShadowAtlasCount> pages;
         std::scoped_lock lock(mutex);
-        auto& variable = adapters.at(page);
-        if (!variable)
-            variable = std::make_unique<AutoConsoleVariable<int>>(LocalShadowPageAdapterName(page), -1,
-                L"Local shadow atlas page " + std::to_wstring(page) + L" owner. -1 uses the primary GPU.",
-                EConsoleVariableFlags::Default, [](int index) { return index >= -1; });
-        return *variable;
+        auto& settings = pages.at(page);
+        if (!settings) settings = std::make_unique<LocalShadowPageCVars>(page);
+        return *settings;
     }
 
     AutoConsoleVariable<UINT> SunShadowSize(L"Render.Shadows.Sun.Resolution", SunShadowCascadeResolution,
@@ -53,13 +65,18 @@ namespace
         EConsoleVariableFlags::ReadOnly, [](UINT value) { return value == 2 || value == 4 || value == 8 || value == 16; });
 }
 
-void RegisterLocalShadowPageAdapter(UINT page) { LocalPageAdapter(page); }
+void RegisterLocalShadowPageSettings(UINT page) { LocalPageSettings(page); }
 
-void ReadLocalShadowPageAdapters(std::vector<int>& adapters, UINT pages)
+void ReadLocalShadowPageSettings(std::vector<int>& adapters, std::vector<ShadowCrossSync>& sync, UINT pages)
 {
     adapters.resize(pages);
+    sync.resize(pages);
     for (UINT page = 0; page < pages; ++page)
-        adapters[page] = LocalPageAdapter(page).GetValue();
+    {
+        const auto& settings = LocalPageSettings(page);
+        adapters[page] = settings.Adapter.GetValue();
+        sync[page] = static_cast<ShadowCrossSync>(settings.CrossSync.GetValue());
+    }
 }
 
 GDX12ShadowQuality ReadShadowQuality()

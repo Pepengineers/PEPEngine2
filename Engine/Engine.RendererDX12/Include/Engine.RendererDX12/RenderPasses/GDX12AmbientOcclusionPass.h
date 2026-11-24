@@ -33,7 +33,7 @@ private:
     enum Pipeline : std::uint8_t
     {
         PrepareNormals, SSAO, HBAO, Blur, Resolve, XePrefilter, XeMain, XeDenoise, Neutral, PrepareHalf, Upsample,
-        PadCACAO, Reproject, PackFull, ReprojectXe, PipelineCount
+        PadCACAO, Reproject, PackFull, ReprojectXe, ResolveXe, PipelineCount
     };
 public:
     struct Pipelines
@@ -44,22 +44,30 @@ public:
     };
 
 private:
+    enum GridResource : UINT
+    {
+        HalfDepth = 1u << 0, HalfVisibility = 1u << 1, VisibilityScratch = 1u << 2,
+        FilterScratch = 1u << 3, XePyramid = 1u << 4, XeTerm = 1u << 5, XeFilter = 1u << 6,
+        XeEdge = 1u << 7, PaddedInputs = 1u << 8, PaddedVisibility = 1u << 9
+    };
     struct WorkGrid
     {
+        UINT Width, Height, Resources;
         GDX12Texture Depth, Normals, Scratch[2], XeDepth, XeTerms[2], XeEdges, Visibility;
         std::array<GDX12Descriptor, 5> DepthUAVs;
         GDX12Texture CacaoDepth, CacaoNormals, CacaoVisibility;
         std::vector<uint8_t> CacaoMemory;
         FFX_CACAO_D3D12Context* Cacao = nullptr;
-        bool CacaoScreenReady = false;
+        GDX12ResourceHandle CacaoScreenDepth;
     };
-    void CreateTextures();
-    void CreateGrid(WorkGrid& grid, UINT width, UINT height, bool half);
+    bool SetOutputSize(UINT width, UINT height);
+    void PrepareGrid(UINT width, UINT height, UINT resources);
+    void ResetGrid();
     void CreateTexture(GDX12Texture& texture, DXGI_FORMAT format, UINT width, UINT height, UINT mips = 1);
     void DestroyCACAO(WorkGrid& grid);
 
     GDX12Texture _output;
-    std::array<WorkGrid, 2> _grids;
+    std::unique_ptr<WorkGrid> _grid;
     std::unique_ptr<GDX12UploadBuffer<ShaderConstants>> _constants;
     std::unique_ptr<GDX12UploadBuffer<XeGTAO::GTAOConstants>> _xeConstants;
     GDX12AOSettings _previous = {};

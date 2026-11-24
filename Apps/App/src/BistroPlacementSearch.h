@@ -98,11 +98,12 @@ struct Result
 {
     size_t Id = 0;
     Config Settings;
+    Config ConfirmationSettings;
     Size Output{}, Render{};
     double Fps = 0, P95 = 0, ThresholdFps = 0;
     std::optional<double> ShadowTexels;
     std::array<double, 7> SectionShadowTexels{{-1, -1, -1, -1, -1, -1, -1}};
-    bool Valid = false, Remote = false;
+    bool Valid = false, Remote = false, EquivalentInactiveOwners = true;
     std::array<bool, std::size(Techniques)> Activity{};
     std::string SourceCsv;
 };
@@ -182,14 +183,11 @@ public:
             const UINT pages = console.FindConsoleVariable(L"Render.Shadows.Local.AtlasCount").GetUInt();
             for (UINT page = 0; page < pages; ++page)
             {
-                RegisterLocalShadowPageAdapter(page);
+                RegisterLocalShadowPageSettings(page);
                 _placements.push_back({LocalShadowPageAdapterName(page), "Local shadow page " + std::to_string(page)});
-            }
-            for (const auto& fixture : shadowFixtures)
-            {
-                const auto name = L"Render.Shadows.Local." + fixture + L".CrossSync";
-                IConsoleVariable* sync = nullptr;
-                if (console.TryFindConsoleVariable(name, sync)) _localShadowSync.emplace_back(name, "1");
+                auto name = LocalShadowPageCrossSyncName(page);
+                auto mode = console.FindConsoleVariable(name).GetString();
+                _localShadowSync.emplace_back(std::move(name), std::move(mode));
             }
         }
         for (unsigned height : {480u, 720u, 900u, 1080u, 1440u, 2160u, screen.second})
@@ -221,7 +219,7 @@ public:
             if (levels[Off] == -1) levels[Off] = levels[High];
         }
         // The renderer exposes shadow quality as a discrete resolution.
-        _values[SunShadowQuality] = {0, 1024, 1024, 2048, 4096};
+        _values[SunShadowQuality] = {0, 512, 1024, 2048, 4096};
         using ShadowLevel = GDX12LocalShadowLevel;
         _values[LocalShadowQuality] = {int(GetLocalShadowProfile(ShadowLevel::Off).Face),
             int(GetLocalShadowProfile(ShadowLevel::Low).Face), int(GetLocalShadowProfile(ShadowLevel::Medium).Face),
@@ -239,6 +237,11 @@ public:
     Size Resolution(const Config& config) const { return _sizes.at(config.Resolution); }
     const auto& Resolutions() const { return _sizes; }
     const auto& Candidates() const { return _placements; }
+    std::optional<std::string_view> ShadowPageSync(size_t candidate) const
+    {
+        if (candidate < _firstLocalShadow) return {};
+        return _localShadowSync.at(candidate - _firstLocalShadow).second;
+    }
     int QualityValue(size_t technique, Level level) const { return _values[technique][level]; }
 
     ConsoleVariablePatch Patch(const Config& config) const
@@ -357,11 +360,14 @@ public:
 
     std::optional<Trial> NextProbe()
     {
-        auto& queue = !_priority.empty() && (_pending.empty() || (++_probeIndex % 3 != 0)) ? _priority : _pending;
-        if (queue.empty()) return {};
-        auto trial = std::move(queue.front());
-        queue.pop_front();
-        return trial;
+        while (!_priority.empty() || !_pending.empty())
+        {
+            auto& queue = !_priority.empty() && (_pending.empty() || (++_probeIndex % 3 != 0)) ? _priority : _pending;
+            auto trial = std::move(queue.front());
+            queue.pop_front();
+            if (!_short.count(trial.Settings)) return trial;
+        }
+        return {};
     }
 
     const Result* Finalist() const
@@ -369,12 +375,14 @@ public:
         const auto* incumbent = RemotePhase() ? Best(Upscaled(), true) : BestReference(Upscaled());
         const Result* best = nullptr;
         const Result* detail = nullptr;
-        for (const auto& [candidate, result] : _short)
+        for (const auto& entry : _short)
         {
-            if ((RemotePhase() && !result.Remote) || _fullSettings.count(candidate)) continue;
+            const auto& result = entry.second;
+            if (_fullSettings.count(result.ConfirmationSettings)) continue;
             if (result.Fps < Threshold[_profile] && (!detail || Better(result, *detail, true))) detail = &result;
             const bool dominated = std::any_of(_short.begin(), _short.end(), [&](const auto& other)
-                { return !_fullSettings.count(other.first) && !_retryFull.count(other.first) && Dominates(other.second, result); });
+                { return !_fullSettings.count(other.second.ConfirmationSettings) && !_retryFull.count(other.second.ConfirmationSettings) &&
+                    Dominates(other.second, result); });
             if (dominated && result.Fps >= Threshold[_profile]) continue;
             if (!best || Better(result, *best)) best = &result;
         }
@@ -390,8 +398,8 @@ public:
     Trial Confirm(const Result& result)
     {
         if (result.Fps < Threshold[_profile]) _triedClosest = true;
-        const auto source = _retryFull.count(result.Settings) ? "retry finalist of trial " : "finalist of trial ";
-        return Make(result.Settings, source + std::to_string(result.Id), true);
+        const auto source = _retryFull.count(result.ConfirmationSettings) ? "retry finalist of trial " : "finalist of trial ";
+        return Make(result.ConfirmationSettings, source + std::to_string(result.Id), true);
     }
 
     void ScheduleWithinVideoMemory(const Trial& trial, ConsoleModule& console, Size output)
@@ -429,6 +437,18 @@ public:
             {
                 ObserveComposition(result);
                 if (!_fullSettings.insert(trial.Settings).second) return;
+                if (trial.Settings.Owners != result.Settings.Owners)
+                {
+                    // The effective configuration still needs its own full-route measurement.
+                    if (result.Remote && !_fullSettings.count(result.Settings))
+                    {
+                        auto effective = result;
+                        effective.ConfirmationSettings = effective.Settings;
+                        _short.insert_or_assign(result.Settings, std::move(effective));
+                        if (result.EquivalentInactiveOwners) _scheduled.insert(result.Settings);
+                    }
+                    return;
+                }
                 _confirmed.push_back(result);
                 if (!result.Remote) SaveReferences();
             }
@@ -456,7 +476,7 @@ public:
             }
             return;
         }
-        _short.emplace(trial.Settings, result);
+        if (!_short.emplace(trial.Settings, result).second) return;
         auto& probe = _nearest[Upscaled()];
         if (!probe || Better(result, *probe)) probe = result;
         auto& detail = _detail[Upscaled()];
@@ -789,11 +809,18 @@ private:
                     lowerQuality(next);
                 }
                 if (reduced.Levels != high.Levels) lowerQuality(reduced);
-                if (!pending && !passes && result.Activity[LocalShadowQuality] && reduced.Levels[LocalShadowQuality] != Off)
+                if (!pending && !passes)
                 {
-                    next = reduced;
-                    next.Levels[LocalShadowQuality] = Low;
-                    lowerQuality(next);
+                    auto both = reduced;
+                    for (const auto shadow : {SunShadowQuality, LocalShadowQuality})
+                        if (result.Activity[shadow] && reduced.Levels[shadow] > Low)
+                        {
+                            next = reduced;
+                            next.Levels[shadow] = both.Levels[shadow] = Low;
+                            lowerQuality(next);
+                        }
+                    if (both.Levels[SunShadowQuality] != reduced.Levels[SunShadowQuality] &&
+                        both.Levels[LocalShadowQuality] != reduced.Levels[LocalShadowQuality]) lowerQuality(both);
                 }
                 if (!pending && !passes)
                 {
@@ -964,6 +991,14 @@ private:
         }
         csv.Config(prefix + "Provider", std::to_string(r->Settings.Provider));
         csv.Config(prefix + "Preset", std::to_string(r->Settings.Preset));
+        for (size_t i = 0; i < r->Settings.Owners.size(); ++i)
+        {
+            csv.Config(prefix + std::filesystem::path(_placements[i].Variable).u8string() + ".EffectiveOwner",
+                std::to_string(r->Settings.Owners[i]));
+            if (const auto sync = ShadowPageSync(i))
+                csv.Config(prefix + std::filesystem::path(_localShadowSync[i - _firstLocalShadow].first).u8string(),
+                    r->Settings.Owners[i] < 0 ? "local" : *sync);
+        }
         for (size_t i = 0; i < r->Activity.size(); ++i)
             if (r->Activity[i]) csv.Config(prefix + "Technique", std::string(Techniques[i].Pass) + "=" +
                 (HasQualityScale(i) ? std::to_string(QualityValue(i, r->Settings.Levels[i])) : "enabled"));

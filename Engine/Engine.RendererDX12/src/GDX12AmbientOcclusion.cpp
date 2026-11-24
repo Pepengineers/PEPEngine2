@@ -78,9 +78,14 @@ namespace
 
 GDX12AOSettings GetAmbientOcclusionSettings()
 {
+    return GetAmbientOcclusionSettings(Quality.GetInt());
+}
+
+GDX12AOSettings GetAmbientOcclusionSettings(int quality)
+{
     GDX12AOSettings s = {};
     s.Enabled = Enabled.GetValue();
-    s.Quality = Quality.GetInt();
+    s.Quality = quality;
     s.Implementation = Implementation.GetInt();
     s.Resolution = Resolution.GetValue();
     const int level = std::max(1, s.Quality) - 1;

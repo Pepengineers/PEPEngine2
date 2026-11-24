@@ -43,8 +43,9 @@ class SceneReflections
   private:
     struct CaptureInputs;
     struct Remote;
+    struct FilteredFaces { UINT Probe, Mask; };
     void AppendCapture(Graph&, std::vector<ID3D12Resource*>&, NativeWork&, GDX12ReflectionProbePass&,
-                       GDX12DeviceResources&, const CaptureInputs&, std::vector<Id>&, std::vector<UINT>&);
+                       GDX12DeviceResources&, const CaptureInputs&, std::vector<Id>&, std::vector<FilteredFaces>&);
     void AppendRemote(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, SceneEnvironment&, UINT,
                       std::vector<Id>&, bool arrayReplaced);
     struct Publication
@@ -52,12 +53,22 @@ class SceneReflections
         uint64_t Fence = 0;
         bool Ready = false;
     };
+    struct MetadataSlot
+    {
+        ID3D12Resource* Target = nullptr;
+        UINT Count = 0;
+        std::array<bool, MaxReflectionProbes> Initialized{};
+        std::array<GDX12ReflectionProbeData, MaxReflectionProbes> Data{};
+    };
     GDX12DeviceResources& _resources;
     RenderPipelineCommonData& _common;
     std::unique_ptr<GDX12ReflectionProbePass> _passes;
     NativeWork _work;
-    std::vector<UINT> _publishing;
+    std::vector<FilteredFaces> _publishing;
     std::vector<Publication> _publications;
+    std::vector<MetadataSlot> _metadata;
+    UINT _metadataSlot = UINT_MAX;
+    std::vector<std::pair<UINT, UINT>> _metadataChanges;
     GDX12Resource _black;
     GDX12Descriptor _radiance;
     uint64_t _history = 0;

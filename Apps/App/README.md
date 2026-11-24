@@ -47,13 +47,13 @@ local). `Render.Shadows.Sun.NearCascades` gives the number of active cascades ke
 GPU0, starting at the camera. Use `0` for an entirely remote CSM or the active
 cascade count for an entirely local CSM.
 
-Set the owner for each local atlas page in F1 under **Render → Shadows → Local**,
-or use `Render.Shadows.Local.Page0.Adapter`, `Page1.Adapter` and so on in
-`Configs/Startup.ini`. Numbering starts at zero. Pages without an explicit
-assignment and pages assigned to unavailable adapters use the primary GPU.
-Older fixture `.Adapter` settings are ignored on startup. The fixture's
-`Render.Shadows.Local.<fixture name>.CrossSync` still applies to all its faces,
-even when the packer places those faces on pages with different owners.
+Set the owner and synchronization for each local atlas page in F1 under
+**Render → Shadows → Local**, or use `Render.Shadows.Local.Page0.Adapter` and
+`Render.Shadows.Local.Page0.CrossSync` in `Configs/Startup.ini`. Numbering
+starts at zero. Pages without an explicit assignment and pages assigned to
+unavailable adapters use the primary GPU. Each face follows the settings of
+the page where the packer places it. All pages default to Exact. Startup
+ignores legacy fixture `.Adapter` and `.CrossSync` settings.
 The Sun uses `Render.Shadows.Sun.CrossSync`.
 `1` (Exact) waits on the owner GPU export for the current frame. `3` (Latest)
 uses the last compatible depth already in the primary atlas until a newer
@@ -62,14 +62,14 @@ identity or atlas layout use Exact so that the sampled depth matches its metadat
 
 For primary hardware index `0` and secondary index `1`, this configuration
 places the first two sun cascades on GPU0 and the remaining cascades and local
-atlas page 0 on GPU1. The named light uses Latest for any of its remote faces.
+atlas page 0 on GPU1. Page 0 uses Latest.
 
 ```ini
 Render.Shadows.Sun.Adapter = 1
 Render.Shadows.Sun.NearCascades = 2
 Render.Shadows.Sun.CrossSync = 1
 Render.Shadows.Local.Page0.Adapter = 1
-Render.Shadows.Local.Paris_Building_01_paris_building_01_bottom_44.CrossSync = 3
+Render.Shadows.Local.Page0.CrossSync = 3
 ```
 
 ### Early camera DepthNormals

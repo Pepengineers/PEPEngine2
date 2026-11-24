@@ -20,6 +20,7 @@ class BistroVideoMemory
 {
     using Bytes = uint64_t;
     using Charges = std::vector<Bytes>;
+    static constexpr wchar_t ProbeAdapterKey[] = L"Render.ReflectionProbes.First.Adapter";
     struct Level { int Value; Charges Cost; };
     struct Feature
     {
@@ -35,6 +36,8 @@ class BistroVideoMemory
     uint64_t _replacementUntil = 0;
     uint64_t _revision = UINT64_MAX;
     uint32_t _size = 0;
+    UINT _acceptedProbeSide = 0;
+    int _acceptedProbeAdapter = -1;
     std::chrono::steady_clock::time_point _nextCheck{};
 
 public:
@@ -180,30 +183,40 @@ public:
             });
         };
         const Bytes particles = BistroParticles::GetBudget();
-        pass(L"Render.Particles.Enabled", L"Render.Particles.Quality", particles * (84 + frames * 32), L"Render.Particles.Adapter");
+        pass(L"Render.Particles.Enabled", L"Render.Particles.Quality",
+             particles * (84 + (value(L"Render.Particles.DrawEnabled") ? frames * 32 : 0)), L"Render.Particles.Adapter");
         const Bytes water = BistroWater::PresetParticleCount.GetValue() ? BistroWater::PresetParticleCount.GetValue() :
             BistroWater::ParticleCount.GetValue();
         pass(L"Render.Water.Enabled", L"Render.Water.Quality", water * BistroWater::Count.GetValue() *
              (128 + 16 * frames), L"Render.Water.Adapter");
         const Bytes face = BistroReflections::Resolution.GetValue();
         const UINT probes = BistroReflections::Count.GetValue();
-        const UINT sunSide = value(L"Render.Shadows.Sun.Resolution");
         pass(L"Render.ReflectionProbes.Enabled", L"Render.ReflectionProbes.Quality",
-             probes ? face * face * 6 * (32 * probes + 32) + depthBytes(sunSide / 2, 1) : 0);
-        const auto probeKey = L"Render.ReflectionProbes.First.Adapter";
-        const int probeAdapter = value(probeKey);
+             probes ? face * face * 6 * (32 * probes + 32) : 0);
+        const int probeAdapter = value(ProbeAdapterKey);
         if (probes && value(L"Render.ReflectionProbes.Enabled") && value(L"Render.ReflectionProbes.Quality") &&
             owner(probeAdapter) != primary)
         {
-            const auto mirror = pipeline.EstimateRemoteProbe(probeAdapter, UINT(face), sunSide);
-            add(probeKey, {-1, probeAdapter}, [&](int index) {
+            const auto mirror = pipeline.EstimateRemoteProbe(probeAdapter, UINT(face));
+            add(ProbeAdapterKey, {-1, probeAdapter}, [&](int index) {
                 auto cost = charge(index < 0 ? 0 : mirror.Primary, primary);
                 if (index >= 0) cost[owner(index)] = mirror.Owner;
                 return cost;
             });
         }
         // Full output dimensions bound render-sized histories even when reconstruction is enabled.
-        pass(L"Render.AO.Enabled", L"Render.AO.Quality", pixels * (value(L"Render.AO.Resolution") ? 4 : 16) * frames, L"Render.AO.Adapter");
+        add(L"Render.AO.Quality", {0,1,2,3,4}, [&](int q)
+        {
+            const auto settings = GetAmbientOcclusionSettings(q);
+            const auto gpu = owner(value(L"Render.AO.Adapter"));
+            const bool remote = gpu != primary &&
+                BistroRender::SceneAO::SupportsRemote(settings, value(L"Render.DepthNormals.PrepassEnabled") != 0);
+            const auto memory = BistroRender::SceneAO::EstimateMemory(settings, width, height, UINT(frames),
+                remote, value(L"Render.AO.CrossSync") == 0, value(L"Render.AO.BlurOnSecondary") != 0);
+            auto cost = charge(memory.Primary, primary);
+            if (remote) cost[gpu] += memory.Secondary;
+            return cost;
+        });
         pass(L"Render.SSR.Enabled", L"Render.SSR.Quality", pixels * 64);
         pass(L"Render.MotionBlur.Enabled", L"Render.MotionBlur.Quality", pixels * 16, L"Render.Post.Adapter");
         pass(L"Render.DOF.Enabled", L"Render.DOF.Quality", pixels * 24, L"Render.Post.Adapter");
@@ -235,17 +248,23 @@ public:
         };
         placement(L"Render.LightGrid.Adapter", maskBytes * 2);
         placement(L"Render.WBOIT.Adapter", geometry + pixels * 24 * frames);
-        placement(L"Render.Post.Adapter", pixels * 32 * frames);
+        const auto upscaler = GDX12UpscalerProvider(value(L"Render.Upscaler.Provider"));
+        const bool temporalPost = (upscaler != GDX12UpscalerProvider::Native && upscaler != GDX12UpscalerProvider::NIS) ||
+            value(L"Render.FrameGeneration.Provider") != 0;
+        const bool postMotion = temporalPost || (value(L"Render.MotionBlur.Enabled") && value(L"Render.MotionBlur.Quality"));
+        const bool postDepth = postMotion || (value(L"Render.DOF.Enabled") && value(L"Render.DOF.Quality"));
+        // Owner copies plus shared packet. Keep capacity for a returned SDR frame if needed.
+        placement(L"Render.Post.Adapter", pixels * frames * (24 + 8 * postDepth + 16 * postMotion));
         placement(L"Render.Sky.SkyView.Adapter", 512 * 256 * 8 * frames);
         placement(L"Render.Sky.AerialPerspective.Adapter", 32 * 32 * 64 * 16 * frames);
         features.push_back({L"", {{0, charge(pixels * 44 * frames + maskBytes, primary)}}});
-        return Admit(console, features, adapters, usage, budget, raw, shadows, size, pipeline.PresentedFrames());
+        return Admit(console, features, adapters, usage, budget, raw, shadows, size, pipeline.PresentedFrames(), UINT(face));
     }
 
 private:
     Result Admit(ConsoleModule& console, std::vector<Feature>& features, const std::vector<DeviceDesc>& adapters,
                  const Charges& usage, const Charges& budget, const Charges& raw, const Charges& shadows, uint32_t size,
-                 uint64_t presented)
+                 uint64_t presented, UINT probeSide)
     {
         const Bytes frames = console.FindConsoleVariable(L"Render.NumFrames").GetUInt();
         Charges occupied = usage;
@@ -259,12 +278,21 @@ private:
             for (const auto& f : features)
             {
                 const auto previous = _accepted.find(f.Key);
-                const auto& costs = f.Levels[f.Selected].Cost;
+                const auto& level = f.Levels[f.Selected];
+                const auto& costs = level.Cost;
+                const bool probe = std::wstring_view(f.Key) == ProbeAdapterKey;
+                const bool sameProbeGeneration = probe && level.Value == _acceptedProbeAdapter &&
+                    probeSide == _acceptedProbeSide;
                 for (size_t i = 0; i < costs.size(); ++i)
                 {
                     total[i] += costs[i];
                     const Bytes old = previous == _accepted.end() ? 0 : previous->second[i];
-                    if (costs[i] != old)
+                    if (sameProbeGeneration)
+                    {
+                        // Frozen scene inputs refine the size of a live mirror, not a second mirror.
+                        if (costs[i] > old) growth[i] += costs[i] - old;
+                    }
+                    else if (costs[i] != old || (probe && level.Value >= 0))
                     {
                         // Sun atlases shrink one retired slot at a time. The first replacement is the peak.
                         const bool shrinkingSun = costs[i] < old && std::wstring_view(f.Key) == L"Render.Shadows.Sun.Resolution";
@@ -365,7 +393,14 @@ private:
             _replacementUntil = presented + frames;
         }
         _accepted.clear();
-        for (const auto& f : features) _accepted.emplace(f.Key, f.Levels[f.Selected].Cost);
+        _acceptedProbeAdapter = -1;
+        _acceptedProbeSide = probeSide;
+        for (const auto& f : features)
+        {
+            const auto& level = f.Levels[f.Selected];
+            _accepted.emplace(f.Key, level.Cost);
+            if (std::wstring_view(f.Key) == ProbeAdapterKey) _acceptedProbeAdapter = level.Value;
+        }
         _revision = IConsoleVariable::ValueRevision();
         _size = size;
         return patch.empty() ? Result::Fits : Result::Limited;

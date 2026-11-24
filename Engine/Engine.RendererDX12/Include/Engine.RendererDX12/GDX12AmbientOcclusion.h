@@ -34,6 +34,7 @@ struct GDX12AOSettings
 
 // One validated snapshot per frame; resolving presets never writes back to CVars.
 GDX12AOSettings GetAmbientOcclusionSettings();
+GDX12AOSettings GetAmbientOcclusionSettings(int quality);
 
 // 0 after depth prepass, 1 before deferred lighting. Snapshotted by RenderModule.
 int GetAmbientOcclusionExecutionPoint();

@@ -862,14 +862,6 @@ void SceneLocalShadows::UpdateLights(Slot& frame)
 		source.ShadowFlags &= ~ShadowEveryFrame;
 		source.ShadowFirstSlice = 0;
 		auto& cached = frame.Cache[i];
-		const bool latest = std::find(_latestPlacements.begin(), _latestPlacements.end(),
-		                                      GetLocalShadowKey(source)) != _latestPlacements.end();
-		if (cached.Latest != latest)
-		{
-			cached.MapsValid = cached.LocalFallback = 0;
-			cached.PublicationOrders = {};
-		}
-		cached.Latest = latest;
 		if (ShouldRenderLocalShadow(source, cached.HasLight ? &cached.Light : nullptr) ||
 		    (source.ShadowFlags & ShadowEnabled) != (cached.Light.ShadowFlags & ShadowEnabled))
 		{
@@ -954,6 +946,7 @@ void SceneLocalShadows::Submitted(UINT slot)
 		auto& cache = frame.Cache[view.Light];
 		cache.MapsValid |= 1u << view.Face;
 		cache.ResidentFaces |= 1u << view.Face;
+		cache.RemoteFaces &= ~(1u << view.Face);
 	}
 	for (const auto& view : frame.RemoteViews)
 	{
@@ -1161,7 +1154,8 @@ void SceneLocalShadows::UpdateLayout(const Slot& frame, UINT effectiveCeiling)
 	_previousPlacement.swap(placements);
 }
 
-void SceneLocalShadows::Allocate(UINT slot, SceneLocalShadows& staticPass, UINT effectiveCeiling)
+void SceneLocalShadows::Allocate(UINT slot, SceneLocalShadows& staticPass, UINT effectiveCeiling,
+                                const std::vector<ShadowCrossSync>& pageSync)
 {
 	auto& frame = _slots.at(slot);
 	auto& statics = staticPass._slots.at(slot);
@@ -1186,6 +1180,7 @@ void SceneLocalShadows::Allocate(UINT slot, SceneLocalShadows& staticPass, UINT 
 						cache.MapsValid &= mask;
 						cache.ResidentFaces &= mask;
 						cache.LocalFallback &= mask;
+					cache.RemoteFaces &= mask;
 						cache.ContentVersions[face] = 0;
 						cache.PublicationOrders[face] = 0;
 					}
@@ -1197,6 +1192,18 @@ void SceneLocalShadows::Allocate(UINT slot, SceneLocalShadows& staticPass, UINT 
 		// A named tile is sampled only after its queued update or an already
 		// resident map. Partial per-slot admission makes whole lights flicker.
 		auto& cache = frame.Cache[i];
+		UINT latest = 0;
+		for (UINT face = 0; face < LocalShadowFaceCount(cache.Light); ++face)
+		{
+			const auto& tile = cache.Tiles[face];
+			const UINT bit = 1u << face;
+			if (tile.Side && pageSync.at(tile.Page) == ShadowCrossSync::Latest) latest |= bit;
+			if ((cache.LatestFaces ^ latest) & bit) cache.PublicationOrders[face] = 0;
+		}
+		const UINT changed = cache.LatestFaces ^ latest;
+		cache.MapsValid &= ~changed;
+		cache.LocalFallback &= ~changed;
+		cache.LatestFaces = latest;
 		cache.ReadyFaces = cache.Resolution ? cache.Needed : 0;
 		statics.Cache[i].ReadyFaces = cache.ReadyFaces;
 	}
@@ -1324,7 +1331,7 @@ void SceneLocalShadows::ResetLayout()
 			cache.Tiles = {};
 			cache.ContentVersions = {};
 			cache.PublicationOrders = {};
-			cache.MapsValid = cache.ResidentFaces = cache.ReadyFaces = cache.LocalFallback = 0;
+			cache.MapsValid = cache.ResidentFaces = cache.ReadyFaces = cache.LocalFallback = cache.RemoteFaces = cache.LatestFaces = 0;
 		}
 	}
 }

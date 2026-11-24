@@ -313,6 +313,7 @@ void SceneGeometry::Freeze(UINT index, UINT camera, std::vector<GDX12SkinningWor
 		destination.Source->Unmap(0, nullptr);
 		destination.Revision = revision;
 		destination.Origin = buffer->GetResource().D3DResource;
+		++destination.ContentRevision;
 	};
 	input(s.Buffers[SceneInstances], f.InstanceCache, true);
 	input(s.Buffers[SceneCommands], _resources.IndirectCommandsCache);
@@ -591,6 +592,7 @@ void SceneGeometry::DrainSkinning()
 void SceneGeometry::AppendWorldCanvases(Graph& graph, UINT index, const std::vector<CanvasRead>& textureReads)
 {
 	auto& s = _slots.at(index);
+	s.ProbeCanvases.clear();
 	if (s.CanvasDraws.empty())
 	{
 		return;
@@ -607,6 +609,7 @@ void SceneGeometry::AppendWorldCanvases(Graph& graph, UINT index, const std::vec
 		if (materials[read.MaterialIndex].DiffuseIndex != read.TextureIndex)
 			throw std::logic_error("World canvas draw uses a different material texture");
 		operation.Accesses.push_back(read.Texture);
+		s.ProbeCanvases.push_back(read.Image);
 	}
 	for (Id id : {SceneInstances, SceneMaterials, SceneTransforms})
 	{
@@ -1051,7 +1054,7 @@ std::unordered_set<ID3D12Resource*> SceneGeometry::LiveProbeInputs() const
 }
 
 std::unordered_set<ID3D12Resource*> SceneGeometry::LiveProbeCaptureInputs(
-    SceneEnvironment& environment, std::vector<GDX12Texture*>* materialTextures) const
+    SceneEnvironment& environment, UINT slot, std::vector<GDX12Texture*>* materialTextures) const
 {
 	auto live = LiveProbeInputs();
 	for (const auto& frame : _resources.FrameConstants)
@@ -1063,13 +1066,64 @@ std::unordered_set<ID3D12Resource*> SceneGeometry::LiveProbeCaptureInputs(
 	}
 	if (auto* transmittance = environment.CaptureTransmittance())
 		live.insert(transmittance->GetResource()->D3DResource.Get());
-	for (const auto& [name, texture] : _resources.Textures)
-	{
+	const auto textureIndex = [](GDX12Texture* texture) {
 		const UINT index = texture->GetSRV()->HeapIndex;
-		if (index < Texture2D_StartIndex || index >= Texture2D_StartIndex + Texture2D_RangeLength) continue;
-		live.insert(texture->GetResource()->D3DResource.Get());
-		if (materialTextures) materialTextures->push_back(texture.get());
+		return index >= Texture2D_StartIndex && index < Texture2D_StartIndex + Texture2D_RangeLength ?
+		    index - Texture2D_StartIndex : UINT_MAX;
+	};
+	if (slot >= _slots.size() || !_slots[slot].Buffers[SceneInstances].Data)
+	{
+		// Preflight budgets run before a new frame slot is populated.
+		for (const auto& [name, texture] : _resources.Textures)
+			if (textureIndex(texture.get()) != UINT_MAX)
+				live.insert(texture->GetResource()->D3DResource.Get());
+		live.erase(nullptr);
+		return live;
 	}
+	const auto& scene = _slots.at(slot);
+	const auto& frame = *_resources.FrameConstants.at(slot);
+	const auto* materials = frame.MaterialCache->GetCPUData();
+	const UINT materialCount = frame.MaterialCache->GetElementCount();
+	std::unordered_set<UINT> textureIndices;
+	const auto addMaterial = [&](UINT index, bool mesh = false) {
+		if (index >= materialCount) return;
+		const auto& material = materials[index];
+		if (mesh && (material.RenderLayer == UINT(MaterialType::Transparent) || material.ReflectionProbePreview)) return;
+		textureIndices.insert(material.DiffuseIndex);
+		if (material.Flags & 1u) textureIndices.insert(material.NormalIndex);
+		if (material.Flags & 2u) textureIndices.insert(material.SpecularIndex);
+		if (material.Flags & 4u) textureIndices.insert(material.RoughnessIndex);
+		if (material.Flags & 8u) textureIndices.insert(material.EmissiveIndex);
+	};
+	const auto* instances = frame.InstanceCache->GetCPUData();
+	const UINT instanceCount = frame.InstanceCache->GetElementCount();
+	const auto* draws = _resources.IndirectCommandsCache->GetCPUData();
+	const UINT drawCount = (std::min)(scene.Draws, _resources.IndirectCommandsCache->GetElementCount());
+	for (UINT draw = 0; draw < drawCount; ++draw)
+		if (draws[draw].InstanceCount && draws[draw].InstanceID < instanceCount)
+			addMaterial(instances[draws[draw].InstanceID].MaterialIndex, true);
+	if (scene.Batches)
+		for (UINT i = 0; i < instanceCount; ++i)
+			if (instances[i].SkinBatch != UINT_MAX)
+				addMaterial(instances[i].MaterialIndex);
+	for (const auto& grass : _grass->Primitives())
+		if (grass.Visible && grass.CapturedInReflections)
+			addMaterial(grass.MaterialIndex);
+	if (scene.Linden)
+		for (const auto& batch : scene.Linden->Batches)
+			addMaterial(batch.MaterialIndex);
+
+	const auto addTexture = [&](GDX12Texture* texture) {
+		const UINT index = textureIndex(texture);
+		if (index == UINT_MAX || !textureIndices.erase(index)) return;
+		live.insert(texture->GetResource()->D3DResource.Get());
+		if (materialTextures) materialTextures->push_back(texture);
+	};
+	if (materialTextures)
+		for (auto* texture : scene.ProbeCanvases)
+			addTexture(texture);
+	for (const auto& [name, texture] : _resources.Textures)
+		addTexture(texture.get());
 	live.erase(nullptr);
 	return live;
 }

@@ -20,6 +20,9 @@ class SceneAO
             GDX12Texture* depth, GDX12Texture* normals);
     ~SceneAO();
     static bool SupportsRemote(const GDX12AOSettings&, bool depthNormals);
+    struct MemoryEstimate { uint64_t Primary = 0, Secondary = 0; };
+    static MemoryEstimate EstimateMemory(const GDX12AOSettings&, UINT width, UINT height, UINT frames,
+                                         bool remote, bool delayed, bool secondaryBlur);
     void Freeze(GDX12Texture* depth, GDX12Texture* normals, GDX12Texture* motion, GDX12Texture* earlyNormals, UINT& temporalIndex,
                 const std::shared_ptr<QueueSubmission>& submit, Id remoteDevice, History&);
     void AppendEarlyInputs(Graph&, std::vector<ID3D12Resource*>&, Id ready);
@@ -54,6 +57,8 @@ class SceneAO
     void AppendReprojection(Plan&, const PreparedInputs&, GDX12Texture& source, GDX12Texture& target,
                             float scale = 1.f, bool terms = false);
     GDX12Texture* AppendVisibility(Plan&, const PreparedInputs&);
+    static UINT GridResources(const GDX12AOSettings&, UINT width, UINT height,
+                              bool remote, bool delayed, bool secondaryBlur);
     bool UsesNeutralOutput() const { return !_settings.IsActive() || (_width == 1 && _height == 1); }
 
     GDX12DeviceResources& _resources;

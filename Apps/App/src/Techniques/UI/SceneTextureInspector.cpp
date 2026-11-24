@@ -99,6 +99,12 @@ void SceneTextureInspector::Name(const char* name, GDX12Texture* texture, View v
 		_named.push_back({name, resource, format, view});
 }
 
+bool SceneTextureInspector::RequestsTexture(std::string_view name) const
+{
+	return (NeedsReadback(name) && !_readback.Buffer.Get()) ||
+	    (Visible() && ImGui::GetCurrentContext() && std::find(_selected.begin(), _selected.end(), name) != _selected.end());
+}
+
 std::vector<SceneTextureInspector::Source> SceneTextureInspector::Collect(Graph& graph,
     std::vector<ID3D12Resource*>& bindings, ID3D12Resource* backBuffer, bool raw)
 {

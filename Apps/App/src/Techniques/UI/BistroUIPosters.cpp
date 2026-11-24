@@ -499,7 +499,7 @@ struct BistroUIPosters::Impl
             const auto access = Bind(graph, bindings, Native(target), "canvas material texture",
                 Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
             frame.Output = access.Resource;
-            reads.push_back({access, surface->Material->_CBufferIndex, target.GetSRV()->HeapIndex - Texture2D_StartIndex});
+            reads.push_back({access, surface->Material->_CBufferIndex, target.GetSRV()->HeapIndex - Texture2D_StartIndex, &target});
         }
         return reads;
     }

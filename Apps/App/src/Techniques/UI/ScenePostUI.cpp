@@ -284,7 +284,7 @@ struct ScenePostUI::RemotePost
 	struct Frame
 	{
 		std::unique_ptr<ProbeInputMirror> Inputs;
-		std::array<GDX12Texture, 4> Views;
+		std::array<std::unique_ptr<GDX12Texture>, 4> Views;
 		std::unique_ptr<GDX12Texture> Preview, ImportedHud, Output;
 		ScreenTransfer Hud, Inspector, Display;
 		Graph Plan;
@@ -661,14 +661,14 @@ Id ScenePostUI::AppendFrameGeneration(Graph& graph, std::vector<ID3D12Resource*>
 }
 Id ScenePostUI::AppendReconstruction(Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12Texture* hdr,
                                      GDX12Texture* depth, GDX12Texture* motion, GDX12Texture* featureMotion,
-                                     GDX12Texture* target, std::vector<Id> dependencies)
+                                     GDX12Texture* target, bool completeMotionRequired, std::vector<Id> dependencies)
 {
 	const auto resource = [](GDX12Texture* texture) { return texture->GetResource(); };
-	_blur.PrepareRecording((_reconstruction.GetFlags() & RENDER_PASS_FLAG_USE_JITTER) ||
-	                       GetFrameGenerationProvider() != GDX12FrameGenerationProvider::Off);
+	_blur.PrepareRecording(completeMotionRequired);
 	auto* color = _blur.GetOutput(0)->GetTexture();
 	auto* completeMotion = _blur.GetOutput(1)->GetTexture();
-	_reconstruction.SetInputs({depth, completeMotion, color});
+	const bool temporal = _reconstruction.GetFlags() & RENDER_PASS_FLAG_USE_JITTER;
+	_reconstruction.SetInputs({temporal ? depth : color, temporal ? completeMotion : color, color});
 	if (_reconstruction._needsInitialize)
 	{
 		_reconstruction.Initialize();
@@ -739,7 +739,7 @@ Id ScenePostUI::AppendReconstruction(Graph& graph, std::vector<ID3D12Resource*>&
 		{
 			std::vector<std::pair<GDX12Resource*, Mode>> accesses{{resource(color), Mode::Read},
 			                                                      {resource(reconstructed), Mode::ReadWrite}};
-			if (_reconstruction.GetFlags() & RENDER_PASS_FLAG_USE_JITTER)
+			if (temporal)
 			{
 				accesses.emplace_back(resource(depth), Mode::Read);
 				accesses.emplace_back(resource(completeMotion), Mode::Read);
@@ -941,18 +941,29 @@ void ScenePostUI::AppendScreen(Graph& graph, std::vector<ID3D12Resource*>& bindi
 	Packet(graph, bindings, "frame end / PRESENT handoff", {{resource(target), Mode::ReadWrite}}, finish, {screenId},
 	       nullptr, D3D12_RESOURCE_STATE_PRESENT);
 }
+ScenePostUI::InputNeeds ScenePostUI::RequiredInputs(GDX12Texture& hdr)
+{
+	const bool completeMotion = (_reconstruction.GetFlags() & RENDER_PASS_FLAG_USE_JITTER) ||
+	    _swapchain->GetFrameGeneration().GetStatus().Effective != GDX12FrameGenerationProvider::Off;
+	return {_dof.IsActive(hdr), completeMotion || GetMotionBlurSettings().Enabled, completeMotion};
+}
+
 Id ScenePostUI::AppendStack(Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12Texture* hdr, GDX12Texture* depth,
-                         GDX12Texture* motion, GDX12Texture* featureMotion, GDX12Texture* target,
+                         GDX12Texture* motion, GDX12Texture* featureMotion, GDX12Texture* target, const InputNeeds& needs,
                          std::vector<Id> dependencies)
 {
-	if (!hdr || !depth || !motion || !target || hdr->GetWidth() != depth->GetWidth() ||
-	    hdr->GetHeight() != depth->GetHeight() || hdr->GetWidth() != motion->GetWidth() ||
-	    hdr->GetHeight() != motion->GetHeight())
+	const auto matchesHdr = [hdr](GDX12Texture* texture)
 	{
-		throw std::invalid_argument("Ordinary post requires matching HDR/depth/motion grids");
+		return texture && hdr->GetWidth() == texture->GetWidth() && hdr->GetHeight() == texture->GetHeight();
+	};
+	if (!hdr || !target || (needs.Depth() && !matchesHdr(depth)) ||
+	    (needs.Motion && (!matchesHdr(motion) || (featureMotion && !matchesHdr(featureMotion)))))
+	{
+		throw std::invalid_argument("Active Bistro post inputs must match the HDR grid");
 	}
-	_dof.SetInputs({hdr, depth});
-	if (_dof.IsActive())
+	// The pass links require non-null slots even when their effects only use color.
+	_dof.SetInputs({hdr, needs.DoF ? depth : hdr});
+	if (needs.DoF)
 	{
 		if (!_dof._output.IsInitialized())
 		{
@@ -974,7 +985,7 @@ Id ScenePostUI::AppendStack(Graph& graph, std::vector<ID3D12Resource*>& bindings
 	{
 		_dof.PrepareRecording(); // Notify temporal SR even when no DoF packet is needed.
 	}
-	_blur.SetInputs({hdr, depth, motion});
+	_blur.SetInputs({hdr, needs.Motion ? depth : hdr, needs.Motion ? motion : hdr});
 	if (!_initialized)
 	{
 		_blur.Initialize();
@@ -985,18 +996,21 @@ Id ScenePostUI::AppendStack(Graph& graph, std::vector<ID3D12Resource*>& bindings
 		_blur.Resize();
 	}
 	const auto output =
-	    AppendReconstruction(graph, bindings, hdr, depth, motion, featureMotion, target, std::move(dependencies));
+	    AppendReconstruction(graph, bindings, hdr, depth, motion, featureMotion, target, needs.CompleteMotion,
+	        std::move(dependencies));
 	return AppendFrameGeneration(graph, bindings, depth, output);
 }
 void ScenePostUI::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12Texture* hdr,
     GDX12Texture* depth, GDX12Texture* motion, GDX12Texture* featureMotion, GDX12Texture* target,
     const std::function<void(GDX12CommandList*)>& finish)
 {
+	if (!hdr || !target) throw std::invalid_argument("Bistro post requires HDR and a display target");
+	const auto needs = (_remotePost ? *_remotePost->Stack : *this).RequiredInputs(*hdr);
 	if (_remotePost)
-		AppendRemotePost(graph, bindings, hdr, depth, motion, featureMotion, target, finish);
+		AppendRemotePost(graph, bindings, hdr, depth, motion, featureMotion, target, needs, finish);
 	else
 	{
-		const auto output = AppendStack(graph, bindings, hdr, depth, motion, featureMotion, target);
+		const auto output = AppendStack(graph, bindings, hdr, depth, motion, featureMotion, target, needs);
 		AppendScreen(graph, bindings, target, finish, output,
 		    CaptureScreen(graph, bindings, target->GetResource()->D3DResource.Get()));
 	}
@@ -1004,7 +1018,7 @@ void ScenePostUI::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, G
 
 void ScenePostUI::AppendRemotePost(Graph& scene, std::vector<ID3D12Resource*>& sceneBindings, GDX12Texture* hdr,
     GDX12Texture* depth, GDX12Texture* motion, GDX12Texture* featureMotion, GDX12Texture* target,
-    const std::function<void(GDX12CommandList*)>& finish)
+    const InputNeeds& needs, const std::function<void(GDX12CommandList*)>& finish)
 {
 	auto& owner = *_remotePost;
 	auto& stack = *owner.Stack;
@@ -1012,10 +1026,13 @@ void ScenePostUI::AppendRemotePost(Graph& scene, std::vector<ID3D12Resource*>& s
 	if (!owner.GPU.TryBegin(slot)) owner.GPU.Begin(slot);
 	_inspector.RetireReadback(owner.Owner, slot);
 	owner.Resources.CurrFrameConstantsIndex = slot;
-	const UINT cameraIndex = _common.ActiveCameraCBufferIndex;
-	auto& camera = *owner.Resources.FrameConstants.at(slot)->CameraCB;
-	if (camera.GetElementCount() <= cameraIndex) camera.Resize(cameraIndex + 1);
-	camera.CopyData(cameraIndex, _resources.FrameConstants.at(slot)->CameraCB->GetCPUData()[cameraIndex]);
+	if (needs.Motion)
+	{
+		const UINT cameraIndex = _common.ActiveCameraCBufferIndex;
+		auto& camera = *owner.Resources.FrameConstants.at(slot)->CameraCB;
+		if (camera.GetElementCount() <= cameraIndex) camera.Resize(cameraIndex + 1);
+		camera.CopyData(cameraIndex, _resources.FrameConstants.at(slot)->CameraCB->GetCPUData()[cameraIndex]);
+	}
 	stack.BeginPlan(owner.GPU, _hudFrame);
 
 	auto& frame = owner.Frames.at(slot);
@@ -1030,9 +1047,18 @@ void ScenePostUI::AppendRemotePost(Graph& scene, std::vector<ID3D12Resource*>& s
 	frame.HudBytes = frame.UiBytes = 0;
 	frame.HudOwner = Invalid;
 	const auto native = [](GDX12Texture* texture) { return texture->GetResource()->D3DResource.Get(); };
-	const std::array sources{hdr, depth, motion, featureMotion};
+	constexpr std::array names{"Post.Owner.HDR", "Post.Owner.Depth", "Post.Owner.Motion", "Post.Owner.FeatureMotion"};
+	using View = SceneTextureInspector::View;
+	constexpr std::array views{View::HDR, View::Depth, View::Motion, View::Motion};
+	const std::array required{true, needs.Depth(), needs.Motion, needs.Motion};
+	std::array sources{hdr, depth, motion, featureMotion};
 	std::unordered_set<ID3D12Resource*> live;
-	for (auto* source : sources) if (source) live.insert(native(source));
+	for (UINT i = 0; i < sources.size(); ++i)
+	{
+		if (!required[i] && !_inspector.RequestsTexture(names[i])) sources[i] = nullptr;
+		if (sources[i]) live.insert(native(sources[i]));
+		else frame.Views[i].reset();
+	}
 	frame.Inputs->Begin();
 	frame.Inputs->RetireUnused(live, [](auto*) {});
 	std::array<GDX12Texture*, 4> inputs{};
@@ -1044,7 +1070,8 @@ void ScenePostUI::AppendRemotePost(Graph& scene, std::vector<ID3D12Resource*>& s
 		auto* copy = frame.Inputs->Mirror(scene, sceneBindings, native(source), id, true);
 		frame.Bytes[i] = frame.Inputs->PendingTransferBytes(native(source));
 		auto& view = frame.Views[i];
-		if (!view.IsInitialized() || native(&view) != copy)
+		if (!view) view = std::make_unique<GDX12Texture>();
+		if (!view->IsInitialized() || native(view.get()) != copy)
 		{
 			GDX12TextureDesc desc;
 			desc.Width = source->GetWidth();
@@ -1052,12 +1079,14 @@ void ScenePostUI::AppendRemotePost(Graph& scene, std::vector<ID3D12Resource*>& s
 			desc.Format = source->GetFormat();
 			desc.SRVDesc = source->ShaderViewDescription();
 			desc.SRV_UAV_Heap = owner.Resources.SRV_UAV_Heap.get();
-			desc.SRVHeapIndex = view.IsInitialized() ? view.GetSRV()->HeapIndex
+			desc.SRVHeapIndex = view->IsInitialized() ? view->GetSRV()->HeapIndex
 			    : desc.SRV_UAV_Heap->GetAvailableIndex(SceneDescriptorStart);
 			desc.ExternalResource = ComPtr<ID3D12Resource>(copy);
-			view.Initialize(desc);
+			view->Initialize(desc);
 		}
-		inputs[i] = &view;
+		inputs[i] = view.get();
+		if (SceneTextureInspector::Visible() || _inspector.NeedsReadback(names[i]))
+			stack._inspector.Name(names[i], view.get(), views[i]);
 	}
 	frame.BundleBytes = frame.Inputs->TransferBytes();
 	frame.Export = frame.Inputs->AppendExport(scene, sceneBindings, _work, Queue::Direct);
@@ -1073,7 +1102,7 @@ void ScenePostUI::AppendRemotePost(Graph& scene, std::vector<ID3D12Resource*>& s
 		output = frame.Output.get();
 	}
 	const Id post = stack.AppendStack(frame.Plan, frame.Bindings, inputs[0], inputs[1], inputs[2], inputs[3], output,
-	    {frame.SceneImport});
+	    needs, {frame.SceneImport});
 	const SceneTextureInspector::Input postTextures{stack._inspector, frame.Plan, frame.Bindings, stack._work,
 	    *owner.Resources.Device, native(output)};
 	_inspector.AppendReadback(postTextures, slot, false);
@@ -1229,7 +1258,7 @@ void ScenePostUI::PostPresented()
 	    " swapchain=", submit.AdapterLabel(owner.Direct ? owner.Owner : 0),
 	    " provider=", int(status.Effective), " quality=", int(status.Requested.Quality),
 	    " FG=", int(_swapchain->GetFrameGeneration().GetStatus().Effective),
-	    " render=", frame.Views[0].GetWidth(), "x", frame.Views[0].GetHeight(),
+	    " render=", frame.Views[0]->GetWidth(), "x", frame.Views[0]->GetHeight(),
 	    " display=", _common.WindowWidth, "x", _common.WindowHeight,
 	    " hdrBytes=", frame.Bytes[0], " depthBytes=", frame.Bytes[1], " motionBytes=", frame.Bytes[2],
 	    " featureMotionBytes=", frame.Bytes[3], " sceneBundleBytes=", frame.BundleBytes,
