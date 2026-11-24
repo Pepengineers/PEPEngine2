@@ -125,6 +125,9 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12DeferredLightingPass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12SkyBoxPass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12IBLPrecomputePass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -208,6 +211,9 @@
     <ClCompile Include="src\GDX12DeferredLightingPass.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\GDX12SkyBoxPass.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="src\GDX12IBLPrecomputePass.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -268,6 +274,7 @@
     <None Include="Shaders\FullScreenVS.hlsl" />
     <None Include="Shaders\DeferredGeometryPass.hlsl" />
     <None Include="Shaders\DeferredLightingPass.hlsl" />
+    <None Include="Shaders\SkyBoxPass.hlsl" />
     <None Include="Shaders\IBLPrecomputePass.hlsl" />
     <None Include="Shaders\PBRMath.hlsli" />
     <None Include="Shaders\ShadowSampling.hlsli" />

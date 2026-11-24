@@ -24,6 +24,7 @@ namespace
         auto opaque = graph.AddPrimaryGPUPass<GDX12DeferredGeometryPass>("Opaque");
         auto ibl = graph.AddPrimaryGPUPass<GDX12IBLPrecomputePass>("IBL Precompute");
         auto lighting = graph.AddPrimaryGPUPass<GDX12DeferredLightingPass>("Deferred Lighting");
+        auto skyBox = graph.AddPrimaryGPUPass<GDX12SkyBoxPass>("SkyBox");
         auto transparency = graph.AddPrimaryGPUPass<GDX12WBOITTransparencyPass>("Transparency");
         auto composition = graph.AddPrimaryGPUPass<GDX12WBOITCompositionPass>("Composition");
         auto clear = graph.AddPrimaryGPUPass<GDX12TextureClearPass>("Back Buffer Clear");
@@ -39,7 +40,11 @@ namespace
         graph.ConnectNodes(culling.GetOutput("OutOpaqueDrawStream"), opaque.GetInput("InDrawStream"));
         graph.ConnectNodes(culling.GetOutput("OutTransparentDrawStream"), transparency.GetInput("InDrawStream"));
         graph.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), transparency.GetInput("InDepthBuffer"));
-        graph.ConnectNodes(inputs.EnvironmentMap, ibl.GetInput("InEnvironmentMap"));
+        graph.ConnectNodes(inputs.SkyBoxMap, ibl.GetInput("InSkyBoxMap"));
+        graph.ConnectNodes(inputs.SkyBoxMap, skyBox.GetInput("InSkyBoxMap"));
+        graph.ConnectNodes(lighting.GetOutput("OutColorTexture"), skyBox.GetInput("InColorTexture"));
+        graph.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), skyBox.GetInput("InDepthBuffer"));
+        graph.ConnectNodes(opaque.GetOutput("OutVelocityBuffer"), skyBox.GetInput("InVelocityBuffer"));
         graph.ConnectNodes(ibl.GetOutput("OutIrradiance"), lighting.GetInput("InIrradiance"));
         graph.ConnectNodes(ibl.GetOutput("OutPrefilteredEnvironment"), lighting.GetInput("InPrefilteredEnvironment"));
         graph.ConnectNodes(ibl.GetOutput("OutBRDFLut"), lighting.GetInput("InBRDFLut"));
@@ -55,12 +60,12 @@ namespace
         graph.ConnectNodes(shadows.GetOutput("OutPointSpotMaps"), lighting.GetInput("InPointSpotMaps"));
         graph.ConnectNodes(shadows.GetOutput("OutDirectionalMaps"), transparency.GetInput("InDirectionalMaps"));
         graph.ConnectNodes(shadows.GetOutput("OutPointSpotMaps"), transparency.GetInput("InPointSpotMaps"));
-        graph.ConnectNodes(lighting.GetOutput("OutColorTexture"), composition.GetInput("InOpaqueTexture"));
+        graph.ConnectNodes(skyBox.GetOutput("OutColorTexture"), composition.GetInput("InOpaqueTexture"));
         graph.ConnectNodes(transparency.GetOutput("OutAccumulationTexture"), composition.GetInput("InAccumulationTexture"));
         graph.ConnectNodes(transparency.GetOutput("OutRevealageTexture"), composition.GetInput("InRevealageTexture"));
         graph.ConnectNodes(composition.GetOutput("OutColorTexture"), upscale.GetInput("InColorTexture"));
         graph.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), upscale.GetInput("InDepthBuffer"));
-        graph.ConnectNodes(opaque.GetOutput("OutVelocityBuffer"), upscale.GetInput("InVelocityBuffer"));
+        graph.ConnectNodes(skyBox.GetOutput("OutVelocityBuffer"), upscale.GetInput("InVelocityBuffer"));
         graph.ConnectNodes(upscale.GetOutput("OutColorTexture"), output.GetInput("InColorTexture"));
     }
 
@@ -72,6 +77,7 @@ namespace
         auto opaque = graph.AddPrimaryGPUPass<GDX12DeferredGeometryPass>("Opaque");
         auto ibl = graph.AddPrimaryGPUPass<GDX12IBLPrecomputePass>("IBL Precompute");
         auto lighting = graph.AddPrimaryGPUPass<GDX12DeferredLightingPass>("Deferred Lighting");
+        auto skyBox = graph.AddPrimaryGPUPass<GDX12SkyBoxPass>("SkyBox");
         auto transparency = graph.AddPrimaryGPUPass<GDX12WBOITTransparencyPass>("Transparency");
         auto composition = graph.AddPrimaryGPUPass<GDX12WBOITCompositionPass>("Composition");
         auto clear = graph.AddSecondaryGPUPass<GDX12TextureClearPass>("Back Buffer Clear");
@@ -87,7 +93,11 @@ namespace
         graph.ConnectNodes(culling.GetOutput("OutOpaqueDrawStream"), opaque.GetInput("InDrawStream"));
         graph.ConnectNodes(culling.GetOutput("OutTransparentDrawStream"), transparency.GetInput("InDrawStream"));
         graph.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), transparency.GetInput("InDepthBuffer"));
-        graph.ConnectNodes(inputs.EnvironmentMap, ibl.GetInput("InEnvironmentMap"));
+        graph.ConnectNodes(inputs.SkyBoxMap, ibl.GetInput("InSkyBoxMap"));
+        graph.ConnectNodes(inputs.SkyBoxMap, skyBox.GetInput("InSkyBoxMap"));
+        graph.ConnectNodes(lighting.GetOutput("OutColorTexture"), skyBox.GetInput("InColorTexture"));
+        graph.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), skyBox.GetInput("InDepthBuffer"));
+        graph.ConnectNodes(opaque.GetOutput("OutVelocityBuffer"), skyBox.GetInput("InVelocityBuffer"));
         graph.ConnectNodes(ibl.GetOutput("OutIrradiance"), lighting.GetInput("InIrradiance"));
         graph.ConnectNodes(ibl.GetOutput("OutPrefilteredEnvironment"), lighting.GetInput("InPrefilteredEnvironment"));
         graph.ConnectNodes(ibl.GetOutput("OutBRDFLut"), lighting.GetInput("InBRDFLut"));
@@ -103,12 +113,12 @@ namespace
         graph.ConnectNodes(shadows.GetOutput("OutPointSpotMaps"), lighting.GetInput("InPointSpotMaps"));
         graph.ConnectNodes(shadows.GetOutput("OutDirectionalMaps"), transparency.GetInput("InDirectionalMaps"));
         graph.ConnectNodes(shadows.GetOutput("OutPointSpotMaps"), transparency.GetInput("InPointSpotMaps"));
-        graph.ConnectNodes(lighting.GetOutput("OutColorTexture"), composition.GetInput("InOpaqueTexture"));
+        graph.ConnectNodes(skyBox.GetOutput("OutColorTexture"), composition.GetInput("InOpaqueTexture"));
         graph.ConnectNodes(transparency.GetOutput("OutAccumulationTexture"), composition.GetInput("InAccumulationTexture"));
         graph.ConnectNodes(transparency.GetOutput("OutRevealageTexture"), composition.GetInput("InRevealageTexture"));
         graph.ConnectNodes(composition.GetOutput("OutColorTexture"), upscale.GetInput("InColorTexture"));
         graph.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), upscale.GetInput("InDepthBuffer"));
-        graph.ConnectNodes(opaque.GetOutput("OutVelocityBuffer"), upscale.GetInput("InVelocityBuffer"));
+        graph.ConnectNodes(skyBox.GetOutput("OutVelocityBuffer"), upscale.GetInput("InVelocityBuffer"));
         graph.ConnectNodes(upscale.GetOutput("OutColorTexture"), output.GetInput("InColorTexture"));
     }
 

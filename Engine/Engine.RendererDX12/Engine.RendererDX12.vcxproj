@@ -38,6 +38,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12NISUpscalePass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12DeferredGeometryPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12DeferredLightingPass.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12SkyBoxPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12IBLPrecomputePass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12OutputToScreenPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12TextureClearPass.h" />
@@ -95,6 +96,7 @@
     <ClCompile Include="src\GDX12DLSSUpscalePass.cpp" />
     <ClCompile Include="src\GDX12DeferredGeometryPass.cpp" />
     <ClCompile Include="src\GDX12DeferredLightingPass.cpp" />
+    <ClCompile Include="src\GDX12SkyBoxPass.cpp" />
     <ClCompile Include="src\GDX12IBLPrecomputePass.cpp" />
     <ClCompile Include="src\GDX12FSRUpscalePass.cpp" />
     <ClCompile Include="src\GDX12GPUCullingPass.cpp" />
@@ -122,6 +124,7 @@
     <None Include="Shaders\FullScreenVS.hlsl" />
     <None Include="Shaders\DeferredGeometryPass.hlsl" />
     <None Include="Shaders\DeferredLightingPass.hlsl" />
+    <None Include="Shaders\SkyBoxPass.hlsl" />
     <None Include="Shaders\IBLPrecomputePass.hlsl" />
     <None Include="Shaders\PBRMath.hlsli" />
     <None Include="Shaders\ShadowSampling.hlsli" />

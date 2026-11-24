@@ -24,7 +24,7 @@ namespace
 void GDX12IBLPrecomputePass::Describe(PassDescription& description) const
 {
     description.RunOnceDuringSetup = true;
-    description.AddInputTexture("InEnvironmentMap", ResourceType::TextureCube).Usages = ResourceUsage::NonPixelShaderRead;
+    description.AddInputTexture("InSkyBoxMap", ResourceType::TextureCube).Usages = ResourceUsage::NonPixelShaderRead;
 
     auto& irradiance = description.AddOutputTexture("OutIrradiance", ResourceType::TextureCube);
     irradiance.Formats = {DXGI_FORMAT_R16G16B16A16_FLOAT};
@@ -69,7 +69,7 @@ void GDX12IBLPrecomputePass::Execute(PassExecutionContext& context)
     cmd->BeginPixEvent("Filter Environment Map", Colors::Gold);
     cmd->SetComputeRootSignature(_filterRoot.get());
     cmd->SetDescriptorHeaps({context.GetDeviceResources()->SRV_UAV_Heap.get()});
-    cmd->SetComputeSRV(0, context.GetInputTexture("InEnvironmentMap").GetSRV()->GPUHandle);
+    cmd->SetComputeSRV(0, context.GetInputTexture("InSkyBoxMap").GetSRV()->GPUHandle);
     cmd->SetComputeUAV(0, irradiance.GetUAV()->GPUHandle);
     cmd->SetComputeUAV(1, brdf.GetUAV()->GPUHandle);
     auto dispatch = [&](UINT size, float roughness, UINT faces)

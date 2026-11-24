@@ -108,10 +108,10 @@ public:
                         lightingCamera = &camera;
                         lightingView = view;
                         lightingProjection = proj;
-                        XMStoreFloat4x4(&objConstants.InvViewProj, XMMatrixTranspose(camera.ViewProj.Invert()));
                     }
 
                     XMStoreFloat4x4(&objConstants.ViewProj, XMMatrixTranspose(view * proj));
+                    XMStoreFloat4x4(&objConstants.InvViewProj, XMMatrixTranspose(camera.ViewProj.Invert()));
                     XMStoreFloat4x4(&objConstants.View, XMMatrixTranspose(view));
                     objConstants.CameraLocation = transform.Location;
                     objConstants.NearPlane = camera.NearPlane;

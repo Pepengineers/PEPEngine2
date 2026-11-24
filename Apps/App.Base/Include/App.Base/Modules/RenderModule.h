@@ -37,7 +37,7 @@ struct FrameGraphInputs
 {
     OutputPinRef BackBuffer;
     OutputPinRef DepthStencil;
-    OutputPinRef EnvironmentMap;
+    OutputPinRef SkyBoxMap;
 };
 
 class RenderModule final : public Module
@@ -153,7 +153,7 @@ private:
     void UnsubscribeFromSceneManager();
     void UnsubscribeFromAllWorlds();
 
-    GDX12Texture* GetEnvironmentMap(EDeviceRole role);
+    GDX12Texture* GetSkyBoxMap(EDeviceRole role);
     GDX12Texture* CreateDX12Texture(const std::string& name, GDX12DeviceResources* resources, const Texture* texture, ETextureType type);
 
     GameTimer* _timer;
