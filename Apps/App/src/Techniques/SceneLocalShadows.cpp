@@ -368,7 +368,7 @@ void SceneLocalShadows::InvalidateBounds(const BoundingBox& bounds, bool listsCh
 	{
 		for (auto& cache : slot.Cache)
 		{
-			const UINT valid = cache.MapsValid | (listsChanged ? cache.ListsValid : 0);
+			const UINT valid = cache.MapsValid | cache.StagedValid | (listsChanged ? cache.ListsValid : 0);
 			if (!valid || !LocalShadowRangeIntersects(cache.Light, bounds)) continue;
 			for (UINT face = 0; face < LocalShadowFaceCount(cache.Light); ++face)
 			{
@@ -377,6 +377,7 @@ void SceneLocalShadows::InvalidateBounds(const BoundingBox& bounds, bool listsCh
 				{
 					if (listsChanged) cache.ListsValid &= ~bit;
 					cache.MapsValid &= ~bit;
+					cache.StagedValid &= ~bit;
 				}
 			}
 		}
@@ -479,7 +480,7 @@ void SceneLocalShadows::UpdateCasters(UINT slot)
 		{
 			for (auto& cache : cachedSlot.Cache)
 			{
-				cache.MapsValid = 0;
+				cache.MapsValid = cache.StagedValid = 0;
 			}
 		}
 		_textureRevision = _resources.TextureRevision;
@@ -629,7 +630,7 @@ void SceneLocalShadows::RebuildCasters(UINT slot)
 	{
 		for (auto& cache : frame.Cache)
 		{
-			cache.ListsValid = cache.MapsValid = cache.LocalFallback = 0;
+			cache.ListsValid = cache.MapsValid = cache.StagedValid = cache.LocalFallback = 0;
 		}
 	}
 	_treeReady = true;
@@ -750,10 +751,10 @@ void SceneLocalShadows::CullJob::Execute(size_t index)
 	output.ScreenPixels = float(coverage.Area() * Frame->Width * Frame->Height / 4);
 }
 
-void SceneLocalShadows::GatherMissing(Slot& frame, UINT index)
+void SceneLocalShadows::GatherMissing(Slot& frame, UINT index, UINT faces)
 {
 	auto& cached = frame.Cache[index];
-	const UINT missing = cached.ReadyFaces & ~cached.ListsValid;
+	const UINT missing = faces & ~cached.ListsValid;
 	for (UINT face = 0; face < 6; ++face)
 	{
 		if (!(missing & (1u << face))) continue;
@@ -778,28 +779,33 @@ void SceneLocalShadows::Pack(Slot& frame)
 		light.ShadowFirstSlice = cached.ReadyFaces ? cached.FirstSlice : UINT_MAX;
 		light.ShadowFlags |= LocalShadowFaceMask;
 		light._padding[2] = cached.ReadyFaces;
-		if (light.ShadowFirstSlice == UINT_MAX) continue;
-		GatherMissing(frame, lightIndex);
-		if (frame.Indexed)
+		GatherMissing(frame, lightIndex, cached.ReadyFaces | cached.StageThisFrame);
+		if (frame.Indexed && light.ShadowFirstSlice != UINT_MAX)
 			SetLocalShadowAtlas(light, frame.Atlases.at(cached.Resolution).Texture.GetSRV()->HeapIndex);
 		const bool everyFrame = !_staticOnly && (light.ShadowFlags & ShadowEveryFrame);
 		const UINT dirty = cached.ReadyFaces & (everyFrame ? UINT_MAX : (~cached.MapsValid | cached.LocalFallback));
 		// Exact bootstrap may need faces that are valid only in this frame slot.
 		const UINT update = dirty && cached.Latest && !(cached.ReadyFaces & ~cached.ResidentFaces)
 		    ? cached.ReadyFaces : dirty;
-		for (UINT face = 0; face < LocalShadowFaceCount(light); ++face)
+		const auto append = [&](UINT mask, UINT side, UINT first, bool staged)
 		{
-			if (!(update & (1u << face))) continue;
-			const auto& commands = cached.Faces[face];
-			const size_t opaqueCount = commands.Opaque.size();
-			const size_t maskedCount = commands.Masked.size();
-			if (frame.Packed.size() + opaqueCount + maskedCount > UINT_MAX / sizeof(GDX12IndirectDrawArgs))
-				throw std::length_error("Local shadow indirect buffer exceeds the buffer size limit");
-			frame.Views.push_back({lightIndex, face, cached.FirstSlice + face, UINT(frame.Packed.size()),
-			                       UINT(opaqueCount), UINT(maskedCount), cached.Resolution, (dirty & (1u << face)) != 0});
-			frame.Packed.insert(frame.Packed.end(), commands.Opaque.begin(), commands.Opaque.end());
-			frame.Packed.insert(frame.Packed.end(), commands.Masked.begin(), commands.Masked.end());
-		}
+			for (UINT face = 0; face < LocalShadowFaceCount(light); ++face)
+			{
+				if (!(mask & (1u << face))) continue;
+				const auto& commands = cached.Faces[face];
+				const size_t opaqueCount = commands.Opaque.size();
+				const size_t maskedCount = commands.Masked.size();
+				if (frame.Packed.size() + opaqueCount + maskedCount > UINT_MAX / sizeof(GDX12IndirectDrawArgs))
+					throw std::length_error("Local shadow indirect buffer exceeds the buffer size limit");
+				frame.Views.push_back({lightIndex, face, first + face, UINT(frame.Packed.size()),
+				                       UINT(opaqueCount), UINT(maskedCount), side, (dirty & (1u << face)) != 0, staged});
+				frame.Packed.insert(frame.Packed.end(), commands.Opaque.begin(), commands.Opaque.end());
+				frame.Packed.insert(frame.Packed.end(), commands.Masked.begin(), commands.Masked.end());
+			}
+		};
+		append(update, cached.Resolution, cached.FirstSlice, false);
+		if (cached.StageThisFrame)
+			append(cached.StageThisFrame, frame.StagedLayout->Sizes[lightIndex], frame.StagedLayout->Starts[lightIndex], true);
 	}
 }
 
@@ -854,6 +860,7 @@ void SceneLocalShadows::UpdateLights(Slot& frame)
 	}
 	if (!sameLights)
 	{
+		frame.StagedLayout.reset();
 		++frame.LayoutRevision;
 		frame.Cache.clear();
 		frame.Cache.resize(frame.Lights.size());
@@ -877,7 +884,7 @@ void SceneLocalShadows::UpdateLights(Slot& frame)
 		if (ShouldRenderLocalShadow(source, cached.HasLight ? &cached.Light : nullptr) ||
 		    (source.ShadowFlags & ShadowEnabled) != (cached.Light.ShadowFlags & ShadowEnabled))
 		{
-			cached.ListsValid = cached.MapsValid = 0;
+			cached.ListsValid = cached.MapsValid = cached.StagedFaces = cached.StagedValid = 0;
 			cached.SelectionDirty = true;
 			cached.Frusta = std::array<GDX12LocalShadowFrustum, 6>{
 			    GDX12LocalShadowFrustum(source.ShadowViewProj[0]), GDX12LocalShadowFrustum(source.ShadowViewProj[1]),
@@ -947,37 +954,44 @@ void SceneLocalShadows::Complete(UINT slot)
 	{
 		frame.CommandUpload->CopyData(0, frame.Packed.data(), UINT(frame.Packed.size()));
 	}
-	for (auto& [resolution, atlas] : frame.Atlases)
-	{
-		if (_staticOnly) atlas.StaticDepthVersions.resize(atlas.Slices);
-		std::vector<bool> updated(atlas.Slices);
-		for (const auto& view : frame.Views)
+	for (const bool staged : {false, true})
+		for (auto& [resolution, atlas] : (staged ? frame.StagedAtlases : frame.Atlases))
 		{
-			if (view.Resolution != resolution) continue;
-			updated[view.Slice] = true;
-			if (_staticOnly) atlas.StaticDepthVersions[view.Slice] = ++_staticDepthVersion;
-			auto& descriptor = atlas.Dsvs[view.Slice];
-			if (descriptor) continue;
-			descriptor = std::make_unique<GDX12Descriptor>();
-			D3D12_DEPTH_STENCIL_VIEW_DESC dsv{};
-			dsv.Format = DXGI_FORMAT_D32_FLOAT;
-			dsv.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
-			dsv.Texture2DArray.FirstArraySlice = view.Slice;
-			dsv.Texture2DArray.ArraySize = 1;
-			descriptor->InitAsDSV(atlas.Texture.GetResource()->D3DResource.Get(), &dsv, _dsvHeap.get(),
-			                      _dsvHeap->GetAvailableIndex());
+			if (_staticOnly) atlas.StaticDepthVersions.resize(atlas.Slices);
+			std::vector<bool> updated(atlas.Slices);
+			for (const auto& view : frame.Views)
+			{
+				if (view.Resolution != resolution || view.Staged != staged) continue;
+				updated[view.Slice] = true;
+				if (_staticOnly) atlas.StaticDepthVersions[view.Slice] = ++_staticDepthVersion;
+				auto& descriptor = atlas.Dsvs[view.Slice];
+				if (descriptor) continue;
+				descriptor = std::make_unique<GDX12Descriptor>();
+				D3D12_DEPTH_STENCIL_VIEW_DESC dsv{};
+				dsv.Format = DXGI_FORMAT_D32_FLOAT;
+				dsv.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
+				dsv.Texture2DArray.FirstArraySlice = view.Slice;
+				dsv.Texture2DArray.ArraySize = 1;
+				descriptor->InitAsDSV(atlas.Texture.GetResource()->D3DResource.Get(), &dsv, _dsvHeap.get(),
+				                      _dsvHeap->GetAvailableIndex());
+			}
+			for (UINT slice = 0; slice < atlas.Slices; ++slice)
+				if (!updated[slice]) atlas.Dsvs[slice].reset();
 		}
-		for (UINT slice = 0; slice < atlas.Slices; ++slice)
-			if (!updated[slice]) atlas.Dsvs[slice].reset();
-	}
 }
 
 void SceneLocalShadows::Submitted(UINT slot)
 {
 	auto& frame = _slots.at(slot);
 	for (const auto& view : frame.Views)
-		{
+	{
 		auto& cache = frame.Cache[view.Light];
+		if (view.Staged)
+		{
+			cache.StagedFaces |= 1u << view.Face;
+			cache.StagedValid |= 1u << view.Face;
+			continue;
+		}
 		cache.MapsValid |= 1u << view.Face;
 		cache.ResidentFaces |= 1u << view.Face;
 	}
@@ -1129,8 +1143,9 @@ void SceneLocalShadows::Allocate(UINT slot, SceneLocalShadows& staticPass, const
 		const auto& primary = ShadowMemory::For(_resources.Device->GetAdapterLuid());
 		Bytes existing = primary.Allocated, replacement = 0;
 		for (const auto* current : {&frame, &statics})
-			for (const auto& [side, atlas] : current->Atlases)
-				existing -= atlas.Memory.Size();
+			for (const auto* atlases : {&current->Atlases, &current->StagedAtlases})
+				for (const auto& [side, atlas] : *atlases)
+					existing -= atlas.Memory.Size();
 		for (UINT tier = 1; tier < demand.size(); ++tier)
 			if (demand[tier].Slices)
 				replacement += 2 * depth(0, tiers[tier], capacity(tier), true);
@@ -1288,8 +1303,8 @@ void SceneLocalShadows::Allocate(UINT slot, SceneLocalShadows& staticPass, const
 	for (const auto& c : candidates)
 	{
 		const auto& current = frame.Cache[c.Index];
-		if (current.Resolution <= ceiling)
-			protectedFaces[c.Index] = current.Needed & current.MapsValid & statics.Cache[c.Index].MapsValid;
+		if (selected[c.Index] && current.Resolution <= ceiling)
+			protectedFaces[c.Index] = current.Needed & current.ReadyFaces & current.ResidentFaces & statics.Cache[c.Index].ResidentFaces;
 	}
 	const auto preservesPublishedFaces = [&]
 	{
@@ -1311,8 +1326,114 @@ void SceneLocalShadows::Allocate(UINT slot, SceneLocalShadows& staticPass, const
 		return true;
 	};
 	buildLayout();
+	auto& primary = *_resources.Device;
+	const auto discardStage = [&]
+	{
+		for (auto* current : {&frame, &statics})
+		{
+			current->StagedLayout.reset();
+			current->StagedAtlases.clear();
+			for (auto& cache : current->Cache)
+				cache.StagedFaces = cache.StagedValid = cache.StageThisFrame = 0;
+		}
+	};
+	const bool mustEvict = std::any_of(candidates.begin(), candidates.end(), [&](const Candidate& c)
+	{
+		const auto side = frame.Cache[c.Index].Resolution;
+		return side && (!selected[c.Index] || side > ceiling);
+	});
+	if (frame.StagedLayout)
+	{
+		const auto& target = *frame.StagedLayout;
+		const bool newReceiver = std::any_of(candidates.begin(), candidates.end(), [&](const Candidate& c)
+		{ return selected[c.Index] && !target.Sizes[c.Index]; });
+		if (mustEvict || newReceiver || !ShadowMemory::Fits(primary, 0) ||
+		    (!target.Capacities.empty() && target.Capacities.rbegin()->first > ceiling))
+			discardStage();
+	}
+	else if (!frame.StagedAtlases.empty())
+		discardStage();
+
+	// Only changed destination arrays need a second allocation while the published maps are read.
+	if (!frame.StagedLayout && !mustEvict && !preservesPublishedFaces())
+	{
+		ShadowLayout target{sizes, starts, {}};
+		std::map<UINT, UINT> replacements;
+		Bytes overlap = 0;
+		for (UINT tier = 1; tier < tiers.size(); ++tier)
+		{
+			const UINT side = tiers[tier], count = capacity(tier);
+			if (!count) continue;
+			target.Capacities.emplace(side, count);
+			const auto old = frame.Atlases.find(side);
+			const bool unchanged = old != frame.Atlases.end() && old->second.Slices == count &&
+			    std::all_of(candidates.begin(), candidates.end(), [&](const Candidate& c)
+			    {
+				    const auto& cache = frame.Cache[c.Index];
+				    return sizes[c.Index] != side || (cache.Resolution == side && cache.FirstSlice == starts[c.Index]);
+			    });
+			if (unchanged) continue;
+			replacements.emplace(side, count);
+			overlap += 2 * depth(0, side, count, true);
+		}
+		if (!replacements.empty() && ShadowMemory::Fits(primary, overlap))
+		{
+			frame.StagedLayout = target;
+			statics.StagedLayout = std::move(target);
+			for (const auto& [side, count] : replacements)
+			{
+				PrepareAtlas(frame, side, count, true);
+				staticPass.PrepareAtlas(statics, side, count, true);
+			}
+		}
+	}
+
+	bool holdingPublished = bool(frame.StagedLayout);
+	bool adoptingStage = false;
+	if (holdingPublished)
+	{
+		const auto& target = *frame.StagedLayout;
+		adoptingStage = std::all_of(candidates.begin(), candidates.end(), [&](const Candidate& c)
+		{
+			if (!frame.StagedAtlases.count(target.Sizes[c.Index])) return true;
+			const auto& now = frame.Cache[c.Index];
+			return (now.Needed & ~(now.StagedFaces & statics.Cache[c.Index].StagedFaces)) == 0;
+		});
+		if (adoptingStage)
+		{
+			// The slot fence has retired all old readers and the last writes to the staged arrays.
+			holdingPublished = false;
+			sizes = target.Sizes;
+			starts = target.Starts;
+			ApplyLayout(frame, sizes, starts);
+			staticPass.ApplyLayout(statics, sizes, starts);
+			for (size_t i = 0; i < sizes.size(); ++i)
+			{
+				if (!frame.StagedAtlases.count(sizes[i])) continue;
+				auto& current = frame.Cache[i];
+				auto& staticDepth = statics.Cache[i];
+				staticDepth.MapsValid = staticDepth.StagedValid;
+				staticDepth.ResidentFaces = staticDepth.StagedFaces;
+				current.MapsValid = current.StagedValid & staticDepth.StagedValid;
+				current.ResidentFaces = current.StagedFaces;
+				current.LocalFallback = current.Owner ? current.MapsValid : 0;
+			}
+			for (auto* current : {&frame, &statics})
+			{
+				for (auto it = current->Atlases.begin(); it != current->Atlases.end();)
+					if (!target.Capacities.count(it->first) || current->StagedAtlases.count(it->first))
+						it = current->Atlases.erase(it);
+					else
+						++it;
+				current->Atlases.merge(current->StagedAtlases);
+				++current->LayoutRevision;
+			}
+			discardStage();
+		}
+	}
+
 	bool deferred = false;
-	if (!preservesPublishedFaces())
+	if (!holdingPublished && !adoptingStage && !preservesPublishedFaces())
 	{
 		const auto target = selected;
 		const auto targetDemand = demand;
@@ -1324,7 +1445,7 @@ void SceneLocalShadows::Allocate(UINT slot, SceneLocalShadows& staticPass, const
 		{
 			const auto& old = frame.Cache[c.Index];
 			const auto tier = UINT(std::find(tiers.begin(), tiers.end(), old.Resolution) - tiers.begin());
-			if (!tier || tier == tiers.size()) continue;
+			if (!target[c.Index] || !tier || tier == tiers.size()) continue;
 			selected[c.Index] = tier;
 			adjust(c, tier, 1);
 			retained[tier] = frame.Atlases.at(old.Resolution).Slices;
@@ -1385,7 +1506,7 @@ void SceneLocalShadows::Allocate(UINT slot, SceneLocalShadows& staticPass, const
 	for (const auto& c : candidates)
 	{
 		auto& cache = frame.Cache[c.Index];
-		const UINT side = tiers[selected[c.Index]];
+		const UINT side = holdingPublished ? cache.Resolution : sizes[c.Index];
 		const auto old = _previousResolution.find(c.Key);
 		if (side)
 		{
@@ -1396,60 +1517,84 @@ void SceneLocalShadows::Allocate(UINT slot, SceneLocalShadows& staticPass, const
 	}
 	_previousResolution.swap(placements);
 
-	for (auto* current : {&frame, &statics})
+	if (!holdingPublished && !adoptingStage)
 	{
-		for (auto it = current->Atlases.begin(); it != current->Atlases.end();)
+		for (auto* current : {&frame, &statics})
 		{
-			const auto tier = size_t(std::find(tiers.begin(), tiers.end(), it->first) - tiers.begin());
-			if (tier < tiers.size() && capacity(UINT(tier)) == it->second.Slices)
+			for (auto it = current->Atlases.begin(); it != current->Atlases.end();)
 			{
-				++it;
-				continue;
+				const auto tier = size_t(std::find(tiers.begin(), tiers.end(), it->first) - tiers.begin());
+				if (tier < tiers.size() && capacity(UINT(tier)) == it->second.Slices)
+				{
+					++it;
+					continue;
+				}
+				for (auto& cache : current->Cache)
+					if (cache.Resolution == it->first) cache.MapsValid = cache.ResidentFaces = 0;
+				++current->LayoutRevision;
+				it = current->Atlases.erase(it);
 			}
-			for (auto& cache : current->Cache)
-				if (cache.Resolution == it->first) cache.MapsValid = cache.ResidentFaces = 0;
-			++current->LayoutRevision;
-			it = current->Atlases.erase(it);
 		}
+		for (UINT tier = 1; tier < tiers.size(); ++tier)
+		{
+			if (!demand[tier].Slices) continue;
+			PrepareAtlas(frame, tiers[tier], capacity(tier));
+			staticPass.PrepareAtlas(statics, tiers[tier], capacity(tier));
+		}
+		ApplyLayout(frame, sizes, starts);
+		staticPass.ApplyLayout(statics, sizes, starts);
 	}
-	for (UINT tier = 1; tier < tiers.size(); ++tier)
-	{
-		if (!demand[tier].Slices) continue;
-		PrepareAtlas(frame, tiers[tier], capacity(tier));
-		staticPass.PrepareAtlas(statics, tiers[tier], capacity(tier));
-	}
-	ApplyLayout(frame, sizes, starts);
-	staticPass.ApplyLayout(statics, sizes, starts);
 	// Repair placements that were already visible before admitting cold faces.
 	Bytes work = 0;
-	bool transitioning = deferred;
+	bool transitioning = deferred || holdingPublished;
 	for (auto* current : {&frame, &statics})
-		for (auto& cache : current->Cache) cache.ReadyFaces = 0;
+		for (auto& cache : current->Cache) cache.ReadyFaces = cache.StageThisFrame = 0;
 	for (const auto& c : candidates)
 	{
 		auto& current = frame.Cache[c.Index];
 		current.ReadyFaces = current.Needed & current.ResidentFaces & statics.Cache[c.Index].ResidentFaces;
 	}
-	for (const bool protect : {true, false})
+	const auto admit = [&](UINT requested, UINT side, UINT& ready)
+	{
+		const Bytes faceWork = 2ull * side * side;
+		for (UINT face = 0; face < 6; ++face)
+		{
+			const UINT bit = 1u << face;
+			if (!(requested & ~ready & bit)) continue;
+			if (faceWork > transitionBudget - work)
+			{
+				transitioning = true;
+				continue;
+			}
+			work += faceWork;
+			ready |= bit;
+		}
+	};
+	for (const auto& c : candidates)
+	{
+		auto& current = frame.Cache[c.Index];
+		if (current.Resolution)
+			admit(protectedFaces[c.Index], current.Resolution, current.ReadyFaces);
+	}
+	if (holdingPublished)
+	{
 		for (const auto& c : candidates)
 		{
 			auto& current = frame.Cache[c.Index];
-			if (!current.Resolution) continue;
-			const UINT requested = current.Needed & (protect ? protectedFaces[c.Index] : ~protectedFaces[c.Index]);
-			const Bytes faceWork = 2ull * current.Resolution * current.Resolution;
-			for (UINT face = 0; face < c.Faces; ++face)
-			{
-				const UINT bit = 1u << face;
-				if (!(requested & ~current.ReadyFaces & bit)) continue;
-				if (faceWork > transitionBudget - work)
-				{
-					transitioning = true;
-					continue;
-				}
-				work += faceWork;
-				current.ReadyFaces |= bit;
-			}
+			auto& staticDepth = statics.Cache[c.Index];
+			const UINT side = frame.StagedLayout->Sizes[c.Index];
+			if (!frame.StagedAtlases.count(side)) continue;
+			const UINT rendered = current.StagedFaces & staticDepth.StagedFaces;
+			admit(current.Needed & ~rendered, side, current.StageThisFrame);
+			staticDepth.StageThisFrame = current.StageThisFrame;
 		}
+	}
+	for (const auto& c : candidates)
+	{
+		auto& current = frame.Cache[c.Index];
+		if (current.Resolution)
+			admit(current.Needed & ~protectedFaces[c.Index], current.Resolution, current.ReadyFaces);
+	}
 	for (const auto& c : candidates)
 		statics.Cache[c.Index].ReadyFaces = frame.Cache[c.Index].ReadyFaces;
 	assert(work <= transitionBudget);
@@ -1458,7 +1603,7 @@ void SceneLocalShadows::Allocate(UINT slot, SceneLocalShadows& staticPass, const
 	if (transitioning)
 	{
 		if (!frame.Limit.empty()) frame.Limit += ", ";
-		frame.Limit += "transition work";
+		frame.Limit += holdingPublished ? "staging shadow layout" : "transition work";
 	}
 	if (!frame.Indexed && ceiling)
 	{
@@ -1469,13 +1614,13 @@ void SceneLocalShadows::Allocate(UINT slot, SceneLocalShadows& staticPass, const
 	staticPass.Pack(statics);
 }
 
-void SceneLocalShadows::PrepareAtlas(Slot& frame, UINT resolution, UINT slices)
+void SceneLocalShadows::PrepareAtlas(Slot& frame, UINT resolution, UINT slices, bool staged)
 {
 	assert(slices && slices <= D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION && resolution);
-	auto& atlas = frame.Atlases[resolution];
+	auto& atlas = (staged ? frame.StagedAtlases : frame.Atlases)[resolution];
 	if (atlas.Slices == slices) return;
 	for (auto& cached : frame.Cache)
-		if (cached.Resolution == resolution) cached.MapsValid = cached.ResidentFaces = 0;
+		if (!staged && cached.Resolution == resolution) cached.MapsValid = cached.ResidentFaces = 0;
 	GDX12TextureDesc texture;
 	texture.Width = texture.Height = resolution;
 	texture.Format = DXGI_FORMAT_D32_FLOAT;
@@ -1560,17 +1705,20 @@ void SceneLocalShadows::ResetLayout()
 	for (auto& frame : _slots)
 	{
 		frame.Atlases.clear();
+		frame.StagedAtlases.clear();
+		frame.StagedLayout.reset();
 		++frame.LayoutRevision;
 		for (auto& cache : frame.Cache)
 		{
 			cache.Resolution = 0;
 			cache.FirstSlice = UINT_MAX;
 			cache.MapsValid = cache.ResidentFaces = cache.ReadyFaces = 0;
+			cache.StagedFaces = cache.StagedValid = cache.StageThisFrame = 0;
 		}
 	}
 }
 
-void SceneLocalShadows::AppendGrassViews(Graph& graph, std::vector<ID3D12Resource*>& bindings, UINT slot, const std::map<UINT, Id>& atlases,
+void SceneLocalShadows::AppendGrassViews(Graph& graph, std::vector<ID3D12Resource*>& bindings, UINT slot, const std::map<std::pair<UINT, bool>, Id>& atlases,
                                          const GrassAppender& appendGrass)
 {
 	const auto& frame = _slots.at(slot);
@@ -1592,13 +1740,13 @@ void SceneLocalShadows::AppendGrassViews(Graph& graph, std::vector<ID3D12Resourc
 		grassTarget.View = {GDX12GeometryStage::Shadow,
 		                    Matrix(frame.Lights[view.Light].ShadowViewProj[view.Face]).Transpose(), cameraPosition,
 		                    cameraAddress};
-		grassTarget.View.Key = (2ull << 60) | (uint64_t(view.Light) * 6 + view.Face);
+		grassTarget.View.Key = (2ull << 60) | (uint64_t(view.Staged) << 59) | (uint64_t(view.Light) * 6 + view.Face);
 		grassTarget.View.Filter = _staticOnly ? GDX12GeometryFilter::Static : GDX12GeometryFilter::Dynamic;
 		grassTarget.View.FrameSlot = slot;
 		grassTarget.View.DepthFormat = DXGI_FORMAT_D32_FLOAT;
-		grassTarget.Depth = atlases.at(view.Resolution);
+		grassTarget.Depth = atlases.at({view.Resolution, view.Staged});
 		grassTarget.Camera = cameraResource;
-		grassTarget.Dsv = frame.Atlases.at(view.Resolution).Dsvs[view.Slice]->CPUHandle;
+		grassTarget.Dsv = frame.AtlasFor(view.Resolution, view.Staged).Dsvs[view.Slice]->CPUHandle;
 		grassTarget.Width = grassTarget.Height = view.Resolution;
 		appendGrass(grassTarget, graph, bindings);
 	}
@@ -1613,7 +1761,7 @@ void SceneLocalShadows::DrawShadowViews(ID3D12GraphicsCommandList* cmd, const Sl
 	{
 		if (!clearDepth && !view.OpaqueCount && !view.MaskedCount)
 			continue;
-		const auto dsv = frame.Atlases.at(view.Resolution).Dsvs[view.Slice]->CPUHandle;
+		const auto dsv = frame.AtlasFor(view.Resolution, view.Staged).Dsvs[view.Slice]->CPUHandle;
 		const D3D12_VIEWPORT viewport{0, 0, float(view.Resolution), float(view.Resolution), 0, 1};
 		const D3D12_RECT rect{0, 0, LONG(view.Resolution), LONG(view.Resolution)};
 		cmd->RSSetViewports(1, &viewport);
@@ -1654,11 +1802,14 @@ void SceneLocalShadows::Append(
 	}
 	const auto resource = [&](ID3D12Resource* value, const char* name)
 	{ return NativeWork::ResourceFor(graph, bindings, value, name); };
-	std::map<UINT, Id> atlases;
+	std::map<std::pair<UINT, bool>, Id> atlases;
 	for (const auto& view : frame.Views)
-		if (!atlases.count(view.Resolution))
-			atlases.emplace(view.Resolution, resource(frame.Atlases.at(view.Resolution).Texture.GetResource()->D3DResource.Get(),
-			                                         "local shadow depth array"));
+	{
+		const auto key = std::make_pair(view.Resolution, view.Staged);
+		if (!atlases.count(key))
+			atlases.emplace(key, resource(frame.AtlasFor(view.Resolution, view.Staged).Texture.GetResource()->D3DResource.Get(),
+			                              "local shadow depth array"));
+	}
 	if (!_staticOnly && frame.Packed.empty())
 	{
 		if (appendGrass)

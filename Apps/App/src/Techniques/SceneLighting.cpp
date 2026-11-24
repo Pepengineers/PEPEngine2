@@ -663,12 +663,12 @@ void SceneLighting::AppendShadows(Graph& graph, std::vector<ID3D12Resource*>& bi
 	AppendRemoteLocalShadows(graph, bindings, geometry);
 	auto& local = _localShadows->_slots[_slot];
 	auto& statics = _staticShadows->_slots[_slot];
-	std::map<UINT, std::vector<std::pair<UINT, UINT>>> copies;
+	std::map<std::pair<UINT, bool>, std::vector<std::pair<UINT, UINT>>> copies;
 	for (const auto& view : local.Views)
-		copies[view.Resolution].emplace_back(view.Slice, view.Slice);
-	for (auto& [side, slices] : copies)
-		CopyShadowSlices(graph, bindings, _work, statics.Atlases.at(side).Texture.GetResource()->D3DResource.Get(),
-		                 local.Atlases.at(side).Texture.GetResource()->D3DResource.Get(), std::move(slices),
+		copies[{view.Resolution, view.Staged}].emplace_back(view.Slice, view.Slice);
+	for (auto& [key, slices] : copies)
+		CopyShadowSlices(graph, bindings, _work, statics.AtlasFor(key.first, key.second).Texture.GetResource()->D3DResource.Get(),
+		                 local.AtlasFor(key.first, key.second).Texture.GetResource()->D3DResource.Get(), std::move(slices),
 		                 "restore static shadow depth");
 	_localShadows->Append(graph, bindings, _slot, descriptors,
 	                      scene.Geometry, *constants.ShadowLights, appendGrass);
@@ -949,7 +949,7 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 	source.Views.erase(std::remove_if(source.Views.begin(), source.Views.end(), [&](const auto& view)
 	{
 		const Id owner = source.Cache[view.Light].Owner;
-		if (!owner) return false;
+		if (!owner || view.Staged) return false;
 		const bool latest = source.Cache[view.Light].Latest && available[view.Light];
 		if (latest && (current[view.Light] & (1u << view.Face)) && !(source.Lights[view.Light].ShadowFlags & ShadowEveryFrame))
 		{

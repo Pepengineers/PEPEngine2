@@ -40,7 +40,7 @@ class SceneLocalShadows
   private:
 	friend class SceneLighting;
 	using GrassAppender = std::function<void(const GeometryTarget&, Graph&, std::vector<ID3D12Resource*>&)>;
-	void AppendGrassViews(Graph& graph, std::vector<ID3D12Resource*>& bindings, UINT slot, const std::map<UINT, Id>& atlases,
+	void AppendGrassViews(Graph& graph, std::vector<ID3D12Resource*>& bindings, UINT slot, const std::map<std::pair<UINT, bool>, Id>& atlases,
 	                      const GrassAppender& appendGrass);
 	struct Input
 	{
@@ -76,6 +76,7 @@ class SceneLocalShadows
 		UINT FirstSlice = UINT_MAX, Resolution = 0, Needed = 0, ListsValid = 0, MapsValid = 0;
 		float ScreenPixels = 0;
 		UINT LocalFallback = 0, ResidentFaces = 0, ReadyFaces = 0;
+		UINT StagedFaces = 0, StagedValid = 0, StageThisFrame = 0;
 		uint64_t Generation = 0;
 		Id Owner = 0;
 		bool Latest = false;
@@ -86,6 +87,7 @@ class SceneLocalShadows
 	{
 		UINT Light, Face, Slice, First, OpaqueCount, MaskedCount, Resolution;
 		bool Dirty = true;
+		bool Staged = false;
 	};
 	struct Slot;
 	struct CullJob final : ParallelJob
@@ -101,6 +103,11 @@ class SceneLocalShadows
 		std::vector<std::unique_ptr<GDX12Descriptor>> Dsvs;
 		std::vector<uint64_t> StaticDepthVersions;
 		UINT Slices = 0;
+	};
+	struct ShadowLayout
+	{
+		std::vector<UINT> Sizes, Starts;
+		std::map<UINT, UINT> Capacities;
 	};
 	struct Slot
 	{
@@ -120,7 +127,10 @@ class SceneLocalShadows
 		JobHandle Ready;
 		std::unique_ptr<GDX12UploadBuffer<GDX12LocalLightConstants>> LightUpload;
 		std::unique_ptr<GDX12UploadBuffer<GDX12IndirectDrawArgs>> CommandUpload, Commands;
-		std::map<UINT, Atlas> Atlases;
+		std::map<UINT, Atlas> Atlases, StagedAtlases;
+		std::optional<ShadowLayout> StagedLayout;
+		auto& AtlasFor(UINT resolution, bool staged) { return (staged ? StagedAtlases : Atlases).at(resolution); }
+		const auto& AtlasFor(UINT resolution, bool staged) const { return (staged ? StagedAtlases : Atlases).at(resolution); }
 		std::string Limit;
 		uint64_t SceneRevision = 0, GrassReceiverRevision = 0, GrassCasterRevision = 0;
 		uint64_t LayoutRevision = 0, MigrationTexels = 0;
@@ -152,11 +162,11 @@ class SceneLocalShadows
 	                 UINT faceMask, const Slot&, const BoundingBox& influence, ScreenCoverage& coverage) const;
 	void RebuildCasters(UINT slot);
 	Input ReadInput(UINT slot, UINT command) const;
-	void PrepareAtlas(Slot&, UINT resolution, UINT slices);
+	void PrepareAtlas(Slot&, UINT resolution, UINT slices, bool staged = false);
 	void Allocate(UINT slot, SceneLocalShadows& staticPass, const QueueSubmission& submissions, Id transparencyOwner);
 	void ApplyLayout(Slot&, const std::vector<UINT>& sizes, const std::vector<UINT>& slices);
 	void Pack(Slot&);
-	void GatherMissing(Slot&, UINT lightIndex);
+	void GatherMissing(Slot&, UINT lightIndex, UINT faces);
 	void ResetLayout();
 	GDX12Texture _fallback;
 	struct Placement
