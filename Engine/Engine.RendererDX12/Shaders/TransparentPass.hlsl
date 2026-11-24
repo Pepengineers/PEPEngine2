@@ -21,7 +21,6 @@ TextureCube<float4> IrradianceEnvironment : register(t4);
 TextureCube<float4> PrefilteredEnvironment : register(t5);
 Texture2D<float4> EnvironmentBRDF : register(t6);
 StructuredBuffer<LocalLight> LocalLights : register(t7);
-Texture2DArray<float> LocalShadowMaps : register(t8);
 Texture2D<float> SeparatorDepth : register(t14);
 Texture2D<float> SceneDepth : register(t15);
 Texture2D Texture2DCache[TEXTURE2D_RANGE_LENGTH] : register(t16);
@@ -41,7 +40,7 @@ SamplerComparisonState samShadow : register(s6);
 #define LOCAL_REFLECTION_PROBES 1
 #include "ReflectionProbes.hlsli"
 #endif
-#define LOCAL_SHADOW_HEAP_INDEXED 1
+#define PBR_NO_LOCAL_SHADOWS 1
 #if TRANSPARENT_SIMPLE_LIGHTING
 #include "PBRSurface.hlsli"
 #if TRANSPARENT_LOCAL_LIGHTS

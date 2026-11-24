@@ -3,6 +3,8 @@
 #include "PBRMath.hlsli"
 #ifndef PROBE_CAPTURE
 #include "CSM.hlsli"
+#endif
+#if !defined(PROBE_CAPTURE) && !defined(PBR_NO_LOCAL_SHADOWS)
 #include "LocalShadows.hlsli"
 #endif
 float3 EvaluateBRDF(PBRSurface s, float3 v, float3 l)
@@ -50,7 +52,7 @@ float3 ShadeLocalLight(PBRSurface s, float3 position, float3 v, LocalLight light
     // Bistro units are centimetres; intensity is expressed per square metre.
     float attenuation = rangeFade * rangeFade * cone * cone / max(distanceSquared * 0.0001f, 0.01f);
     float3 result = EvaluateBRDF(s, v, l) * light.Radiance * attenuation;
-#ifndef PROBE_CAPTURE
+#if !defined(PROBE_CAPTURE) && !defined(PBR_NO_LOCAL_SHADOWS)
     if (any(result > 0)) result *= LocalVisibility(light, position, s.Normal, saturate(dot(s.Normal, l)));
 #endif
     return result;

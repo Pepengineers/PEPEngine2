@@ -106,10 +106,7 @@ struct SceneTransparency::Remote
 	SceneParticles::RemoteRaster Particles;
 	GDX12WBOITTransparencyPass Draw;
 	GDX12WBOITCompositionPass Compose;
-	PublishedShadowMirror Shadows;
 	std::unique_ptr<GDX12UploadBuffer<GDX12LocalLightConstants>> Lights;
-	GDX12Descriptor ShadowFallback;
-	ShadowMemory::Bytes ShadowBytes = 0;
 	GDX12Texture Depth;
 	std::array<GDX12Descriptor, 3> SceneViews;
 	std::shared_ptr<TransparentGeometry> Geometry;
@@ -138,7 +135,7 @@ struct SceneTransparency::Remote
 		    " motion=0",
 		    " weightedEmitters=", EmitterCounts[0], " sortedEmitters=", EmitterCounts[1], " additiveEmitters=", EmitterCounts[2],
 		    " transparentSceneCommands=", TransparentDraws, " inputBytes=", DepthBytes, " depthSource=opaque-prepass depthBytes=", DepthBytes,
-		    " opaqueHdrBytes=0 shadowBytes=", ShadowBytes, " particlePoolBytes=0 hostGeometryUploadBytes=", GeometryBytes,
+		    " opaqueHdrBytes=0 particlePoolBytes=0 hostGeometryUploadBytes=", GeometryBytes,
 		    " layerBytes=", Transfer->Bytes, " finalResultBytes=", Transfer->Bytes, " ownerMeshFence=", MeshDone.Value, " ownerResolveFence=", Resolved.Value, " ownerExportFence=", Produced.Value,
 		    " primaryImportFence=", Imported.Value, " primaryApplyFence=", Applied.Value, " completedFrameFence=", Consumer.Value);
 	}
@@ -146,14 +143,12 @@ struct SceneTransparency::Remote
 
 Id SceneTransparency::RequestedOwner(const std::shared_ptr<QueueSubmission>& submit, UINT slot)
 {
-	_visibleMesh = false;
 	Id owner = submit->SelectAdapter(WboitAdapter.GetValue());
-	constexpr unsigned SkinnedTransparent = 1, InteractionFieldEmitter = 2, IncompatibleShadowBinding = 4;
+	constexpr unsigned SkinnedTransparent = 1, InteractionFieldEmitter = 2;
 	unsigned fallback = 0;
 	if (owner)
 	{
 		const auto& constants = *_resources.FrameConstants.at(slot);
-		const auto planes = WboitPlanes(constants.CameraCB->GetCPUData()[_common.ActiveCameraCBufferIndex].ViewProj);
 		const auto* cmds = _resources.IndirectCommandsCache->GetCPUData();
 		const auto* instances = constants.InstanceCache->GetCPUData();
 		const auto* materials = constants.MaterialCache->GetCPUData();
@@ -163,7 +158,6 @@ Id SceneTransparency::RequestedOwner(const std::shared_ptr<QueueSubmission>& sub
 			const auto& instance = instances[cmds[i].InstanceID];
 			const auto& material = materials[instance.MaterialIndex];
 			if (material.RenderLayer != UINT(MaterialType::Transparent) || material.ReflectionProbePreview) continue;
-			_visibleMesh |= WboitVisible(planes, instance);
 			if (instance.SkinOutputVertex != UINT_MAX)
 			{
 				fallback |= SkinnedTransparent;
@@ -174,15 +168,10 @@ Id SceneTransparency::RequestedOwner(const std::shared_ptr<QueueSubmission>& sub
 			    return emitter.Blend != ParticleBlend::Opaque && emitter.InteractionEnabled;
 		    }))
 			fallback |= InteractionFieldEmitter;
-		if (_resources.ShadowQuality.LocalResolution &&
-		    _resources.Device->GetDeviceFeatures().Features.HighestShaderModel() >= D3D_SHADER_MODEL_6_6 &&
-		    submit->Device(owner).GetDeviceFeatures().Features.HighestShaderModel() < D3D_SHADER_MODEL_6_6)
-			fallback |= IncompatibleShadowBinding;
 		if (fallback && fallback != _fallbackReasons)
 			Log::Warning("RenderGraph", "WBOIT uses local rendering on ", submit->AdapterLabel(0),
 			    " because the remote path cannot preserve the requested inputs",
-			    " skinnedTransparent=", bool(fallback & SkinnedTransparent), " interactionFieldEmitter=", bool(fallback & InteractionFieldEmitter),
-			    " incompatibleLocalShadowBinding=", bool(fallback & IncompatibleShadowBinding));
+			    " skinnedTransparent=", bool(fallback & SkinnedTransparent), " interactionFieldEmitter=", bool(fallback & InteractionFieldEmitter));
 		if (fallback) owner = 0;
 	}
 	_fallbackReasons = fallback;
@@ -190,37 +179,21 @@ Id SceneTransparency::RequestedOwner(const std::shared_ptr<QueueSubmission>& sub
 }
 
 Id SceneTransparency::Begin(const std::shared_ptr<QueueSubmission>& submit, UINT slot, uint64_t frame,
-                            Id owner, const PublishedShadows& shadows)
+                            Id owner)
 {
 	_frame = frame;
 	_work.Commands.clear();
 	auto& entry = _remoteSlots.at(slot);
 	if (entry) entry->Report(); // BeginFrame has retired this slot.
 	std::shared_ptr<Shared> shared;
-	bool budgetFallback = false;
 	if (owner)
 	{
 		if (_shared && _shared->Owner == owner) shared = _shared;
 		if (entry && entry->SharedInputs != shared) entry.reset();
-		// A rejected slot has no remote context. Price its shadow mirror before recreating heaps and pipelines.
-		budgetFallback = !entry && _visibleMesh && !PublishedShadowMirror::CanRecreate(*submit, owner, {&shadows});
-		if (!budgetFallback)
-		{
-			if (!shared) shared = std::make_shared<Shared>(submit->Device(owner), _remoteSlots.size());
-			shared->Owner = owner;
-			if (!entry) entry = std::make_unique<Remote>(submit, owner, _common, shared);
-			if (!_visibleMesh) entry->Shadows.Clear();
-			else budgetFallback = !entry->Shadows.Prepare(*submit, owner, *entry->Resources.SRV_UAV_Heap, shadows);
-		}
-		if (budgetFallback)
-		{
-			owner = 0;
-			shared.reset();
-		}
+		if (!shared) shared = std::make_shared<Shared>(submit->Device(owner), _remoteSlots.size());
+		shared->Owner = owner;
+		if (!entry) entry = std::make_unique<Remote>(submit, owner, _common, shared);
 	}
-	if (budgetFallback && !_shadowBudgetFallback)
-		Log::Warning("RenderGraph", "WBOIT running on the primary GPU: published shadow arrays exceed the transfer budget");
-	_shadowBudgetFallback = budgetFallback;
 	const Id previousOwner = _shared ? _shared->Owner : 0;
 	if (owner != previousOwner)
 	{
@@ -343,15 +316,7 @@ SceneTransparency::~SceneTransparency()
 		frame.Draw.ClearDenendencies();
 	}
 }
-void SceneTransparency::RetireLocalShadows()
-{
-	for (auto& remote : _remoteSlots)
-		if (remote) remote->Shadows.Clear();
-}
-
-void SceneTransparency::AppendRemote(Graph& primary, std::vector<ID3D12Resource*>& primaryBindings,
-                                    SceneGeometry& geometry, UINT slot, Frame& frame, GDX12Texture* hdr,
-                                    const PublishedShadows& shadows)
+void SceneTransparency::AppendRemote(SceneGeometry& geometry, UINT slot, Frame& frame, GDX12Texture* hdr)
 {
 	auto& r = *_remote;
 	auto& submit = *r.GPU.Submissions();
@@ -389,7 +354,7 @@ void SceneTransparency::AppendRemote(Graph& primary, std::vector<ID3D12Resource*
 	};
 	auto* ownerDepth = r.DepthResource;
 	if (!ownerDepth || r.DepthExport == Invalid) throw std::logic_error("WBOIT missing opaque prepass snapshot");
-	const Id depthImport = r.DepthMirror.AppendImport(plan, bindings, work);
+	r.DepthMirror.AppendImport(plan, bindings, work);
 	wrap(r.Depth, depth, ownerDepth);
 	const bool resized = r.Width != hdr->GetWidth() || r.Height != hdr->GetHeight();
 	const bool fresh = !r.Width;
@@ -559,7 +524,6 @@ void SceneTransparency::AppendRemote(Graph& primary, std::vector<ID3D12Resource*
 		instances.push_back(instance);
 	}
 	r.TransparentDraws = mesh.Draws = UINT(draws.size());
-	r.ShadowBytes = 0;
 	if (mesh.Draws)
 	{
 		mesh.Geometry = r.Geometry->Binding;
@@ -567,29 +531,15 @@ void SceneTransparency::AppendRemote(Graph& primary, std::vector<ID3D12Resource*
 		structured(1, transforms);
 		structured(2, instances);
 		mesh.Args = cpu(5, draws.data(), UINT64(draws.size()) * sizeof(draws.front()));
-		const auto* metadata = shadows.Lights.GetCPUData();
 		const UINT count = main.LocalLightCount;
-		std::vector<Id> inputs{r.DepthExport}, imports;
-		r.ShadowBytes = r.Shadows.Append(primary, primaryBindings, _work, plan, bindings, work, shadows, inputs, imports, accesses);
-		for (Id imported : imports) plan.Operations[imported].Dependencies.push_back(depthImport);
-		if (inputs.size() > 1)
-		{
-			r.DepthExport = inputs.back();
-			inputs.pop_back();
-			auto& dependencies = primary.Operations[r.DepthExport].Dependencies;
-			dependencies.insert(dependencies.end(), inputs.begin(), inputs.end());
-		}
-
 		if (!r.Lights)
 		{
 			r.Lights = std::make_unique<GDX12UploadBuffer<GDX12LocalLightConstants>>(&device, 1, EBufferType::Upload, false);
 			r.Lights->CreateSRV(heap, heap->GetAvailableIndex(SceneDescriptorStart));
 		}
 		r.Lights->Resize((std::max)(1u, count));
-		for (UINT i = 0; i < count; ++i)
-			r.Lights->CopyData(i, metadata[i]);
+		if (count) r.Lights->CopyData(0, _resources.LocalLights.data(), count);
 		mesh.Views[7] = r.Lights->GetSRV()->GPUHandle;
-		mesh.Views[8] = r.Shadows.Fallback(view(r.ShadowFallback, nullptr, ShadowMemory::View(1)));
 		addRead(r.Lights->GetResource().D3DResource.Get(), D3D12_RESOURCE_STATE_GENERIC_READ);
 		addRead(mesh.Geometry.VertexResource, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 		addRead(mesh.Geometry.IndexResource, D3D12_RESOURCE_STATE_INDEX_BUFFER);

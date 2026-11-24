@@ -163,10 +163,10 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	const auto* world = scenes->GetWorld();
 	const double delta = c.Common.GameTimer ? c.Common.GameTimer->DeltaTime() : 0;
 	_environment->Freeze(world && !world->IsPaused() ? delta * world->GetTimeScale() : 0, *_executor, _frameNumber);
-	_lighting->UpdateLocalShadowProfile(*_executor, requestedTransparency);
+	_lighting->UpdateLocalShadowProfile(*_executor);
 	_lighting->Freeze(*_geometry, slot, submissions, submissions->SelectAdapter(_aoAdapter));
 	const auto transparencyOwner = _transparencyOwner = _lighting->Transparency().Begin(submissions, slot, _frameNumber,
-	    requestedTransparency, _lighting->PublishedLocalShadows());
+	    requestedTransparency);
 	auto& particles = _lighting->Particles();
 	auto& water = _lighting->Water();
 	auto& grass = _geometry->Grass();

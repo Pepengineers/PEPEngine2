@@ -11,6 +11,7 @@
 #include <chrono>
 namespace BistroRender
 {
+class LocalShadowTileCopy;
 class SceneLighting
 {
   public:
@@ -67,9 +68,8 @@ class SceneLighting
 	void Submitted(uint64_t fence);
 	void Reset();
 	void RetireLocalShadows();
-	void UpdateLocalShadowProfile(Executor& primary, Id transparencyOwner);
+	void UpdateLocalShadowProfile(Executor& primary);
 	std::string LocalShadowDistribution() const;
-	PublishedShadows PublishedLocalShadows() const { return {*_localShadows, _slot, _frames.at(_slot).LightCount}; }
 	UINT64 LocalShadowTexels() const { return _localShadows->ShadowTexels(_slot); }
 	SceneTransparency& Transparency() { return *_transparency; }
 	SceneParticles& Particles() { return _transparency->Particles(); }

@@ -334,7 +334,7 @@ SceneLighting::~SceneLighting()
 		_deferred.ClearDenendencies();
 	}
 }
-void SceneLighting::UpdateLocalShadowProfile(Executor& primary, Id transparencyOwner)
+void SceneLighting::UpdateLocalShadowProfile(Executor& primary)
 {
 	const auto& submit = *primary.Submissions();
 	const auto requested = GetLocalShadowProfile(_resources.ShadowQuality.LocalResolution);
@@ -345,18 +345,15 @@ void SceneLighting::UpdateLocalShadowProfile(Executor& primary, Id transparencyO
 	struct Demand
 	{
 		UINT ExactFaces = 0, LatestFaces = 0;
-		UINT Mirrors = 0;
 	};
 	std::map<Id, Demand> demand;
 	const UINT slots = UINT(_frames.size());
-	UINT sceneFaces = 0;
 	if (requested.Face)
 	{
 		for (const auto& light : _resources.LocalLights)
 		{
 			if (!(light.ShadowFlags & ShadowEnabled)) continue;
 			const UINT faces = LocalShadowFaceCount(light);
-			sceneFaces += faces;
 			const auto key = GetLocalShadowKey(light);
 			const auto placement = std::find_if(_resources.LocalShadowPlacements.begin(), _resources.LocalShadowPlacements.end(),
 			    [&](const auto& item) { return item.Key == key; });
@@ -369,7 +366,6 @@ void SceneLighting::UpdateLocalShadowProfile(Executor& primary, Id transparencyO
 				if (placement->CrossSync == ShadowCrossSync::Latest) lane.LatestFaces += faces;
 			}
 		}
-		if (transparencyOwner) demand[transparencyOwner].Mirrors += slots;
 	}
 
 	auto& gpu = submit.Device(0);
@@ -398,7 +394,7 @@ void SceneLighting::UpdateLocalShadowProfile(Executor& primary, Id transparencyO
 		for (const auto& [owner, needs] : demand)
 		{
 			auto& remote = submit.Device(owner);
-			const UINT depthCopies = 2 * slots * ((needs.ExactFaces != 0) + (needs.LatestFaces != 0)) + needs.Mirrors;
+			const UINT depthCopies = 2 * slots * ((needs.ExactFaces != 0) + (needs.LatestFaces != 0));
 			const UINT64 remoteDepth = ShadowMemory::Size(remote, shape);
 			if (!fullDepthFits(remoteDepth, depthCopies, limit(remote)))
 			{
@@ -417,7 +413,6 @@ void SceneLighting::UpdateLocalShadowProfile(Executor& primary, Id transparencyO
 					remaining -= count;
 				}
 			};
-			if (needs.Mirrors) copies(sceneFaces, needs.Mirrors, true);
 			for (const UINT faces : {needs.ExactFaces, needs.LatestFaces})
 				if (faces)
 				{
@@ -481,7 +476,6 @@ std::string SceneLighting::LocalShadowDistribution() const
 		layout += " | " + _submissions->AdapterLabel(owner) + " tracked shadow allocations: " +
 		    std::to_string(ShadowMemory::For(device.GetAdapterLuid()).Allocated) + " B";
 	}
-	if (_transparency->ShadowBudgetFallback()) layout += " | WBOIT on primary: shadow transfer budget";
 	return layout;
 }
 
@@ -517,7 +511,6 @@ void SceneLighting::RetireLocalShadows()
 		frame.ShadowReads.clear();
 	}
 	_latestLocalShadows.clear();
-	_transparency->RetireLocalShadows();
 	for (auto it = _shadowVertexBaselines.begin(); it != _shadowVertexBaselines.end();)
 		if (it->second->Memory.Size()) it = _shadowVertexBaselines.erase(it);
 		else ++it;
@@ -2002,8 +1995,7 @@ void SceneLighting::AppendComposition(Graph& graph, std::vector<ID3D12Resource*>
 		    return _probePreview->HDR();
 	    },
 	    [this] { return _probePreview->Depth(); }, [this] { return _probePreview->Motion(); });
-	auto* hdr = _transparency->Append(graph, bindings, geometry, _slot, opaqueHDR, environment,
-	    PublishedLocalShadows());
+	auto* hdr = _transparency->Append(graph, bindings, geometry, _slot, opaqueHDR, environment);
 	_hdrContinuation(graph, bindings, hdr);
 }
 } // namespace BistroRender

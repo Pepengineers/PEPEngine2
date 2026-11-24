@@ -1,6 +1,5 @@
 #pragma once
 #include "NativeWork.h"
-#include "PublishedShadowMirror.h"
 #include "SceneGeometry.h"
 #include "SceneEnvironment.h"
 #include "SceneParticles.h"
@@ -15,17 +14,15 @@ class SceneTransparency
 	SceneTransparency(GDX12DeviceResources&, RenderPipelineCommonData&);
 	~SceneTransparency();
 	Id RequestedOwner(const std::shared_ptr<QueueSubmission>&, UINT slot);
-	Id Begin(const std::shared_ptr<QueueSubmission>&, UINT slot, uint64_t frame, Id owner, const PublishedShadows&);
-	bool ShadowBudgetFallback() const { return _shadowBudgetFallback; }
+	Id Begin(const std::shared_ptr<QueueSubmission>&, UINT slot, uint64_t frame, Id owner);
 	void PrepareOpaqueDepth(Graph&, std::vector<ID3D12Resource*>&, UINT slot, GDX12Texture*);
 	void AddExchange(const Schedule&, std::vector<Executor::PacketExchange>&);
 	void Submitted(const std::vector<CompletionToken>&);
 	void Presented();
-	void RetireLocalShadows();
 	SceneWater& Water() { return _water; }
 	void SetWaterRetirement(std::function<void()> retire) { _water.SetRetirement(std::move(retire)); }
 	SceneParticles& Particles() { return _particles; }
-	GDX12Texture* Append(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, UINT slot, GDX12Texture* hdr, SceneEnvironment&, const PublishedShadows&);
+	GDX12Texture* Append(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, UINT slot, GDX12Texture* hdr, SceneEnvironment&);
 	using OpaqueContinuation = std::function<GDX12Texture*(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture*,
 	                                                       GDX12Texture*, GDX12Texture*)>;
 	void SetOpaqueContinuation(OpaqueContinuation append, std::function<GDX12Texture*()> depth,
@@ -52,7 +49,6 @@ class SceneTransparency
 	Remote* _remote = nullptr;
 	uint64_t _frame = 0;
 	unsigned _fallbackReasons = 0;
-	bool _visibleMesh = false, _shadowBudgetFallback = false;
 	struct Frame
 	{
 		GDX12WBOITTransparencyPass Draw;
@@ -64,10 +60,9 @@ class SceneTransparency
 		bool Initialized = false;
 	};
 	GDX12Texture* ApplyRemote(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, UINT, Frame&, GDX12Texture*, SceneEnvironment&);
-	void AppendRemote(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, UINT, Frame&, GDX12Texture*,
-	                  const PublishedShadows&);
+	void AppendRemote(SceneGeometry&, UINT, Frame&, GDX12Texture*);
 	GDX12Texture* AppendPhase(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, UINT slot, Frame&,
-	                          GDX12Texture* hdr, SceneEnvironment&, const PublishedShadows&);
+	                          GDX12Texture* hdr, SceneEnvironment&);
 	GDX12DeviceResources& _resources;
 	RenderPipelineCommonData& _common;
 	std::vector<Frame> _frames;

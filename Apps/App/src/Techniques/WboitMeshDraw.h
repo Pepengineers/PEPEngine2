@@ -10,7 +10,7 @@ struct WboitMeshDraw
 	ID3D12CommandSignature* Signature;
 	ID3D12DescriptorHeap* Heap;
 	D3D12_GPU_VIRTUAL_ADDRESS Main, Camera;
-	std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 9> Views;
+	std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 8> Views;
 	D3D12_GPU_DESCRIPTOR_HANDLE Textures;
 	GDX12GeometryBuffer::RecordingBinding Geometry;
 	D3D12_CPU_DESCRIPTOR_HANDLE Depth;

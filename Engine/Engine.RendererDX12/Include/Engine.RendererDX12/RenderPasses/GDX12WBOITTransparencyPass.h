@@ -68,7 +68,6 @@ public:
 
 		// Root Signatures
 		GDX12RootSignatureDesc RSDesc1;
-		RSDesc1.IndexedLocalShadows = true;
         RSDesc1.InstancedGeometry = true;
 		RSDesc1.NumSingleCBVSlots = 4;
 		RSDesc1.NumSingleSRVSlots = 16;
