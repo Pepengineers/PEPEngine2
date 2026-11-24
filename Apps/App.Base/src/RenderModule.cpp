@@ -24,6 +24,7 @@ namespace
         auto skyBox = graph.AddPrimaryGPUPass<GDX12SkyBoxPass>("SkyBox");
         auto transparency = graph.AddPrimaryGPUPass<GDX12WBOITTransparencyPass>("Transparency");
         auto composition = graph.AddPrimaryGPUPass<GDX12WBOITCompositionPass>("Composition");
+        auto taa = graph.AddPrimaryGPUPass<GDX12TemporalAntiAliasingPass>("Temporal Anti-Aliasing");
         auto clear = graph.AddPrimaryGPUPass<GDX12TextureClearPass>("Back Buffer Clear");
         auto output = graph.AddPrimaryGPUPass<GDX12OutputToScreenPass>("Output To Screen");
 
@@ -59,7 +60,11 @@ namespace
         graph.ConnectNodes(skyBox.GetOutput("OutColorTexture"), composition.GetInput("InOpaqueTexture"));
         graph.ConnectNodes(transparency.GetOutput("OutAccumulationTexture"), composition.GetInput("InAccumulationTexture"));
         graph.ConnectNodes(transparency.GetOutput("OutRevealageTexture"), composition.GetInput("InRevealageTexture"));
-        graph.ConnectNodes(composition.GetOutput("OutColorTexture"), output.GetInput("InColorTexture"));
+        graph.ConnectNodes(composition.GetOutput("OutColorTexture"), taa.GetInput("InColorTexture"));
+        graph.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), taa.GetInput("InDepthBuffer"));
+        graph.ConnectNodes(skyBox.GetOutput("OutVelocityBuffer"), taa.GetInput("InVelocityBuffer"));
+        graph.ConnectNodes(composition.GetOutput("OutTransparencyMask"), taa.GetInput("InTransparencyMask"));
+        graph.ConnectNodes(taa.GetOutput("OutColorTexture"), output.GetInput("InColorTexture"));
     }
 }
 
