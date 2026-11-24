@@ -10,6 +10,7 @@
 #include <optional>
 #include <random>
 #include <set>
+#include <sstream>
 #include <tuple>
 
 namespace BistroPlacement
@@ -97,7 +98,9 @@ struct Result
     size_t Id = 0;
     Config Settings;
     Size Output{}, Render{};
-    double Fps = 0, P95 = 0, ThresholdFps = 0, ShadowTexels = 0;
+    double Fps = 0, P95 = 0, ThresholdFps = 0;
+    std::optional<double> ShadowTexels;
+    std::array<double, 7> SectionShadowTexels{{-1, -1, -1, -1, -1, -1, -1}};
     bool Valid = false, Remote = false;
     std::array<bool, std::size(Techniques)> Activity{};
     std::string SourceCsv;
@@ -486,7 +489,7 @@ public:
                             BistroBenchmarkData::Csv::Number(100 * (remote->Fps / reference->Fps - 1)));
                     else
                     {
-                        csv.Config(prefix + "Comparison", "different image settings; compare output, render and techniques");
+                        csv.Config(prefix + "Comparison", "image comparability not verified; compare output, render, techniques and local-shadow texels");
                         csv.Config(prefix + "OutputPixelChangePct", BistroBenchmarkData::Csv::Number(100 *
                             (double(remote->Output.first) * remote->Output.second /
                                 (double(reference->Output.first) * reference->Output.second) - 1)));
@@ -555,8 +558,13 @@ private:
         for (size_t i = 0; i < _available.size(); ++i) _available[i] |= result.Activity[i];
     }
 
-    static bool ReadReference(std::istream& input, Result& r)
+    static bool ReadReference(std::istream& file, Result& r)
     {
+        std::string line;
+        if (!std::getline(file >> std::ws, line)) return false;
+        std::istringstream input(line);
+        r.ShadowTexels.reset();
+        r.SectionShadowTexels.fill(-1);
         if (!(input >> r.Id >> r.Settings.Provider >> r.Settings.Preset >> r.Output.first >> r.Output.second >>
             r.Render.first >> r.Render.second >> r.Fps >> r.P95 >> std::quoted(r.SourceCsv))) return false;
         if (!std::isfinite(r.Fps) || r.Fps <= 0 || !std::isfinite(r.P95) || r.P95 <= 0 ||
@@ -567,6 +575,15 @@ private:
             unsigned level;
             if (!(input >> level >> r.Activity[i]) || level > Epic) return false;
             r.Settings.Levels[i] = Level(level);
+        }
+        if (input >> std::ws && !input.eof())
+        {
+            double texels;
+            if (!(input >> texels) || !std::isfinite(texels) || texels < 0) return false;
+            r.ShadowTexels = texels;
+            for (double& section : r.SectionShadowTexels)
+                if (!(input >> section) || !std::isfinite(section) || (section < 0 && section != -1)) return false;
+            if (!(input >> std::ws).eof()) return false;
         }
         r.Valid = true;
         return true;
@@ -585,6 +602,11 @@ private:
                 ' ' << r.Fps << ' ' << r.P95 << ' ' << std::quoted(r.SourceCsv);
             for (size_t i = 0; i < r.Activity.size(); ++i)
                 output << ' ' << unsigned(r.Settings.Levels[i]) << ' ' << r.Activity[i];
+            if (r.ShadowTexels)
+            {
+                output << ' ' << *r.ShadowTexels;
+                for (const double section : r.SectionShadowTexels) output << ' ' << section;
+            }
             output << '\n';
         };
         for (const auto& r : _confirmed)
@@ -600,6 +622,15 @@ private:
 
     static bool SameImage(const Result& a, const Result& b)
     {
+        if (a.Activity[LocalShadowQuality] || b.Activity[LocalShadowQuality])
+        {
+            const auto comparable = [](double left, double right) {
+                return left >= 0 && right >= 0 && std::abs(left - right) <= 0.01 * (std::max)(left, right);
+            };
+            if (!a.ShadowTexels || !b.ShadowTexels || !comparable(*a.ShadowTexels, *b.ShadowTexels) ||
+                !std::equal(a.SectionShadowTexels.begin(), a.SectionShadowTexels.end(), b.SectionShadowTexels.begin(), comparable))
+                return false;
+        }
         return a.Output == b.Output && a.Render == b.Render && a.Settings.Provider == b.Settings.Provider &&
             a.Settings.Preset == b.Settings.Preset && a.Activity == b.Activity && a.Settings.Levels == b.Settings.Levels &&
             a.Settings.Owners[Wind] == b.Settings.Owners[Wind];
@@ -882,7 +913,9 @@ private:
     {
         if (a.Settings.Provider != b.Settings.Provider || a.Settings.Preset != b.Settings.Preset ||
             a.Fps < b.Fps || a.Output.first < b.Output.first || a.Output.second < b.Output.second ||
-            a.Render.first < b.Render.first || a.Render.second < b.Render.second || a.ShadowTexels < b.ShadowTexels)
+            a.Render.first < b.Render.first || a.Render.second < b.Render.second ||
+            ((a.Activity[LocalShadowQuality] || b.Activity[LocalShadowQuality]) &&
+             (!a.ShadowTexels || !b.ShadowTexels || a.ShadowTexels < b.ShadowTexels)))
             return false;
         // Keep layouts whose short-window results are indistinguishable within measurement noise.
         if (a.Fps <= b.Fps * 1.04) return false;

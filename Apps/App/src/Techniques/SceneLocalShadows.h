@@ -75,7 +75,7 @@ class SceneLocalShadows
 		std::optional<std::array<GDX12LocalShadowFrustum, 6>> Frusta;
 		UINT FirstSlice = UINT_MAX, Resolution = 0, Needed = 0, ListsValid = 0, MapsValid = 0;
 		float ScreenPixels = 0;
-		UINT LocalFallback = 0;
+		UINT LocalFallback = 0, ResidentFaces = 0, ReadyFaces = 0;
 		uint64_t Generation = 0;
 		Id Owner = 0;
 		bool Latest = false;
@@ -123,7 +123,7 @@ class SceneLocalShadows
 		std::map<UINT, Atlas> Atlases;
 		std::string Limit;
 		uint64_t SceneRevision = 0, GrassReceiverRevision = 0, GrassCasterRevision = 0;
-		uint64_t LayoutRevision = 0;
+		uint64_t LayoutRevision = 0, MigrationTexels = 0;
 		NativeWork Work;
 	};
 	static void DrawShadowViews(ID3D12GraphicsCommandList* cmd, const Slot& frame, ID3D12CommandSignature* signature,
@@ -142,7 +142,7 @@ class SceneLocalShadows
 	void Gather(UINT node, const GDX12LocalLightConstants&, const std::array<GDX12LocalShadowFrustum, 6>&,
 	            UINT faceMask, std::array<FaceCommands, 6>&) const;
 	UINT NeededFaces(UINT node, const GDX12LocalLightConstants&, const std::array<GDX12LocalShadowFrustum, 6>&,
-	                 UINT faceMask, const Slot&, const BoundingBox& influence, float& pixels) const;
+	                 UINT faceMask, const Slot&, const BoundingBox& influence, std::array<uint64_t, 36>& coverage) const;
 	void RebuildCasters(UINT slot);
 	Input ReadInput(UINT slot, UINT command) const;
 	void PrepareAtlas(Slot&, UINT resolution, UINT slices);

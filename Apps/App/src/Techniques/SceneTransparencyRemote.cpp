@@ -149,7 +149,7 @@ Id SceneTransparency::Begin(const std::shared_ptr<QueueSubmission>& submit, UINT
 	_frame = frame;
 	_work.Commands.clear();
 	Id owner = submit->SelectAdapter(WboitAdapter.GetValue());
-	constexpr unsigned SkinnedTransparent = 1, InteractionFieldEmitter = 2;
+	constexpr unsigned SkinnedTransparent = 1, InteractionFieldEmitter = 2, IncompatibleShadowBinding = 4;
 	unsigned fallback = 0;
 	if (owner)
 	{
@@ -173,10 +173,15 @@ Id SceneTransparency::Begin(const std::shared_ptr<QueueSubmission>& submit, UINT
 			    return emitter.Blend != ParticleBlend::Opaque && emitter.InteractionEnabled;
 		    }))
 			fallback |= InteractionFieldEmitter;
+		if (_resources.ShadowQuality.LocalResolution &&
+		    _resources.Device->GetDeviceFeatures().Features.HighestShaderModel() >= D3D_SHADER_MODEL_6_6 &&
+		    submit->Device(owner).GetDeviceFeatures().Features.HighestShaderModel() < D3D_SHADER_MODEL_6_6)
+			fallback |= IncompatibleShadowBinding;
 		if (fallback && fallback != _fallbackReasons)
 			Log::Warning("RenderGraph", "WBOIT uses local rendering on ", submit->AdapterLabel(0),
-			    " because the remote path requires rigid transparent meshes and depth-only particle inputs",
-			    " skinnedTransparent=", bool(fallback & SkinnedTransparent), " interactionFieldEmitter=", bool(fallback & InteractionFieldEmitter));
+			    " because the remote path cannot preserve the requested inputs",
+			    " skinnedTransparent=", bool(fallback & SkinnedTransparent), " interactionFieldEmitter=", bool(fallback & InteractionFieldEmitter),
+			    " incompatibleLocalShadowBinding=", bool(fallback & IncompatibleShadowBinding));
 		if (fallback) owner = 0;
 	}
 	_fallbackReasons = fallback;

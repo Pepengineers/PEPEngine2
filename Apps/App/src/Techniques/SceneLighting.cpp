@@ -353,7 +353,7 @@ void SceneLighting::ReportLocalShadows(uint64_t frame)
 	Log::Info("RenderGraph", "Bistro local shadows presented frame=", frame, " slot=", _slot,
 	          " ceiling=", ceiling, " final arrays (lights/layers/bytes)=", layout,
 	          " static arrays=", _staticShadows->Distribution(_slot), " GPU0 tracked=", account.Allocated,
-	          " GPU0 DXGI remainder=", account.Limit,
+	          " GPU0 DXGI remainder=", account.Limit, " migration texels=", shadows.MigrationTexels,
 	          " offscreen emitters with maps=", offscreen, " camera=", eye.x, ",", eye.y, ",", eye.z,
 	          " direction=", forward.x, ",", forward.y, ",", forward.z);
 }
@@ -998,10 +998,24 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 		const Id owner = lane.first;
 		const UINT resolution = lane.Resolution;
 		auto& ownerDevice = _submissions->Device(owner);
+		const auto fallback = [&]
+		{
+			source.Limit = "shadow transfer / owner peak";
+			if (lane.second) return;
+			for (const auto& view : batch)
+			{
+				const UINT bit = 1u << view.Face;
+				auto& cache = source.Cache[view.Light];
+				cache.LocalFallback |= bit;
+				if (!(cache.MapsValid & bit) || (source.Lights[view.Light].ShadowFlags & ShadowEveryFrame))
+					source.Views.push_back(view);
+			}
+		};
+		UINT64 resultCopy = 0, stageDepth = 0;
 		if (!batch.empty())
 		{
 			const UINT count = UINT(batch.size());
-			const auto copy = ShadowMemory::TransferBytes(*_resources.Device, ownerDevice, resolution, count);
+			resultCopy = ShadowMemory::TransferBytes(*_resources.Device, ownerDevice, resolution, count);
 			const auto& previous = owners.find(lane);
 			const auto* cached = previous == owners.end() ? nullptr : previous->second.get();
 			const bool reuseStatic = cached && cached->StaticDepth && cached->StaticPlacement == _localPlacementEpoch &&
@@ -1018,35 +1032,28 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 			const auto ownerDepth = reuseAtlas ? 0 : ShadowMemory::Size(ownerDevice, ShadowMemory::Depth(resolution, count));
 			const auto staticDepth = reuseStatic ? 0 : ShadowMemory::Size(ownerDevice,
 			    ShadowMemory::Depth(resolution, staticCapacity + missing, D3D12_RESOURCE_FLAG_NONE));
-			const auto stageDepth = (lane.second || std::none_of(batch.begin(), batch.end(),
+			stageDepth = (lane.second || std::none_of(batch.begin(), batch.end(),
 			    [&](const auto& view) { return source.Cache[view.Light].Latest; })) ? 0 :
 			    ShadowMemory::Size(*_resources.Device, ShadowMemory::Depth(resolution, count, D3D12_RESOURCE_FLAG_NONE));
-			const auto mirrors = ProbeInputMirror::EstimateGrowth(*_resources.Device, ownerDevice,
-			    cached ? &cached->Mirror : nullptr, live);
 			const auto baseline = _shadowVertexBaselines.find(owner);
 			const auto* vertices = scene.Geometry.VertexResource;
 			const auto baselineBytes = baseline != _shadowVertexBaselines.end() && baseline->second->Source.Get() == vertices
 			    ? 0 : ShadowMemory::Size(ownerDevice, CD3DX12_RESOURCE_DESC::Buffer(scene.Geometry.Vertices.SizeInBytes));
-			if (!ShadowMemory::Fits(*_resources.Device, 2 * copy + stageDepth + mirrors.TransferHeap) ||
-			    !ShadowMemory::Fits(ownerDevice, 2 * copy + ownerDepth + staticDepth + baselineBytes +
-			                                    mirrors.OwnerImages + mirrors.TransferHeap))
+			if (!ShadowMemory::Fits(*_resources.Device, 2 * resultCopy + stageDepth) ||
+			    !ShadowMemory::Fits(ownerDevice, 2 * resultCopy + ownerDepth + staticDepth + baselineBytes))
 			{
-				source.Limit = "shadow transfer / owner peak";
-				if (!lane.second)
-					for (const auto& view : batch)
-					{
-						const UINT bit = 1u << view.Face;
-						auto& cache = source.Cache[view.Light];
-						cache.LocalFallback |= bit;
-						if (!(cache.MapsValid & bit) || (source.Lights[view.Light].ShadowFlags & ShadowEveryFrame))
-							source.Views.push_back(view);
-					}
+				fallback();
 				continue;
 			}
 		}
 		auto& entry = owners[lane];
 		if (!entry) entry = std::make_unique<RemoteShadows>(_submissions, owner, _common, resolution != 0);
 		auto& remote = *entry;
+		const size_t operationCount = primary.Operations.size(), bindingCount = primaryBindings.size();
+		const size_t commandCount = _work.Commands.size(), readCount = frame.ShadowReads.size();
+		const auto oldBaseline = _shadowVertexBaselines.find(owner);
+		const auto savedBaseline = oldBaseline == _shadowVertexBaselines.end() ? nullptr : oldBaseline->second;
+		const auto savedMeshRevision = remote.MeshRevision, savedTextureRevision = remote.TextureRevision;
 		remote.SunMask = orderSun && lane == sunLane ? (_sunSync == 3 && !sunAvailable ? _sunRemoteMask : sunUpdate) : 0;
 		remote.NearMask = sun.Update & ~_sunRemoteMask;
 		const bool latest = lane.second;
@@ -1157,169 +1164,199 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 			CopyShadowSlices(graph, bindings, work, remote.StaticDepth.Get(), target.Atlases.at(resolution).Texture.GetResource()->D3DResource.Get(),
 			                 std::move(restore), "restore static shadow depth");
 		}
-		remote.Mirror.Begin();
-		remote.Mirror.RetireUnused(live, [&](ID3D12Resource* retired) { remote.Vegetation.Forget(retired); });
-		const auto mirror = [&](Id id, bool refresh)
-		{ return remote.Mirror.Mirror(primary, primaryBindings, primaryBindings.at(id), id, refresh); };
-		const auto bind = [&](ID3D12Resource* resource)
-		{ return NativeWork::ResourceFor(graph, bindings, resource, "shadow owner input"); };
-		std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 4> descriptors{};
-		std::array<Id, 6> inputs{};
-		constexpr UINT strides[]{sizeof(GDX12InstanceData), sizeof(GDX12IndirectDrawArgs),
-		                         sizeof(GDX12MaterialConstants), sizeof(GDX12TransformConstants)};
-		constexpr std::array sceneInputs{SceneInstances, SceneMaterials, SceneTransforms, SceneCommands};
-		for (UINT output = 0; output < sceneInputs.size(); ++output)
-		{
-			const auto index = sceneInputs[output];
-			auto* local = mirror(index, true);
-			inputs[index == SceneCommands ? 5 : output] = bind(local);
-			auto& descriptor = remote.SceneViews[index];
-			D3D12_SHADER_RESOURCE_VIEW_DESC view{};
-			view.Format = DXGI_FORMAT_UNKNOWN;
-			view.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
-			view.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-			view.Buffer.StructureByteStride = strides[index];
-			view.Buffer.NumElements = UINT(scene.Buffers[index].Bytes / strides[index]);
-			descriptor.InitAsSRV(local, &view, heap, descriptor.HeapIndex == UINT_MAX
-			    ? heap->GetAvailableIndex(SceneDescriptorStart) : descriptor.HeapIndex);
-			descriptors[index] = descriptor.GPUHandle;
-		}
-		auto mesh = scene.Geometry;
-		const auto meshRevision = _resources.GeometryBuffer->GetMeshCacheRevision();
-		const bool meshChanged = remote.MeshRevision != meshRevision;
-		remote.MeshRevision = meshRevision;
-		auto* sourceVertices = mesh.VertexResource;
-		auto& baseline = _shadowVertexBaselines[owner];
-		if (!baseline || baseline->Source.Get() != sourceVertices)
-		{
-			baseline = std::make_shared<ShadowVertexBaseline>();
-			baseline->Source = sourceVertices;
-			const auto shape = CD3DX12_RESOURCE_DESC::Buffer(mesh.Vertices.SizeInBytes);
-			baseline->Data = ownerDevice.CreateResource(D3D12_HEAP_TYPE_DEFAULT, shape, D3D12_RESOURCE_STATE_COMMON);
-			if (resolution) baseline->Memory.Set(ownerDevice, ShadowMemory::Size(ownerDevice, shape));
-		}
 		const auto producer = baselineExports.find(owner);
-		const bool seed = !baseline->Ready && producer == baselineExports.end();
-		if (seed) baseline->Version = geometry._vertexDeformationRevision;
-		const bool clone = !seed && (remote.VertexSource != sourceVertices || !remote.Mirror.Contains(sourceVertices));
-		const auto previousVersion = seed ? 0 : clone ? baseline->Version : remote.VertexDeformationRevision;
-		remote.VertexBase = baseline;
-		remote.SeedVertices = Invalid;
-		remote.Vertices = {previousVersion, geometry._vertexDeformationRevision, 0, 0, 0, seed, clone};
-		std::vector<ProbeInputMirror::BufferRange> ranges;
-		if (!seed && remote.Vertices.From != remote.Vertices.To)
-			for (const auto& [first, end] : geometry.ChangedVertexRanges(remote.Vertices.From))
-				ranges.push_back({UINT64(first) * sizeof(Vertex), UINT64(end - first) * sizeof(Vertex)});
-		std::vector<ProbeInputMirror::BufferPatch> patches;
-		const auto skin = scene.RemoteSkin.find(owner);
-		if ((seed || remote.Vertices.From != remote.Vertices.To) &&
-		    skin != scene.RemoteSkin.end() && !skin->second.Ranges.empty())
+		std::vector<Access> restore;
+		try
 		{
-			remote.SkinInput = skin->second.Output;
-			for (const auto& range : skin->second.Ranges)
+			auto mesh = scene.Geometry;
+			const auto meshRevision = _resources.GeometryBuffer->GetMeshCacheRevision();
+			const bool meshChanged = remote.MeshRevision != meshRevision;
+			remote.MeshRevision = meshRevision;
+			auto* sourceVertices = mesh.VertexResource;
+			auto& baseline = _shadowVertexBaselines[owner];
+			if (!baseline || baseline->Source.Get() != sourceVertices)
 			{
-				const auto bytes = range.Work.VertexBytes();
-				patches.push_back({remote.SkinInput->Get(), UINT64(range.FirstVertex) * sizeof(Vertex),
-				    UINT64(range.Work.OutputVertex) * sizeof(Vertex), bytes});
-				remote.Vertices.LocalBytes += bytes;
+				baseline = std::make_shared<ShadowVertexBaseline>();
+				baseline->Source = sourceVertices;
+				const auto shape = CD3DX12_RESOURCE_DESC::Buffer(mesh.Vertices.SizeInBytes);
+				baseline->Data = ownerDevice.CreateResource(D3D12_HEAP_TYPE_DEFAULT, shape, D3D12_RESOURCE_STATE_COMMON);
+				if (resolution) baseline->Memory.Set(ownerDevice, ShadowMemory::Size(ownerDevice, shape));
 			}
-		}
-		mesh.VertexResource = remote.Mirror.Mirror(primary, primaryBindings, mesh.VertexResource,
-		    SceneVertices, seed, std::move(patches), std::move(ranges), clone ? baseline->Data.Get() : nullptr);
-		remote.Vertices.TransferBytes = remote.Mirror.PendingTransferBytes(sourceVertices);
-		remote.Vertices.BaselineBytes = remote.Mirror.PendingBaselineBytes(sourceVertices);
-		mesh.IndexResource = mirror(SceneIndices, meshChanged);
-		mesh.Vertices.BufferLocation = mesh.VertexResource->GetGPUVirtualAddress();
-		mesh.Indices.BufferLocation = mesh.IndexResource->GetGPUVirtualAddress();
-		inputs[3] = bind(mesh.VertexResource);
-		inputs[4] = bind(mesh.IndexResource);
-		if (seed)
-		{
-			auto* target = baseline->Data.Get();
-			const Id targetId = bind(target);
-			remote.Vertices.BaselineBytes = mesh.Vertices.SizeInBytes;
-			remote.SeedVertices = work.Add(graph, "seed shadow owner vertex baseline",
-			    {{inputs[3], Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE},
-			     {targetId, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
-			    [target, mesh](auto* cmd)
-			    { cmd->CopyBufferRegion(target, 0, mesh.VertexResource, 0, mesh.Vertices.SizeInBytes); },
-			    {}, Queue::Copy);
-		}
-		const Id cameraSource = NativeWork::ResourceFor(primary, primaryBindings, cameraBuffer, "shadow camera input");
-		auto* localCamera = mirror(cameraSource, true);
-		const Id cameraId = bind(localCamera);
-		const auto cameraAddress = localCamera->GetGPUVirtualAddress() +
-		    UINT64(_common.ActiveCameraCBufferIndex) * camera.GetElementSize();
-		const bool materialsChanged = remote.TextureRevision != _resources.TextureRevision;
-		remote.TextureRevision = _resources.TextureRevision;
-		std::vector<Access> materialReads, restore;
-		for (auto* texture : textures)
-		{
-			auto& resource = *texture->GetResource();
-			auto* native = resource.D3DResource.Get();
-			Id id = primary.FindBinding(primaryBindings, native);
-			if (id == Invalid)
+			remote.Mirror.Begin(resultCopy);
+			remote.Mirror.RetireUnused(live, [&](ID3D12Resource* retired) { remote.Vegetation.Forget(retired); });
+			const auto mirror = [&](Id id, bool refresh)
+			{ return remote.Mirror.Mirror(primary, primaryBindings, primaryBindings.at(id), id, refresh); };
+			const auto bind = [&](ID3D12Resource* resource)
+			{ return NativeWork::ResourceFor(graph, bindings, resource, "shadow owner input"); };
+			std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 4> descriptors{};
+			std::array<Id, 6> inputs{};
+			constexpr UINT strides[]{sizeof(GDX12InstanceData), sizeof(GDX12IndirectDrawArgs),
+			                         sizeof(GDX12MaterialConstants), sizeof(GDX12TransformConstants)};
+			constexpr std::array sceneInputs{SceneInstances, SceneMaterials, SceneTransforms, SceneCommands};
+			for (UINT output = 0; output < sceneInputs.size(); ++output)
 			{
-				id = NativeWork::ResourceFor(primary, primaryBindings, native, "shadow material texture");
-				primary.Resources[id].Initial = primary.Resources[id].Final = resource.GetCurrentState();
+				const auto index = sceneInputs[output];
+				auto* local = mirror(index, true);
+				inputs[index == SceneCommands ? 5 : output] = bind(local);
+				auto& descriptor = remote.SceneViews[index];
+				D3D12_SHADER_RESOURCE_VIEW_DESC view{};
+				view.Format = DXGI_FORMAT_UNKNOWN;
+				view.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+				view.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+				view.Buffer.StructureByteStride = strides[index];
+				view.Buffer.NumElements = UINT(scene.Buffers[index].Bytes / strides[index]);
+				descriptor.InitAsSRV(local, &view, heap, descriptor.HeapIndex == UINT_MAX
+				    ? heap->GetAvailableIndex(SceneDescriptorStart) : descriptor.HeapIndex);
+				descriptors[index] = descriptor.GPUHandle;
 			}
-			const bool refresh = materialsChanged || !remote.Mirror.Contains(native);
-			auto* local = mirror(id, refresh);
-			if (refresh)
+			const bool seed = !baseline->Ready && producer == baselineExports.end();
+			if (seed) baseline->Version = geometry._vertexDeformationRevision;
+			const bool clone = !seed && (remote.VertexSource != sourceVertices || !remote.Mirror.Contains(sourceVertices));
+			const auto previousVersion = seed ? 0 : clone ? baseline->Version : remote.VertexDeformationRevision;
+			remote.VertexBase = baseline;
+			remote.SeedVertices = Invalid;
+			remote.Vertices = {previousVersion, geometry._vertexDeformationRevision, 0, 0, 0, seed, clone};
+			std::vector<ProbeInputMirror::BufferRange> ranges;
+			if (!seed && remote.Vertices.From != remote.Vertices.To)
+				for (const auto& [first, end] : geometry.ChangedVertexRanges(remote.Vertices.From))
+					ranges.push_back({UINT64(first) * sizeof(Vertex), UINT64(end - first) * sizeof(Vertex)});
+			std::vector<ProbeInputMirror::BufferPatch> patches;
+			const auto skin = scene.RemoteSkin.find(owner);
+			if ((seed || remote.Vertices.From != remote.Vertices.To) &&
+			    skin != scene.RemoteSkin.end() && !skin->second.Ranges.empty())
 			{
-				const auto view = texture->ShaderViewDescription();
-				remote.Resources.Device->GetDevice()->CreateShaderResourceView(
-				    local, &view, heap->GetCPUHandle(texture->GetSRV()->HeapIndex));
+				remote.SkinInput = skin->second.Output;
+				for (const auto& range : skin->second.Ranges)
+				{
+					const auto bytes = range.Work.VertexBytes();
+					patches.push_back({remote.SkinInput->Get(), UINT64(range.FirstVertex) * sizeof(Vertex),
+					    UINT64(range.Work.OutputVertex) * sizeof(Vertex), bytes});
+					remote.Vertices.LocalBytes += bytes;
+				}
 			}
-			constexpr State read = D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE;
-			materialReads.push_back({bind(local), Mode::Read, read});
-			if (remote.Mirror.PendingCopy(native)) restore.push_back({id, Mode::Read, read});
+			mesh.VertexResource = remote.Mirror.Mirror(primary, primaryBindings, mesh.VertexResource,
+			    SceneVertices, seed, std::move(patches), std::move(ranges), clone ? baseline->Data.Get() : nullptr);
+			remote.Vertices.TransferBytes = remote.Mirror.PendingTransferBytes(sourceVertices);
+			remote.Vertices.BaselineBytes = remote.Mirror.PendingBaselineBytes(sourceVertices);
+			mesh.IndexResource = mirror(SceneIndices, meshChanged);
+			mesh.Vertices.BufferLocation = mesh.VertexResource->GetGPUVirtualAddress();
+			mesh.Indices.BufferLocation = mesh.IndexResource->GetGPUVirtualAddress();
+			inputs[3] = bind(mesh.VertexResource);
+			inputs[4] = bind(mesh.IndexResource);
+			if (seed)
+			{
+				auto* target = baseline->Data.Get();
+				const Id targetId = bind(target);
+				remote.Vertices.BaselineBytes = mesh.Vertices.SizeInBytes;
+				remote.SeedVertices = work.Add(graph, "seed shadow owner vertex baseline",
+				    {{inputs[3], Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE},
+				     {targetId, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
+				    [target, mesh](auto* cmd)
+				    { cmd->CopyBufferRegion(target, 0, mesh.VertexResource, 0, mesh.Vertices.SizeInBytes); },
+				    {}, Queue::Copy);
+			}
+			const Id cameraSource = NativeWork::ResourceFor(primary, primaryBindings, cameraBuffer, "shadow camera input");
+			auto* localCamera = mirror(cameraSource, true);
+			const Id cameraId = bind(localCamera);
+			const auto cameraAddress = localCamera->GetGPUVirtualAddress() +
+			    UINT64(_common.ActiveCameraCBufferIndex) * camera.GetElementSize();
+			const bool materialsChanged = remote.TextureRevision != _resources.TextureRevision;
+			remote.TextureRevision = _resources.TextureRevision;
+			std::vector<Access> materialReads;
+			for (auto* texture : textures)
+			{
+				auto& resource = *texture->GetResource();
+				auto* native = resource.D3DResource.Get();
+				Id id = primary.FindBinding(primaryBindings, native);
+				if (id == Invalid)
+				{
+					id = NativeWork::ResourceFor(primary, primaryBindings, native, "shadow material texture");
+					primary.Resources[id].Initial = primary.Resources[id].Final = resource.GetCurrentState();
+				}
+				const bool refresh = materialsChanged || !remote.Mirror.Contains(native);
+				auto* local = mirror(id, refresh);
+				if (refresh)
+				{
+					const auto view = texture->ShaderViewDescription();
+					remote.Resources.Device->GetDevice()->CreateShaderResourceView(
+					    local, &view, heap->GetCPUHandle(texture->GetSRV()->HeapIndex));
+				}
+				constexpr State read = D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE;
+				materialReads.push_back({bind(local), Mode::Read, read});
+				if (remote.Mirror.PendingCopy(native)) restore.push_back({id, Mode::Read, read});
+			}
+			materialReads = UniqueLightingAccesses(std::move(materialReads));
+			const auto vegetation = [&](const GeometryTarget& view, Graph&, std::vector<ID3D12Resource*>&)
+			{
+				auto grass = view;
+				grass.View.FrameSlot = _slot;
+				grass.Camera = cameraId;
+				grass.View.CameraConstants = cameraAddress;
+				grass.AdditionalReads = materialReads;
+				geometry.AppendVegetationView(primary, primaryBindings, remote.Mirror, graph, bindings, work,
+				    remote.Vegetation, _slot, grass, remote.SceneViews[SceneMaterials], inputs[1], Invalid, 0, {});
+			};
+			const auto addWork = [&](NativeWork& planned)
+			{
+				work.Commands.insert(work.Commands.end(), std::make_move_iterator(planned.Commands.begin()),
+				                     std::make_move_iterator(planned.Commands.end()));
+			};
+			if (!batch.empty())
+			{
+				const std::array<Id, 5> localInputs{inputs[0], inputs[1], inputs[2], inputs[3], inputs[4]};
+				pass.Append(graph, bindings, 0, descriptors, mesh, *target.LightUpload, vegetation, &localInputs, materialReads);
+				addWork(target.Work);
+			}
+			if (remote.SunMask)
+			{
+				if (!remote.Sun) remote.Sun = std::make_unique<SceneSunShadows>(remote.Resources, _common);
+				auto& shadow = *remote.Sun;
+				remote.Resources.ShadowQuality.SunResolution = _resources.ShadowQuality.SunResolution;
+				remote.Resources.ShadowSettings = _resources.ShadowSettings;
+				remote.Resources.FrameConstants.front()->ShadowCB->CopyData(0, _resources.ShadowSettings);
+				shadow._slots.front().Update = remote.SunMask;
+				shadow.Append(graph, bindings, 0, descriptors, scene.Draws, mesh, vegetation, remote.SunMask,
+				              &inputs, materialReads);
+				addWork(shadow._slots.front().Work);
+			}
+			std::sort(work.Commands.begin(), work.Commands.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+			remote.Mirror.CheckShadowStaging(resultCopy + stageDepth, resultCopy);
+			remote.Input = remote.Mirror.AppendImport(graph, bindings, work, true);
 		}
-		materialReads = UniqueLightingAccesses(std::move(materialReads));
-		const auto vegetation = [&](const GeometryTarget& view, Graph&, std::vector<ID3D12Resource*>&)
+		catch (const ProbeInputMirror::ShadowBudgetExceeded&)
 		{
-			auto grass = view;
-			grass.View.FrameSlot = _slot;
-			grass.Camera = cameraId;
-			grass.View.CameraConstants = cameraAddress;
-			grass.AdditionalReads = materialReads;
-			geometry.AppendVegetationView(primary, primaryBindings, remote.Mirror, graph, bindings, work,
-			    remote.Vegetation, _slot, grass, remote.SceneViews[SceneMaterials], inputs[1], Invalid, 0, {});
-		};
-		const auto addWork = [&](NativeWork& planned)
-		{
-			work.Commands.insert(work.Commands.end(), std::make_move_iterator(planned.Commands.begin()),
-			                     std::make_move_iterator(planned.Commands.end()));
-		};
-		if (!batch.empty())
-		{
-			const std::array<Id, 5> localInputs{inputs[0], inputs[1], inputs[2], inputs[3], inputs[4]};
-			pass.Append(graph, bindings, 0, descriptors, mesh, *target.LightUpload, vegetation, &localInputs, materialReads);
-			addWork(target.Work);
+			primary.Operations.resize(operationCount);
+			_work.Commands.resize(commandCount);
+			for (size_t i = bindingCount; i < primary.IndexedBindings; ++i)
+			{
+				const auto binding = primary.BindingIds.find(primaryBindings[i]);
+				if (binding != primary.BindingIds.end() && binding->second == i) primary.BindingIds.erase(binding);
+			}
+			primary.IndexedBindings = (std::min)(primary.IndexedBindings, bindingCount);
+			primaryBindings.resize(bindingCount);
+			primary.Resources.resize(bindingCount);
+			frame.ShadowReads.resize(readCount);
+			remote.Publication.reset();
+			remote.StaticTransfer.reset();
+			remote.VertexBase.reset();
+			remote.SkinInput.reset();
+			remote.MeshRevision = savedMeshRevision;
+			remote.TextureRevision = savedTextureRevision;
+			remote.Mirror.Abort([&](ID3D12Resource* resource) { remote.Vegetation.Forget(resource); });
+			if (savedBaseline) _shadowVertexBaselines[owner] = savedBaseline;
+			else _shadowVertexBaselines.erase(owner);
+			fallback();
+			continue;
 		}
-		if (remote.SunMask)
-		{
-			if (!remote.Sun) remote.Sun = std::make_unique<SceneSunShadows>(remote.Resources, _common);
-			auto& shadow = *remote.Sun;
-			remote.Resources.ShadowQuality.SunResolution = _resources.ShadowQuality.SunResolution;
-			remote.Resources.ShadowSettings = _resources.ShadowSettings;
-			remote.Resources.FrameConstants.front()->ShadowCB->CopyData(0, _resources.ShadowSettings);
-			shadow._slots.front().Update = remote.SunMask;
-			shadow.Append(graph, bindings, 0, descriptors, scene.Draws, mesh, vegetation, remote.SunMask,
-			              &inputs, materialReads);
-			addWork(shadow._slots.front().Work);
-		}
-		std::sort(work.Commands.begin(), work.Commands.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-		remote.Input = remote.Mirror.AppendImport(graph, bindings, work, true);
-		if (seed) ++remote.SeedVertices; // The scene import was prepended.
+		if (remote.Vertices.Seed) ++remote.SeedVertices; // The scene import was prepended.
 		remote.Export = remote.Mirror.AppendExport(primary, primaryBindings, _work, restore.empty() ? Queue::Copy : Queue::Direct);
 		if (staticExport != Invalid)
 		{
 			primary.Operations[remote.Export].Dependencies.push_back(staticExport);
 			graph.Operations[staticImport + 1].Dependencies.push_back(remote.Input); // Scene import was prepended.
 		}
-		if (seed) baselineExports.emplace(owner, remote.Export);
-		else if (clone && producer != baselineExports.end())
+		if (remote.Vertices.Seed) baselineExports.emplace(owner, remote.Export);
+		else if (remote.Vertices.Clone && producer != baselineExports.end())
 			primary.Operations[remote.Export].Dependencies.push_back(producer->second);
 		Id restored = Invalid;
 		if (!restore.empty())

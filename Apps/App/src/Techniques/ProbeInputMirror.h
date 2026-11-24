@@ -17,32 +17,7 @@ class ProbeInputMirror
     ProbeInputMirror(QueueSubmission& submit, Id remote, bool localShadows = false)
         : _submit(submit), _remote(remote), _localShadows(localShadows) {}
 
-    struct Growth
-    {
-        UINT64 OwnerImages = 0, TransferHeap = 0;
-    };
-
-    static Growth EstimateGrowth(GDX12Device& primary, GDX12Device& owner,
-        const ProbeInputMirror* existing, const std::unordered_set<ID3D12Resource*>& sources)
-    {
-        Growth growth;
-        UINT64 transferBytes = 0;
-        for (auto* source : sources)
-        {
-            if (!source) continue;
-            const auto desc = source->GetDesc();
-            UINT64 bytes = desc.Width;
-            if (desc.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE2D)
-                primary.GetDevice()->GetCopyableFootprints(&desc, 0, UINT(desc.MipLevels) * desc.DepthOrArraySize,
-                    0, nullptr, nullptr, nullptr, &bytes);
-            transferBytes = Align(transferBytes) + bytes;
-            if (!existing || !existing->Contains(source))
-                growth.OwnerImages += ShadowMemory::Size(owner, LocalShape(desc, false));
-        }
-        if (transferBytes && (!existing || transferBytes > existing->_capacity))
-            growth.TransferHeap = ShadowMemory::TransferBytes(primary, owner, transferBytes);
-        return growth;
-    }
+    struct ShadowBudgetExceeded {};
 
     struct BufferPatch
     {
@@ -51,11 +26,38 @@ class ProbeInputMirror
     };
     struct BufferRange { UINT64 Offset, Bytes; };
 
-    void Begin()
+    void Begin(UINT64 ownerReserve = 0)
     {
         _pending.clear();
         _bytes = 0;
         _sealed = false;
+        _ownerReserve = ownerReserve;
+    }
+
+    void CheckShadowStaging(UINT64 primaryReserve, UINT64 ownerReserve) const
+    {
+        if (!_localShadows) return;
+        auto& primary = _submit.Device(0);
+        auto& owner = _submit.Device(_remote);
+        const auto growth = _bytes > _capacity ? ShadowMemory::TransferBytes(primary, owner, _bytes) : 0;
+        if (!ShadowMemory::Fits(primary, primaryReserve + growth) ||
+            !ShadowMemory::Fits(owner, ownerReserve + growth))
+            throw ShadowBudgetExceeded{};
+    }
+
+    void Abort(const std::function<void(ID3D12Resource*)>& forgetLocalViews)
+    {
+        Begin();
+        for (auto entry = _mirrors.begin(); entry != _mirrors.end();)
+        {
+            if (entry->second.Initialized)
+            {
+                ++entry;
+                continue;
+            }
+            forgetLocalViews(entry->second.Local.Get());
+            entry = _mirrors.erase(entry);
+        }
     }
 
     void RetireUnused(const std::unordered_set<ID3D12Resource*>& live,
@@ -273,8 +275,10 @@ class ProbeInputMirror
         mirror.Source = source;
         shape = LocalShape(shape, depthTarget);
         auto& owner = _submit.Device(_remote);
+        const auto allocation = _localShadows ? ShadowMemory::Size(owner, shape) : 0;
+        if (_localShadows && !ShadowMemory::Fits(owner, _ownerReserve + allocation)) throw ShadowBudgetExceeded{};
         mirror.Local = owner.CreateResource(D3D12_HEAP_TYPE_DEFAULT, shape, D3D12_RESOURCE_STATE_COMMON);
-        if (_localShadows) mirror.ShadowAllocation.Set(owner, ShadowMemory::Size(owner, shape));
+        if (_localShadows) mirror.ShadowAllocation.Set(owner, allocation);
     }
 
     Id Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work, bool importing, Queue queue)
@@ -377,7 +381,7 @@ class ProbeInputMirror
     std::unordered_map<ID3D12Resource*, Pending> _pending;
     ShadowMemory::Charge _shadowExport, _shadowImport;
     QueueSubmission::TransferBuffer _transfer;
-    UINT64 _capacity = 0;
+    UINT64 _capacity = 0, _ownerReserve = 0;
     UINT64 _bytes = 0;
     bool _sealed = false;
 };

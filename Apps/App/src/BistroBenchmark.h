@@ -924,6 +924,8 @@ private:
         _trialFirstShadowLayout.clear();
         _trialShadowLimits.clear();
         _trialShadowTexels = _trialShadowSamples = 0;
+        _trialSectionShadowTexels = {};
+        _trialSectionShadowSamples = {};
         _trialLastShadowLayout.clear();
         _trialPublications.clear();
         if (_calibrating) _placementSeenOnRoute = {};
@@ -1059,6 +1061,9 @@ private:
         const auto shadowTexels = pipeline.LocalShadowTexels();
         _trialShadowTexels += shadowTexels;
         ++_trialShadowSamples;
+        const auto section = Section(_routeTime);
+        _trialSectionShadowTexels[section] += shadowTexels;
+        ++_trialSectionShadowSamples[section];
         _trialLastShadowLayout = pipeline.LocalShadowDistribution();
         const auto limit = _trialLastShadowLayout.find(" (");
         if (limit != std::string::npos) _trialShadowLimits.insert(_trialLastShadowLayout.substr(limit + 1));
@@ -1229,6 +1234,9 @@ private:
     {
         _trialResult.Remote = !_trialPublications.empty();
         if (_trialShadowSamples) _trialResult.ShadowTexels = double(_trialShadowTexels) / _trialShadowSamples;
+        for (size_t i = 0; i < _trialSectionShadowSamples.size(); ++i)
+            if (_trialSectionShadowSamples[i])
+                _trialResult.SectionShadowTexels[i] = double(_trialSectionShadowTexels[i]) / _trialSectionShadowSamples[i];
         const bool remote = _placementSearch.RemotePhase();
         if (!_manualPlacement && remote != _trialResult.Remote && _trialReason.empty())
             _trialReason = remote ? "no frame consumer observed on the requested placement" : "unexpected cross-GPU work";
@@ -1294,7 +1302,8 @@ private:
             _csv.Config(_trialPrefix + name, adapter);
         _csv.Config(_trialPrefix + "FirstLocalShadowLayout", _trialFirstShadowLayout);
         _csv.Config(_trialPrefix + "LastLocalShadowLayout", _trialLastShadowLayout);
-        _csv.Config(_trialPrefix + "MeanLocalShadowTexels", Csv::Number(_trialResult.ShadowTexels));
+        if (_trialResult.ShadowTexels)
+            _csv.Config(_trialPrefix + "MeanLocalShadowTexels", Csv::Number(*_trialResult.ShadowTexels));
         for (const auto& limit : _trialShadowLimits) _csv.Config(_trialPrefix + "LocalShadowLimit", limit);
         constexpr std::array transferNames{"PostSceneInputBytes", "PostHUDBytes", "PostInspectorBytes", "PostReturnBytes"};
         for (size_t i = 0; i < transferNames.size(); ++i)
@@ -2437,6 +2446,7 @@ private:
     std::string _trialFirstShadowLayout, _trialLastShadowLayout;
     std::set<std::string> _trialShadowLimits;
     uint64_t _trialShadowTexels = 0, _trialShadowSamples = 0;
+    std::array<uint64_t, 7> _trialSectionShadowTexels{}, _trialSectionShadowSamples{};
     std::vector<double> _trialIntervals;
     std::array<uint64_t, 4> _trialTransferBytes{};
     Config _trialConfig;
