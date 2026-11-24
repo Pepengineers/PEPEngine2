@@ -101,6 +101,7 @@ struct LocalLight
     uint ShadowFlags;
     uint3 _padding;
     float4x4 ShadowViewProj[6];
+    uint4 ShadowTiles[6]; // Page, X, Y, side.
 };
 
 struct InstanceData

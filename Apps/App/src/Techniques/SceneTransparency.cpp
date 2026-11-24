@@ -87,11 +87,9 @@ GDX12Texture* SceneTransparency::AppendPhase(Graph& graph, std::vector<ID3D12Res
 	                                                    scene.Buffers[3].Srv.GPUHandle,
 	                                                    scene.Buffers[0].Srv.GPUHandle};
 	srvs[7] = constants.ShadowLights->GetSRV()->GPUHandle;
-	srvs[8] = shadows.Fallback->GetSRV()->GPUHandle;
+	srvs[8] = shadows.Texture->GetSRV()->GPUHandle;
 	accesses.push_back({resource(constants.ShadowLights->GetResource().D3DResource.Get()), Mode::Read, read});
-	accesses.push_back(texture(shadows.Fallback, Mode::Read, read));
-	for (auto* atlas : shadows.Atlases)
-		if (atlas != shadows.Fallback) accesses.push_back(texture(atlas, Mode::Read, read));
+	accesses.push_back(texture(shadows.Texture, Mode::Read, read));
 	const std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 3> atmosphere{_resources.SkyTransmittanceSRV.GPUHandle,
 	                                                            _resources.SkyAerialRadianceSRV.GPUHandle,
 	                                                            _resources.SkyAerialTransmittanceSRV.GPUHandle};

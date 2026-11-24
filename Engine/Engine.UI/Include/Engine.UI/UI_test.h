@@ -1,4 +1,5 @@
 #pragma once
+#include <functional>
 
 #include <Windows.h>
 #include <dxgiformat.h>
@@ -37,7 +38,7 @@ namespace Engine::UI
     void SetDebugReconstructionStatusVisible(bool visible);
     void SetSettingsEditingEnabled(bool enabled);
     void SetAvailableSettingLevels(std::map<std::wstring, std::vector<int>> levels);
-    void SetLocalShadowDistribution(std::string layout);
+    void SetLocalShadowDistribution(std::function<std::string()> layout);
     void HideSettings();
     void OpenSettings();
     void EnableDebugUI(); // Startup opt-in for non-Debug builds.

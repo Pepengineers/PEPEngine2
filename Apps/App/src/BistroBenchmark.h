@@ -774,7 +774,7 @@ private:
     void WriteConfig(ConsoleModule& console, const BistroRenderPipeline& pipeline, const Config& effective)
     {
         for (const auto& [name, value] : RenderConfig(console))
-            _csv.Config(std::filesystem::path(name).u8string(), value);
+            if (name != L"Render.Shadows.Local.AtlasCount") _csv.Config(std::filesystem::path(name).u8string(), value);
         for (const auto& [name, value] : effective) _csv.Config(name, value);
         for (const auto& [name, value] : pipeline.BenchmarkAdapters()) _csv.Config(name, value);
         _configured = true;
@@ -861,13 +861,13 @@ private:
             if (!exeLength || exeLength == std::size(executable))
                 throw std::runtime_error("Cannot identify benchmark executable");
             std::ostringstream conditions;
-            conditions << "bistro-baseline-v6 " << std::setprecision(17) << Duration() << ' ' << _paintingHold << ' ' << _warmup << ' ' <<
+            conditions << "bistro-baseline-v7 " << std::setprecision(17) << Duration() << ' ' << _paintingHold << ' ' << _warmup << ' ' <<
                 std::filesystem::last_write_time(executable).time_since_epoch().count() << ' ' <<
                 pipeline.BenchmarkSubmissions().AdapterLabel(0) << ' ' <<
                 world.GetTimeScale() << ' ' << _characters->Seed() << ' ' << _startupLayout;
             for (const auto& [outputWidth, outputHeight] : _placementSearch.Resolutions())
                 conditions << ' ' << outputWidth << 'x' << outputHeight;
-            for (auto level : {BistroPlacement::Off, BistroPlacement::Medium, BistroPlacement::High, BistroPlacement::Epic})
+            for (auto level : {BistroPlacement::Off, BistroPlacement::Low, BistroPlacement::Medium, BistroPlacement::High, BistroPlacement::Epic})
                 conditions << ' ' << _placementSearch.QualityValue(BistroPlacement::LocalShadowQuality, level);
             auto renderConditions = RenderConfig(console);
             std::sort(renderConditions.begin(), renderConditions.end());
@@ -923,12 +923,9 @@ private:
         _trialIntervals.clear();
         _trialTransferBytes = {};
         _trialOwners.clear();
-        _trialFirstShadowLayout.clear();
-        _trialShadowLimits.clear();
         _trialShadowTexels = _trialShadowSamples = 0;
         _trialSectionShadowTexels = {};
         _trialSectionShadowSamples = {};
-        _trialLastShadowLayout.clear();
         _trialPublications.clear();
         if (_calibrating) _placementSeenOnRoute = {};
         _trialWindowCount = _windows.size();
@@ -971,7 +968,7 @@ private:
         }
         _trialRequested = RenderConfig(console);
         for (const auto& [name, value] : _trialRequested)
-            _csv.Config(_trialPrefix + std::filesystem::path(name).u8string(), value);
+            if (name != L"Render.Shadows.Local.AtlasCount") _csv.Config(_trialPrefix + std::filesystem::path(name).u8string(), value);
         BeginPlacementLeg(world, pipeline);
     }
 
@@ -1058,7 +1055,7 @@ private:
             activity[15] |= starts("linden vertex fetch view ");
             activity[16] |= name == "cloud picture generation" || name == "cloud picture GPU0 import";
             activity[17] |= starts("sun atlas ") || name == "publish dirty remote CSM tiles on GPU0";
-            activity[18] |= name == "local shadow CPU lists ExecuteIndirect" || name == "import shadow depth slices";
+            activity[18] |= name == "local shadow CPU lists ExecuteIndirect" || name == "publish local shadow tiles";
         };
         const auto shadowTexels = pipeline.LocalShadowTexels();
         _trialShadowTexels += shadowTexels;
@@ -1066,10 +1063,6 @@ private:
         const auto section = Section(_routeTime);
         _trialSectionShadowTexels[section] += shadowTexels;
         ++_trialSectionShadowSamples[section];
-        _trialLastShadowLayout = pipeline.LocalShadowDistribution();
-        const auto limit = _trialLastShadowLayout.find(" (");
-        if (limit != std::string::npos) _trialShadowLimits.insert(_trialLastShadowLayout.substr(limit + 1));
-        if (_trialFirstShadowLayout.empty()) _trialFirstShadowLayout = _trialLastShadowLayout;
         const auto& schedule = pipeline.BenchmarkSchedule();
         if (_observedSchedule != schedule)
         {
@@ -1302,11 +1295,8 @@ private:
     {
         for (const auto& [name, adapter] : _trialOwners)
             _csv.Config(_trialPrefix + name, adapter);
-        _csv.Config(_trialPrefix + "FirstLocalShadowLayout", _trialFirstShadowLayout);
-        _csv.Config(_trialPrefix + "LastLocalShadowLayout", _trialLastShadowLayout);
         if (_trialResult.ShadowTexels)
             _csv.Config(_trialPrefix + "MeanLocalShadowTexels", Csv::Number(*_trialResult.ShadowTexels));
-        for (const auto& limit : _trialShadowLimits) _csv.Config(_trialPrefix + "LocalShadowLimit", limit);
         constexpr std::array transferNames{"PostSceneInputBytes", "PostHUDBytes", "PostInspectorBytes", "PostReturnBytes"};
         for (size_t i = 0; i < transferNames.size(); ++i)
             _csv.Config(_trialPrefix + transferNames[i], std::to_string(_trialTransferBytes[i]));
@@ -2197,7 +2187,7 @@ private:
             {
                 if (!_configured)
                     for (const auto& [name, value] : RenderConfig(console))
-                        _csv.Config(std::filesystem::path(name).u8string(), value);
+                        if (name != L"Render.Shadows.Local.AtlasCount") _csv.Config(std::filesystem::path(name).u8string(), value);
                 WriteLeg(status);
             }
             if (TimedSearch())
@@ -2445,8 +2435,6 @@ private:
     std::array<bool, std::size(BistroPlacement::Techniques)> _packetActivity{};
     std::shared_ptr<const BistroRender::Schedule> _observedSchedule;
     std::set<std::pair<std::string, std::string>> _trialOwners;
-    std::string _trialFirstShadowLayout, _trialLastShadowLayout;
-    std::set<std::string> _trialShadowLimits;
     uint64_t _trialShadowTexels = 0, _trialShadowSamples = 0;
     std::array<uint64_t, 7> _trialSectionShadowTexels{}, _trialSectionShadowSamples{};
     std::vector<double> _trialIntervals;

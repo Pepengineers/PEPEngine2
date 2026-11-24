@@ -324,7 +324,6 @@ private:
             return Result::RetireLocalShadows;
         }
         std::map<std::wstring, std::vector<int>> available;
-        available[L"Render.Shadows.Local.Resolution"] = {0, 128, 256, 384, 512, 1024};
         for (const auto& f : features)
         {
             if (!f.ShowLevels) continue;

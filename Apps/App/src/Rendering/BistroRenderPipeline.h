@@ -99,7 +99,6 @@ class BistroRenderPipeline final : public IRenderPipeline
 		_executor->Drain();
 		_lighting->RetireLocalShadows();
 	}
-	std::string LocalShadowDistribution() const { return _lighting->LocalShadowDistribution(); }
 	struct ProbeMemory { UINT64 Primary = 0, Owner = 0; };
 	ProbeMemory EstimateRemoteProbe(int hardwareIndex, UINT side, UINT sunSide) const;
 	UINT64 LocalShadowTexels() const { return _lighting->LocalShadowTexels(); }

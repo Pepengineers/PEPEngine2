@@ -89,7 +89,6 @@ void GDX12GrassRenderer::Initialize()
 void GDX12GrassRenderer::InitializeGraphics(bool captureOnly)
 {
     GDX12RootSignatureDesc graphics;
-    graphics.IndexedLocalShadows = true;
     graphics.VolatileSRVData = true;
     graphics.NumSingleCBVSlots = 4;
     graphics.NumSingleSRVSlots = 8;
@@ -596,11 +595,10 @@ GDX12GraphicsBindings GDX12GrassRenderer::DrawBindings(const GDX12GeometryContex
     if (view.Stage == GDX12GeometryStage::ReflectionCapture)
     {
         const auto& lighting = *view.CaptureLighting;
-        binding.CBVs.push_back({3, lighting.ShadowConstants});
         binding.SRVs.insert(binding.SRVs.end(), {
-            {2, lighting.SunShadow->GetSRV()->GPUHandle}, {3, lighting.Irradiance->GetSRV()->GPUHandle},
+            {3, lighting.Irradiance->GetSRV()->GPUHandle},
             {4, lighting.Prefiltered->GetSRV()->GPUHandle}, {5, lighting.BRDF->GetSRV()->GPUHandle},
-            {6, localLights}, {7, lighting.LocalShadows->GetSRV()->GPUHandle}});
+            {6, localLights}});
     }
     return binding;
 }

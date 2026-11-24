@@ -204,7 +204,7 @@ SceneLocalShadows::SceneLocalShadows(GDX12DeviceResources& r, RenderPipelineComm
 {
 	_dsvHeap = std::make_unique<GDX12DescriptorHeap>(
 	    r.Device, D3D12_DESCRIPTOR_HEAP_TYPE_DSV,
-	    UINT(_slots.size()) * D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION * 8, D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
+	    UINT(_slots.size() + remote) * MaxLocalShadowAtlasCount, D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
 	GDX12RootSignatureDesc root;
 	root.Constants = {2};
 	root.NumSingleSRVSlots = 4;
@@ -243,7 +243,6 @@ SceneLocalShadows::SceneLocalShadows(GDX12DeviceResources& r, RenderPipelineComm
 	{
 		frame.Cull.Owner = this;
 		frame.Cull.Frame = &frame;
-		frame.Indexed = r.Device->GetDeviceFeatures().Features.HighestShaderModel() >= D3D_SHADER_MODEL_6_6;
 	}
 	if (remote) return;
 	r.IndirectCommandsCache->TrackElementChanges();
@@ -369,7 +368,7 @@ void SceneLocalShadows::InvalidateBounds(const BoundingBox& bounds, bool listsCh
 	{
 		for (auto& cache : slot.Cache)
 		{
-			const UINT valid = cache.MapsValid | cache.StagedValid | (listsChanged ? cache.ListsValid : 0);
+			const UINT valid = cache.MapsValid | (listsChanged ? cache.ListsValid : 0);
 			if (!valid || !LocalShadowRangeIntersects(cache.Light, bounds)) continue;
 			for (UINT face = 0; face < LocalShadowFaceCount(cache.Light); ++face)
 			{
@@ -378,7 +377,6 @@ void SceneLocalShadows::InvalidateBounds(const BoundingBox& bounds, bool listsCh
 				{
 					if (listsChanged) cache.ListsValid &= ~bit;
 					cache.MapsValid &= ~bit;
-					cache.StagedValid &= ~bit;
 				}
 			}
 		}
@@ -481,7 +479,7 @@ void SceneLocalShadows::UpdateCasters(UINT slot)
 		{
 			for (auto& cache : cachedSlot.Cache)
 			{
-				cache.MapsValid = cache.StagedValid = 0;
+				cache.MapsValid = 0;
 			}
 		}
 		_textureRevision = _resources.TextureRevision;
@@ -631,7 +629,7 @@ void SceneLocalShadows::RebuildCasters(UINT slot)
 	{
 		for (auto& cache : frame.Cache)
 		{
-			cache.ListsValid = cache.MapsValid = cache.StagedValid = cache.LocalFallback = 0;
+			cache.ListsValid = cache.MapsValid = cache.LocalFallback = 0;
 		}
 	}
 	_treeReady = true;
@@ -776,37 +774,29 @@ void SceneLocalShadows::Pack(Slot& frame)
 	for (UINT lightIndex = 0; lightIndex < frame.Lights.size(); ++lightIndex)
 	{
 		auto& light = frame.Lights[lightIndex];
-		auto& cached = frame.Cache[lightIndex];
-		light.ShadowFirstSlice = cached.ReadyFaces ? cached.FirstSlice : UINT_MAX;
+		auto& cache = frame.Cache[lightIndex];
+		light.ShadowFirstSlice = cache.ReadyFaces ? 0 : UINT_MAX;
 		light.ShadowFlags |= LocalShadowFaceMask;
-		light._padding[2] = cached.ReadyFaces;
-		GatherMissing(frame, lightIndex, cached.ReadyFaces | cached.StageThisFrame);
-		if (frame.Indexed && light.ShadowFirstSlice != UINT_MAX)
-			SetLocalShadowAtlas(light, frame.Atlases.at(cached.Resolution).Texture.GetSRV()->HeapIndex);
+		light._padding[2] = cache.ReadyFaces;
+		std::copy(cache.Tiles.begin(), cache.Tiles.end(), light.ShadowTiles);
+		GatherMissing(frame, lightIndex, cache.ReadyFaces);
 		const bool everyFrame = !_staticOnly && (light.ShadowFlags & ShadowEveryFrame);
-		const UINT dirty = cached.ReadyFaces & (everyFrame ? UINT_MAX : (~cached.MapsValid | cached.LocalFallback));
+		const UINT dirty = cache.ReadyFaces & (everyFrame ? UINT_MAX : (~cache.MapsValid | cache.LocalFallback));
 		// Exact bootstrap may need faces that are valid only in this frame slot.
-		const UINT update = dirty && cached.Latest && !(cached.ReadyFaces & ~cached.ResidentFaces)
-		    ? cached.ReadyFaces : dirty;
-		const auto append = [&](UINT mask, UINT side, UINT first, bool staged)
+		const UINT update = dirty && cache.Latest && !(cache.ReadyFaces & ~cache.ResidentFaces)
+		    ? cache.ReadyFaces : dirty;
+		for (UINT face = 0; face < LocalShadowFaceCount(light); ++face)
 		{
-			for (UINT face = 0; face < LocalShadowFaceCount(light); ++face)
-			{
-				if (!(mask & (1u << face))) continue;
-				const auto& commands = cached.Faces[face];
-				const size_t opaqueCount = commands.Opaque.size();
-				const size_t maskedCount = commands.Masked.size();
-				if (frame.Packed.size() + opaqueCount + maskedCount > UINT_MAX / sizeof(GDX12IndirectDrawArgs))
-					throw std::length_error("Local shadow indirect buffer exceeds the buffer size limit");
-				frame.Views.push_back({lightIndex, face, first + face, UINT(frame.Packed.size()),
-				                       UINT(opaqueCount), UINT(maskedCount), side, (dirty & (1u << face)) != 0, staged});
-				frame.Packed.insert(frame.Packed.end(), commands.Opaque.begin(), commands.Opaque.end());
-				frame.Packed.insert(frame.Packed.end(), commands.Masked.begin(), commands.Masked.end());
-			}
-		};
-		append(update, cached.Resolution, cached.FirstSlice, false);
-		if (cached.StageThisFrame)
-			append(cached.StageThisFrame, frame.StagedLayout->Sizes[lightIndex], frame.StagedLayout->Starts[lightIndex], true);
+			if (!(update & (1u << face))) continue;
+			const auto& commands = cache.Faces[face];
+			const size_t opaqueCount = commands.Opaque.size(), maskedCount = commands.Masked.size();
+			if (frame.Packed.size() + opaqueCount + maskedCount > UINT_MAX / sizeof(GDX12IndirectDrawArgs))
+				throw std::length_error("Local shadow indirect buffer exceeds the buffer size limit");
+			frame.Views.push_back({lightIndex, face, UINT(frame.Packed.size()), UINT(opaqueCount), UINT(maskedCount),
+			                       cache.Tiles[face], bool(dirty & (1u << face))});
+			frame.Packed.insert(frame.Packed.end(), commands.Opaque.begin(), commands.Opaque.end());
+			frame.Packed.insert(frame.Packed.end(), commands.Masked.begin(), commands.Masked.end());
+		}
 	}
 }
 
@@ -861,9 +851,6 @@ void SceneLocalShadows::UpdateLights(Slot& frame)
 	}
 	if (!sameLights)
 	{
-		frame.Plan.reset();
-		frame.StagedLayout.reset();
-		++frame.LayoutRevision;
 		frame.Cache.clear();
 		frame.Cache.resize(frame.Lights.size());
 		frame.SelectionChanged = true;
@@ -881,15 +868,16 @@ void SceneLocalShadows::UpdateLights(Slot& frame)
 		                                      GetLocalShadowKey(source)) != _latestPlacements.end();
 		if (cached.Owner != owner || cached.Latest != latest)
 		{
-			frame.Plan.reset();
 			cached.MapsValid = cached.LocalFallback = 0;
+			cached.PublicationOrders = {};
 		}
 		cached.Owner = owner;
 		cached.Latest = latest;
 		if (ShouldRenderLocalShadow(source, cached.HasLight ? &cached.Light : nullptr) ||
 		    (source.ShadowFlags & ShadowEnabled) != (cached.Light.ShadowFlags & ShadowEnabled))
 		{
-			cached.ListsValid = cached.MapsValid = cached.StagedValid = 0;
+			cached.ListsValid = cached.MapsValid = 0;
+			cached.PublicationOrders = {};
 			cached.SelectionDirty = true;
 			cached.Frusta = std::array<GDX12LocalShadowFrustum, 6>{
 			    GDX12LocalShadowFrustum(source.ShadowViewProj[0]), GDX12LocalShadowFrustum(source.ShadowViewProj[1]),
@@ -959,28 +947,6 @@ void SceneLocalShadows::Complete(UINT slot)
 	{
 		frame.CommandUpload->CopyData(0, frame.Packed.data(), UINT(frame.Packed.size()));
 	}
-	for (const bool staged : {false, true})
-		for (auto& [resolution, atlas] : (staged ? frame.StagedAtlases : frame.Atlases))
-		{
-			std::vector<bool> updated(atlas.Slices);
-			for (const auto& view : frame.Views)
-			{
-				if (view.Resolution != resolution || view.Staged != staged) continue;
-				updated[view.Slice] = true;
-				auto& descriptor = atlas.Dsvs[view.Slice];
-				if (descriptor) continue;
-				descriptor = std::make_unique<GDX12Descriptor>();
-				D3D12_DEPTH_STENCIL_VIEW_DESC dsv{};
-				dsv.Format = DXGI_FORMAT_D32_FLOAT;
-				dsv.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
-				dsv.Texture2DArray.FirstArraySlice = view.Slice;
-				dsv.Texture2DArray.ArraySize = 1;
-				descriptor->InitAsDSV(atlas.Texture.GetResource()->D3DResource.Get(), &dsv, _dsvHeap.get(),
-				                      _dsvHeap->GetAvailableIndex());
-			}
-			for (UINT slice = 0; slice < atlas.Slices; ++slice)
-				if (!updated[slice]) atlas.Dsvs[slice].reset();
-		}
 }
 
 void SceneLocalShadows::Submitted(UINT slot)
@@ -989,12 +955,6 @@ void SceneLocalShadows::Submitted(UINT slot)
 	for (const auto& view : frame.Views)
 	{
 		auto& cache = frame.Cache[view.Light];
-		if (view.Staged)
-		{
-			cache.StagedFaces |= 1u << view.Face;
-			cache.StagedValid |= 1u << view.Face;
-			continue;
-		}
 		cache.MapsValid |= 1u << view.Face;
 		cache.ResidentFaces |= 1u << view.Face;
 	}
@@ -1007,764 +967,290 @@ void SceneLocalShadows::Submitted(UINT slot)
 	}
 }
 
-void SceneLocalShadows::ApplyLayout(Slot& frame, const std::vector<UINT>& sizes, const std::vector<UINT>& starts)
+namespace
 {
-	for (UINT i = 0; i < frame.Cache.size(); ++i)
-	{
-		auto& cached = frame.Cache[i];
-		if (cached.Resolution != sizes[i] || cached.FirstSlice != starts[i])
-		{
-			cached.Resolution = sizes[i];
-			cached.FirstSlice = starts[i];
-			cached.MapsValid = cached.LocalFallback = cached.ResidentFaces = 0;
-			++frame.LayoutRevision;
-		}
-	}
-}
+class FreeShadowPages
+{
+public:
+	FreeShadowPages(UINT side, UINT pages) : _free(pages, {{0, 0, LONG(side), LONG(side)}}) {}
 
-bool SceneLocalShadows::BudgetRange::Fits(UINT64 available, UINT64 required)
-{
-	// The same fit decisions hold throughout this interval, including when other slots allocate or retire.
-	if (required <= available)
+	bool Reserve(const GDX12LocalShadowTile& tile)
 	{
-		Minimum = (std::max)(Minimum, required);
+		auto& page = _free.at(tile.Page);
+		const D3D12_RECT used{LONG(tile.X), LONG(tile.Y), LONG(tile.X + tile.Side), LONG(tile.Y + tile.Side)};
+		const auto contains = [](const D3D12_RECT& outer, const D3D12_RECT& inner)
+		{
+			return outer.left <= inner.left && outer.top <= inner.top && outer.right >= inner.right &&
+			    outer.bottom >= inner.bottom;
+		};
+		if (std::none_of(page.begin(), page.end(), [&](const auto& free) { return contains(free, used); }))
+			return false;
+		std::vector<D3D12_RECT> pieces;
+		for (const auto& free : page)
+		{
+			if (used.right <= free.left || used.left >= free.right || used.bottom <= free.top || used.top >= free.bottom)
+			{
+				pieces.push_back(free);
+				continue;
+			}
+			if (used.left > free.left) pieces.push_back({free.left, free.top, used.left, free.bottom});
+			if (used.right < free.right) pieces.push_back({used.right, free.top, free.right, free.bottom});
+			if (used.top > free.top) pieces.push_back({free.left, free.top, free.right, used.top});
+			if (used.bottom < free.bottom) pieces.push_back({free.left, used.bottom, free.right, free.bottom});
+		}
+		page.clear();
+		for (size_t i = 0; i < pieces.size(); ++i)
+		{
+			bool contained = false;
+			for (size_t j = 0; j < pieces.size() && !contained; ++j)
+				contained = i != j && contains(pieces[j], pieces[i]) &&
+				    (j < i || !contains(pieces[i], pieces[j]));
+			if (!contained) page.push_back(pieces[i]);
+		}
 		return true;
 	}
-	Maximum = (std::min)(Maximum, required - 1);
-	return false;
+
+	bool Place(UINT side, GDX12LocalShadowTile& tile)
+	{
+		for (UINT page = 0; page < _free.size(); ++page)
+		{
+			const D3D12_RECT* first = nullptr;
+			for (const auto& rect : _free[page])
+				if (rect.right - rect.left >= LONG(side) && rect.bottom - rect.top >= LONG(side) &&
+				    (!first || std::tie(rect.top, rect.left) < std::tie(first->top, first->left)))
+					first = &rect;
+			if (!first) continue;
+			tile = {page, UINT(first->left), UINT(first->top), side};
+			return Reserve(tile);
+		}
+		return false;
+	}
+
+private:
+	std::vector<std::vector<D3D12_RECT>> _free;
+};
 }
 
-void SceneLocalShadows::Allocate(UINT slot, SceneLocalShadows& staticPass, const QueueSubmission& submissions, Id transparencyOwner)
+void SceneLocalShadows::Allocate(UINT slot, SceneLocalShadows& staticPass, UINT effectiveCeiling)
 {
-	using ShadowMemory::Bytes;
 	auto& frame = _slots.at(slot);
 	auto& statics = staticPass._slots.at(slot);
 	frame.Ready.Complete();
-	const UINT ceiling = frame.Ceiling;
-	const auto& primaryBudget = ShadowMemory::For(_resources.Device->GetAdapterLuid());
-	Bytes otherAllocations = primaryBudget.Allocated;
-	for (const auto* current : {&frame, &statics})
-		for (const auto* atlases : {&current->Atlases, &current->StagedAtlases})
-			for (const auto& [side, atlas] : *atlases)
-				otherAllocations -= atlas.Memory.Size();
-	const Bytes retiredHeadroom = primaryBudget.Limit - (std::min)(primaryBudget.Limit, otherAllocations);
-	const auto& cachedPlan = frame.Plan;
-	const bool reusePlan = cachedPlan && cachedPlan->Ceiling == ceiling && cachedPlan->TransparencyOwner == transparencyOwner &&
-	    cachedPlan->PlacementRevision == _placementRevision && cachedPlan->Tiers.size() == frame.Cache.size() &&
-	    cachedPlan->RetiredSlot.Contains(retiredHeadroom) &&
-	    std::all_of(cachedPlan->Budgets.begin(), cachedPlan->Budgets.end(), [&](const auto& budget)
-	    {
-		    auto& device = budget.first ? submissions.Device(budget.first) : *_resources.Device;
-		    return budget.second.Contains(ShadowMemory::For(device.GetAdapterLuid()).Limit);
-	    }) &&
-	    std::equal(frame.Cache.begin(), frame.Cache.end(), cachedPlan->Receivers.begin(), cachedPlan->Receivers.end(),
-	        [](const LightCache& light, const auto& receiver)
-	        { return light.Needed == receiver.first && light.ScreenPixels == receiver.second; });
-	if (reusePlan && cachedPlan->Settled)
-	{
-		frame.Limit = cachedPlan->Limit;
-		frame.MigrationTexels = 0;
-		Pack(frame);
-		staticPass.Pack(statics);
-		return;
-	}
-	if (!reusePlan)
-	{
-		auto& plan = frame.Plan.emplace();
-		plan.Ceiling = ceiling;
-		plan.TransparencyOwner = transparencyOwner;
-		plan.PlacementRevision = _placementRevision;
-		plan.Receivers.reserve(frame.Cache.size());
-		for (const auto& light : frame.Cache) plan.Receivers.emplace_back(light.Needed, light.ScreenPixels);
-	}
-	auto& plan = *frame.Plan;
-	const uint64_t initialLayout = frame.LayoutRevision;
 	std::vector<UINT> tiers{0};
-	if (ceiling)
-	{
-		for (UINT side = 16; side < ceiling; side *= 2) tiers.push_back(side);
-		tiers.push_back(ceiling);
-	}
-	struct Candidate
+	for (UINT side = 16; side < effectiveCeiling; side *= 2) tiers.push_back(side);
+	if (effectiveCeiling) tiers.push_back(effectiveCeiling);
+
+	struct Request
 	{
 		UINT Index, Faces, Desired;
 		float Pixels;
 		std::pair<UINT, uint64_t> Key;
 	};
-	std::vector<Candidate> candidates;
-	std::map<Id, GDX12Device*> devices{{0, _resources.Device}};
-	if (transparencyOwner) devices.emplace(transparencyOwner, &submissions.Device(transparencyOwner));
-	for (UINT i = 0; i < frame.Lights.size(); ++i)
+	std::vector<Request> requests;
+	for (UINT i = 0; i < frame.Cache.size(); ++i)
 	{
-		const auto& light = frame.Lights[i];
 		const auto& cache = frame.Cache[i];
-		if (!cache.Needed) continue;
-		if (cache.Owner) devices.emplace(cache.Owner, &submissions.Device(cache.Owner));
-		const auto id = GetLocalShadowKey(light);
+		if (!effectiveCeiling || !(cache.Light.ShadowFlags & ShadowEnabled))
+			continue;
+		const auto id = GetLocalShadowKey(cache.Light);
 		const auto key = std::make_pair(id.EntityId, id.Generation);
-		const auto old = _previousResolution.find(key);
-		const UINT previous = old == _previousResolution.end() ? 0 : old->second.Resolution;
+		const auto old = _previousPlacement.find(key);
+		const UINT previous = old == _previousPlacement.end() ? 0 : old->second.Resolution;
+		if (!cache.Needed && !previous) continue;
 		const float detail = std::sqrt(cache.ScreenPixels);
 		UINT desired = 1;
 		for (UINT tier = 2; tier < tiers.size(); ++tier)
 		{
-			const float threshold = (0.5f * (tiers[tier - 1] + tiers[tier])) *
-			    (previous >= tiers[tier] ? 0.8f : 1.2f);
+			const float threshold = 0.5f * (tiers[tier - 1] + tiers[tier]) * (previous >= tiers[tier] ? 0.8f : 1.2f);
 			if (detail < threshold) break;
 			desired = tier;
 		}
-		candidates.push_back({i, LocalShadowFaceCount(light), desired, cache.ScreenPixels, key});
+		if (!cache.Needed)
+			desired = UINT(std::lower_bound(tiers.begin(), tiers.end(), previous) - tiers.begin());
+		requests.push_back({i, LocalShadowFaceCount(cache.Light), desired, cache.Needed ? cache.ScreenPixels : -1.f, key});
 	}
-	std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b)
+	std::sort(requests.begin(), requests.end(), [](const Request& a, const Request& b)
 	{
 		return a.Pixels != b.Pixels ? a.Pixels > b.Pixels : a.Key < b.Key;
 	});
 
-	struct Demand
+	const UINT pages = frame.Depth ? frame.Depth->Pages : 0;
+	const UINT pageSide = frame.Depth ? frame.Depth->Side : 0;
+	UINT64 freeTexels = UINT64(pageSide) * pageSide * pages;
+	const auto area = [](const Request& request, UINT side) { return UINT64(side) * side * request.Faces; };
+	const auto coverageCost = [&](UINT side)
 	{
-		UINT Slices = 0;
-		std::map<std::pair<Id, bool>, UINT> Owners;
+		UINT64 cost = 0;
+		for (const auto& request : requests)
+			if (frame.Cache[request.Index].Needed)
+				cost += area(request, (std::min)(tiers[request.Desired], side));
+		return cost;
 	};
-	std::vector<Demand> demand(tiers.size());
-	std::vector<UINT> selected(frame.Lights.size()), retained(tiers.size());
-	const auto capacity = [&](UINT tier) {
-		return demand[tier].Slices ? (std::max)(demand[tier].Slices, retained[tier]) : 0;
-	};
-	const auto adjust = [&](const Candidate& c, UINT tier, int direction)
+	// Leave room for visible lights before spending the remaining texels on detail.
+	// Otherwise a few full-page groups turn the later lights into unoccluded fill.
+	UINT coverageSide = GetLocalShadowProfile(GDX12LocalShadowLevel::Low).Face;
+	UINT64 pendingCoverage = coverageCost(coverageSide);
+	while (coverageSide > 16 && pendingCoverage > freeTexels)
 	{
-		if (!tier) return;
-		auto& level = demand[tier];
-		const auto& cache = frame.Cache[c.Index];
-		level.Slices = UINT(int(level.Slices) + direction * int(c.Faces));
-		if (cache.Owner)
+		coverageSide /= 2;
+		pendingCoverage = coverageCost(coverageSide);
+	}
+	FreeShadowPages free(pageSide, pages);
+	frame.OccupiedTexels.assign(pages, 0);
+	frame.Placed = frame.Downgraded = frame.Skipped = 0;
+	std::vector<Placement> layout(frame.Cache.size());
+	decltype(_previousPlacement) placements;
+	for (const auto& request : requests)
+	{
+		const auto previous = _previousPlacement.find(request.Key);
+		const bool needed = frame.Cache[request.Index].Needed != 0;
+		const UINT coverage = (std::min)(tiers[request.Desired], coverageSide);
+		if (needed) pendingCoverage -= area(request, coverage);
+		auto& placed = layout[request.Index];
+		for (UINT tier = request.Desired; tier; --tier)
 		{
-			auto& count = level.Owners[{cache.Owner, cache.Latest}];
-			count = UINT(int(count) + direction * int(c.Faces));
-		}
-	};
-	std::map<std::tuple<Id, UINT, UINT, bool>, Bytes> depths;
-	std::map<std::tuple<Id, UINT, UINT>, Bytes> transfers;
-	const auto depth = [&](Id owner, UINT side, UINT count, bool dsv)
-	{
-		auto [it, inserted] = depths.try_emplace({owner, side, count, dsv});
-		if (inserted)
-			it->second = ShadowMemory::Size(*devices.at(owner), ShadowMemory::Depth(side, count,
-			    dsv ? D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL : D3D12_RESOURCE_FLAG_NONE));
-		return it->second;
-	};
-	const auto transfer = [&](Id owner, UINT side, UINT count)
-	{
-		auto [it, inserted] = transfers.try_emplace({owner, side, count});
-		if (inserted) it->second = ShadowMemory::TransferBytes(*_resources.Device, *devices.at(owner), side, count);
-		return it->second;
-	};
-	const auto cost = [&]()
-	{
-		std::map<Id, Bytes> result;
-		for (UINT tier = 1; tier < demand.size(); ++tier)
-		{
-			const auto& level = demand[tier];
-			if (!level.Slices) continue;
-			if (level.Slices > D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION)
-			{
-				result[0] = UINT64_MAX;
-				break;
-			}
 			const UINT side = tiers[tier];
-			result[0] += 2 * depth(0, side, capacity(tier), true) * _slots.size();
-			if (transparencyOwner)
+			const UINT64 texels = area(request, side);
+			if (texels > freeTexels || (needed && side > coverage && pendingCoverage > freeTexels - texels))
+				continue;
+			const auto retain = [&](const auto& tiles)
 			{
-				const auto copy = transfer(transparencyOwner, side, level.Slices);
-				result[0] += copy * _slots.size();
-				result[transparencyOwner] += (depth(transparencyOwner, side, capacity(tier), false) + copy) * _slots.size();
-			}
-			for (const auto& [lane, count] : level.Owners)
+				if (tiles[0].Side != side) return false;
+				auto trial = free;
+				for (UINT face = 0; face < request.Faces; ++face)
+					if (!trial.Reserve(tiles[face])) return false;
+				free = std::move(trial);
+				placed.Tiles = tiles;
+				return true;
+			};
+			// All frame slots use the same placement history. A slot's depth cache
+			// can retain individual faces when it catches up to that layout.
+			bool fits = previous != _previousPlacement.end() && retain(previous->second.Tiles);
+			if (!fits && needed)
 			{
-				if (!count) continue;
-				const auto owner = lane.first;
-				const auto copy = transfer(owner, side, count);
-				const auto staging = depth(0, side, count, false);
-				result[0] += (2 * copy + (lane.second ? staging : 0)) * _slots.size();
-				result[owner] += (depth(owner, side, count, true) + depth(owner, side, count, false) +
-				                  2 * copy) * _slots.size();
-			}
-		}
-		return result;
-	};
-	const auto fitsRetiredSlot = [&]()
-	{
-		Bytes replacement = 0;
-		for (UINT tier = 1; tier < demand.size(); ++tier)
-			if (demand[tier].Slices)
-				replacement += 2 * depth(0, tiers[tier], capacity(tier), true);
-		return plan.RetiredSlot.Fits(retiredHeadroom, replacement);
-	};
-	const auto fits = [&](const auto& charges)
-	{
-		for (const auto& [owner, bytes] : charges)
-			if (bytes == UINT64_MAX ||
-			    !plan.Budgets[owner].Fits(ShadowMemory::For(devices.at(owner)->GetAdapterLuid()).Limit, bytes))
-				return false;
-		return fitsRetiredSlot();
-	};
-
-	bool limited = plan.Limited;
-	if (reusePlan)
-	{
-		selected = plan.Tiers;
-		for (const auto& c : candidates) adjust(c, selected[c.Index], 1);
-	}
-	else
-	{
-		for (const auto& c : candidates)
-		{
-			adjust(c, 1, 1);
-			if (fits(cost())) selected[c.Index] = 1;
-			else
-			{
-				adjust(c, 1, -1);
-				limited = true;
-			}
-		}
-		if (!frame.Indexed && tiers.size() > 2)
-		{
-			UINT desired = 1;
-			for (const auto& c : candidates)
-				if (selected[c.Index]) desired = (std::max)(desired, c.Desired);
-			// The legacy shader binds one array. Preserve the minimum allocation for every admitted light.
-			for (UINT tier = desired; tier > 1; --tier)
-			{
-				std::swap(demand[1], demand[tier]);
-				if (fits(cost()))
-				{
-					for (auto& level : selected)
-						if (level) level = tier;
-					break;
-				}
-				std::swap(demand[1], demand[tier]);
-				limited = true;
-			}
-		}
-		else
-		{
-			for (;;)
-			{
-				const auto baseline = cost();
-				const Candidate* best = nullptr;
-				double bestRatio = -1;
-				struct Upgrade
-				{
-					Bytes Extra = 0;
-					bool Admitted = false;
-				};
-				std::map<std::tuple<UINT, UINT, Id, bool>, Upgrade> upgrades;
-				for (const auto& c : candidates)
-				{
-					const UINT tier = selected[c.Index];
-					if (!tier || tier >= c.Desired) continue;
-					const auto& cache = frame.Cache[c.Index];
-					auto [it, inserted] = upgrades.try_emplace({tier, c.Faces, cache.Owner, cache.Latest});
-					auto& estimate = it->second;
-					if (inserted)
+				auto trial = free;
+				fits = true;
+				for (UINT face = 0; face < request.Faces; ++face)
+					if (!trial.Place(side, placed.Tiles[face]))
 					{
-						adjust(c, tier, -1);
-						adjust(c, tier + 1, 1);
-						const auto trial = cost();
-						estimate.Admitted = fits(trial);
-						if (estimate.Admitted)
-						{
-							for (const auto& [owner, bytes] : trial)
-							{
-								const auto old = baseline.find(owner);
-								const Bytes previous = old == baseline.end() ? 0 : old->second;
-								if (bytes > previous) estimate.Extra += bytes - previous;
-							}
-						}
-						adjust(c, tier + 1, -1);
-						adjust(c, tier, 1);
-					}
-					if (!estimate.Admitted) { limited = true; continue; }
-					const double gain = (std::min)(double(c.Pixels), double(tiers[tier + 1]) * tiers[tier + 1]) -
-					                    (std::min)(double(c.Pixels), double(tiers[tier]) * tiers[tier]);
-					const double ratio = gain / (std::max)(Bytes(1), estimate.Extra);
-					if (ratio > bestRatio || (ratio == bestRatio && c.Key < best->Key))
-					{
-						best = &c;
-						bestRatio = ratio;
-					}
-				}
-				if (!best) break;
-				auto& tier = selected[best->Index];
-				adjust(*best, tier, -1);
-				adjust(*best, tier + 1, 1);
-				++tier;
-			}
-		}
-		plan.Tiers = selected;
-		plan.Limited = limited;
-	}
-	for (UINT tier = 1; tier < tiers.size(); ++tier)
-	{
-		const auto current = frame.Atlases.find(tiers[tier]);
-		if (!demand[tier].Slices || current == frame.Atlases.end() || current->second.Slices <= demand[tier].Slices ||
-		    current->second.Slices > 2 * demand[tier].Slices) continue;
-		retained[tier] = current->second.Slices;
-		if (!fits(cost())) retained[tier] = 0;
-	}
-	constexpr Bytes transitionBudget = 2ull * 6 * 512 * 512;
-	std::vector<UINT> sizes(frame.Lights.size()), starts(frame.Lights.size());
-	const auto buildLayout = [&]
-	{
-		std::fill(sizes.begin(), sizes.end(), 0);
-		std::fill(starts.begin(), starts.end(), UINT_MAX);
-		for (UINT tier = 1; tier < tiers.size(); ++tier)
-		{
-			if (!demand[tier].Slices) continue;
-			std::vector<bool> used(capacity(tier));
-			for (const auto& c : candidates)
-			{
-				if (selected[c.Index] != tier) continue;
-				const auto& cache = frame.Cache[c.Index];
-				sizes[c.Index] = tiers[tier];
-				if (cache.Resolution != tiers[tier] || cache.FirstSlice == UINT_MAX ||
-				    cache.FirstSlice + c.Faces > used.size()) continue;
-				starts[c.Index] = cache.FirstSlice;
-				std::fill_n(used.begin() + cache.FirstSlice, c.Faces, true);
-			}
-			for (UINT faces : {6u, 1u})
-			{
-				bool compact = false;
-				for (const auto& c : candidates)
-				{
-					if (selected[c.Index] != tier || c.Faces != faces || starts[c.Index] != UINT_MAX) continue;
-					const auto free = std::search_n(used.begin(), used.end(), faces, false);
-					if (free == used.end())
-					{
-						compact = true;
+						fits = false;
 						break;
 					}
-					starts[c.Index] = UINT(free - used.begin());
-					std::fill_n(free, faces, true);
-				}
-				if (!compact) continue;
-				UINT next = 0;
-				for (const auto& c : candidates)
+				if (fits) free = std::move(trial);
+				else placed.Tiles = {};
+			}
+			if (fits)
+			{
+				freeTexels -= texels;
+				placed.Resolution = side;
+				placed.Generation = previous != _previousPlacement.end() && previous->second.Tiles == placed.Tiles
+				    ? previous->second.Generation : ++_generation;
+				placements.emplace(request.Key, placed);
+				for (UINT face = 0; face < request.Faces; ++face)
+					frame.OccupiedTexels[placed.Tiles[face].Page] += UINT64(side) * side;
+				if (needed)
 				{
-					if (selected[c.Index] != tier) continue;
-					starts[c.Index] = next;
-					next += c.Faces;
+					++frame.Placed;
+					if (tier != request.Desired) ++frame.Downgraded;
 				}
-				assert(next == demand[tier].Slices);
 				break;
 			}
+			if (!needed) break;
 		}
-	};
-	std::vector<UINT> protectedFaces(frame.Lights.size());
-	for (const auto& c : candidates)
-	{
-		const auto& current = frame.Cache[c.Index];
-		if (selected[c.Index] && current.Resolution <= ceiling)
-			protectedFaces[c.Index] = current.Needed & current.ReadyFaces & current.ResidentFaces & statics.Cache[c.Index].ResidentFaces;
+		if (needed && !placed.Resolution) ++frame.Skipped;
 	}
-	const auto preservesPublishedFaces = [&]
-	{
-		Bytes work = 0;
-		for (const auto& c : candidates)
-		{
-			const auto faces = protectedFaces[c.Index];
-			if (!faces) continue;
-			const auto side = sizes[c.Index];
-			if (!side) return false;
-			const auto& old = frame.Cache[c.Index];
-			if (side != old.Resolution || starts[c.Index] != old.FirstSlice ||
-			    capacity(selected[c.Index]) != frame.Atlases.at(old.Resolution).Slices)
-			{
-				work += 2ull * side * side * __popcnt(faces);
-				if (work > transitionBudget) return false;
-			}
-		}
-		return true;
-	};
-	buildLayout();
-	auto& primary = *_resources.Device;
-	const auto discardStage = [&]
-	{
-		for (auto* current : {&frame, &statics})
-		{
-			current->StagedLayout.reset();
-			current->StagedAtlases.clear();
-			for (auto& cache : current->Cache)
-				cache.StagedFaces = cache.StagedValid = cache.StageThisFrame = 0;
-		}
-	};
-	const bool mustEvict = std::any_of(candidates.begin(), candidates.end(), [&](const Candidate& c)
-	{
-		const auto side = frame.Cache[c.Index].Resolution;
-		return side && (!selected[c.Index] || side > ceiling);
-	});
-	if (frame.StagedLayout)
-	{
-		const auto& target = *frame.StagedLayout;
-		const bool newReceiver = std::any_of(candidates.begin(), candidates.end(), [&](const Candidate& c)
-		{ return selected[c.Index] && !target.Sizes[c.Index]; });
-		const auto targetFits = [&]
-		{
-			// The target may predate a budget reduction, a new owner or a change of ceiling.
-			auto proposedDemand = std::move(demand);
-			auto proposedRetained = std::move(retained);
-			demand.assign(tiers.size(), {});
-			retained.assign(tiers.size(), 0);
-			bool supported = true;
-			for (const auto& [side, count] : target.Capacities)
-			{
-				const auto tier = std::find(tiers.begin(), tiers.end(), side);
-				if (tier == tiers.end()) { supported = false; break; }
-				retained[tier - tiers.begin()] = count;
-			}
-			for (UINT i = 0; supported && i < target.Sizes.size(); ++i)
-			{
-				if (!target.Sizes[i]) continue;
-				if (!frame.Cache[i].Needed) { supported = false; break; }
-				const auto tier = std::find(tiers.begin(), tiers.end(), target.Sizes[i]);
-				adjust({i, LocalShadowFaceCount(frame.Lights[i]), 0, 0, {}}, UINT(tier - tiers.begin()), 1);
-			}
-			const bool valid = supported && fits(cost());
-			demand.swap(proposedDemand);
-			retained.swap(proposedRetained);
-			return valid;
-		};
-		if (mustEvict || newReceiver || !ShadowMemory::Fits(primary, 0) || !targetFits())
-			discardStage();
-	}
-	else if (!frame.StagedAtlases.empty())
-		discardStage();
+	_previousPlacement.swap(placements);
 
-	// Only changed destination arrays need a second allocation while the published maps are read.
-	if (!frame.StagedLayout && !mustEvict && !preservesPublishedFaces())
+	for (UINT i = 0; i < frame.Cache.size(); ++i)
 	{
-		ShadowLayout target{sizes, starts, {}};
-		std::map<UINT, UINT> replacements;
-		Bytes overlap = 0;
-		for (UINT tier = 1; tier < tiers.size(); ++tier)
+		for (auto* pass : {&frame, &statics})
 		{
-			const UINT side = tiers[tier], count = capacity(tier);
-			if (!count) continue;
-			target.Capacities.emplace(side, count);
-			const auto old = frame.Atlases.find(side);
-			const bool unchanged = old != frame.Atlases.end() && old->second.Slices == count &&
-			    std::all_of(candidates.begin(), candidates.end(), [&](const Candidate& c)
-			    {
-				    const auto& cache = frame.Cache[c.Index];
-				    return sizes[c.Index] != side || (cache.Resolution == side && cache.FirstSlice == starts[c.Index]);
-			    });
-			if (unchanged) continue;
-			replacements.emplace(side, count);
-			overlap += 2 * depth(0, side, count, true);
-		}
-		if (!replacements.empty() && ShadowMemory::Fits(primary, overlap))
-		{
-			frame.StagedLayout = target;
-			statics.StagedLayout = std::move(target);
-			for (const auto& [side, count] : replacements)
+			auto& cache = pass->Cache[i];
+			const auto& placed = layout[i];
+			if (cache.Tiles != placed.Tiles)
 			{
-				PrepareAtlas(frame, side, count, true);
-				staticPass.PrepareAtlas(statics, side, count, true);
+				for (UINT face = 0; face < cache.Tiles.size(); ++face)
+					if (cache.Tiles[face] != placed.Tiles[face])
+					{
+						const UINT mask = ~(1u << face);
+						cache.MapsValid &= mask;
+						cache.ResidentFaces &= mask;
+						cache.LocalFallback &= mask;
+						cache.ContentVersions[face] = 0;
+						cache.PublicationOrders[face] = 0;
+					}
+				cache.Tiles = placed.Tiles;
 			}
+			cache.Resolution = placed.Resolution;
+			cache.Generation = placed.Generation;
 		}
+		// A named tile is sampled only after its queued update or an already
+		// resident map. Partial per-slot admission makes whole lights flicker.
+		auto& cache = frame.Cache[i];
+		cache.ReadyFaces = cache.Resolution ? cache.Needed : 0;
+		statics.Cache[i].ReadyFaces = cache.ReadyFaces;
 	}
-
-	bool holdingPublished = bool(frame.StagedLayout);
-	bool adoptingStage = false;
-	Bytes cutoverWork = 0;
-	const auto extraRepairs = [&](const Candidate& c)
-	{
-		const auto& now = frame.Cache[c.Index];
-		const auto& staticDepth = statics.Cache[c.Index];
-		const UINT required = protectedFaces[c.Index];
-		const UINT staticRepairs = required & ~staticDepth.StagedValid & staticDepth.MapsValid;
-		const UINT finalRepairs = (frame.Lights[c.Index].ShadowFlags & ShadowEveryFrame) ? 0 :
-		    required & ~(now.StagedValid & staticDepth.StagedValid) & now.MapsValid & staticDepth.MapsValid;
-		return std::make_pair(staticRepairs, finalRepairs);
-	};
-	if (holdingPublished)
-	{
-		const auto& target = *frame.StagedLayout;
-		adoptingStage = std::all_of(candidates.begin(), candidates.end(), [&](const Candidate& c)
-		{
-			const UINT side = target.Sizes[c.Index];
-			if (!frame.StagedAtlases.count(side)) return true;
-			const auto& now = frame.Cache[c.Index];
-			const auto& staticDepth = statics.Cache[c.Index];
-			const UINT required = protectedFaces[c.Index];
-			if (required & ~(now.StagedFaces & staticDepth.StagedFaces)) return false;
-			// Published dirty faces already need a draw this frame. Direct it to the new address.
-			const auto [staticRepairs, finalRepairs] = extraRepairs(c);
-			cutoverWork += UINT64(side) * side * (__popcnt(staticRepairs) + __popcnt(finalRepairs));
-			return cutoverWork <= transitionBudget;
-		});
-		if (adoptingStage)
-		{
-			// The slot fence has retired all old readers and the last writes to the staged arrays.
-			holdingPublished = false;
-			sizes = target.Sizes;
-			starts = target.Starts;
-			ApplyLayout(frame, sizes, starts);
-			staticPass.ApplyLayout(statics, sizes, starts);
-			for (size_t i = 0; i < sizes.size(); ++i)
-			{
-				if (!frame.StagedAtlases.count(sizes[i])) continue;
-				auto& current = frame.Cache[i];
-				auto& staticDepth = statics.Cache[i];
-				staticDepth.MapsValid = staticDepth.StagedValid;
-				staticDepth.ResidentFaces = staticDepth.StagedValid | protectedFaces[i];
-				current.MapsValid = current.StagedValid & staticDepth.StagedValid;
-				current.ResidentFaces = current.MapsValid | protectedFaces[i];
-				current.LocalFallback = current.Owner ? current.MapsValid : 0;
-			}
-			for (auto* current : {&frame, &statics})
-			{
-				for (auto it = current->Atlases.begin(); it != current->Atlases.end();)
-					if (!target.Capacities.count(it->first) || current->StagedAtlases.count(it->first))
-						it = current->Atlases.erase(it);
-					else
-						++it;
-				current->Atlases.merge(current->StagedAtlases);
-				++current->LayoutRevision;
-			}
-			discardStage();
-		}
-	}
-
-	bool deferred = false;
-	if (!holdingPublished && !adoptingStage && !preservesPublishedFaces())
-	{
-		const auto target = selected;
-		const auto targetDemand = demand;
-		const auto targetRetained = retained;
-		std::fill(selected.begin(), selected.end(), 0);
-		std::fill(demand.begin(), demand.end(), Demand{});
-		std::fill(retained.begin(), retained.end(), 0);
-		for (const auto& c : candidates)
-		{
-			const auto& old = frame.Cache[c.Index];
-			const auto tier = UINT(std::find(tiers.begin(), tiers.end(), old.Resolution) - tiers.begin());
-			if (!target[c.Index] || !tier || tier == tiers.size()) continue;
-			selected[c.Index] = tier;
-			adjust(c, tier, 1);
-			retained[tier] = frame.Atlases.at(old.Resolution).Slices;
-		}
-		buildLayout();
-		if (!fitsRetiredSlot() || !preservesPublishedFaces())
-		{
-			// A budget drop can require evicting the old layout after the slot fence.
-			selected = target;
-			demand = targetDemand;
-			retained = targetRetained;
-			limited = true;
-		}
-		else
-		{
-			deferred = true;
-			const auto tryMove = [&](const Candidate& c, UINT next)
-			{
-				auto& tier = selected[c.Index];
-				const UINT old = tier;
-				const UINT oldCapacity = retained[next];
-				adjust(c, old, -1);
-				adjust(c, next, 1);
-				tier = next;
-				const bool singleArray = frame.Indexed ||
-				    std::count_if(demand.begin(), demand.end(), [](const auto& d) { return d.Slices != 0; }) <= 1;
-				const auto canPublish = [&]
-				{
-					if (!singleArray || !fits(cost())) return false;
-					buildLayout();
-					return preservesPublishedFaces();
-				};
-				if (next)
-				{
-					// Reserve the destination once, so later faces do not force another rebuild on arrival.
-					retained[next] = (std::max)({oldCapacity, targetDemand[next].Slices, targetRetained[next]});
-					if (canPublish()) return true;
-				}
-				retained[next] = oldCapacity;
-				if (canPublish()) return true;
-				tier = old;
-				adjust(c, next, -1);
-				adjust(c, old, 1);
-				return false;
-			};
-			for (const auto& c : candidates)
-			{
-				const UINT old = selected[c.Index], next = target[c.Index];
-				if (old == next || (!next && protectedFaces[c.Index])) continue;
-				if (!tryMove(c, next) && !old)
-					for (UINT lower = next; lower > 1;)
-						if (tryMove(c, --lower)) break;
-			}
-		}
-		buildLayout();
-	}
-	decltype(_previousResolution) placements;
-	const uint64_t previousGeneration = _generation;
-	for (const auto& c : candidates)
-	{
-		auto& cache = frame.Cache[c.Index];
-		const UINT side = holdingPublished ? cache.Resolution : sizes[c.Index];
-		const auto old = _previousResolution.find(c.Key);
-		if (side)
-		{
-			cache.Generation = old != _previousResolution.end() && old->second.Resolution == side
-			    ? old->second.Generation : ++_generation;
-			placements.emplace(c.Key, Placement{side, cache.Generation});
-		}
-	}
-	if (previousGeneration != _generation || placements.size() != _previousResolution.size()) ++_placementRevision;
-	_previousResolution.swap(placements);
-
-	if (!holdingPublished && !adoptingStage)
-	{
-		for (auto* current : {&frame, &statics})
-		{
-			for (auto it = current->Atlases.begin(); it != current->Atlases.end();)
-			{
-				const auto tier = size_t(std::find(tiers.begin(), tiers.end(), it->first) - tiers.begin());
-				if (tier < tiers.size() && capacity(UINT(tier)) == it->second.Slices)
-				{
-					++it;
-					continue;
-				}
-				for (auto& cache : current->Cache)
-					if (cache.Resolution == it->first) cache.MapsValid = cache.ResidentFaces = 0;
-				++current->LayoutRevision;
-				it = current->Atlases.erase(it);
-			}
-		}
-		for (UINT tier = 1; tier < tiers.size(); ++tier)
-		{
-			if (!demand[tier].Slices) continue;
-			PrepareAtlas(frame, tiers[tier], capacity(tier));
-			staticPass.PrepareAtlas(statics, tiers[tier], capacity(tier));
-		}
-		ApplyLayout(frame, sizes, starts);
-		staticPass.ApplyLayout(statics, sizes, starts);
-	}
-	// Repair placements that were already visible before admitting cold faces.
-	Bytes work = adoptingStage ? cutoverWork : 0;
-	bool transitioning = deferred || holdingPublished;
-	for (auto* current : {&frame, &statics})
-		for (auto& cache : current->Cache) cache.ReadyFaces = cache.StageThisFrame = 0;
-	for (const auto& c : candidates)
-	{
-		auto& current = frame.Cache[c.Index];
-		current.ReadyFaces = current.Needed & current.ResidentFaces & statics.Cache[c.Index].ResidentFaces;
-	}
-	const auto admit = [&](UINT requested, UINT side, UINT& ready)
-	{
-		const Bytes faceWork = 2ull * side * side;
-		for (UINT face = 0; face < 6; ++face)
-		{
-			const UINT bit = 1u << face;
-			if (!(requested & ~ready & bit)) continue;
-			if (faceWork > transitionBudget - work)
-			{
-				transitioning = true;
-				continue;
-			}
-			work += faceWork;
-			ready |= bit;
-		}
-	};
-	for (const auto& c : candidates)
-	{
-		auto& current = frame.Cache[c.Index];
-		if (current.Resolution)
-			admit(protectedFaces[c.Index], current.Resolution, current.ReadyFaces);
-	}
-	if (holdingPublished)
-	{
-		// Build every protected face once. At cutover, normal shadow updates repair moving casters.
-		for (const bool refresh : {false, true})
-		{
-			for (const auto& c : candidates)
-			{
-				auto& current = frame.Cache[c.Index];
-				auto& staticDepth = statics.Cache[c.Index];
-				const UINT side = frame.StagedLayout->Sizes[c.Index];
-				if (!frame.StagedAtlases.count(side)) continue;
-				const auto [staticRepairs, finalRepairs] = extraRepairs(c);
-				const UINT required = refresh ? staticRepairs | finalRepairs
-				    : protectedFaces[c.Index] & ~(current.StagedFaces & staticDepth.StagedFaces);
-				admit(required, side, current.StageThisFrame);
-				staticDepth.StageThisFrame = current.StageThisFrame;
-			}
-		}
-	}
-	for (const auto& c : candidates)
-	{
-		auto& current = frame.Cache[c.Index];
-		if (current.Resolution)
-			admit(current.Needed & ~protectedFaces[c.Index], current.Resolution, current.ReadyFaces);
-	}
-	for (const auto& c : candidates)
-		statics.Cache[c.Index].ReadyFaces = frame.Cache[c.Index].ReadyFaces;
-	assert(work <= transitionBudget);
-	frame.MigrationTexels = work;
-	frame.Limit = limited ? "DXGI/array capacity" : "";
-	if (transitioning)
-	{
-		if (!frame.Limit.empty()) frame.Limit += ", ";
-		frame.Limit += holdingPublished ? "staging shadow layout" : "transition work";
-	}
-	if (!frame.Indexed && ceiling)
-	{
-		if (!frame.Limit.empty()) frame.Limit += ", ";
-		frame.Limit += "single array on Shader Model < 6.6";
-	}
-	plan.Settled = !transitioning && !adoptingStage && !work && initialLayout == frame.LayoutRevision;
-	if (plan.Settled) plan.Limit = frame.Limit;
 	Pack(frame);
 	staticPass.Pack(statics);
 }
 
-void SceneLocalShadows::PrepareAtlas(Slot& frame, UINT resolution, UINT slices, bool staged)
+void SceneLocalShadows::PrepareAtlas(Slot& frame, UINT side, UINT pages)
 {
-	assert(slices && slices <= D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION && resolution);
-	auto& atlas = (staged ? frame.StagedAtlases : frame.Atlases)[resolution];
-	if (atlas.Slices == slices) return;
-	for (auto& cached : frame.Cache)
-		if (!staged && cached.Resolution == resolution) cached.MapsValid = cached.ResidentFaces = 0;
+	if (frame.Depth && frame.Depth->Pages == pages && frame.Depth->Side == side) return;
+	frame.Depth = CreateAtlas(side, pages);
+}
+
+std::unique_ptr<SceneLocalShadows::Atlas> SceneLocalShadows::CreateAtlas(UINT side, UINT pages)
+{
+	assert(side && pages && pages <= MaxLocalShadowAtlasCount);
+	auto atlas = std::make_unique<Atlas>();
 	GDX12TextureDesc texture;
-	texture.Width = texture.Height = resolution;
+	texture.Width = texture.Height = side;
 	texture.Format = DXGI_FORMAT_D32_FLOAT;
-	texture.SRVDesc = ShadowMemory::View(slices);
+	texture.SRVDesc = ShadowMemory::View(pages);
 	texture.SRV_UAV_Heap = _resources.SRV_UAV_Heap.get();
-	const auto desc = ShadowMemory::Depth(resolution, slices);
+	const auto desc = ShadowMemory::Depth(side, pages);
 	D3D12_CLEAR_VALUE clear{};
 	clear.Format = DXGI_FORMAT_D32_FLOAT;
 	clear.DepthStencil.Depth = 1;
 	texture.ExternalResource =
 	    _resources.Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc, D3D12_RESOURCE_STATE_COMMON, &clear);
-	texture.SRVHeapIndex = atlas.Texture.IsInitialized() ? atlas.Texture.GetSRV()->HeapIndex
-	                                                    : texture.SRV_UAV_Heap->GetAvailableIndex(SceneDescriptorStart);
-	atlas.Texture.Initialize(texture);
-	atlas.Memory.Set(*_resources.Device, ShadowMemory::Size(*_resources.Device, desc));
-	atlas.Dsvs.clear();
-	atlas.Dsvs.resize(slices);
-	atlas.ContentVersions.assign(slices, 0);
-	atlas.Slices = slices;
-	++frame.LayoutRevision;
+	texture.SRVHeapIndex = texture.SRV_UAV_Heap->GetAvailableIndex(SceneDescriptorStart);
+	atlas->Texture.Initialize(texture);
+	atlas->Memory.Set(*_resources.Device, ShadowMemory::Size(*_resources.Device, desc));
+	atlas->Side = side;
+	atlas->Pages = pages;
+	for (UINT page = 0; page < pages; ++page)
+	{
+		auto descriptor = std::make_unique<GDX12Descriptor>();
+		D3D12_DEPTH_STENCIL_VIEW_DESC dsv{};
+		dsv.Format = DXGI_FORMAT_D32_FLOAT;
+		dsv.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
+		dsv.Texture2DArray.FirstArraySlice = page;
+		dsv.Texture2DArray.ArraySize = 1;
+		descriptor->InitAsDSV(atlas->Texture.GetResource()->D3DResource.Get(), &dsv, _dsvHeap.get(),
+		                      _dsvHeap->GetAvailableIndex());
+		atlas->Dsvs.push_back(std::move(descriptor));
+	}
+	return atlas;
 }
 
-void SceneLocalShadows::MarkDepthWritten(UINT slot, UINT resolution, UINT slice, bool staged)
+void SceneLocalShadows::PrepareAtlases(UINT side, UINT pages)
 {
-	_slots.at(slot).AtlasFor(resolution, staged).ContentVersions.at(slice) = ++_depthVersion;
+	if (pages)
+		for (auto& frame : _slots) PrepareAtlas(frame, side, pages);
+}
+
+void SceneLocalShadows::MarkDepthWritten(UINT slot, UINT light, UINT face)
+{
+	auto& cache = _slots.at(slot).Cache;
+	if (light < cache.size()) cache[light].ContentVersions[face] = ++_depthVersion;
 }
 
 GDX12Texture* SceneLocalShadows::Output(UINT slot)
 {
 	auto& frame = _slots.at(slot);
-	if (!frame.Atlases.empty()) return &frame.Atlases.begin()->second.Texture;
+	if (frame.Depth) return &frame.Depth->Texture;
 	if (!_fallback.IsInitialized())
 	{
 		GDX12TextureDesc texture{};
@@ -1778,30 +1264,26 @@ GDX12Texture* SceneLocalShadows::Output(UINT slot)
 	return &_fallback;
 }
 
-std::vector<GDX12Texture*> SceneLocalShadows::Outputs(UINT slot)
+std::string SceneLocalShadows::Distribution(UINT slot) const
 {
-	std::vector<GDX12Texture*> result;
-	for (auto& [resolution, atlas] : _slots.at(slot).Atlases)
-		result.push_back(&atlas.Texture);
+	const auto& frame = _slots.at(slot);
+	if (!frame.Depth) return "0 pages";
+	const auto& atlas = *frame.Depth;
+	const auto used = std::count_if(frame.OccupiedTexels.begin(), frame.OccupiedTexels.end(), [](auto area) { return area > 0; });
+	std::string result = std::to_string(used) + "/" + std::to_string(atlas.Pages) + " pages of " +
+	    std::to_string(atlas.Side) + " x " + std::to_string(atlas.Side) + "; page fill";
+	const UINT64 pageArea = UINT64(atlas.Side) * atlas.Side;
+	for (const auto area : frame.OccupiedTexels)
+		result += " " + (area && area * 100 < pageArea ? std::string("<1") : std::to_string(area * 100 / pageArea)) + "%";
+	result += "; lights: " + std::to_string(frame.Placed) + " placed, " + std::to_string(frame.Downgraded) +
+	    " reduced, " + std::to_string(frame.Skipped) + " skipped";
+	std::map<UINT, UINT> faces;
+	for (UINT i = 0; i < frame.Cache.size(); ++i)
+		if (frame.Cache[i].Resolution)
+			faces[frame.Cache[i].Resolution] += LocalShadowFaceCount(frame.Lights[i]);
+	for (const auto& [side, count] : faces)
+		result += "; " + std::to_string(count) + " faces at " + std::to_string(side);
 	return result;
-}
-
-std::string SceneLocalShadows::Distribution(UINT slot)
-{
-	auto& frame = _slots.at(slot);
-	std::map<UINT, UINT> lights;
-	for (const auto& light : frame.Cache)
-		if (light.Resolution) ++lights[light.Resolution];
-	std::string result;
-	for (auto& [resolution, atlas] : frame.Atlases)
-	{
-		if (!result.empty()) result += '|';
-		const auto shape = atlas.Texture.GetResource()->D3DResource->GetDesc();
-		result += std::to_string(shape.Width) + "x" + std::to_string(shape.Height) + ":" +
-		          std::to_string(lights[resolution]) + "/" + std::to_string(shape.DepthOrArraySize) +
-		          "/" + std::to_string(atlas.Memory.Size()) + "B";
-	}
-	return (result.empty() ? "none" : result) + (frame.Limit.empty() ? "" : " (" + frame.Limit + ")");
 }
 
 UINT64 SceneLocalShadows::ShadowTexels(UINT slot) const
@@ -1819,25 +1301,24 @@ UINT64 SceneLocalShadows::ShadowTexels(UINT slot) const
 
 void SceneLocalShadows::ResetLayout()
 {
-	_previousResolution.clear();
+	_previousPlacement.clear();
 	for (auto& frame : _slots)
 	{
-		frame.Plan.reset();
-		frame.Atlases.clear();
-		frame.StagedAtlases.clear();
-		frame.StagedLayout.reset();
-		++frame.LayoutRevision;
+		frame.Work.Commands.clear();
+		frame.Depth.reset();
+		frame.OccupiedTexels.clear();
 		for (auto& cache : frame.Cache)
 		{
 			cache.Resolution = 0;
-			cache.FirstSlice = UINT_MAX;
-			cache.MapsValid = cache.ResidentFaces = cache.ReadyFaces = 0;
-			cache.StagedFaces = cache.StagedValid = cache.StageThisFrame = 0;
+			cache.Tiles = {};
+			cache.ContentVersions = {};
+			cache.PublicationOrders = {};
+			cache.MapsValid = cache.ResidentFaces = cache.ReadyFaces = cache.LocalFallback = 0;
 		}
 	}
 }
 
-void SceneLocalShadows::AppendGrassViews(Graph& graph, std::vector<ID3D12Resource*>& bindings, UINT slot, const std::map<std::pair<UINT, bool>, Id>& atlases,
+void SceneLocalShadows::AppendGrassViews(Graph& graph, std::vector<ID3D12Resource*>& bindings, UINT slot, Id atlas,
                                          const GrassAppender& appendGrass)
 {
 	const auto& frame = _slots.at(slot);
@@ -1859,14 +1340,16 @@ void SceneLocalShadows::AppendGrassViews(Graph& graph, std::vector<ID3D12Resourc
 		grassTarget.View = {GDX12GeometryStage::Shadow,
 		                    Matrix(frame.Lights[view.Light].ShadowViewProj[view.Face]).Transpose(), cameraPosition,
 		                    cameraAddress};
-		grassTarget.View.Key = (2ull << 60) | (uint64_t(view.Staged) << 59) | (uint64_t(view.Light) * 6 + view.Face);
+		grassTarget.View.Key = (2ull << 60) | (uint64_t(view.Light) * 6 + view.Face);
 		grassTarget.View.Filter = _staticOnly ? GDX12GeometryFilter::Static : GDX12GeometryFilter::Dynamic;
 		grassTarget.View.FrameSlot = slot;
 		grassTarget.View.DepthFormat = DXGI_FORMAT_D32_FLOAT;
-		grassTarget.Depth = atlases.at({view.Resolution, view.Staged});
+		grassTarget.Depth = atlas;
 		grassTarget.Camera = cameraResource;
-		grassTarget.Dsv = frame.AtlasFor(view.Resolution, view.Staged).Dsvs[view.Slice]->CPUHandle;
-		grassTarget.Width = grassTarget.Height = view.Resolution;
+		grassTarget.Dsv = frame.Depth->Dsvs[view.Tile.Page]->CPUHandle;
+		grassTarget.X = view.Tile.X;
+		grassTarget.Y = view.Tile.Y;
+		grassTarget.Width = grassTarget.Height = view.Tile.Side;
 		appendGrass(grassTarget, graph, bindings);
 	}
 }
@@ -1880,14 +1363,15 @@ void SceneLocalShadows::DrawShadowViews(ID3D12GraphicsCommandList* cmd, const Sl
 	{
 		if (!clearDepth && !view.OpaqueCount && !view.MaskedCount)
 			continue;
-		const auto dsv = frame.AtlasFor(view.Resolution, view.Staged).Dsvs[view.Slice]->CPUHandle;
-		const D3D12_VIEWPORT viewport{0, 0, float(view.Resolution), float(view.Resolution), 0, 1};
-		const D3D12_RECT rect{0, 0, LONG(view.Resolution), LONG(view.Resolution)};
+		const auto& tile = view.Tile;
+		const auto dsv = frame.Depth->Dsvs[tile.Page]->CPUHandle;
+		const D3D12_VIEWPORT viewport{float(tile.X), float(tile.Y), float(tile.Side), float(tile.Side), 0, 1};
+		const D3D12_RECT rect{LONG(tile.X), LONG(tile.Y), LONG(tile.X + tile.Side), LONG(tile.Y + tile.Side)};
 		cmd->RSSetViewports(1, &viewport);
 		cmd->RSSetScissorRects(1, &rect);
 		cmd->OMSetRenderTargets(0, nullptr, FALSE, &dsv);
 		if (clearDepth)
-			cmd->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1, 0, 0, nullptr);
+			cmd->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1, 0, 1, &rect);
 		cmd->SetGraphicsRoot32BitConstant(0, 0, 0);
 		cmd->SetGraphicsRoot32BitConstant(0, view.Light * 6 + view.Face, 1);
 		if (view.OpaqueCount)
@@ -1921,19 +1405,12 @@ void SceneLocalShadows::Append(
 	}
 	const auto resource = [&](ID3D12Resource* value, const char* name)
 	{ return NativeWork::ResourceFor(graph, bindings, value, name); };
-	std::map<std::pair<UINT, bool>, Id> atlases;
-	for (const auto& view : frame.Views)
-	{
-		MarkDepthWritten(slot, view.Resolution, view.Slice, view.Staged);
-		const auto key = std::make_pair(view.Resolution, view.Staged);
-		if (!atlases.count(key))
-			atlases.emplace(key, resource(frame.AtlasFor(view.Resolution, view.Staged).Texture.GetResource()->D3DResource.Get(),
-			                              "local shadow depth array"));
-	}
+	const Id atlas = resource(frame.Depth->Texture.GetResource()->D3DResource.Get(), "local shadow atlas");
+	for (const auto& view : frame.Views) MarkDepthWritten(slot, view.Light, view.Face);
 	if (!_staticOnly && frame.Packed.empty())
 	{
 		if (appendGrass)
-			AppendGrassViews(graph, bindings, slot, atlases, appendGrass);
+			AppendGrassViews(graph, bindings, slot, atlas, appendGrass);
 		return;
 	}
 	const Id commands = resource(frame.Commands->GetResource().D3DResource.Get(), "CPU-culled local shadow commands");
@@ -1961,8 +1438,7 @@ void SceneLocalShadows::Append(
 	    {commands, Mode::Read, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT},
 	    {lightId, Mode::Read, graph.Resources.at(lightId).Memory == Heap::Upload
 	                              ? State(D3D12_RESOURCE_STATE_GENERIC_READ) : read}};
-	for (const auto& [resolution, atlas] : atlases)
-		accesses.push_back({atlas, Mode::Write, D3D12_RESOURCE_STATE_DEPTH_WRITE});
+	accesses.push_back({atlas, Mode::Write, D3D12_RESOURCE_STATE_DEPTH_WRITE});
 	accesses.insert(accesses.end(), materialTextures.begin(), materialTextures.end());
 	auto* heap = _resources.SRV_UAV_Heap->GetHeap().Get();
 	auto* root = _root.get();
@@ -1984,7 +1460,7 @@ void SceneLocalShadows::Append(
 	         });
 	if (appendGrass)
 	{
-		AppendGrassViews(graph, bindings, slot, atlases, appendGrass);
+		AppendGrassViews(graph, bindings, slot, atlas, appendGrass);
 	}
 }
 } // namespace BistroRender

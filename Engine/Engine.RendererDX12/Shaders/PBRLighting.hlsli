@@ -3,8 +3,8 @@
 #include "PBRMath.hlsli"
 #ifndef PROBE_CAPTURE
 #include "CSM.hlsli"
-#endif
 #include "LocalShadows.hlsli"
+#endif
 float3 EvaluateBRDF(PBRSurface s, float3 v, float3 l)
 {
     float nDotV = saturate(dot(s.Normal, v)), nDotL = saturate(dot(s.Normal, l));
@@ -23,7 +23,9 @@ float3 ShadeSunAndIBL(PBRSurface s, float3 position, float3 v, float ambientVisi
 #ifdef SKY_RENDERING_HLSLI
     direct *= SkySunTransmittance(position, l);
 #endif
+#ifndef PROBE_CAPTURE
     if (any(direct > 0)) direct *= SunVisibility(position, s.Normal, saturate(dot(s.Normal, l)));
+#endif
     float nDotV = saturate(dot(s.Normal, v));
     float3 irradiance = IrradianceEnvironment.SampleLevel(samLinearClamp, s.Normal, 0).rgb;
     float3 prefiltered = PrefilteredEnvironment.SampleLevel(samLinearClamp, reflect(-v, s.Normal), s.Roughness * 7).rgb;
@@ -48,7 +50,9 @@ float3 ShadeLocalLight(PBRSurface s, float3 position, float3 v, LocalLight light
     // Bistro units are centimetres; intensity is expressed per square metre.
     float attenuation = rangeFade * rangeFade * cone * cone / max(distanceSquared * 0.0001f, 0.01f);
     float3 result = EvaluateBRDF(s, v, l) * light.Radiance * attenuation;
+#ifndef PROBE_CAPTURE
     if (any(result > 0)) result *= LocalVisibility(light, position, s.Normal, saturate(dot(s.Normal, l)));
+#endif
     return result;
 }
 #endif

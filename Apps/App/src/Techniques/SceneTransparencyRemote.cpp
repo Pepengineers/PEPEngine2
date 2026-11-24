@@ -587,7 +587,7 @@ void SceneTransparency::AppendRemote(Graph& primary, std::vector<ID3D12Resource*
 		}
 		r.Lights->Resize((std::max)(1u, count));
 		for (UINT i = 0; i < count; ++i)
-			r.Lights->CopyData(i, r.Shadows.Remap(metadata[i], shadows));
+			r.Lights->CopyData(i, metadata[i]);
 		mesh.Views[7] = r.Lights->GetSRV()->GPUHandle;
 		mesh.Views[8] = r.Shadows.Fallback(view(r.ShadowFallback, nullptr, ShadowMemory::View(1)));
 		addRead(r.Lights->GetResource().D3DResource.Get(), D3D12_RESOURCE_STATE_GENERIC_READ);

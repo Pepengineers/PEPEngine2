@@ -2,9 +2,8 @@
 
 #ifdef PROBE_CULLING
 #include "ShadowFrustum.hlsli"
-cbuffer CullParameters : register(b0) { uint Geometry; uint Shadow; };
+cbuffer CullParameters : register(b0) { uint Geometry; };
 ConstantBuffer<CameraCB> CBCamera : register(b1);
-ConstantBuffer<ShadowCB> CBShadow : register(b2);
 StructuredBuffer<InstanceData> Instances : register(t0);
 StructuredBuffer<IndirectDrawArgs> InputCommands : register(t1);
 StructuredBuffer<Material> Materials : register(t2);
@@ -23,14 +22,12 @@ void CullCS(uint3 id : SV_DispatchThreadID)
     IndirectDrawArgs command = InputCommands[id.x];
     if (command.InstanceCount == 0) return;
     InstanceData instance = Instances[command.InstanceID];
-    if (Shadow != 0 && instance.CastsShadows == 0) return;
     // shortcut: transparent surfaces are excluded, add transparency capture when glass must appear inside probes.
     Material material = Materials[instance.MaterialIndex];
     if (material.RenderLayer == 2 || material.ReflectionProbePreview != 0) return;
     if (Geometry == 1 && instance.ReflectionDynamic != 0) return;
     if (Geometry == 2 && instance.ReflectionDynamic == 0) return;
-    float4x4 viewProj = Shadow != 0 ? CBShadow.ViewProj[0] : CBCamera.ViewProj;
-    if (!ShadowBoxVisible(instance.BoundingBoxCenter, instance.BoundingBoxExtents, viewProj)) return;
+    if (!ShadowBoxVisible(instance.BoundingBoxCenter, instance.BoundingBoxExtents, CBCamera.ViewProj)) return;
     uint index;
     InterlockedAdd(Counter[0], 1, index);
     VisibleCommands[index] = command;
@@ -40,16 +37,13 @@ void CullCS(uint3 id : SV_DispatchThreadID)
 cbuffer DrawConstants : register(b0) { uint InstanceID; };
 ConstantBuffer<MainCB> CBMain : register(b1);
 ConstantBuffer<CameraCB> CBCamera : register(b2);
-ConstantBuffer<ShadowCB> CBShadow : register(b3);
 StructuredBuffer<Material> MaterialCache : register(t0);
 StructuredBuffer<Transform> TransformCache : register(t1);
 StructuredBuffer<InstanceData> InstanceCache : register(t2);
-Texture2D<float> ShadowAtlas : register(t3);
 TextureCube<float4> IrradianceEnvironment : register(t4);
 TextureCube<float4> PrefilteredEnvironment : register(t5);
 Texture2D<float4> EnvironmentBRDF : register(t6);
 StructuredBuffer<LocalLight> LocalLights : register(t7);
-Texture2DArray<float> LocalShadowMaps : register(t8);
 TextureCube<float4> SkyEnvironment : register(t9);
 #define SKY_CB_REGISTER b4
 #define SKY_TRANSMITTANCE_REGISTER t10
@@ -57,11 +51,8 @@ TextureCube<float4> SkyEnvironment : register(t9);
 Texture2D Texture2DCache[TEXTURE2D_RANGE_LENGTH] : register(t11);
 SamplerState samLinearClamp : register(s3);
 SamplerState samAnisotropicWrap : register(s4);
-SamplerComparisonState samShadow : register(s6);
 
 #define PROBE_CAPTURE 1
-#define LOCAL_SHADOW_HEAP_INDEXED 1
-#include "CSM.hlsli"
 #include "PBR.hlsli"
 
 struct VertexOutput
@@ -71,7 +62,6 @@ struct VertexOutput
     float3 Normal : NORMAL;
     float2 UV : TEXCOORD0;
     nointerpolation uint MaterialIndex : TEXCOORD1;
-    nointerpolation uint CastsShadows : TEXCOORD2;
 };
 VertexOutput VS(float3 position : POSITION, float3 normal : NORMAL, float2 uv : TEXCOORD, uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
 {
@@ -91,7 +81,6 @@ VertexOutput VS(float3 position : POSITION, float3 normal : NORMAL, float2 uv : 
     output.Normal = TransformNormal(normal, (float3x3)world);
     output.UV = uv;
     output.MaterialIndex = instance.MaterialIndex;
-    output.CastsShadows = instance.CastsShadows;
     return output;
 }
 float4 PS(VertexOutput input) : SV_TARGET
@@ -101,20 +90,6 @@ float4 PS(VertexOutput input) : SV_TARGET
     float4 color = Texture2DCache[material.DiffuseIndex].Sample(samAnisotropicWrap, input.UV);
     if (material.RenderLayer == 1) clip(color.a - 0.5f);
     return float4(ShadePBR(material, color.rgb, input.WorldPosition, input.Normal, input.UV), 1);
-}
-VertexOutput ShadowVS(float3 position : POSITION, float3 normal : NORMAL, float2 uv : TEXCOORD, uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
-{
-    VertexOutput output = VS(position, normal, uv, vertexID, instanceID);
-    output.Position = mul(float4(output.WorldPosition, 1), CBShadow.ViewProj[0]);
-    return output;
-}
-void ShadowPS(VertexOutput input)
-{
-    if (input.CastsShadows == 0) clip(-1.0f);
-    Material material = MaterialCache[input.MaterialIndex];
-    if (material.ReflectionProbePreview != 0) clip(-1.0f);
-    if (material.RenderLayer == 1)
-        clip(Texture2DCache[material.DiffuseIndex].Sample(samAnisotropicWrap, input.UV).a - 0.5f);
 }
 float4 SkyVS(uint vertex : SV_VertexID) : SV_POSITION
 {

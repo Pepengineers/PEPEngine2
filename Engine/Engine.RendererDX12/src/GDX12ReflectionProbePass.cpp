@@ -40,33 +40,6 @@ namespace
         return result;
     }
 
-    GDX12ShadowConstants ProbeSunShadow(const GDX12DeviceResources& resources, UINT resolution)
-    {
-        Vector3 direction(resources.Lighting.LightDirection);
-        if (direction.LengthSquared() < 1e-8f) direction = -Vector3::UnitY;
-        direction.Normalize();
-        const auto& bounds = resources.ReflectionSceneBounds;
-        const Vector3 center(bounds.Center);
-        const float radius = (std::max)(Vector3(bounds.Extents).Length(), 1.0f);
-        const Vector3 up = std::abs(direction.y) > 0.95f ? Vector3::UnitZ : Vector3::UnitY;
-        const Matrix view = Matrix::CreateLookAt(center - direction * (2 * radius + 1), center, up);
-        XMFLOAT3 corners[8];
-        bounds.GetCorners(corners);
-        Vector3 minimum(FLT_MAX), maximum(-FLT_MAX);
-        for (const auto& corner : corners)
-        {
-            const Vector3 position = Vector3::Transform(Vector3(corner), view);
-            minimum = Vector3::Min(minimum, position);
-            maximum = Vector3::Max(maximum, position);
-        }
-        const Matrix projection = Matrix::CreateOrthographicOffCenter(minimum.x - 1, maximum.x + 1,
-            minimum.y - 1, maximum.y + 1, (std::max)(0.01f, -maximum.z - 1), -minimum.z + 1);
-        GDX12ShadowConstants result;
-        result.CascadeCount = 1;
-        XMStoreFloat4x4(&result.ViewProj[0], (view * projection).Transpose());
-        result.TexelWorldSize.x = (std::max)(maximum.x - minimum.x, maximum.y - minimum.y) / resolution;
-        return result;
-    }
 }
 
 GDX12ReflectionProbePass::GDX12ReflectionProbePass()
@@ -81,7 +54,6 @@ void GDX12ReflectionProbePass::Initialize()
 {
     GDX12RootSignatureDesc capture;
     capture.InstancedGeometry = true;
-    capture.IndexedLocalShadows = true;
     capture.Constants.push_back(1);
     capture.NumSingleCBVSlots = 4;
     capture.NumSingleSRVSlots = 11;
@@ -89,15 +61,10 @@ void GDX12ReflectionProbePass::Initialize()
     capture.StaticSamplers = GetStaticSamplers();
     capture.StaticSamplers.emplace_back(7, D3D12_FILTER_MIN_MAG_MIP_LINEAR,
         D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
-    CD3DX12_STATIC_SAMPLER_DESC sampler(6, D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT);
-    sampler.AddressU = sampler.AddressV = sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
-    sampler.ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
-    sampler.BorderColor = D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE;
-    capture.StaticSamplers.push_back(sampler);
     _captureRoot = std::make_unique<GDX12RootSignature>(_resources->Device, capture);
     GDX12RootSignatureDesc cull;
-    cull.Constants.push_back(2);
-    cull.NumSingleCBVSlots = 2;
+    cull.Constants.push_back(1);
+    cull.NumSingleCBVSlots = 1;
     cull.NumSingleSRVSlots = 3;
     cull.NumSingleUAVSlots = 2;
     _cullRoot = std::make_unique<GDX12RootSignature>(_resources->Device, cull);
@@ -109,7 +76,7 @@ void GDX12ReflectionProbePass::Initialize()
         D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
     _filterRoot = std::make_unique<GDX12RootSignature>(_resources->Device, filter);
     auto& compiler = GDX12ShaderCompiler::GetInstance();
-    const auto graphics = [&](const char* vsEntry, const char* psEntry, bool shadow, bool sky,
+    const auto graphics = [&](const char* vsEntry, const char* psEntry, bool sky,
         ComPtr<ID3D12PipelineState>& pipeline)
     {
         auto vs = compiler.CompileShader(_resources->Device, SHADERS_FOLDER "ReflectionCapture.hlsl", nullptr, vsEntry, "vs");
@@ -122,28 +89,22 @@ void GDX12ReflectionProbePass::Initialize()
         desc.PS = { ps->GetBufferPointer(), ps->GetBufferSize() };
         desc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
         // The cube projection reverses X; reverse winding with it.
-        desc.RasterizerState.FrontCounterClockwise = shadow ? TRUE : FALSE;
+        desc.RasterizerState.FrontCounterClockwise = FALSE;
         if (sky) desc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
-        if (shadow)
-        {
-            desc.RasterizerState.DepthBias = 250;
-            desc.RasterizerState.SlopeScaledDepthBias = 1.5f;
-        }
         desc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
         desc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-        desc.DepthStencilState.DepthFunc = shadow ? D3D12_COMPARISON_FUNC_LESS_EQUAL : D3D12_COMPARISON_FUNC_GREATER_EQUAL;
+        desc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
         if (sky) desc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
         desc.SampleMask = UINT_MAX;
         desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-        desc.NumRenderTargets = shadow ? 0 : 1;
-        desc.RTVFormats[0] = shadow ? DXGI_FORMAT_UNKNOWN : DXGI_FORMAT_R16G16B16A16_FLOAT;
+        desc.NumRenderTargets = 1;
+        desc.RTVFormats[0] = DXGI_FORMAT_R16G16B16A16_FLOAT;
         desc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
         desc.SampleDesc.Count = 1;
         ThrowIfFailed(_resources->Device->GetDevice()->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&pipeline)));
     };
-    graphics("VS", "PS", false, false, _capturePSO);
-    graphics("SkyVS", "SkyPS", false, true, _skyPSO);
-    graphics("ShadowVS", "ShadowPS", true, false, _shadowPSO);
+    graphics("VS", "PS", false, _capturePSO);
+    graphics("SkyVS", "SkyPS", true, _skyPSO);
     D3D_SHADER_MACRO culling[] = { { "PROBE_CULLING", "1" }, { nullptr, nullptr } };
     _cullPSO = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _cullRoot.get(),
         SHADERS_FOLDER "ReflectionCapture.hlsl", "CullCS", culling);
@@ -158,7 +119,6 @@ void GDX12ReflectionProbePass::Initialize()
     for (auto& frame : _frames)
     {
         frame.Cameras = std::make_unique<GDX12UploadBuffer<GDX12CameraConstants>>(_resources->Device, MaxReflectionProbes * 6);
-        frame.Shadow = std::make_unique<GDX12UploadBuffer<GDX12ShadowConstants>>(_resources->Device, 1);
         frame.Counter = std::make_unique<GDX12UploadBuffer<UINT>>(_resources->Device, 1, EBufferType::Default, false);
         frame.Counter->CreateUAV(_resources->SRV_UAV_Heap.get(), _resources->SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
     }
@@ -178,7 +138,7 @@ void GDX12ReflectionProbePass::CreateTexture(GDX12Texture& texture, const UINT s
         D3D12_RESOURCE_STATE_COMMON, clearable ? &clear : nullptr);
     desc.Width = desc.Height = size;
     desc.Format = depth ? DXGI_FORMAT_R32_FLOAT : format;
-    desc.CreateSRV = _capture && &texture == &_capture->SunShadow;
+    desc.CreateSRV = false;
     if (desc.CreateSRV)
     {
         desc.SRV_UAV_Heap = _resources->SRV_UAV_Heap.get();
@@ -285,28 +245,16 @@ void GDX12ReflectionProbePass::CreateCaptureTextures(UINT resolution)
         if (_capture)
         {
             _resources->Device->GetCommandQueue()->Flush();
-            for (auto* texture : {&_capture->Filtered, &_capture->Depth, &_capture->SunShadow})
+            for (auto* texture : {&_capture->Filtered, &_capture->Depth})
                 _statistics.TextureBytes -= AllocationBytes(_resources->Device, texture);
             _filterUAVs.clear();
             _depthDSVs.clear();
-            _sunDSV.clear();
             _capture.reset();
             _captureTextureResolution = 0;
         }
         return;
     }
     if (!_capture) _capture.emplace();
-    auto& sun = _capture->SunShadow;
-
-    const bool sunEnabled = (_resources->Lighting.SunShadowFlags & 1u) != 0;
-    const UINT sunSize = sunEnabled ? (std::max)(1u, _resources->ShadowQuality.SunResolution / 2) : 1u;
-    if (!sun.IsInitialized() || sun.GetWidth() != sunSize)
-    {
-        if (sun.IsInitialized()) _resources->Device->GetCommandQueue()->Flush();
-        CreateTexture(sun, sunSize, 1, 1, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL, true);
-        CreateFaceViews(sun, _sunDSV, true);
-        _sunShadowNeedsClear = true;
-    }
     const UINT captureMips = GDX12RenderHelpers::MipCount(resolution);
     if (_captureTextureResolution != resolution)
     {
@@ -441,12 +389,11 @@ void GDX12ReflectionProbePass::Prepare()
     const bool invalidate = _staticRevision != _resources->ReflectionStaticRevision ||
         _environmentRevision != _resources->ReflectionEnvironmentRevision;
     const bool staticGeometryChanged = _staticGeometryRevision != _resources->ReflectionStaticGeometryRevision;
-    const bool shadowQualityChanged = !(_shadowQuality == _resources->ShadowQuality);
     UINT maximumCaptureResolution = 0;
     for (UINT i = 0; i < submitted.size(); ++i)
     {
         auto& probe = _probes[i];
-        if (!SameReflectionCapture(probe.Source, submitted[i]) || shadowQualityChanged)
+        if (!SameReflectionCapture(probe.Source, submitted[i]))
         {
             if (probe.Source.Adapter != submitted[i].Adapter) probe.Ready = false;
             _commonData->ResetHistory = true;
@@ -474,7 +421,6 @@ void GDX12ReflectionProbePass::Prepare()
     _staticRevision = _resources->ReflectionStaticRevision;
     _staticGeometryRevision = _resources->ReflectionStaticGeometryRevision;
     _environmentRevision = _resources->ReflectionEnvironmentRevision;
-    _shadowQuality = _resources->ShadowQuality;
     if (!_enabled || _settings.Scheduled != settings.Scheduled) _scheduler.Reset();
     _settings = settings;
     _enabled = true;
@@ -523,11 +469,8 @@ void GDX12ReflectionProbePass::Prepare()
         _planPrepared = true;
         return;
     }
-    _views.resize(_probes.size() * 14);
+    _views.resize(_probes.size() * 12);
     auto& frame = _frames[_resources->CurrFrameConstantsIndex];
-    const bool sunShadow = (_resources->Lighting.SunShadowFlags & 1u) != 0;
-    const auto shadowSettings = sunShadow ? ProbeSunShadow(*_resources, _capture->SunShadow.GetWidth()) : GDX12ShadowConstants{};
-    frame.Shadow->CopyData(0, shadowSettings);
     for (UINT index = 0; index < _probes.size(); ++index)
     {
         auto& state = _probes[index];
@@ -542,50 +485,41 @@ void GDX12ReflectionProbePass::Prepare()
         const bool bake = state.Source.Implementation == 1 && state.BakedFaces != 63;
         const bool frozen = state.Source.Implementation == 2;
         if (bake) CreateBakedTextures(state);
-        const auto select = [&](UINT localSlot, Geometry geometry, bool shadow, UINT face, bool baked)
+        const auto select = [&](UINT localSlot, Geometry geometry, UINT face, bool baked)
         {
-            auto& prepared = _views[index * 14 + localSlot];
+            auto& prepared = _views[index * 12 + localSlot];
             prepared.Probe = index;
             prepared.Filter = geometry;
             prepared.Face = face;
             prepared.Bake = baked;
             prepared.Selected = true;
             auto& view = prepared.Context;
-            view.Stage = shadow ? GDX12GeometryStage::Shadow : GDX12GeometryStage::ReflectionCapture;
-            view.ViewProjection = shadow ? Matrix(shadowSettings.ViewProj[0]).Transpose() :
-                Matrix(FaceCamera(state.Source, face, _resolution).ViewProj).Transpose();
+            view.Stage = GDX12GeometryStage::ReflectionCapture;
+            view.ViewProjection = Matrix(FaceCamera(state.Source, face, _resolution).ViewProj).Transpose();
             view.Eye = state.Source.Position;
-            view.CameraConstants = shadow ? 0 : frame.Cameras->GetElementAddress(index * 6 + face);
+            view.CameraConstants = frame.Cameras->GetElementAddress(index * 6 + face);
             view.Filter = geometry == StaticGeometry ? GDX12GeometryFilter::Static :
                 (geometry == DynamicGeometry ? GDX12GeometryFilter::Dynamic : GDX12GeometryFilter::All);
-            view.Key = shadow ? (4ull << 60) | (index * 3ull + geometry) :
-                (5ull << 60) | (static_cast<uint64_t>(index) << 8) | (geometry * 6u + face);
+            view.Key = (5ull << 60) | (static_cast<uint64_t>(index) << 8) | (geometry * 6u + face);
             view.FrameSlot = _resources->CurrFrameConstantsIndex;
             view.DepthFormat = DXGI_FORMAT_D32_FLOAT;
-            if (!shadow)
-            {
-                prepared.Lighting.SunShadow = &_capture->SunShadow;
-                prepared.Lighting.Irradiance = _inputs[0]->GetTexture();
-                prepared.Lighting.Prefiltered = _inputs[1]->GetTexture();
-                prepared.Lighting.BRDF = _inputs[2]->GetTexture();
-                prepared.Lighting.ShadowConstants = frame.Shadow->GetElementAddress(0);
-                view.CaptureLighting = &prepared.Lighting;
-                view.ColorTargetCount = 1;
-                view.ColorFormats[0] = baked ? state.BakedColor->GetFormat() : state.Raw->GetFormat();
-            }
+            prepared.Lighting.Irradiance = _inputs[0]->GetTexture();
+            prepared.Lighting.Prefiltered = _inputs[1]->GetTexture();
+            prepared.Lighting.BRDF = _inputs[2]->GetTexture();
+            view.CaptureLighting = &prepared.Lighting;
+            view.ColorTargetCount = 1;
+            view.ColorFormats[0] = baked ? state.BakedColor->GetFormat() : state.Raw->GetFormat();
         };
         if (bake)
         {
-            if (sunShadow) select(0, StaticGeometry, true, 0, false);
             for (UINT face = 0; face < 6; ++face)
                 if ((work[index].Faces & (1u << face)) && !(state.BakedFaces & (1u << face)))
-                    select(1 + face, StaticGeometry, false, face, true);
+                    select(face, StaticGeometry, face, true);
         }
-        if (sunShadow) select(7, frozen ? StaticGeometry : AllGeometry, true, 0, false);
         for (UINT face = 0; face < 6; ++face)
             if (work[index].Faces & (1u << face))
-                select(8 + face, frozen ? StaticGeometry : state.Source.Implementation == 1 ? DynamicGeometry : AllGeometry,
-                    false, face, false);
+                select(6 + face, frozen ? StaticGeometry : state.Source.Implementation == 1 ? DynamicGeometry : AllGeometry,
+                    face, false);
     }
     _planPrepared = true;
 }

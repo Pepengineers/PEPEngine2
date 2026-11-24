@@ -3,14 +3,11 @@
 float LocalVisibility(LocalLight light, float3 position, float3 normal, float nDotL)
 {
     if (light.ShadowFirstSlice == 0xffffffffu || (light.ShadowFlags & 1u) == 0u) return 1;
-    Texture2DArray<float> maps = LocalShadowMaps;
-#if LOCAL_SHADOW_HEAP_INDEXED && (__SHADER_TARGET_MAJOR > 6 || (__SHADER_TARGET_MAJOR == 6 && __SHADER_TARGET_MINOR >= 6))
-    if (light.ShadowFlags & 8u)
-        maps = ResourceDescriptorHeap[NonUniformResourceIndex(light.ShadowFlags >> 4)];
-#endif
     uint width, height, slices;
-    maps.GetDimensions(width, height, slices);
-    float bias = light.Range / width * (0.1f + 0.2f * (1.0f - nDotL));
+    LocalShadowMaps.GetDimensions(width, height, slices);
+    const bool atlas = (light.ShadowFlags & 4u) != 0u;
+    const uint side = atlas ? light.ShadowTiles[0].w : width;
+    float bias = light.Range / side * (0.1f + 0.2f * (1.0f - nDotL));
     float3 biasedPosition = position + normal * bias;
     uint face = 0;
     if (light.Type == 1u)
@@ -27,12 +24,16 @@ float LocalVisibility(LocalLight light, float3 position, float3 normal, float nD
     float3 projected = clip.xyz / clip.w;
     float2 uv = projected.xy * float2(0.5f, -0.5f) + 0.5f;
     if (any(uv < 0) || any(uv > 1) || projected.z < 0 || projected.z > 1) return 1;
+    const uint4 tile = atlas ? light.ShadowTiles[face] : uint4(light.ShadowFirstSlice + face, 0, 0, width);
+    const float2 origin = float2(tile.yz);
+    const float2 texel = origin + uv * (atlas ? float2(tile.ww) : float2(width, height));
+    const float2 lower = origin + 0.5f;
+    const float2 upper = origin + (atlas ? float2(tile.ww) : float2(width, height)) - 0.5f;
     float visibility = 0;
     [unroll] for (int y = -1; y <= 1; ++y)
         [unroll] for (int x = -1; x <= 1; ++x)
-            visibility += maps.SampleCmpLevelZero(samShadow,
-                float3(clamp(uv + float2(x, y) / float2(width, height),
-                    0.5f / float2(width, height), 1 - 0.5f / float2(width, height)), light.ShadowFirstSlice + face), projected.z - 0.00001f);
+            visibility += LocalShadowMaps.SampleCmpLevelZero(samShadow,
+                float3(clamp(texel + float2(x, y), lower, upper) / float2(width, height), tile.x), projected.z - 0.00001f);
     return visibility / 9.0f;
 }
 #endif

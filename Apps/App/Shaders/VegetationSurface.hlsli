@@ -1,11 +1,8 @@
 SamplerState samLinearClamp : register(s3);
 SamplerState samAnisotropicWrap : register(s4);
-SamplerComparisonState samShadow : register(s6);
 #include "PBRSurface.hlsli"
 #ifdef VEGETATION_CAPTURE
 #define PROBE_CAPTURE 1
-#define LOCAL_SHADOW_HEAP_INDEXED 1
-#include "CSM.hlsli"
 #include "PBR.hlsli"
 #endif
 struct VertexOutput

@@ -14,6 +14,9 @@ namespace
     AutoConsoleVariable<UINT> LocalShadowSize(L"Render.Shadows.Local.Resolution", LocalShadowResolution,
         L"Point and spot shadow face resolution. In Bistro this caps adaptive maps. 0 Off, 128, 256, 384, 512 or 1024.",
         EConsoleVariableFlags::Default, [](UINT value) { return value == 0 || IsLocalShadowResolution(value); });
+    AutoConsoleVariable<UINT> LocalAtlasPages(L"Render.Shadows.Local.AtlasCount", LocalShadowAtlasCount,
+        L"Number of fixed local shadow atlas pages for Bistro.",
+        EConsoleVariableFlags::Default, [](UINT value) { return value >= 1 && value <= MaxLocalShadowAtlasCount; });
     AutoConsoleVariable<UINT> SunCascadeCount(L"Render.Shadows.Sun.CascadeCount", 4u,
         L"Number of sun cascades, 1..4. Applies at the frame boundary.",
         EConsoleVariableFlags::Default, [](UINT value) { return value >= 1 && value <= 4; });
@@ -41,6 +44,7 @@ GDX12ShadowQuality ReadShadowQuality()
     static std::mutex mutex;
     std::scoped_lock lock(mutex);
     GDX12ShadowQuality result{SunShadowSize.GetValue(), LocalShadowSize.GetValue()};
+    result.LocalAtlasCount = LocalAtlasPages.GetValue();
     auto& cascades = result.SunCascades;
     cascades.Count = SunCascadeCount.GetValue();
     cascades.MaxDistance = SunMaxDistance.GetValue();

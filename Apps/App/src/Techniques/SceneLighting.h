@@ -16,7 +16,7 @@ class SceneLighting
   public:
 	SceneLighting(GDX12DeviceResources&, RenderPipelineCommonData&);
 	~SceneLighting();
-	void Freeze(SceneGeometry&, UINT slot, const std::shared_ptr<QueueSubmission>&, Id aoDevice, Id transparencyOwner);
+	void Freeze(SceneGeometry&, UINT slot, const std::shared_ptr<QueueSubmission>&, Id aoDevice);
 	void RetireShadowSkinInputs(UINT slot);
 	Id AOExecutionDevice() const { return _frames.at(_slot).AO->ExecutionDevice(); }
 	std::optional<Executor::PacketExchange> AOExchange(const Schedule& schedule)
@@ -67,14 +67,9 @@ class SceneLighting
 	void Submitted(uint64_t fence);
 	void Reset();
 	void RetireLocalShadows();
-	std::string LocalShadowDistribution() const
-	{
-		auto layout = _localShadows->Distribution(_slot);
-		if (_transparency->ShadowBudgetFallback()) layout += " (WBOIT on primary: shadow transfer budget)";
-		return layout;
-	}
+	void UpdateLocalShadowProfile(Executor& primary, Id transparencyOwner);
+	std::string LocalShadowDistribution() const;
 	PublishedShadows PublishedLocalShadows() const { return {*_localShadows, _slot, _frames.at(_slot).LightCount}; }
-	void ReportLocalShadows(uint64_t frame);
 	UINT64 LocalShadowTexels() const { return _localShadows->ShadowTexels(_slot); }
 	SceneTransparency& Transparency() { return *_transparency; }
 	SceneParticles& Particles() { return _transparency->Particles(); }
@@ -122,9 +117,7 @@ class SceneLighting
 		GDX12LightGridConstants GridLayout{};
 		std::map<ShadowLane, std::unique_ptr<RemoteShadows>> ShadowOwners;
 		std::vector<std::shared_ptr<ShadowPublication>> ShadowReads;
-		std::map<UINT, std::array<uint64_t, 6>> LocalShadowOrders;
 		std::array<uint64_t, 4> SunShadowOrders{};
-		uint64_t LocalShadowLayout = 0;
 		GDX12ResourceHandle LatestSunAtlas;
 		UINT CrossSlotShadows = 0;
 		CompletionToken ShadowConsumer;
@@ -155,9 +148,13 @@ class SceneLighting
 	uint64_t _shadowOrder = 0;
 	UINT _reportedCrossSlotShadows = 0;
 	std::shared_ptr<QueueSubmission> _submissions;
-	std::chrono::steady_clock::time_point _nextShadowReport{};
-	std::string _lastShadowReport;
-	UINT _lastShadowCeiling = UINT_MAX;
+	std::unique_ptr<LocalShadowTileCopy> _localShadowTileCopy;
+	LocalShadowTileCopy& MainShadowTileCopy();
+	GDX12LocalShadowProfile _localShadowProfile = LocalShadowProfiles[0];
+	UINT _localShadowPages = 0;
+	std::vector<Id> _localShadowBudgetOwners;
+	std::string _localShadowLimit;
+	bool _localShadowTransferLimited = false;
 	GDX12DeferredLightingPass _deferred;
 	std::unique_ptr<GDX12SSSRPass> _ssr;
 	NativeWork _work;

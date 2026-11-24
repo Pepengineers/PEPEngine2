@@ -1,4 +1,5 @@
 #pragma once
+#include "Engine.RendererDX12/GDX12LocalLights.h"
 
 #include "BistroBenchmarkCsv.h"
 #include "Engine.Core/ConsoleModule.h"
@@ -73,7 +74,7 @@ inline constexpr size_t AO = 0, Wind = 4, Post = 11, HUD = 12, SunShadow = 13;
 inline constexpr size_t WaterQuality = 4, SkinningQuality = 12;
 inline constexpr size_t SunShadowQuality = std::size(Techniques) - 2, LocalShadowQuality = std::size(Techniques) - 1;
 
-enum Level { Off, Medium, High, Epic };
+enum Level { Off, Low, Medium, High, Epic };
 enum Profile { Performance, Quality };
 inline constexpr double Threshold[]{60, 28};
 inline constexpr const char* ProfileName[]{"Performance", "Quality"};
@@ -218,9 +219,11 @@ public:
             if (levels[Off] == -1) levels[Off] = levels[High];
         }
         // The renderer exposes shadow quality as a discrete resolution.
-        _values[SunShadowQuality] = {0, 1024, 2048, 4096};
-        const int localCeiling = console.FindConsoleVariable(Techniques[LocalShadowQuality].Quality).GetInt();
-        _values[LocalShadowQuality] = {0, localCeiling == 128 || localCeiling == 384 ? localCeiling : 256, 512, 1024};
+        _values[SunShadowQuality] = {0, 1024, 1024, 2048, 4096};
+        using ShadowLevel = GDX12LocalShadowLevel;
+        _values[LocalShadowQuality] = {int(GetLocalShadowProfile(ShadowLevel::Off).Face),
+            int(GetLocalShadowProfile(ShadowLevel::Low).Face), int(GetLocalShadowProfile(ShadowLevel::Medium).Face),
+            int(GetLocalShadowProfile(ShadowLevel::High).Face), int(GetLocalShadowProfile(ShadowLevel::Epic).Face)};
         _values[SkinningQuality][Epic] = _values[SkinningQuality][High];
         if (!usesSkinningPreset)
             _values[SkinningQuality][Medium] = _values[SkinningQuality][High];
@@ -541,7 +544,7 @@ private:
     static Config WithHighInsteadOfMedium(Config config)
     {
         for (auto& level : config.Levels)
-            if (level == Medium) level = High;
+            if (level == Low || level == Medium) level = High;
         return config;
     }
 
@@ -783,6 +786,12 @@ private:
                     lowerQuality(next);
                 }
                 if (reduced.Levels != high.Levels) lowerQuality(reduced);
+                if (!pending && !passes && result.Activity[LocalShadowQuality] && reduced.Levels[LocalShadowQuality] != Off)
+                {
+                    next = reduced;
+                    next.Levels[LocalShadowQuality] = Low;
+                    lowerQuality(next);
+                }
                 if (!pending && !passes)
                 {
                     for (size_t i = 0; i < std::size(Techniques); ++i)
@@ -824,12 +833,12 @@ private:
                     }
                 }
             }
-            const bool allHigh = std::none_of(config.Levels.begin(), config.Levels.end(), [](Level l) { return l == Medium; });
+            const bool allHigh = std::none_of(config.Levels.begin(), config.Levels.end(), [](Level l) { return l == Low || l == Medium; });
             for (size_t i = 0; i < std::size(Techniques); ++i)
             {
                 if (config.Levels[i] == Off || config.Levels[i] == Epic) continue;
                 next = config;
-                next.Levels[i] = config.Levels[i] == Medium ? High : Epic;
+                next.Levels[i] = Level(config.Levels[i] + 1);
                 if ((!allHigh && next.Levels[i] == Epic) || _values[i][next.Levels[i]] == _values[i][config.Levels[i]])
                     continue;
                 enqueue(next, "raise effect quality");
@@ -975,7 +984,7 @@ private:
     size_t _firstLocalShadow = 0;
     ConsoleVariablePatch _localShadowSync;
     std::vector<Size> _sizes;
-    std::array<std::array<int, 4>, std::size(Techniques)> _values{};
+    std::array<std::array<int, Epic + 1>, std::size(Techniques)> _values{};
     std::array<bool, std::size(Techniques)> _available{};
     std::deque<Trial> _pending, _priority;
     std::set<Config> _scheduled;

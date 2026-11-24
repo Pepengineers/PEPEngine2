@@ -50,7 +50,6 @@ private:
     struct FrameData
     {
         std::unique_ptr<GDX12UploadBuffer<GDX12CameraConstants>> Cameras;
-        std::unique_ptr<GDX12UploadBuffer<GDX12ShadowConstants>> Shadow;
         std::unique_ptr<GDX12UploadBuffer<GDX12IndirectDrawArgs>> Commands;
         std::unique_ptr<GDX12UploadBuffer<UINT>> Counter;
         std::unique_ptr<GDX12InstanceBatcher> Batches;
@@ -76,19 +75,17 @@ private:
     std::vector<ProbeState> _probes;
     std::vector<FrameData> _frames;
     std::unique_ptr<GDX12RootSignature> _captureRoot, _cullRoot, _filterRoot;
-    ComPtr<ID3D12PipelineState> _capturePSO, _skyPSO, _shadowPSO, _cullPSO, _clearPSO, _filterPSO;
+    ComPtr<ID3D12PipelineState> _capturePSO, _skyPSO, _cullPSO, _clearPSO, _filterPSO;
     ComPtr<ID3D12CommandSignature> _signature;
     const GDX12ReflectionSettings* _externalSettings = nullptr;
     std::function<bool(UINT)> _ownsCapture;
     std::function<bool(UINT)> _captureAllowed;
     GDX12Texture _published;
-    struct CaptureTextures { GDX12Texture Filtered, Depth, SunShadow; };
+    struct CaptureTextures { GDX12Texture Filtered, Depth; };
     std::optional<CaptureTextures> _capture;
-    bool _sunShadowNeedsClear = true;
-    std::vector<std::unique_ptr<GDX12Descriptor>> _depthDSVs, _sunDSV, _filterUAVs;
+    std::vector<std::unique_ptr<GDX12Descriptor>> _depthDSVs, _filterUAVs;
     Statistics _statistics;
     GDX12ReflectionSettings _settings;
-    GDX12ShadowQuality _shadowQuality;
     uint64_t _staticRevision = 0;
     uint64_t _staticGeometryRevision = 0;
     uint64_t _environmentRevision = 0;

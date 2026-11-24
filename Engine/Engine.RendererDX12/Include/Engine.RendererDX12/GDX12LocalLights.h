@@ -7,12 +7,32 @@
 
 inline constexpr UINT LocalShadowResolution = 256;
 inline constexpr UINT LocalShadowFaceMask = 4u;
-inline constexpr UINT LocalShadowAtlasIndex = 8u;
+enum class GDX12LocalShadowLevel { Off, Low, Medium, Manual, High, Epic };
 
-inline void SetLocalShadowAtlas(GDX12LocalLightConstants& light, UINT descriptorIndex)
+struct GDX12LocalShadowProfile
 {
-    light.ShadowFlags = (light.ShadowFlags & 7u) | LocalShadowAtlasIndex | (descriptorIndex << 4);
+    UINT Face, Page;
+    const char* Name;
+};
+inline constexpr GDX12LocalShadowProfile LocalShadowProfiles[] = {
+    {0, 0, "Off"}, {128, 512, "Low"}, {256, 1024, "Medium"},
+    {384, 768, "Manual"}, {512, 2048, "High"}, {1024, 4096, "Epic"}
+};
+inline constexpr UINT LocalShadowAtlasCount = 4;
+inline constexpr UINT MaxLocalShadowAtlasCount = D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION;
+
+constexpr GDX12LocalShadowProfile GetLocalShadowProfile(GDX12LocalShadowLevel level)
+{
+    return LocalShadowProfiles[static_cast<size_t>(level)];
 }
+
+constexpr GDX12LocalShadowProfile GetLocalShadowProfile(UINT face)
+{
+    for (const auto& profile : LocalShadowProfiles)
+        if (profile.Face == face) return profile;
+    return LocalShadowProfiles[0];
+}
+
 inline constexpr UINT SunShadowCascadeResolution = 2048;
 
 struct GDX12SunCascadeSettings
@@ -34,9 +54,10 @@ struct GDX12ShadowQuality
     UINT SunResolution = SunShadowCascadeResolution;
     UINT LocalResolution = LocalShadowResolution;
     GDX12SunCascadeSettings SunCascades;
+    UINT LocalAtlasCount = LocalShadowAtlasCount;
 
     bool operator==(const GDX12ShadowQuality& other) const
-    { return SunResolution == other.SunResolution && LocalResolution == other.LocalResolution && SunCascades == other.SunCascades; }
+    { return SunResolution == other.SunResolution && LocalResolution == other.LocalResolution && LocalAtlasCount == other.LocalAtlasCount && SunCascades == other.SunCascades; }
 };
 
 constexpr bool IsSunShadowResolution(UINT value)
@@ -46,7 +67,7 @@ constexpr bool IsSunShadowResolution(UINT value)
 
 constexpr bool IsLocalShadowResolution(UINT value)
 {
-    return value == 128 || value == 256 || value == 384 || value == 512 || value == 1024;
+    return GetLocalShadowProfile(value).Face != 0;
 }
 
 GDX12ShadowQuality ReadShadowQuality();

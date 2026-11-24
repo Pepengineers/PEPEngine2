@@ -17,12 +17,9 @@ enum class GDX12GeometryDepthPartition : std::uint8_t { All, Far, Near };
 
 struct GDX12CaptureLighting
 {
-    GDX12Texture* SunShadow = nullptr;
     GDX12Texture* Irradiance = nullptr;
     GDX12Texture* Prefiltered = nullptr;
     GDX12Texture* BRDF = nullptr;
-    GDX12Texture* LocalShadows = nullptr;
-    D3D12_GPU_VIRTUAL_ADDRESS ShadowConstants = 0;
     D3D12_GPU_DESCRIPTOR_HANDLE LocalLightSrv{};
 };
 

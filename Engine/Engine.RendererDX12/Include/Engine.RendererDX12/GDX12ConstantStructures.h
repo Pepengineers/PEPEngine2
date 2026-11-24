@@ -89,6 +89,16 @@ struct GDX12LightConstants
     XMFLOAT4 CascadeDistances = { 10.0f, 50.0f, 150.0f, 400.0f };
 };
 
+struct GDX12LocalShadowTile
+{
+    UINT Page = 0, X = 0, Y = 0, Side = 0;
+    bool operator==(const GDX12LocalShadowTile& other) const
+    {
+        return Page == other.Page && X == other.X && Y == other.Y && Side == other.Side;
+    }
+    bool operator!=(const GDX12LocalShadowTile& other) const { return !(*this == other); }
+};
+
 struct GDX12LocalLightConstants
 {
     XMFLOAT3 Position = {};
@@ -104,8 +114,11 @@ struct GDX12LocalLightConstants
     UINT ShadowFlags = 0; // Bit 0: casts shadows; bit 1: every-frame updates.
     UINT _padding[3] = {};
     XMFLOAT4X4 ShadowViewProj[6] = {};
+    GDX12LocalShadowTile ShadowTiles[6] = {};
 };
-static_assert(sizeof(GDX12LocalLightConstants) == 464);
+static_assert(sizeof(GDX12LocalShadowTile) == 16);
+static_assert(offsetof(GDX12LocalLightConstants, ShadowTiles) == 464);
+static_assert(sizeof(GDX12LocalLightConstants) == 560);
 
 struct GDX12InstanceData
 {

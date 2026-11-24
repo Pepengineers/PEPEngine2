@@ -1,6 +1,6 @@
 #pragma once
 #include "SceneLocalShadows.h"
-#include "ShadowDepthTransfer.h"
+#include "LocalShadowTileCopy.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
 
 namespace BistroRender
@@ -8,46 +8,50 @@ namespace BistroRender
 struct PublishedShadows
 {
 	PublishedShadows(SceneLocalShadows& pass, UINT slot, UINT lightCount)
-	    : Fallback(pass.Output(slot)), Atlases(pass.Outputs(slot)), Lights(pass.LightSource(slot)),
-	      Source(pass), Slot(slot), LightCount(lightCount) {}
-	GDX12Texture* Fallback;
-	std::vector<GDX12Texture*> Atlases;
+	    : Texture(pass.Output(slot)), Lights(pass.LightSource(slot)), Source(pass), Slot(slot), LightCount(lightCount),
+	      Enabled(pass.HasAtlas(slot)) {}
+	GDX12Texture* Texture;
 	GDX12UploadBuffer<GDX12LocalLightConstants>& Lights;
 	const SceneLocalShadows& Source;
 	UINT Slot, LightCount;
+	bool Enabled;
 };
 
 // The caller retires the consumer's previous submission before preparing another capture or frame.
 class PublishedShadowMirror
 {
-	struct Atlas
+	struct Face
 	{
-		ShadowMemory::Charge Memory;
-		std::unique_ptr<GDX12Texture> Depth;
-		std::unique_ptr<ShadowDepthTransfer> Transfer;
-		std::vector<uint64_t> Versions;
-		std::vector<UINT> Slices;
+		UINT Light, Index;
+		GDX12LocalShadowTile Tile;
 	};
-	std::map<UINT, Atlas> _atlases;
-	std::map<UINT, UINT> _descriptorSizes;
-	bool _indexed = false;
+	using Tiles = std::map<UINT, std::vector<Face>>;
 
-	static UINT Descriptor(const GDX12LocalLightConstants& light, const PublishedShadows& source)
+	static Tiles ReadyTiles(const PublishedShadows& source)
 	{
-		return light.ShadowFlags & LocalShadowAtlasIndex ? light.ShadowFlags >> 4 : source.Fallback->GetSRV()->HeapIndex;
-	}
-
-	template<class Visitor>
-	static void VisitReadySlices(const PublishedShadows& source, Visitor visit)
-	{
+		Tiles tiles;
 		for (UINT i = 0; i < source.LightCount; ++i)
 		{
 			const auto& light = source.Lights.GetCPUData()[i];
 			if (light.ShadowFirstSlice == UINT_MAX) continue;
-			const UINT descriptor = Descriptor(light, source);
 			for (UINT face = 0; face < LocalShadowFaceCount(light); ++face)
-				if (light._padding[2] & (1u << face)) visit(descriptor, light.ShadowFirstSlice + face);
+				if (light._padding[2] & (1u << face))
+				{
+					const auto& tile = light.ShadowTiles[face];
+					tiles[tile.Side].push_back({i, face, tile});
+				}
 		}
+		return tiles;
+	}
+
+	static LocalShadowTileTransfer::Bytes TransferCost(GDX12Device& primary, GDX12Device& owner, const Tiles& tiles)
+	{
+		LocalShadowTileTransfer::Bytes cost;
+		for (const auto& [side, faces] : tiles)
+			for (size_t first = 0; first < faces.size(); first += MaxLocalShadowAtlasCount)
+				cost += LocalShadowTileTransfer::Cost(primary, owner, side,
+				    UINT((std::min)(faces.size() - first, size_t(MaxLocalShadowAtlasCount))), true);
+		return cost;
 	}
 
 public:
@@ -56,99 +60,75 @@ public:
 	{
 		auto& primary = submit.Device(0);
 		auto& device = submit.Device(owner);
-		const bool indexed = device.GetDeviceFeatures().Features.HighestShaderModel() >= D3D_SHADER_MODEL_6_6;
-		UINT64 primaryBytes = 0, ownerBytes = 0;
+		LocalShadowTileTransfer::Bytes cost;
 		for (const auto* source : sources)
 		{
-			if (!source) continue;
-			std::map<UINT, UINT> ready;
-			VisitReadySlices(*source, [&](UINT descriptor, UINT) { ++ready[descriptor]; });
-			if (!indexed && ready.size() > 1) return false;
-			for (auto* atlas : source->Atlases)
-			{
-				const auto found = ready.find(atlas->GetSRV()->HeapIndex);
-				if (found == ready.end()) continue;
-				const UINT side = atlas->GetWidth();
-				const UINT layers = atlas->GetResource()->D3DResource->GetDesc().DepthOrArraySize;
-				const auto transfer = ShadowMemory::TransferBytes(primary, device, side, found->second);
-				primaryBytes += transfer;
-				ownerBytes += transfer + ShadowMemory::Size(device, ShadowMemory::Depth(side, layers, D3D12_RESOURCE_FLAG_NONE));
-			}
+			if (!source || !source->Enabled) continue;
+			const auto shape = source->Texture->GetResource()->D3DResource->GetDesc();
+			cost.Owner += ShadowMemory::Size(device, shape);
+			cost += TransferCost(primary, device, ReadyTiles(*source));
 		}
-		return !ownerBytes || (ShadowMemory::Fits(primary, primaryBytes) && ShadowMemory::Fits(device, ownerBytes));
+		return !cost.Owner || (ShadowMemory::Fits(primary, cost.Primary) && ShadowMemory::Fits(device, cost.Owner));
 	}
 
 	void Clear()
 	{
-		_atlases.clear();
-		_descriptorSizes.clear();
+		_transfers.clear();
+		_tiles.clear();
+		_versions.clear();
+		_dsvs.clear();
+		_depth.reset();
+		_memory.Reset();
 	}
 
 	bool Prepare(const QueueSubmission& submit, Id owner, GDX12DescriptorHeap& heap, const PublishedShadows& source)
 	{
+		_transfers.clear();
+		if (!source.Enabled)
+		{
+			Clear();
+			return true;
+		}
 		auto& primary = submit.Device(0);
 		auto& device = submit.Device(owner);
-		_indexed = device.GetDeviceFeatures().Features.HighestShaderModel() >= D3D_SHADER_MODEL_6_6;
-		_descriptorSizes.clear();
-		for (auto* atlas : source.Atlases)
-			_descriptorSizes.emplace(atlas->GetSRV()->HeapIndex, atlas->GetWidth());
-		for (auto& [side, local] : _atlases) local.Slices.clear();
-		VisitReadySlices(source, [&](UINT descriptor, UINT slice) {
-			_atlases[_descriptorSizes.at(descriptor)].Slices.push_back(slice);
-		});
-		for (auto it = _atlases.begin(); it != _atlases.end();)
-			if (it->second.Slices.empty()) it = _atlases.erase(it);
-			else ++it;
-		if (!_indexed && _atlases.size() > 1) { Clear(); return false; }
-
-		// Old slot resources are fence-safe now. Release replaced allocations before pricing their successors.
-		UINT64 primaryBytes = 0, ownerBytes = 0;
-		for (auto* atlas : source.Atlases)
-		{
-			const UINT side = atlas->GetWidth();
-			const auto found = _atlases.find(side);
-			if (found == _atlases.end()) continue;
-			auto& local = found->second;
-			const UINT layers = atlas->GetResource()->D3DResource->GetDesc().DepthOrArraySize;
-			if (local.Versions.size() != layers)
-			{
-				local.Depth.reset();
-				local.Memory.Reset();
-				local.Versions.assign(layers, 0);
-			}
-			if (!local.Depth) ownerBytes += ShadowMemory::Size(device, ShadowMemory::Depth(side, layers, D3D12_RESOURCE_FLAG_NONE));
-			const UINT count = UINT(local.Slices.size());
-			if (local.Transfer && local.Transfer->Capacity() < count) local.Transfer.reset();
-			if (!local.Transfer)
-			{
-				const UINT64 bytes = ShadowMemory::TransferBytes(primary, device, side, count);
-				primaryBytes += bytes;
-				ownerBytes += bytes;
-			}
-		}
-		if (!_atlases.empty() && (!ShadowMemory::Fits(primary, primaryBytes) || !ShadowMemory::Fits(device, ownerBytes)))
+		const auto shape = source.Texture->GetResource()->D3DResource->GetDesc();
+		if (_depth && (_depth->GetWidth() != shape.Width || _dsvs.size() != shape.DepthOrArraySize)) Clear();
+		_tiles = ReadyTiles(source);
+		auto cost = TransferCost(primary, device, _tiles);
+		if (!_depth) cost.Owner += ShadowMemory::Size(device, shape);
+		if (!ShadowMemory::Fits(primary, cost.Primary) || !ShadowMemory::Fits(device, cost.Owner))
 		{
 			Clear();
 			return false;
 		}
-		for (auto& [side, local] : _atlases)
+		_submit = &submit;
+		_owner = owner;
+		if (!_depth)
 		{
-			const UINT layers = UINT(local.Versions.size());
-			if (!local.Depth)
+			GDX12TextureDesc texture{};
+			texture.Width = texture.Height = UINT(shape.Width);
+			texture.Format = DXGI_FORMAT_D32_FLOAT;
+			texture.SRVDesc = ShadowMemory::View(shape.DepthOrArraySize);
+			texture.SRV_UAV_Heap = &heap;
+			texture.ExternalResource = device.CreateResource(D3D12_HEAP_TYPE_DEFAULT, shape, D3D12_RESOURCE_STATE_COMMON);
+			texture.SRVHeapIndex = heap.GetAvailableIndex(SceneDescriptorStart);
+			_depth = std::make_unique<GDX12Texture>();
+			_depth->Initialize(texture);
+			_memory.Set(device, ShadowMemory::Size(device, shape));
+			if (!_dsvHeap)
+				_dsvHeap = std::make_unique<GDX12DescriptorHeap>(&device, D3D12_DESCRIPTOR_HEAP_TYPE_DSV,
+				    MaxLocalShadowAtlasCount, D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
+			for (UINT page = 0; page < shape.DepthOrArraySize; ++page)
 			{
-				const auto shape = ShadowMemory::Depth(side, layers, D3D12_RESOURCE_FLAG_NONE);
-				GDX12TextureDesc texture{};
-				texture.Width = texture.Height = side;
-				texture.Format = DXGI_FORMAT_R32_FLOAT;
-				texture.SRVDesc = ShadowMemory::View(layers);
-				texture.SRV_UAV_Heap = &heap;
-				texture.ExternalResource = device.CreateResource(D3D12_HEAP_TYPE_DEFAULT, shape, D3D12_RESOURCE_STATE_COMMON);
-				texture.SRVHeapIndex = heap.GetAvailableIndex(SceneDescriptorStart);
-				local.Depth = std::make_unique<GDX12Texture>();
-				local.Depth->Initialize(texture);
-				local.Memory.Set(device, ShadowMemory::Size(device, shape));
+				auto dsv = std::make_unique<GDX12Descriptor>();
+				D3D12_DEPTH_STENCIL_VIEW_DESC view{};
+				view.Format = DXGI_FORMAT_D32_FLOAT;
+				view.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
+				view.Texture2DArray.FirstArraySlice = page;
+				view.Texture2DArray.ArraySize = 1;
+				dsv->InitAsDSV(_depth->GetResource()->D3DResource.Get(), &view, _dsvHeap.get(), _dsvHeap->GetAvailableIndex());
+				_dsvs.push_back(std::move(dsv));
 			}
-			if (!local.Transfer) local.Transfer = std::make_unique<ShadowDepthTransfer>(submit, owner, side, UINT(local.Slices.size()));
 		}
 		return true;
 	}
@@ -157,54 +137,62 @@ public:
 	              Graph& remote, std::vector<ID3D12Resource*>& remoteBindings, NativeWork& remoteWork,
 	              const PublishedShadows& source, std::vector<Id>& exports, std::vector<Id>& imports, std::vector<Access>& reads)
 	{
+		if (!_depth) return 0;
+		auto* from = source.Texture->GetResource()->D3DResource.Get();
+		auto* target = _depth->GetResource()->D3DResource.Get();
 		UINT64 bytes = 0;
-		for (auto* atlas : source.Atlases)
+		decltype(_versions) versions;
+		for (const auto& [side, faces] : _tiles)
 		{
-			const UINT side = atlas->GetWidth();
-			const auto found = _atlases.find(side);
-			if (found == _atlases.end()) continue;
-			auto& local = found->second;
-			const auto& versions = source.Source.ContentVersions(source.Slot, side);
-			std::vector<UINT> dirty;
-			for (UINT slice : local.Slices)
+			std::vector<GDX12LocalShadowTile> dirty;
+			for (const auto& face : faces)
 			{
-				const auto version = versions.at(slice);
-				if (version && version == local.Versions[slice]) continue;
-				dirty.push_back(slice);
-				local.Versions[slice] = version;
+				const auto version = source.Source.ContentVersion(source.Slot, face.Light, face.Index);
+				const std::array key{face.Tile.Page, face.Tile.X, face.Tile.Y, side};
+				versions.emplace(key, version);
+				const auto found = _versions.find(key);
+				if (!version || found == _versions.end() || found->second != version) dirty.push_back(face.Tile);
 			}
-			auto* target = local.Depth->GetResource()->D3DResource.Get();
-			if (!dirty.empty())
+			bytes += UINT64(dirty.size()) * side * side * sizeof(float);
+			for (size_t first = 0; first < dirty.size(); first += MaxLocalShadowAtlasCount)
 			{
-				bytes += UINT64(dirty.size()) * side * side * sizeof(float);
-				exports.push_back(local.Transfer->Append(primary, primaryBindings, primaryWork,
-				    atlas->GetResource()->D3DResource.Get(), dirty, true));
-				imports.push_back(local.Transfer->Append(remote, remoteBindings, remoteWork, target, std::move(dirty), false));
+				if (!_pack) _pack = std::make_unique<LocalShadowTileCopy>(_submit->Device(0));
+				if (!_draw) _draw = std::make_unique<LocalShadowTileCopy>(_submit->Device(_owner));
+				const UINT count = UINT((std::min)(dirty.size() - first, size_t(MaxLocalShadowAtlasCount)));
+				auto transfer = std::make_unique<LocalShadowTileTransfer>(*_submit, _owner, side, count, true);
+				exports.push_back(transfer->Export(primary, primaryBindings, primaryWork, *_pack, from,
+				    {dirty.begin() + first, dirty.begin() + first + count}));
+				imports.push_back(transfer->Stage(remote, remoteBindings, remoteWork));
+				std::vector<LocalShadowTileCopy::Region> regions;
+				for (UINT i = 0; i < count; ++i)
+				{
+					const auto& tile = dirty[first + i];
+					regions.push_back({transfer->PackedTile(i), tile, _dsvs[tile.Page]->CPUHandle});
+				}
+				transfer->Publish(remote, remoteBindings, remoteWork, *_draw, target, std::move(regions));
+				_transfers.push_back(std::move(transfer));
 			}
-			const auto id = NativeWork::ResourceFor(remote, remoteBindings, target, "published local shadow array");
-			reads.push_back({id, Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
 		}
+		_versions.swap(versions);
+		const auto id = NativeWork::ResourceFor(remote, remoteBindings, target, "published local shadow atlas");
+		reads.push_back({id, Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
 		return bytes;
 	}
 
-	GDX12LocalLightConstants Remap(GDX12LocalLightConstants light, const PublishedShadows& source) const
-	{
-		if (light.ShadowFirstSlice != UINT_MAX)
-		{
-			const auto& local = _atlases.at(_descriptorSizes.at(Descriptor(light, source)));
-			if (_indexed) SetLocalShadowAtlas(light, local.Depth->GetSRV()->HeapIndex);
-			else light.ShadowFlags &= 7u;
-		}
-		return light;
-	}
-
-	GDX12Texture* Fallback(GDX12Texture& empty)
-	{
-		return _atlases.empty() ? &empty : _atlases.begin()->second.Depth.get();
-	}
+	GDX12Texture* Fallback(GDX12Texture& empty) { return _depth ? _depth.get() : &empty; }
 	D3D12_GPU_DESCRIPTOR_HANDLE Fallback(D3D12_GPU_DESCRIPTOR_HANDLE empty)
-	{
-		return _atlases.empty() ? empty : _atlases.begin()->second.Depth->GetSRV()->GPUHandle;
-	}
+	{ return _depth ? _depth->GetSRV()->GPUHandle : empty; }
+
+private:
+	const QueueSubmission* _submit = nullptr;
+	Id _owner = 0;
+	ShadowMemory::Charge _memory;
+	std::unique_ptr<GDX12Texture> _depth;
+	std::unique_ptr<GDX12DescriptorHeap> _dsvHeap;
+	std::vector<std::unique_ptr<GDX12Descriptor>> _dsvs;
+	std::unique_ptr<LocalShadowTileCopy> _pack, _draw;
+	Tiles _tiles;
+	std::map<std::array<UINT, 4>, uint64_t> _versions;
+	std::vector<std::unique_ptr<LocalShadowTileTransfer>> _transfers;
 };
 }

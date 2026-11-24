@@ -12,7 +12,6 @@ namespace BistroRender
 LindenDraw::LindenDraw(GDX12DeviceResources& resources, bool captureOnly) : _resources(resources)
 {
 	GDX12RootSignatureDesc root;
-	root.IndexedLocalShadows = true;
 	root.Constants = {18}; // view-projection, batch material, first pulled index
 	root.NumSingleCBVSlots = 3;
 	root.NumSingleSRVSlots = 11;
@@ -172,18 +171,14 @@ void LindenDraw::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, Na
 	srvs[9] = buffers->UVs.GetSRV()->GPUHandle;
 	if (stage == Stage::GBuffer) srvs[10] = pose.Previous->GetSRV()->GPUHandle;
 	srvs[11] = _resources.SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex);
-	D3D12_GPU_VIRTUAL_ADDRESS shadowConstants = 0;
 	if (capture)
 	{
 		const auto& lighting = *target.View.CaptureLighting;
-		srvs[2] = lighting.SunShadow->GetSRV()->GPUHandle;
 		srvs[3] = lighting.Irradiance->GetSRV()->GPUHandle;
 		srvs[4] = lighting.Prefiltered->GetSRV()->GPUHandle;
 		srvs[5] = lighting.BRDF->GetSRV()->GPUHandle;
 		srvs[6] = remote ? remote->LocalLights : lighting.LocalLightSrv.ptr ? lighting.LocalLightSrv
 		                                                     : frame->ShadowLights->GetSRV()->GPUHandle;
-		srvs[7] = lighting.LocalShadows->GetSRV()->GPUHandle;
-		shadowConstants = lighting.ShadowConstants;
 	}
 	const auto main = remote ? remote->MainAddress : frame->MainCB->GetElementAddress(0);
 	auto* heap = _resources.SRV_UAV_Heap->GetHeap().Get();
@@ -202,7 +197,6 @@ void LindenDraw::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, Na
 		         if (capture)
 		         {
 			         cmd->SetGraphicsRootConstantBufferView(b + 2, main);
-			         cmd->SetGraphicsRootConstantBufferView(b + 3, shadowConstants);
 		         }
 		         for (UINT i = 0; i < srvs.size(); ++i)
 			         if (srvs[i].ptr) cmd->SetGraphicsRootDescriptorTable(t + i, srvs[i]);
