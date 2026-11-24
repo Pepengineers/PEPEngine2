@@ -1397,7 +1397,7 @@ void SceneLocalShadows::Allocate(UINT slot, SceneLocalShadows& staticPass, const
 		{
 			if (!frame.StagedAtlases.count(target.Sizes[c.Index])) return true;
 			const auto& now = frame.Cache[c.Index];
-			return (now.Needed & ~(now.StagedFaces & statics.Cache[c.Index].StagedFaces)) == 0;
+			return (now.Needed & ~(now.StagedValid & statics.Cache[c.Index].StagedValid)) == 0;
 		});
 		if (adoptingStage)
 		{
@@ -1578,15 +1578,20 @@ void SceneLocalShadows::Allocate(UINT slot, SceneLocalShadows& staticPass, const
 	}
 	if (holdingPublished)
 	{
-		for (const auto& c : candidates)
+		// Finish the first pass over all faces even if moving casters keep invalidating staged depth.
+		for (const bool refresh : {false, true})
 		{
-			auto& current = frame.Cache[c.Index];
-			auto& staticDepth = statics.Cache[c.Index];
-			const UINT side = frame.StagedLayout->Sizes[c.Index];
-			if (!frame.StagedAtlases.count(side)) continue;
-			const UINT rendered = current.StagedFaces & staticDepth.StagedFaces;
-			admit(current.Needed & ~rendered, side, current.StageThisFrame);
-			staticDepth.StageThisFrame = current.StageThisFrame;
+			for (const auto& c : candidates)
+			{
+				auto& current = frame.Cache[c.Index];
+				auto& staticDepth = statics.Cache[c.Index];
+				const UINT side = frame.StagedLayout->Sizes[c.Index];
+				if (!frame.StagedAtlases.count(side)) continue;
+				const UINT ready = refresh ? current.StagedValid & staticDepth.StagedValid
+				                           : current.StagedFaces & staticDepth.StagedFaces;
+				admit(current.Needed & ~ready, side, current.StageThisFrame);
+				staticDepth.StageThisFrame = current.StageThisFrame;
+			}
 		}
 	}
 	for (const auto& c : candidates)
