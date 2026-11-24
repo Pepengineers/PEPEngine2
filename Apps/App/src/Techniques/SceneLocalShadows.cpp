@@ -766,6 +766,17 @@ void SceneLocalShadows::GatherMissing(Slot& frame, UINT index, UINT faces)
 	cached.ListsValid |= missing;
 }
 
+void SceneLocalShadows::PackView(Slot& target, const FaceCommands& commands, UINT light, UINT face,
+                                GDX12LocalShadowTile tile)
+{
+	const size_t opaqueCount = commands.Opaque.size(), maskedCount = commands.Masked.size();
+	if (target.Packed.size() + opaqueCount + maskedCount > UINT_MAX / sizeof(GDX12IndirectDrawArgs))
+		throw std::length_error("Local shadow indirect buffer exceeds the buffer size limit");
+	target.Views.push_back({light, face, UINT(target.Packed.size()), UINT(opaqueCount), UINT(maskedCount), tile});
+	target.Packed.insert(target.Packed.end(), commands.Opaque.begin(), commands.Opaque.end());
+	target.Packed.insert(target.Packed.end(), commands.Masked.begin(), commands.Masked.end());
+}
+
 void SceneLocalShadows::Pack(Slot& frame)
 {
 	frame.Views.clear();
@@ -782,20 +793,10 @@ void SceneLocalShadows::Pack(Slot& frame)
 		GatherMissing(frame, lightIndex, cache.ReadyFaces);
 		const bool everyFrame = !_staticOnly && (light.ShadowFlags & ShadowEveryFrame);
 		const UINT dirty = cache.ReadyFaces & (everyFrame ? UINT_MAX : (~cache.MapsValid | cache.LocalFallback));
-		// Exact bootstrap may need faces that are valid only in this frame slot.
-		const UINT update = dirty && cache.Latest && !(cache.ReadyFaces & ~cache.ResidentFaces)
-		    ? cache.ReadyFaces : dirty;
 		for (UINT face = 0; face < LocalShadowFaceCount(light); ++face)
 		{
-			if (!(update & (1u << face))) continue;
-			const auto& commands = cache.Faces[face];
-			const size_t opaqueCount = commands.Opaque.size(), maskedCount = commands.Masked.size();
-			if (frame.Packed.size() + opaqueCount + maskedCount > UINT_MAX / sizeof(GDX12IndirectDrawArgs))
-				throw std::length_error("Local shadow indirect buffer exceeds the buffer size limit");
-			frame.Views.push_back({lightIndex, face, UINT(frame.Packed.size()), UINT(opaqueCount), UINT(maskedCount),
-			                       cache.Tiles[face], bool(dirty & (1u << face))});
-			frame.Packed.insert(frame.Packed.end(), commands.Opaque.begin(), commands.Opaque.end());
-			frame.Packed.insert(frame.Packed.end(), commands.Masked.begin(), commands.Masked.end());
+			if (!(dirty & (1u << face))) continue;
+			PackView(frame, cache.Faces[face], lightIndex, face, cache.Tiles[face]);
 		}
 	}
 }
@@ -861,17 +862,13 @@ void SceneLocalShadows::UpdateLights(Slot& frame)
 		source.ShadowFlags &= ~ShadowEveryFrame;
 		source.ShadowFirstSlice = 0;
 		auto& cached = frame.Cache[i];
-		const auto placement = std::find_if(_placements.begin(), _placements.end(), [&](const auto& entry)
-		{ return entry.first == GetLocalShadowKey(source); });
-		const Id owner = placement == _placements.end() ? 0 : placement->second;
-		const bool latest = owner && std::find(_latestPlacements.begin(), _latestPlacements.end(),
+		const bool latest = std::find(_latestPlacements.begin(), _latestPlacements.end(),
 		                                      GetLocalShadowKey(source)) != _latestPlacements.end();
-		if (cached.Owner != owner || cached.Latest != latest)
+		if (cached.Latest != latest)
 		{
 			cached.MapsValid = cached.LocalFallback = 0;
 			cached.PublicationOrders = {};
 		}
-		cached.Owner = owner;
 		cached.Latest = latest;
 		if (ShouldRenderLocalShadow(source, cached.HasLight ? &cached.Light : nullptr) ||
 		    (source.ShadowFlags & ShadowEnabled) != (cached.Light.ShadowFlags & ShadowEnabled))
@@ -1318,8 +1315,8 @@ void SceneLocalShadows::ResetLayout()
 	}
 }
 
-void SceneLocalShadows::AppendGrassViews(Graph& graph, std::vector<ID3D12Resource*>& bindings, UINT slot, Id atlas,
-                                         const GrassAppender& appendGrass)
+void SceneLocalShadows::AppendGrassViews(Graph& graph, std::vector<ID3D12Resource*>& bindings, UINT slot,
+                                       Id atlas, Id fallback, const Atlas* fallbackDepth, const GrassAppender& appendGrass)
 {
 	const auto& frame = _slots.at(slot);
 	const auto& views = frame.Views;
@@ -1344,9 +1341,10 @@ void SceneLocalShadows::AppendGrassViews(Graph& graph, std::vector<ID3D12Resourc
 		grassTarget.View.Filter = _staticOnly ? GDX12GeometryFilter::Static : GDX12GeometryFilter::Dynamic;
 		grassTarget.View.FrameSlot = slot;
 		grassTarget.View.DepthFormat = DXGI_FORMAT_D32_FLOAT;
-		grassTarget.Depth = atlas;
+		const auto* depth = view.DrawIntoFinal ? fallbackDepth : frame.Depth.get();
+		grassTarget.Depth = view.DrawIntoFinal ? fallback : atlas;
 		grassTarget.Camera = cameraResource;
-		grassTarget.Dsv = frame.Depth->Dsvs[view.Tile.Page]->CPUHandle;
+		grassTarget.Dsv = depth->Dsvs[view.Tile.Page]->CPUHandle;
 		grassTarget.X = view.Tile.X;
 		grassTarget.Y = view.Tile.Y;
 		grassTarget.Width = grassTarget.Height = view.Tile.Side;
@@ -1357,14 +1355,15 @@ void SceneLocalShadows::AppendGrassViews(Graph& graph, std::vector<ID3D12Resourc
 void SceneLocalShadows::DrawShadowViews(ID3D12GraphicsCommandList* cmd, const Slot& frame,
                                         ID3D12CommandSignature* signature, ID3D12Resource* target,
                                         ID3D12PipelineState* opaquePipeline, ID3D12PipelineState* maskedPipeline,
-                                        bool clearDepth)
+                                        bool clearDepth, const Atlas* fallbackDepth)
 {
 	for (const auto& view : frame.Views)
 	{
 		if (!clearDepth && !view.OpaqueCount && !view.MaskedCount)
 			continue;
 		const auto& tile = view.Tile;
-		const auto dsv = frame.Depth->Dsvs[tile.Page]->CPUHandle;
+		const auto* depth = view.DrawIntoFinal ? fallbackDepth : frame.Depth.get();
+		const auto dsv = depth->Dsvs[tile.Page]->CPUHandle;
 		const D3D12_VIEWPORT viewport{float(tile.X), float(tile.Y), float(tile.Side), float(tile.Side), 0, 1};
 		const D3D12_RECT rect{LONG(tile.X), LONG(tile.Y), LONG(tile.X + tile.Side), LONG(tile.Y + tile.Side)};
 		cmd->RSSetViewports(1, &viewport);
@@ -1394,7 +1393,7 @@ void SceneLocalShadows::Append(
     const std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 4>& scene, GDX12GeometryBuffer::RecordingBinding geometry,
     GDX12UploadBuffer<GDX12LocalLightConstants>& lights,
     const std::function<void(const GeometryTarget&, Graph&, std::vector<ID3D12Resource*>&)>& appendGrass,
-    const std::array<Id, 5>* inputs, const std::vector<Access>& materialTextures)
+    const std::array<Id, 5>* inputs, const std::vector<Access>& materialTextures, Atlas* fallbackDepth)
 {
 	auto& frame = _slots.at(slot);
 	auto& work = frame.Work;
@@ -1405,12 +1404,16 @@ void SceneLocalShadows::Append(
 	}
 	const auto resource = [&](ID3D12Resource* value, const char* name)
 	{ return NativeWork::ResourceFor(graph, bindings, value, name); };
-	const Id atlas = resource(frame.Depth->Texture.GetResource()->D3DResource.Get(), "local shadow atlas");
+	const bool ownViews = std::any_of(frame.Views.begin(), frame.Views.end(), [](const auto& view) { return !view.DrawIntoFinal; });
+	const bool fallbackViews = std::any_of(frame.Views.begin(), frame.Views.end(), [](const auto& view) { return view.DrawIntoFinal; });
+	const Id atlas = ownViews ? resource(frame.Depth->Texture.GetResource()->D3DResource.Get(), "local shadow atlas") : Invalid;
+	const Id fallback = fallbackViews ?
+	    resource(fallbackDepth->Texture.GetResource()->D3DResource.Get(), "local shadow atlas") : Invalid;
 	for (const auto& view : frame.Views) MarkDepthWritten(slot, view.Light, view.Face);
 	if (!_staticOnly && frame.Packed.empty())
 	{
 		if (appendGrass)
-			AppendGrassViews(graph, bindings, slot, atlas, appendGrass);
+			AppendGrassViews(graph, bindings, slot, atlas, fallback, fallbackDepth, appendGrass);
 		return;
 	}
 	const Id commands = resource(frame.Commands->GetResource().D3DResource.Get(), "CPU-culled local shadow commands");
@@ -1438,7 +1441,8 @@ void SceneLocalShadows::Append(
 	    {commands, Mode::Read, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT},
 	    {lightId, Mode::Read, graph.Resources.at(lightId).Memory == Heap::Upload
 	                              ? State(D3D12_RESOURCE_STATE_GENERIC_READ) : read}};
-	accesses.push_back({atlas, Mode::Write, D3D12_RESOURCE_STATE_DEPTH_WRITE});
+	for (const Id dest : {atlas, fallback})
+		if (dest != Invalid) accesses.push_back({dest, Mode::Write, D3D12_RESOURCE_STATE_DEPTH_WRITE});
 	accesses.insert(accesses.end(), materialTextures.begin(), materialTextures.end());
 	auto* heap = _resources.SRV_UAV_Heap->GetHeap().Get();
 	auto* root = _root.get();
@@ -1456,11 +1460,11 @@ void SceneLocalShadows::Append(
 		         BindShadowGeometry(cmd, root, scene, geometry);
 		         cmd->SetGraphicsRootDescriptorTable(root->GetTRootParamIndex(3), lightSrv);
 		         cmd->SetGraphicsRootDescriptorTable(root->GetTRootParamIndex(4), textures);
-		         DrawShadowViews(cmd, frame, signature, target, opaquePipeline, maskedPipeline, clearDepth);
+	         DrawShadowViews(cmd, frame, signature, target, opaquePipeline, maskedPipeline, clearDepth, fallbackDepth);
 	         });
 	if (appendGrass)
 	{
-		AppendGrassViews(graph, bindings, slot, atlas, appendGrass);
+		AppendGrassViews(graph, bindings, slot, atlas, fallback, fallbackDepth, appendGrass);
 	}
 }
 } // namespace BistroRender

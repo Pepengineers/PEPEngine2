@@ -55,7 +55,6 @@ class SceneLighting
 	{
 		_reflections->AppendPublishedOwners(owners);
 	}
-	void AppendBenchmarkShadowOwners(std::vector<std::pair<UINT, Id>>& owners) const;
 	void DrainLightGrid();
 	void AppendGpuLightGrid(Graph&, std::vector<ID3D12Resource*>&);
 	void SubmitLightGrid(const Schedule&, std::vector<PacketWait>&);
@@ -142,6 +141,8 @@ class SceneLighting
 
 	GDX12AmbientOcclusionPass::Pipelines _aoPipelines;
 	std::vector<Frame> _frames;
+	std::vector<Id> _localPageOwners, _effectiveLocalPageOwners;
+	std::vector<UINT> _localStaticSlices;
 	std::map<Id, std::shared_ptr<ShadowVertexBaseline>> _shadowVertexBaselines;
 	std::map<UINT, std::array<std::shared_ptr<ShadowPublication>, 6>> _latestLocalShadows;
 	std::array<std::shared_ptr<ShadowPublication>, 4> _latestSunShadows;

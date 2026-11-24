@@ -4,10 +4,24 @@
 #include "Common/ConsoleVariables.h"
 #include "Engine.RendererDX12/GDX12LocalLights.h"
 #include "Engine.Core/Logging/Logger.h"
+#include <memory>
 #include <mutex>
 
 namespace
 {
+    AutoConsoleVariable<int>& LocalPageAdapter(UINT page)
+    {
+        static std::mutex mutex;
+        static std::array<std::unique_ptr<AutoConsoleVariable<int>>, MaxLocalShadowAtlasCount> adapters;
+        std::scoped_lock lock(mutex);
+        auto& variable = adapters.at(page);
+        if (!variable)
+            variable = std::make_unique<AutoConsoleVariable<int>>(LocalShadowPageAdapterName(page), -1,
+                L"Local shadow atlas page " + std::to_wstring(page) + L" owner. -1 uses the primary GPU.",
+                EConsoleVariableFlags::Default, [](int index) { return index >= -1; });
+        return *variable;
+    }
+
     AutoConsoleVariable<UINT> SunShadowSize(L"Render.Shadows.Sun.Resolution", SunShadowCascadeResolution,
         L"Texels per sun cascade: 0 Off, 512, 1024, 2048 or 4096. Applies at the frame boundary.",
         EConsoleVariableFlags::Default, [](UINT value) { return value == 0 || IsSunShadowResolution(value); });
@@ -37,6 +51,15 @@ namespace
     AutoConsoleVariable<UINT> TextureAnisotropy(L"Render.Textures.Anisotropy", 8u,
         L"Anisotropic material filtering: 2, 4, 8 or 16. Restart required for static samplers.",
         EConsoleVariableFlags::ReadOnly, [](UINT value) { return value == 2 || value == 4 || value == 8 || value == 16; });
+}
+
+void RegisterLocalShadowPageAdapter(UINT page) { LocalPageAdapter(page); }
+
+void ReadLocalShadowPageAdapters(std::vector<int>& adapters, UINT pages)
+{
+    adapters.resize(pages);
+    for (UINT page = 0; page < pages; ++page)
+        adapters[page] = LocalPageAdapter(page).GetValue();
 }
 
 GDX12ShadowQuality ReadShadowQuality()

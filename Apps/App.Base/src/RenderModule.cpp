@@ -949,6 +949,7 @@ void RenderModule::OnUpdate()
 {
     if (!_gpu) throw std::logic_error("Renderer device domain is quarantined");
     const auto shadowQuality = ReadShadowQuality();
+    ReadLocalShadowPageAdapters(_primaryResources.LocalShadowPageAdapters, shadowQuality.LocalAtlasCount);
     if (!(shadowQuality == _primaryResources.ShadowQuality))
     {
         DrainFrameWork();

@@ -110,6 +110,7 @@ public:
     BoundingBox ReflectionSceneBounds = { XMFLOAT3(0, 0, 0), XMFLOAT3(10000, 10000, 10000) };
     GDX12ShadowConstants ShadowSettings;
     GDX12ShadowQuality ShadowQuality;
+    std::vector<int> LocalShadowPageAdapters;
     std::vector<GDX12LocalLightConstants> LocalLights;
     std::vector<GDX12LocalShadowPlacement> LocalShadowPlacements;
     // When present, these casters plus StaticMeshShadowCasters form the current shadow snapshot.

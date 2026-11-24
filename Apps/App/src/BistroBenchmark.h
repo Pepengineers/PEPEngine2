@@ -804,7 +804,6 @@ private:
         _placementWindow = nullptr;
         _placementBorderless = false;
         _placementPhysics = {};
-        _shadowFixtures.clear();
         _placementSearch = BistroPlacement::Search(_placementProfile);
         _trial = {};
         _placementWaitsOpen = false;
@@ -839,10 +838,9 @@ private:
             const Size screen{unsigned(_placementMonitor.right - _placementMonitor.left),
                 unsigned(_placementMonitor.bottom - _placementMonitor.top)};
             std::set<std::wstring> shadowNames;
-            world.GetECS().ForEach<NameComponent, LightComponent>([&](Entity entity, const NameComponent& name, const LightComponent& light)
+            world.GetECS().ForEach<NameComponent, LightComponent>([&](Entity, const NameComponent& name, const LightComponent& light)
             {
                 if (!light.Enabled || !light.CastShadows || light.Type == LightType::Directional) return;
-                _shadowFixtures.emplace(static_cast<UINT>(entity), name.value);
                 const auto decoded = std::filesystem::u8path(name.value).wstring();
                 shadowNames.insert(decoded);
             });
@@ -1091,14 +1089,6 @@ private:
         }
         for (const auto& owner : pipeline.PanelAdapters())
             _trialOwners.insert(owner);
-        std::vector<std::pair<UINT, BistroRender::Id>> shadows;
-        pipeline.AppendBenchmarkShadowOwners(shadows);
-        for (const auto& [entity, owner] : shadows)
-            if (const auto found = _shadowFixtures.find(entity); found != _shadowFixtures.end())
-            {
-                const auto& label = submissions.AdapterLabel(owner);
-                _trialOwners.emplace(found->second, label);
-            }
     }
 
     void RecordPlacementFrame(RenderModule& render, BistroRenderPipeline& pipeline, Clock::time_point now)
@@ -2425,7 +2415,6 @@ private:
     std::function<void()> _replayScene;
     size_t _startupBodies = 0;
     uint64_t _startupLayout = 14695981039346656037ull;
-    std::map<UINT, std::string> _shadowFixtures;
     BistroPlacement::Search _placementSearch;
     BistroPlacement::Trial _trial;
     BistroPlacement::Result _trialResult;

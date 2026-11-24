@@ -47,23 +47,28 @@ local). `Render.Shadows.Sun.NearCascades` gives the number of active cascades ke
 GPU0, starting at the camera. Use `0` for an entirely remote CSM or the active
 cascade count for an entirely local CSM.
 
-Each Bistro fixture has `Render.Shadows.Local.<fixture name>.Adapter` and
-`Render.Shadows.Local.<fixture name>.CrossSync` settings. All six faces of a point
-light use the same settings. The Sun uses `Render.Shadows.Sun.CrossSync`.
+Set the owner for each local atlas page in F1 under **Render → Shadows → Local**,
+or use `Render.Shadows.Local.Page0.Adapter`, `Page1.Adapter` and so on in
+`Configs/Startup.ini`. Numbering starts at zero. Pages without an explicit
+assignment and pages assigned to unavailable adapters use the primary GPU.
+Older fixture `.Adapter` settings are ignored on startup. The fixture's
+`Render.Shadows.Local.<fixture name>.CrossSync` still applies to all its faces,
+even when the packer places those faces on pages with different owners.
+The Sun uses `Render.Shadows.Sun.CrossSync`.
 `1` (Exact) waits on the owner GPU export for the current frame. `3` (Latest)
 uses the last compatible depth already in the primary atlas until a newer
 export completes. The first publication and changes to the shadow projection,
 identity or atlas layout use Exact so that the sampled depth matches its metadata.
 
 For primary hardware index `0` and secondary index `1`, this configuration
-places the first two sun cascades on GPU0, the rest on GPU1, and sends one point
-light to GPU1 independently:
+places the first two sun cascades on GPU0 and the remaining cascades and local
+atlas page 0 on GPU1. The named light uses Latest for any of its remote faces.
 
 ```ini
 Render.Shadows.Sun.Adapter = 1
 Render.Shadows.Sun.NearCascades = 2
 Render.Shadows.Sun.CrossSync = 1
-Render.Shadows.Local.Paris_Building_01_paris_building_01_bottom_44.Adapter = 1
+Render.Shadows.Local.Page0.Adapter = 1
 Render.Shadows.Local.Paris_Building_01_paris_building_01_bottom_44.CrossSync = 3
 ```
 

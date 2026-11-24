@@ -74,6 +74,25 @@ class ShadowDepthTransfer
 		                });
 	}
 
+	void ImportPageRegions(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work,
+	                       ID3D12Resource* staging, std::vector<D3D12_BOX> regions) const
+	{
+		auto* shared = _buffer.Resources[0].Get();
+		const auto source = NativeWork::ResourceFor(graph, bindings, shared, "cross-adapter shadow depth");
+		const auto destination = NativeWork::ResourceFor(graph, bindings, staging, "shadow page staging");
+		const auto footprint = _footprints.front();
+		work.Add(graph, "import selected shadow page regions",
+		    {{source, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE},
+		     {destination, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
+		    [shared, staging, footprint, regions = std::move(regions)](auto* cmd)
+		    {
+			    const CD3DX12_TEXTURE_COPY_LOCATION from(shared, footprint);
+			    const CD3DX12_TEXTURE_COPY_LOCATION to(staging, 0);
+			    for (const auto& region : regions)
+				    cmd->CopyTextureRegion(&to, region.left, region.top, 0, &from, &region);
+		    });
+	}
+
   private:
 	Id _owner;
 	UINT _resolution;

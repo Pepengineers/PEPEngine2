@@ -177,19 +177,20 @@ public:
         else
             csv.Config("Render.ReflectionProbes.First.Adapter.Reason", "reflection probe count is zero");
         _firstLocalShadow = _placements.size();
-        for (const auto* variable : console.GetConsoleVariables(L"Render.Shadows.Local."))
+        if (!shadowFixtures.empty())
         {
-            const std::wstring name(variable->GetName());
-            constexpr std::wstring_view prefix = L"Render.Shadows.Local.", suffix = L".Adapter";
-            if (name.size() <= prefix.size() + suffix.size() || name.compare(name.size() - suffix.size(), suffix.size(), suffix) != 0) continue;
-            const auto fixture = name.substr(prefix.size(), name.size() - prefix.size() - suffix.size());
-            if (!shadowFixtures.count(fixture))
+            const UINT pages = console.FindConsoleVariable(L"Render.Shadows.Local.AtlasCount").GetUInt();
+            for (UINT page = 0; page < pages; ++page)
             {
-                csv.Config(std::filesystem::path(name).u8string() + ".Reason", "no enabled shadow-casting light for this fixture");
-                continue;
+                RegisterLocalShadowPageAdapter(page);
+                _placements.push_back({LocalShadowPageAdapterName(page), "Local shadow page " + std::to_string(page)});
             }
-            _placements.push_back({name, std::filesystem::path(fixture).u8string()});
-            _localShadowSync.emplace_back(L"Render.Shadows.Local." + fixture + L".CrossSync", "1");
+            for (const auto& fixture : shadowFixtures)
+            {
+                const auto name = L"Render.Shadows.Local." + fixture + L".CrossSync";
+                IConsoleVariable* sync = nullptr;
+                if (console.TryFindConsoleVariable(name, sync)) _localShadowSync.emplace_back(name, "1");
+            }
         }
         for (unsigned height : {480u, 720u, 900u, 1080u, 1440u, 2160u, screen.second})
             if (height <= screen.second)
@@ -209,6 +210,7 @@ public:
             {
                 const auto name = variable.GetEnumValueName(v);
                 if (name == "Off") levels[Off] = v;
+                if (name == "Low") levels[Low] = v;
                 if (name == "Mid" || name == "Medium") levels[Medium] = v;
                 if (name == "High") levels[High] = v;
                 if (name == "Epic" || name == "Ultra") levels[Epic] = v;
@@ -256,7 +258,7 @@ public:
         {
             if (Techniques[i].Enable)
                 patch.emplace_back(Techniques[i].Enable, config.Levels[i] == Off ? "false" : "true");
-            if (Techniques[i].Quality)
+            if (Techniques[i].Quality && QualityValue(i, config.Levels[i]) >= 0)
                 patch.emplace_back(Techniques[i].Quality, std::to_string(QualityValue(i, config.Levels[i])));
         }
         for (size_t i = 0; i < _placements.size(); ++i)
@@ -404,7 +406,8 @@ public:
             if (!t.Quality) continue;
             const int admitted = console.FindConsoleVariable(t.Quality).GetInt();
             auto& level = next.Levels[i];
-            while (level > Off && QualityValue(i, level) > admitted) level = Level(int(level) - 1);
+            while (level > Off && (QualityValue(i, level) < 0 || QualityValue(i, level) > admitted))
+                level = Level(int(level) - 1);
         }
         for (size_t i = 0; i < next.Owners.size(); ++i)
             next.Owners[i] = console.FindConsoleVariable(_placements[i].Variable).GetInt();
@@ -522,7 +525,7 @@ private:
         for (size_t i = 0; i < config.Levels.size(); ++i)
         {
             auto& level = config.Levels[i];
-            if (level != Off && _values[i][level] == _values[i][High]) level = High;
+            if (level != Off && (_values[i][level] < 0 || _values[i][level] == _values[i][High])) level = High;
         }
         return config;
     }

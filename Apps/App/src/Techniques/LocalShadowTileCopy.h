@@ -113,7 +113,12 @@ public:
 	struct Bytes
 	{
 		UINT64 Primary = 0, Owner = 0;
-		Bytes& operator+=(Bytes other) { Primary += other.Primary; Owner += other.Owner; return *this; }
+		Bytes& operator+=(Bytes other)
+		{
+			Primary += (std::min)(other.Primary, UINT64_MAX - Primary);
+			Owner += (std::min)(other.Owner, UINT64_MAX - Owner);
+			return *this;
+		}
 	};
 
 	static Bytes Cost(GDX12Device& primary, GDX12Device& owner, UINT side, UINT count, bool fromPrimary)
@@ -186,5 +191,72 @@ private:
 	ShadowMemory::Charge _packMemory, _receiveMemory;
 	GDX12ResourceHandle _packed, _received;
 	std::unique_ptr<GDX12DescriptorHeap> _sendHeap, _receiveHeap;
+};
+
+// A full depth layer needs only a shared buffer when the receiver can replace its page.
+class LocalShadowPageTransfer
+{
+public:
+	static LocalShadowTileTransfer::Bytes Cost(GDX12Device& primary, GDX12Device& owner, UINT side, bool allowPartial)
+	{
+		const auto shared = ShadowMemory::TransferBytes(primary, owner, side, 1);
+		LocalShadowTileTransfer::Bytes bytes{shared, shared};
+		if (allowPartial) bytes += {ShadowMemory::Size(primary, StagingShape(side)), 0};
+		return bytes;
+	}
+
+	LocalShadowPageTransfer(const QueueSubmission& submit, Id owner, UINT side, bool allowPartial)
+	    : _transfer(submit, owner, side, 1)
+	{
+		if (!allowPartial) return;
+		auto& device = submit.Device(0);
+		const auto shape = StagingShape(side);
+		_staging = device.CreateResource(D3D12_HEAP_TYPE_DEFAULT, shape, D3D12_RESOURCE_STATE_COMMON);
+		_stagingMemory.Set(device, ShadowMemory::Size(device, shape));
+		_stagingHeap = std::make_unique<GDX12DescriptorHeap>(&device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
+		    1, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
+		const auto srv = ShadowMemory::View(1);
+		device.GetDevice()->CreateShaderResourceView(_staging.Get(), &srv, _stagingHeap->GetCPUHandle(0));
+	}
+
+	Id Export(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work,
+	          ID3D12Resource* ownerAtlas, UINT ownerSlice) const
+	{
+		return _transfer.Append(graph, bindings, work, ownerAtlas, {ownerSlice}, true);
+	}
+
+	Id Import(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work,
+	          ID3D12Resource* targetAtlas, UINT targetSlice) const
+	{
+		return _transfer.Append(graph, bindings, work, targetAtlas, {targetSlice}, false);
+	}
+
+	Id Publish(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work, const LocalShadowTileCopy& copy,
+	           ID3D12Resource* targetAtlas, std::vector<LocalShadowTileCopy::Region> regions) const
+	{
+		if (!_staging) throw std::logic_error("Local shadow page has no staging texture");
+		std::vector<D3D12_BOX> boxes;
+		boxes.reserve(regions.size());
+		for (auto& region : regions)
+		{
+			auto& tile = region.From;
+			boxes.push_back({tile.X, tile.Y, 0, tile.X + tile.Side, tile.Y + tile.Side, 1});
+			tile.Page = 0;
+		}
+		_transfer.ImportPageRegions(graph, bindings, work, _staging.Get(), std::move(boxes));
+		return copy.Draw(graph, bindings, work, _staging.Get(), targetAtlas, _stagingHeap->GetHeap().Get(),
+		    _stagingHeap->GetGPUHandle(0), std::move(regions), "publish selected local shadow page tiles");
+	}
+
+private:
+	static auto StagingShape(UINT side)
+	{
+		return ShadowMemory::Depth(side, 1, D3D12_RESOURCE_FLAG_NONE);
+	}
+
+	ShadowDepthTransfer _transfer;
+	ShadowMemory::Charge _stagingMemory;
+	GDX12ResourceHandle _staging;
+	std::unique_ptr<GDX12DescriptorHeap> _stagingHeap;
 };
 }

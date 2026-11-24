@@ -19,7 +19,6 @@ struct LightComponent : ComponentTag
     bool Enabled = true;
     bool CastShadows = true;
     ShadowUpdateMode ShadowUpdate = ShadowUpdateMode::Cached;
-    int ShadowAdapter = -1; // DXGI hardware index; -1 uses the primary adapter.
     ShadowCrossSync CrossSync = ShadowCrossSync::Exact;
     uint32_t ShadowRevision = 1;
 

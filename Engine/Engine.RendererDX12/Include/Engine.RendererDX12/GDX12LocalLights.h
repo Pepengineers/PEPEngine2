@@ -4,6 +4,9 @@
 #include <cmath>
 #include <vector>
 #include <array>
+#include <optional>
+#include <string>
+#include <string_view>
 
 inline constexpr UINT LocalShadowResolution = 256;
 inline constexpr UINT LocalShadowFaceMask = 4u;
@@ -20,6 +23,33 @@ inline constexpr GDX12LocalShadowProfile LocalShadowProfiles[] = {
 };
 inline constexpr UINT LocalShadowAtlasCount = 4;
 inline constexpr UINT MaxLocalShadowAtlasCount = D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION;
+
+inline std::wstring LocalShadowPageAdapterName(UINT page)
+{
+    return L"Render.Shadows.Local.Page" + std::to_wstring(page) + L".Adapter";
+}
+
+// The console registry treats names as case-insensitive.
+inline std::optional<UINT> LocalShadowPageAdapterIndex(std::wstring_view name)
+{
+    constexpr std::wstring_view prefix = L"Render.Shadows.Local.Page", suffix = L".Adapter";
+    if (name.size() <= prefix.size() + suffix.size() ||
+        _wcsnicmp(name.data(), prefix.data(), prefix.size()) != 0 ||
+        _wcsnicmp(name.data() + name.size() - suffix.size(), suffix.data(), suffix.size()) != 0) return {};
+    const auto index = name.substr(prefix.size(), name.size() - prefix.size() - suffix.size());
+    if (index.size() > 1 && index.front() == L'0') return {};
+    UINT page = 0;
+    for (wchar_t digit : index)
+    {
+        if (digit < L'0' || digit > L'9') return {};
+        page = page * 10 + (digit - L'0');
+        if (page >= MaxLocalShadowAtlasCount) return {};
+    }
+    return page;
+}
+
+void RegisterLocalShadowPageAdapter(UINT page);
+void ReadLocalShadowPageAdapters(std::vector<int>& adapters, UINT pages);
 
 constexpr GDX12LocalShadowProfile GetLocalShadowProfile(GDX12LocalShadowLevel level)
 {
@@ -98,7 +128,6 @@ enum class ShadowCrossSync : std::uint8_t { Exact = 1, Latest = 3 };
 struct GDX12LocalShadowPlacement
 {
     GDX12LocalShadowKey Key;
-    int Adapter = -1;
     ShadowCrossSync CrossSync = ShadowCrossSync::Exact;
 };
 

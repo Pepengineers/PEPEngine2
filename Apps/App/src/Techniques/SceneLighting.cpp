@@ -42,6 +42,8 @@ bool CompatibleLocalShadow(const GDX12LocalLightConstants& cached, const GDX12Lo
 	       std::memcmp(cached.ShadowViewProj, current.ShadowViewProj, sizeof(current.ShadowViewProj)) == 0;
 }
 
+constexpr UINT WholeShadowPageCoveragePercent = 75;
+
 constexpr UINT LightGridThreads = 64;
 constexpr UINT LightingTileSize = 8;
 constexpr UINT MaxDispatchGroups = D3D12_CS_DISPATCH_MAX_THREAD_GROUPS_PER_DIMENSION;
@@ -109,14 +111,16 @@ struct SceneLighting::ShadowPublication
 		GDX12LocalLightConstants Metadata;
 		uint64_t Generation = 0;
 		std::vector<std::pair<UINT, UINT>> Faces;
+		std::array<uint64_t, 6> PageOrders{};
 	};
 	Id Owner = 0;
 	UINT OriginSlot = 0;
 	uint64_t Order = 0, LocalPlacement = 0, SunPlacement = 0, SceneRevision = 0, GrassRevision = 0;
-	UINT LocalResolution = 0, SunResolution = 0, SunMask = 0, SunRevision = 0;
+	UINT LocalPage = UINT_MAX, SunResolution = 0, SunMask = 0, SunRevision = 0;
 	GDX12ShadowConstants SunSettings{};
 	std::map<UINT, LocalLight> Lights;
 	std::shared_ptr<LocalShadowTileTransfer> Local;
+	std::shared_ptr<LocalShadowPageTransfer> Page;
 	std::shared_ptr<SunShadowTileTransfer> Sun;
 	bool LocalStaged = false, SunStaged = false;
 };
@@ -157,6 +161,7 @@ struct SceneLighting::RemoteShadows
 			    descriptors, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
 			HeapMemory.Set(device, HeapBytes(device, descriptors));
 			Local = std::make_unique<SceneLocalShadows>(Resources, common, false, true);
+			Static = std::make_unique<SceneLocalShadows>(Resources, common, true, true);
 		}
 		else
 			Resources.Initialize(&device);
@@ -171,20 +176,22 @@ struct SceneLighting::RemoteShadows
 	GDX12DeviceResources Resources;
 	SceneGeometry::RemoteProbeVegetation Vegetation;
 	std::unique_ptr<SceneLocalShadows> Local;
+	std::unique_ptr<SceneLocalShadows> Static;
 	std::unique_ptr<SceneSunShadows> Sun;
 	std::shared_ptr<SunShadowTileTransfer> SunTransfer;
 	std::array<GDX12Descriptor, 4> SceneViews;
-	std::unique_ptr<SceneLocalShadows::Atlas> StaticDepth;
 	std::unique_ptr<LocalShadowTileCopy> TileCopy;
 	std::map<UINT, uint64_t> StaticVersions, PendingStaticVersions;
+	std::map<std::pair<UINT, UINT>, uint64_t> FinalOrders;
 	std::vector<std::shared_ptr<LocalShadowTileTransfer>> Transfers;
+	std::vector<std::shared_ptr<LocalShadowPageTransfer>> PageTransfers;
 	std::vector<std::shared_ptr<ShadowPublication>> Publications;
 	Graph Plan;
 	NativeWork Work;
 	std::vector<ID3D12Resource*> Bindings;
 	Id Export = Invalid, Import = Invalid, Input = Invalid;
-	Id SeedVertices = Invalid;
-	CompletionToken Produced, Imported, Consumer;
+	Id SeedVertices = Invalid, ExactExport = Invalid;
+	CompletionToken Produced, ExactProduced, Imported, Consumer;
 	std::shared_ptr<GDX12ResourceHandle> SkinInput;
 	std::shared_ptr<ShadowVertexBaseline> VertexBase;
 	ID3D12Resource* VertexSource = nullptr;
@@ -336,7 +343,7 @@ SceneLighting::~SceneLighting()
 }
 void SceneLighting::UpdateLocalShadowProfile(Executor& primary)
 {
-	const auto& submit = *primary.Submissions();
+	auto& submit = *primary.Submissions();
 	const auto requested = GetLocalShadowProfile(_resources.ShadowQuality.LocalResolution);
 	const UINT pages = _resources.ShadowQuality.LocalAtlasCount;
 	_localShadowTransferLimited = false;
@@ -344,31 +351,36 @@ void SceneLighting::UpdateLocalShadowProfile(Executor& primary)
 
 	struct Demand
 	{
-		UINT ExactFaces = 0, LatestFaces = 0;
+		UINT Pages = 0;
 	};
 	std::map<Id, Demand> demand;
+	std::vector<Id> owners(pages);
+	for (UINT page = 0; requested.Face && page < pages; ++page)
+	{
+		const auto& adapters = _resources.LocalShadowPageAdapters;
+		if (page < adapters.size()) owners[page] = submit.SelectAdapter(adapters[page]);
+		if (owners[page]) ++demand[owners[page]].Pages;
+	}
 	const UINT slots = UINT(_frames.size());
+	UINT sceneFaces = 0;
+	bool hasLatest = false;
 	if (requested.Face)
 	{
 		for (const auto& light : _resources.LocalLights)
 		{
 			if (!(light.ShadowFlags & ShadowEnabled)) continue;
 			const UINT faces = LocalShadowFaceCount(light);
+			sceneFaces += faces;
 			const auto key = GetLocalShadowKey(light);
 			const auto placement = std::find_if(_resources.LocalShadowPlacements.begin(), _resources.LocalShadowPlacements.end(),
 			    [&](const auto& item) { return item.Key == key; });
 			if (placement == _resources.LocalShadowPlacements.end()) continue;
-			const Id owner = primary.Submissions()->SelectAdapter(placement->Adapter);
-			if (owner)
-			{
-				auto& lane = demand[owner];
-				lane.ExactFaces += faces; // Latest also needs an Exact bootstrap for a new layout.
-				if (placement->CrossSync == ShadowCrossSync::Latest) lane.LatestFaces += faces;
-			}
+			hasLatest |= placement->CrossSync == ShadowCrossSync::Latest;
 		}
 	}
 
 	auto& gpu = submit.Device(0);
+	const UINT primaryPages = UINT(std::count(owners.begin(), owners.end(), Id(0)));
 	const auto fits = [&](const GDX12LocalShadowProfile& profile)
 	{
 		const auto shape = ShadowMemory::Depth(profile.Page, pages);
@@ -378,7 +390,10 @@ void SceneLighting::UpdateLocalShadowProfile(Executor& primary)
 		{
 			return allocation != UINT64_MAX && (!copies || allocation <= budget / copies);
 		};
-		if (!fullDepthFits(depth, 2 * slots, limit(gpu)))
+		const UINT64 staticDepth = primaryPages ?
+		    ShadowMemory::Size(gpu, ShadowMemory::Depth(profile.Page, primaryPages)) : 0;
+		if (!fullDepthFits(depth, slots, limit(gpu)) ||
+		    !fullDepthFits(staticDepth, slots, limit(gpu) - depth * slots))
 		{
 			_localShadowLimit = "VRAM budget on " + submit.AdapterLabel(0);
 			return false;
@@ -388,20 +403,19 @@ void SceneLighting::UpdateLocalShadowProfile(Executor& primary)
 		{
 			bytes = amount > (UINT64_MAX - bytes) / copies ? UINT64_MAX : bytes + amount * copies;
 		};
-		UINT64 gpuBytes = depth * 2 * slots;
+		UINT64 gpuBytes = (depth + staticDepth) * slots;
 		// Reserve a full burst at the ceiling, bounded by atlas space and assigned lights.
 		const UINT maxFaces = pages * (profile.Page / profile.Face) * (profile.Page / profile.Face);
 		for (const auto& [owner, needs] : demand)
 		{
 			auto& remote = submit.Device(owner);
-			const UINT depthCopies = 2 * slots * ((needs.ExactFaces != 0) + (needs.LatestFaces != 0));
-			const UINT64 remoteDepth = ShadowMemory::Size(remote, shape);
-			if (!fullDepthFits(remoteDepth, depthCopies, limit(remote)))
+			const UINT64 remoteDepth = needs.Pages ? ShadowMemory::Size(remote, ShadowMemory::Depth(profile.Page, needs.Pages)) : 0;
+			if (!fullDepthFits(remoteDepth, 2 * slots, limit(remote)))
 			{
 				_localShadowLimit = "VRAM budget on " + submit.AdapterLabel(owner);
 				return false;
 			}
-			UINT64 remoteBytes = remoteDepth * depthCopies;
+			UINT64 remoteBytes = remoteDepth * 2 * slots;
 			const auto copies = [&](UINT faces, UINT simultaneous, bool fromPrimary)
 			{
 				for (UINT remaining = (std::min)(faces, maxFaces); remaining;)
@@ -413,13 +427,8 @@ void SceneLighting::UpdateLocalShadowProfile(Executor& primary)
 					remaining -= count;
 				}
 			};
-			for (const UINT faces : {needs.ExactFaces, needs.LatestFaces})
-				if (faces)
-				{
-					copies(faces, slots, true);
-					copies(faces, slots, false);
-				}
-			if (needs.LatestFaces) copies(needs.LatestFaces, slots, false); // Readers can retain older publications.
+			if (needs.Pages)
+				copies((std::min)(sceneFaces, maxFaces / pages * needs.Pages), slots * (hasLatest ? 2u : 1u), false);
 			if (remoteBytes > limit(remote))
 			{
 				_localShadowLimit = "shadow transfers and VRAM budget on " + submit.AdapterLabel(owner);
@@ -445,9 +454,10 @@ void SceneLighting::UpdateLocalShadowProfile(Executor& primary)
 		}
 	}
 	const UINT activePages = selected.Face ? pages : 0;
+	owners.resize(activePages);
 	_localShadowBudgetOwners = {0};
 	for (const auto& [owner, needs] : demand) _localShadowBudgetOwners.push_back(owner);
-	if (selected.Face == _localShadowProfile.Face && activePages == _localShadowPages) return;
+	if (selected.Face == _localShadowProfile.Face && owners == _localPageOwners) return;
 
 	// Atlas descriptors and every old tile user retire before the replacement is allocated.
 	if (_localShadowPages)
@@ -456,9 +466,15 @@ void SceneLighting::UpdateLocalShadowProfile(Executor& primary)
 		RetireLocalShadows();
 	}
 	_localShadows->PrepareAtlases(selected.Page, activePages);
-	_staticShadows->PrepareAtlases(selected.Page, activePages);
+	_staticShadows->PrepareAtlases(selected.Page, activePages ? primaryPages : 0);
 	_localShadowProfile = selected;
 	_localShadowPages = activePages;
+	_localPageOwners = std::move(owners);
+	_localStaticSlices.assign(activePages, UINT_MAX);
+	UINT slice = 0;
+	for (UINT page = 0; page < activePages; ++page)
+		if (!_localPageOwners[page]) _localStaticSlices[page] = slice++;
+	++_localPlacementEpoch;
 }
 
 std::string SceneLighting::LocalShadowDistribution() const
@@ -517,6 +533,9 @@ void SceneLighting::RetireLocalShadows()
 	_localShadows->ResetLayout();
 	_staticShadows->ResetLayout();
 	_localShadowPages = 0;
+	_localPageOwners.clear();
+	_effectiveLocalPageOwners.clear();
+	_localStaticSlices.clear();
 	_localShadowProfile = LocalShadowProfiles[0];
 }
 
@@ -552,21 +571,11 @@ void SceneLighting::Freeze(SceneGeometry& geometry, UINT slot, const std::shared
 	staticVegetation.erase(std::remove_if(staticVegetation.begin(), staticVegetation.end(),
 	                                      [](const auto& primitive) { return primitive.Dynamic; }), staticVegetation.end());
 	_staticShadows->Freeze(slot, staticVegetation, frame.Width, frame.Height);
-	auto& placements = _localShadows->_placements;
-	std::vector<std::pair<GDX12LocalShadowKey, Id>> resolved;
 	_localShadows->_latestPlacements.clear();
 	for (const auto& placement : _resources.LocalShadowPlacements)
-		if (const Id owner = submissions->SelectAdapter(placement.Adapter))
-		{
-			resolved.emplace_back(placement.Key, owner);
-			if (placement.CrossSync == ShadowCrossSync::Latest)
-				_localShadows->_latestPlacements.push_back(placement.Key);
-		}
-	if (placements != resolved)
-	{
-		placements = std::move(resolved);
-		++_localPlacementEpoch;
-	}
+		if (placement.CrossSync == ShadowCrossSync::Latest)
+			_localShadows->_latestPlacements.push_back(placement.Key);
+	_effectiveLocalPageOwners = _localPageOwners;
 	_localShadows->Freeze(slot, vegetation, frame.Width, frame.Height);
 	_sunShadows->Freeze(slot, _localShadows->CastersRebuilt(), _localShadows->ChangedCasterBounds(), vegetation);
 	auto& sun = _sunShadows->_slots.at(slot);
@@ -788,20 +797,45 @@ void SceneLighting::AppendShadows(Graph& graph, std::vector<ID3D12Resource*>& bi
 	const std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 4> descriptors{scene.Buffers[0].Srv.GPUHandle,
 	    scene.Buffers[1].Srv.GPUHandle, scene.Buffers[2].Srv.GPUHandle, scene.Buffers[3].Srv.GPUHandle};
 	_sunShadows->Append(graph, bindings, _slot, descriptors, scene.Draws, scene.Geometry, appendGrass, ~_sunRemoteMask);
-	_staticShadows->Append(graph, bindings, _slot, descriptors, scene.Geometry,
-	                            _staticShadows->LightSource(_slot), appendGrass);
+	for (const auto& view : _staticShadows->_slots[_slot].Views)
+		if (_localPageOwners[view.Tile.Page]) _staticShadows->MarkDepthWritten(_slot, view.Light, view.Face);
 	AppendRemoteLocalShadows(graph, bindings, geometry);
-	auto& local = _localShadows->_slots[_slot];
 	auto& statics = _staticShadows->_slots[_slot];
+	auto& local = _localShadows->_slots[_slot];
+	statics.Views.erase(std::remove_if(statics.Views.begin(), statics.Views.end(), [&](const auto& view)
+	{
+		if (!_localPageOwners[view.Tile.Page]) return false;
+		if (!_effectiveLocalPageOwners[view.Tile.Page] &&
+		    std::any_of(local.Views.begin(), local.Views.end(), [&](const auto& update) {
+		        return update.Light == view.Light && update.Face == view.Face;
+		    }))
+			return false;
+		statics.RemoteViews.push_back(view);
+		return true;
+	}), statics.Views.end());
+	for (auto& view : statics.Views)
+	{
+		const UINT slice = _localStaticSlices[view.Tile.Page];
+		view.DrawIntoFinal = slice == UINT_MAX; // Local fallback builds static depth directly in the final tile.
+		if (!view.DrawIntoFinal) view.Tile.Page = slice;
+	}
+	_staticShadows->Append(graph, bindings, _slot, descriptors, scene.Geometry,
+	    _staticShadows->LightSource(_slot), appendGrass, nullptr, {}, local.Depth.get());
 	if (!local.Views.empty())
 	{
 		std::vector<LocalShadowTileCopy::Region> copies;
 		for (const auto& view : local.Views)
-			copies.push_back({view.Tile, view.Tile, local.Depth->Dsvs[view.Tile.Page]->CPUHandle});
-		MainShadowTileCopy().Draw(graph, bindings, _work,
-		    statics.Depth->Texture.GetResource()->D3DResource.Get(), local.Depth->Texture.GetResource()->D3DResource.Get(),
-		    _resources.SRV_UAV_Heap->GetHeap().Get(), statics.Depth->Texture.GetSRV()->GPUHandle, std::move(copies),
-		    "restore static shadow tiles");
+		{
+			auto from = view.Tile;
+			from.Page = _localStaticSlices[from.Page];
+			if (from.Page != UINT_MAX)
+				copies.push_back({from, view.Tile, local.Depth->Dsvs[view.Tile.Page]->CPUHandle});
+		}
+		if (!copies.empty())
+			MainShadowTileCopy().Draw(graph, bindings, _work,
+			    statics.Depth->Texture.GetResource()->D3DResource.Get(), local.Depth->Texture.GetResource()->D3DResource.Get(),
+			    _resources.SRV_UAV_Heap->GetHeap().Get(), statics.Depth->Texture.GetSRV()->GPUHandle, std::move(copies),
+			    "restore static shadow tiles");
 	}
 	_localShadows->Append(graph, bindings, _slot, descriptors,
 	                      scene.Geometry, *constants.ShadowLights, appendGrass);
@@ -813,28 +847,10 @@ void SceneLighting::AppendPanelOwners(std::vector<std::pair<std::string, Id>>& o
 	if (_resources.Lighting.SunShadowFlags & ShadowEnabled)
 		for (UINT i = 0; i < _resources.ShadowSettings.CascadeCount; ++i)
 			owners.emplace_back("CSM " + std::to_string(i), (_sunRemoteMask & (1u << i)) ? _sunOwner : 0);
-	const auto& local = _localShadows->_slots.at(_slot);
-	std::set<Id> localOwners;
-	for (size_t i = 0; i < local.Lights.size(); ++i)
-		if (local.Lights[i].ShadowFirstSlice != UINT_MAX)
-		{
-			const auto& cache = local.Cache.at(i);
-			localOwners.insert(cache.LocalFallback & cache.Needed ? 0 : cache.Owner);
-		}
-	for (Id owner : localOwners) owners.emplace_back("Local shadows", owner);
+	for (UINT page = 0; page < _effectiveLocalPageOwners.size(); ++page)
+		owners.emplace_back("Local shadow page " + std::to_string(page), _effectiveLocalPageOwners[page]);
 	const auto& probes = _reflections->Owners();
 	for (size_t i = 0; i < probes.size(); ++i) owners.emplace_back("Probe " + std::to_string(i), probes[i]);
-}
-
-void SceneLighting::AppendBenchmarkShadowOwners(std::vector<std::pair<UINT, Id>>& owners) const
-{
-	const auto& local = _localShadows->_slots.at(_slot);
-	for (size_t i = 0; i < local.Lights.size(); ++i)
-		if (local.Lights[i].ShadowFirstSlice != UINT_MAX)
-		{
-			const auto& cache = local.Cache.at(i);
-			owners.emplace_back(local.Lights[i].EntityId, cache.LocalFallback & cache.Needed ? 0 : cache.Owner);
-		}
 }
 
 void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12Resource*>& primaryBindings,
@@ -872,13 +888,15 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 		       publication.SunResolution == _resources.ShadowQuality.SunResolution &&
 		       std::memcmp(&publication.SunSettings, &sunSettings, sizeof(sunSettings)) == 0;
 	};
-	const auto compatibleLocal = [&](const ShadowPublication& publication, UINT index)
+	const auto compatibleLocal = [&](const ShadowPublication& publication, UINT index, UINT face)
 	{
 		const auto& light = source.Lights[index];
+		const auto page = light.ShadowTiles[face].Page;
 		const auto found = publication.Lights.find(light.EntityId);
 		return source.Cache[index].Latest &&
-		       publication.Owner == source.Cache[index].Owner && publication.LocalPlacement == _localPlacementEpoch &&
-		       publication.LocalResolution == source.Cache[index].Resolution && found != publication.Lights.end() &&
+		       page < _localPageOwners.size() && _localPageOwners[page] == publication.Owner &&
+		       publication.LocalPlacement == _localPlacementEpoch && found != publication.Lights.end() &&
+		       found->second.Metadata.ShadowTiles[face].Side == light.ShadowTiles[face].Side &&
 		       found->second.Generation == source.Cache[index].Generation &&
 		       CompatibleLocalShadow(found->second.Metadata, light);
 	};
@@ -890,8 +908,9 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 			it = _latestLocalShadows.erase(it);
 		else
 		{
-			for (auto& face : it->second)
-				if (face && !compatibleLocal(*face, UINT(light - source.Lights.begin()))) face.reset();
+			for (UINT face = 0; face < it->second.size(); ++face)
+				if (it->second[face] && !compatibleLocal(*it->second[face], UINT(light - source.Lights.begin()), face))
+					it->second[face].reset();
 			++it;
 		}
 	}
@@ -910,11 +929,11 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 					    [](const auto& item, UINT id) { return item.EntityId < id; });
 					if (active == source.Lights.end() || active->EntityId != entity) continue;
 					const UINT index = UINT(active - source.Lights.begin());
-					if (!compatibleLocal(*publication, index)) continue;
 					for (const auto& [slice, face] : light.Faces)
 					{
+						if (!compatibleLocal(*publication, index, face)) continue;
 						auto& selected = _latestLocalShadows[entity][face];
-						if (!selected || !compatibleLocal(*selected, index) || selected->Order < publication->Order)
+						if (!selected || !compatibleLocal(*selected, index, face) || selected->Order < publication->Order)
 							selected = publication;
 					}
 				}
@@ -935,7 +954,7 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 		remote->Export = remote->Import = Invalid;
 		if (!remote->Reported && remote->Consumer && _submissions->Complete(remote->Consumer))
 		{
-			_submissions->LogFirstImport("local shadow depth", remote->Produced, remote->Imported);
+			_submissions->LogFirstImport("local shadow depth", remote->ExactProduced, remote->Imported);
 			for (const UINT light : remote->Lights)
 				Log::Info("RenderGraph", "GPU0 completed local shadow consumer fence=", remote->Consumer.Value,
 				          " entity=", light, " slices=", remote->Count, " owner=", _submissions->AdapterLabel(lane.Owner));
@@ -951,7 +970,7 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 	{
 		return publication.SceneRevision == source.SceneRevision && publication.GrassRevision == source.GrassCasterRevision;
 	};
-	std::vector<bool> available(source.Lights.size());
+	std::vector<UINT> available(source.Lights.size());
 	std::vector<UINT> current(source.Lights.size());
 	std::map<ShadowPublication*, std::vector<LocalShadowTileCopy::Region>> imports;
 	for (UINT i = 0; i < source.Lights.size(); ++i)
@@ -962,14 +981,10 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 		if (found == _latestLocalShadows.end()) continue;
 		const auto& faces = found->second;
 		const UINT needed = light._padding[2];
-		UINT covered = 0;
-		for (UINT face = 0; face < faces.size(); ++face)
-			if (faces[face] && compatibleLocal(*faces[face], i)) covered |= 1u << face;
-		if ((covered & needed) != needed) continue;
-		available[i] = true;
 		for (UINT face = 0; face < faces.size(); ++face)
 		{
-			if (!(needed & (1u << face))) continue;
+			if (!(needed & (1u << face)) || !faces[face] || !compatibleLocal(*faces[face], i, face)) continue;
+			available[i] |= 1u << face;
 			const auto& publication = faces[face];
 			if (currentCasters(*publication)) current[i] |= 1u << face;
 			auto& order = source.Cache[i].PublicationOrders[face];
@@ -977,7 +992,13 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 			const auto& tiles = publication->Lights.at(light.EntityId).Faces;
 			const auto tile = std::find_if(tiles.begin(), tiles.end(), [=](const auto& entry) { return entry.second == face; });
 			if (tile == tiles.end()) throw std::logic_error("Missing published local shadow face");
-			imports[publication.get()].push_back(makeRegion(tile->first, light.ShadowTiles[face]));
+			auto region = makeRegion(tile->first, light.ShadowTiles[face]);
+			if (publication->Page)
+			{
+				region.From = publication->Lights.at(light.EntityId).Metadata.ShadowTiles[face];
+				region.From.Page = 0;
+			}
+			imports[publication.get()].push_back(region);
 			_localShadows->MarkDepthWritten(_slot, i, face);
 			order = publication->Order;
 			frame.ShadowReads.push_back(publication);
@@ -985,12 +1006,40 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 	}
 	for (auto& [publication, regions] : imports)
 	{
-		if (!publication->LocalStaged)
+		if (publication->Page)
 		{
-			publication->Local->Stage(primary, primaryBindings, _work);
-			publication->LocalStaged = true;
+			const UINT page = publication->LocalPage;
+			bool coherent = std::all_of(regions.begin(), regions.end(), [=](const auto& region) { return region.To.Page == page; });
+			for (UINT i = 0; coherent && i < source.Lights.size(); ++i)
+			{
+				const auto& light = source.Lights[i];
+				for (UINT face = 0; coherent && face < LocalShadowFaceCount(light); ++face)
+				{
+					const auto& tile = light.ShadowTiles[face];
+				const auto& cache = source.Cache[i];
+				if (!((cache.ReadyFaces | cache.ResidentFaces) & (1u << face)) || tile.Page != page) continue;
+					const auto old = publication->Lights.find(light.EntityId);
+					coherent = old != publication->Lights.end() && compatibleLocal(*publication, i, face) &&
+					    old->second.Metadata.ShadowTiles[face] == tile && old->second.PageOrders[face] &&
+				    old->second.PageOrders[face] == cache.PublicationOrders[face];
+				}
+			}
+			if (coherent)
+				publication->Page->Import(primary, primaryBindings, _work, localAtlas(), page);
+			else
+			{
+				publication->Page->Publish(primary, primaryBindings, _work, MainShadowTileCopy(), localAtlas(), std::move(regions));
+			}
 		}
-		publication->Local->Publish(primary, primaryBindings, _work, MainShadowTileCopy(), localAtlas(), std::move(regions));
+		else
+		{
+			if (!publication->LocalStaged)
+			{
+				publication->Local->Stage(primary, primaryBindings, _work);
+				publication->LocalStaged = true;
+			}
+			publication->Local->Publish(primary, primaryBindings, _work, MainShadowTileCopy(), localAtlas(), std::move(regions));
+		}
 		if (publication->OriginSlot != _slot) frame.CrossSlotShadows |= 1u;
 	}
 
@@ -1031,43 +1080,38 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 		}
 	}
 
-	std::set<Id> configuredOwners;
-	if (source.Depth)
-		for (const auto& [key, owner] : _localShadows->_placements) configuredOwners.insert(owner);
-	for (auto it = owners.begin(); it != owners.end();)
-		if (it->first.Local && !configuredOwners.count(it->first.Owner) &&
-		    (!it->second->Produced || _submissions->Complete(it->second->Produced)))
-			it = owners.erase(it);
-		else ++it;
-
 	struct Batch
 	{
 		std::vector<SceneLocalShadows::View> Views;
-		std::vector<std::pair<UINT, uint64_t>> StaticUpdates;
+		bool Latest = false;
 	};
 	std::map<ShadowLane, std::vector<Batch>> views;
 	const auto busy = [&](Id owner, bool local)
 	{
-		const auto found = owners.find({owner, true, local});
+		const auto found = owners.find({owner, !local, local});
 		return found != owners.end() && !found->second->Publications.empty();
 	};
 	source.Views.erase(std::remove_if(source.Views.begin(), source.Views.end(), [&](const auto& view)
 	{
-		const Id owner = source.Cache[view.Light].Owner;
+		const Id owner = _localPageOwners[view.Tile.Page];
 		if (!owner) return false;
-		const bool latest = source.Cache[view.Light].Latest && available[view.Light];
+		const bool latest = (available[view.Light] & (1u << view.Face)) != 0;
 		if (latest && (current[view.Light] & (1u << view.Face)) && !(source.Lights[view.Light].ShadowFlags & ShadowEveryFrame))
 		{
 			source.RemoteViews.push_back(view);
 			return true;
 		}
-		if (!latest || (view.Dirty && !busy(owner, true)))
+		if (!latest || !busy(owner, true))
 		{
-			auto& batches = views[{owner, latest}];
+			auto& batches = views[{owner, false}];
 			const auto batch = std::find_if(batches.begin(), batches.end(), [&](const Batch& batch)
-			{ return batch.Views.size() < MaxLocalShadowAtlasCount && batch.Views.front().Tile.Side == view.Tile.Side; });
+			{
+				const auto& tile = batch.Views.front().Tile;
+				return batch.Latest == latest && tile.Page == view.Tile.Page && tile.Side == view.Tile.Side &&
+				       batch.Views.size() < MaxLocalShadowAtlasCount;
+			});
 			if (batch != batches.end()) batch->Views.push_back(view);
-			else batches.push_back({{view}});
+			else batches.push_back({{view}, latest});
 		}
 		return true;
 	}), source.Views.end());
@@ -1107,32 +1151,47 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 	{
 		const Id owner = lane.Owner;
 		auto& ownerDevice = _submissions->Device(owner);
-		const auto fallback = [&](const Batch& batch)
+		auto& statics = _staticShadows->_slots.at(_slot);
+		const auto fallback = [&]
 		{
 			_localShadowTransferLimited = true;
-			if (lane.Latest) return;
-			for (const auto& view : batch.Views)
-			{
-				const UINT bit = 1u << view.Face;
-				auto& cache = source.Cache[view.Light];
-				cache.LocalFallback |= bit;
-				if (!(cache.MapsValid & bit) || (source.Lights[view.Light].ShadowFlags & ShadowEveryFrame))
+			for (const auto& batch : batches)
+				if (!batch.Latest)
+					for (const auto& view : batch.Views)
 				{
+					_effectiveLocalPageOwners[view.Tile.Page] = 0;
+					auto& cache = source.Cache[view.Light];
+					cache.LocalFallback |= 1u << view.Face;
 					source.Views.push_back(view);
 					cache.PublicationOrders[view.Face] = ++_shadowOrder;
+					if (std::none_of(statics.Views.begin(), statics.Views.end(), [&](const auto& dirty) {
+					        return dirty.Light == view.Light && dirty.Face == view.Face;
+					    }))
+						SceneLocalShadows::PackView(statics, statics.Cache[view.Light].Faces[view.Face],
+						    view.Light, view.Face, view.Tile);
 				}
-			}
 		};
 		const UINT descriptors = lane.Local ? RemoteShadows::DescriptorCount(live.size()) : 0;
 		const auto existing = owners.find(lane);
+		if (lane.Local && existing != owners.end() && existing->second->Produced &&
+		    !_submissions->Complete(existing->second->Produced))
+		{
+			fallback();
+			continue;
+		}
 		if (existing != owners.end() && existing->second->Resources.SRV_UAV_Heap->GetNumDescriptors() < descriptors)
 			owners.erase(existing); // This lane is idle. Rebind the mirrors in a larger heap.
 		const auto previous = owners.find(lane);
 		const auto* cached = previous == owners.end() ? nullptr : previous->second.get();
 		const auto* oldDraw = cached && cached->Local ? &cached->Local->_slots.front() : nullptr;
+		const auto* oldStatic = cached && cached->Static ? &cached->Static->_slots.front() : nullptr;
+		std::vector<UINT> ownerSlices(_localPageOwners.size());
+		UINT ownerPages = 0;
+		for (UINT page = 0; lane.Local && page < _localPageOwners.size(); ++page)
+			if (_localPageOwners[page] == owner) ownerSlices[page] = ownerPages++;
 		const auto oldBaseline = _shadowVertexBaselines.find(owner);
 		const auto savedBaseline = oldBaseline == _shadowVertexBaselines.end() ? nullptr : oldBaseline->second;
-		UINT64 primaryGrowth = 0, ownerGrowth = 0;
+		UINT64 ownerGrowth = 0;
 		LocalShadowTileTransfer::Bytes resultCopy;
 		if (lane.Local)
 		{
@@ -1145,49 +1204,92 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 			return buffer && buffer->GetResource().D3DResource->GetDesc().Width >= bytes ? UINT64(0) :
 			    ShadowMemory::Size(ownerDevice, CD3DX12_RESOURCE_DESC::Buffer(bytes, flags));
 		};
-		if (lane.Local && (!cached || !cached->StaticDepth))
-			ownerGrowth += 2 * ShadowMemory::Size(ownerDevice, ShadowMemory::Depth(source.Depth->Side, source.Depth->Pages));
+		if (lane.Local && (!oldStatic || !oldStatic->Depth))
+			ownerGrowth += 2 * ShadowMemory::Size(ownerDevice, ShadowMemory::Depth(source.Depth->Side, ownerPages));
 		if (lane.Local)
-			ownerGrowth += bufferGrowth(oldDraw ? oldDraw->LightUpload.get() : nullptr,
-			    (std::max)(size_t(1), source.Lights.size()) * sizeof(GDX12LocalLightConstants));
-		UINT64 packedCount = 0;
-		for (auto it = batches.begin(); it != batches.end();)
+			for (const auto* pass : {oldDraw, oldStatic})
+				ownerGrowth += bufferGrowth(pass ? pass->LightUpload.get() : nullptr,
+				    (std::max)(size_t(1), source.Lights.size()) * sizeof(GDX12LocalLightConstants));
+		UINT64 packedCount = 0, staticCount = 0;
+		struct PageUpdate
 		{
-			auto& batch = *it;
-			const UINT side = batch.Views.front().Tile.Side;
-			const UINT count = UINT(batch.Views.size());
-			UINT64 additionalCommands = 0;
-			for (UINT i = 0; i < count; ++i)
+			UINT64 Area = 0;
+			bool Exact = false, Latest = false, Full = false, KeepPublication = false;
+			std::set<std::pair<UINT, UINT>> Updated;
+			std::vector<std::pair<UINT, UINT>> Readable;
+		};
+		std::map<UINT, PageUpdate> pageUpdates;
+		const auto staticDirty = [&](const SceneLocalShadows::View& view)
+		{
+			const auto version = statics.Cache[view.Light].ContentVersions[view.Face];
+			const auto key = view.Light * 6 + view.Face;
+			return !version || !cached || !cached->StaticVersions.count(key) || cached->StaticVersions.at(key) != version;
+		};
+		for (const auto& batch : batches)
+		{
+			auto& update = pageUpdates[batch.Views.front().Tile.Page];
+			update.Exact |= !batch.Latest;
+			update.Latest |= batch.Latest;
+			for (const auto& view : batch.Views)
 			{
-				const auto& view = batch.Views[i];
-				const auto version = _staticShadows->ContentVersion(_slot, view.Light, view.Face);
-				const auto key = view.Light * 6 + view.Face;
-				if (!cached || !cached->StaticVersions.count(key) ||
-				    cached->StaticVersions.at(key) != version)
-					batch.StaticUpdates.emplace_back(i, version);
-				additionalCommands += UINT64(view.OpaqueCount) + view.MaskedCount;
+				update.Area += UINT64(view.Tile.Side) * view.Tile.Side; // The packer guarantees disjoint tiles.
+				update.Updated.emplace(view.Light, view.Face);
+				update.KeepPublication |= source.Cache[view.Light].Latest;
+				packedCount += UINT64(view.OpaqueCount) + view.MaskedCount;
+				if (staticDirty(view))
+				{
+					const auto& commands = statics.Cache[view.Light].Faces[view.Face];
+					staticCount += commands.Opaque.size() + commands.Masked.size();
+				}
 			}
-			const auto result = LocalShadowTileTransfer::Cost(*_resources.Device, ownerDevice, side, count, false);
-			LocalShadowTileTransfer::Bytes staticCopy;
-			if (!batch.StaticUpdates.empty())
-				staticCopy = LocalShadowTileTransfer::Cost(*_resources.Device, ownerDevice, side, UINT(batch.StaticUpdates.size()), true);
-			const auto commandBytes = (std::max)(UINT64(1), packedCount + additionalCommands) * sizeof(GDX12IndirectDrawArgs);
-			const auto drawGrowth = bufferGrowth(oldDraw ? oldDraw->CommandUpload.get() : nullptr, commandBytes) +
-			    bufferGrowth(oldDraw ? oldDraw->Commands.get() : nullptr, commandBytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
-			if (!ShadowMemory::Fits(*_resources.Device, primaryGrowth + result.Primary + staticCopy.Primary) ||
-			    !ShadowMemory::Fits(ownerDevice, ownerGrowth + result.Owner + staticCopy.Owner + drawGrowth))
-			{
-				fallback(batch);
-				it = batches.erase(it);
-				continue;
-			}
-			primaryGrowth += result.Primary + staticCopy.Primary;
-			ownerGrowth += result.Owner + staticCopy.Owner;
-			packedCount += additionalCommands;
-			resultCopy += result;
-			++it;
 		}
-		if (lane.Local && batches.empty()) continue;
+		for (auto& [page, update] : pageUpdates)
+		{
+			const UINT64 pageArea = UINT64(source.Depth->Side) * source.Depth->Side;
+			if (update.Area * 100 < pageArea * WholeShadowPageCoveragePercent || (update.Exact && update.Latest))
+				continue;
+			update.Full = true;
+			for (UINT i = 0; update.Full && i < source.Lights.size(); ++i)
+			{
+				const auto& light = source.Lights[i];
+				for (UINT face = 0; update.Full && face < LocalShadowFaceCount(light); ++face)
+				{
+				const auto& cache = source.Cache[i];
+				if (!((cache.ReadyFaces | cache.ResidentFaces) & (1u << face)) || light.ShadowTiles[face].Page != page) continue;
+				if (cache.Latest != update.KeepPublication)
+				{
+					update.Full = false;
+					break;
+				}
+					update.Readable.emplace_back(i, face);
+					if (update.Updated.count({i, face})) continue;
+				const auto order = cache.PublicationOrders[face];
+					const auto old = cached ? cached->FinalOrders.find({light.EntityId, face}) :
+					    std::map<std::pair<UINT, UINT>, uint64_t>::const_iterator{};
+					update.Full = cached && old != cached->FinalOrders.end() && order && old->second == order;
+				}
+			}
+			if (update.Full)
+				resultCopy += LocalShadowPageTransfer::Cost(*_resources.Device, ownerDevice, source.Depth->Side, update.KeepPublication);
+		}
+		for (const auto& batch : batches)
+			if (!pageUpdates.at(batch.Views.front().Tile.Page).Full)
+				resultCopy += LocalShadowTileTransfer::Cost(*_resources.Device, ownerDevice,
+				    batch.Views.front().Tile.Side, UINT(batch.Views.size()), false);
+		const auto commandGrowth = [&](const SceneLocalShadows::Slot* pass, UINT64 count)
+		{
+			const auto bytes = (std::max)(UINT64(1), count) * sizeof(GDX12IndirectDrawArgs);
+			return bufferGrowth(pass ? pass->CommandUpload.get() : nullptr, bytes) +
+			    bufferGrowth(pass ? pass->Commands.get() : nullptr, bytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+		};
+		if (lane.Local &&
+		    (!ShadowMemory::Fits(*_resources.Device, resultCopy.Primary) ||
+		     !ShadowMemory::Fits(ownerDevice, ownerGrowth + resultCopy.Owner +
+		         commandGrowth(oldDraw, packedCount) + commandGrowth(oldStatic, staticCount))))
+		{
+			fallback();
+			continue;
+		}
 		auto& entry = owners[lane];
 		if (!entry) entry = std::make_unique<RemoteShadows>(_submissions, owner, _common, _resources, descriptors);
 		auto& remote = *entry;
@@ -1197,17 +1299,17 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 		remote.NearMask = sun.Update & ~_sunRemoteMask;
 		const bool latest = lane.Latest;
 		const bool publishSun = remote.SunMask && _sunSync == 3;
-		const auto publish = [&]() -> ShadowPublication&
+		const auto publish = [&](bool exact, uint64_t order) -> ShadowPublication&
 		{
 			auto publication = std::make_shared<ShadowPublication>();
 			publication->Owner = owner;
 			publication->OriginSlot = _slot;
-			publication->Order = ++_shadowOrder;
+			publication->Order = order;
 			publication->LocalPlacement = _localPlacementEpoch;
 			publication->SunPlacement = _sunPlacementEpoch;
 			publication->SceneRevision = source.SceneRevision;
 			publication->GrassRevision = source.GrassCasterRevision;
-			if (!latest) frame.ShadowReads.push_back(publication);
+			if (exact) frame.ShadowReads.push_back(publication);
 			remote.Publications.push_back(publication);
 			return *publication;
 		};
@@ -1220,62 +1322,46 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 		graph.FrameBoundary = false;
 		bindings.clear();
 		work.Commands.clear();
-		std::vector<Id> staticExports, staticImports;
+		remote.ExactExport = Invalid;
 		remote.Lights.clear();
 		remote.Count = 0;
 		if (lane.Local)
 		{
 			auto& pass = *remote.Local;
 			auto& target = pass._slots.front();
-			target.Lights = source.Lights;
+			auto& staticPass = *remote.Static;
+			auto& staticTarget = staticPass._slots.front();
+			staticTarget.Lights = target.Lights = source.Lights;
 			target.Views.clear();
 			target.Packed.clear();
-			const auto& statics = _staticShadows->_slots.at(_slot);
-			pass.PrepareAtlas(target, source.Depth->Side, source.Depth->Pages);
-			if (!remote.StaticDepth) remote.StaticDepth = pass.CreateAtlas(source.Depth->Side, source.Depth->Pages);
+			staticTarget.Views.clear();
+			staticTarget.Packed.clear();
+			pass.PrepareAtlas(target, source.Depth->Side, ownerPages);
+			staticPass.PrepareAtlas(staticTarget, source.Depth->Side, ownerPages);
 			if (!remote.TileCopy) remote.TileCopy = std::make_unique<LocalShadowTileCopy>(ownerDevice);
-			auto& staticDepth = *remote.StaticDepth;
-			std::vector<LocalShadowTileCopy::Region> restore;
-			for (auto& batch : batches)
+			for (const auto& batch : batches)
 			{
-				const UINT side = batch.Views.front().Tile.Side;
-				for (auto view : batch.Views)
+				for (const auto& view : batch.Views)
 				{
-					const auto first = source.Packed.begin() + view.First;
-					view.First = UINT(target.Packed.size());
-					target.Packed.insert(target.Packed.end(), first, first + view.OpaqueCount + view.MaskedCount);
-					target.Views.push_back(view);
-					restore.push_back({view.Tile, view.Tile, target.Depth->Dsvs[view.Tile.Page]->CPUHandle});
+					auto tile = view.Tile;
+					tile.Page = ownerSlices[tile.Page];
+					SceneLocalShadows::PackView(target, source.Cache[view.Light].Faces[view.Face], view.Light, view.Face, tile);
+					if (staticDirty(view))
+					{
+						const auto& cache = statics.Cache[view.Light];
+						SceneLocalShadows::PackView(staticTarget, cache.Faces[view.Face], view.Light, view.Face, tile);
+						remote.PendingStaticVersions.emplace(view.Light * 6 + view.Face, cache.ContentVersions[view.Face]);
+					}
 					const auto entity = target.Lights[view.Light].EntityId;
 					if (remote.Lights.empty() || remote.Lights.back() != entity) remote.Lights.push_back(entity);
 				}
-				if (batch.StaticUpdates.empty()) continue;
-				auto transfer = std::make_shared<LocalShadowTileTransfer>(*_submissions, owner, side,
-				    UINT(batch.StaticUpdates.size()), true);
-				std::vector<GDX12LocalShadowTile> tiles;
-				std::vector<LocalShadowTileCopy::Region> updates;
-				for (const auto& [index, version] : batch.StaticUpdates)
-				{
-					const auto& view = batch.Views[index];
-					const auto& tile = view.Tile;
-					updates.push_back({transfer->PackedTile(UINT(tiles.size())), tile, staticDepth.Dsvs[tile.Page]->CPUHandle});
-					tiles.push_back(tile);
-					remote.PendingStaticVersions.emplace(view.Light * 6 + view.Face, version);
-				}
-				staticExports.push_back(transfer->Export(primary, primaryBindings, _work, MainShadowTileCopy(),
-				    statics.Depth->Texture.GetResource()->D3DResource.Get(), std::move(tiles)));
-				staticImports.push_back(transfer->Stage(graph, bindings, work));
-				transfer->Publish(graph, bindings, work, *remote.TileCopy,
-				    staticDepth.Texture.GetResource()->D3DResource.Get(), std::move(updates));
-				remote.Transfers.push_back(std::move(transfer));
 			}
-			remote.TileCopy->Draw(graph, bindings, work,
-			    staticDepth.Texture.GetResource()->D3DResource.Get(), target.Depth->Texture.GetResource()->D3DResource.Get(),
-			    heap->GetHeap().Get(), staticDepth.Texture.GetSRV()->GPUHandle, std::move(restore), "restore static shadow tiles");
 			remote.Count = UINT(target.Views.size());
 			pass.Complete(0);
+			staticPass.Complete(0);
 			const auto allocated = [&](auto& buffer) { return ShadowMemory::Size(ownerDevice, buffer->GetResource().D3DResource->GetDesc()); };
-			remote.DrawMemory.Set(ownerDevice, allocated(target.LightUpload) + allocated(target.CommandUpload) + allocated(target.Commands));
+			remote.DrawMemory.Set(ownerDevice, allocated(target.LightUpload) + allocated(target.CommandUpload) + allocated(target.Commands) +
+			    allocated(staticTarget.LightUpload) + allocated(staticTarget.CommandUpload) + allocated(staticTarget.Commands));
 			if (!target.LightUpload->GetSRV()) target.LightUpload->CreateSRV(heap, heap->GetAvailableIndex(SceneDescriptorStart));
 		}
 		const auto producer = baselineExports.find(owner);
@@ -1419,7 +1505,19 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 			{
 				auto& pass = *remote.Local;
 				auto& target = pass._slots.front();
+				auto& staticPass = *remote.Static;
+				auto& staticTarget = staticPass._slots.front();
 				const std::array<Id, 5> localInputs{inputs[0], inputs[1], inputs[2], inputs[3], inputs[4]};
+				staticPass.Append(graph, bindings, 0, descriptors, mesh, *target.LightUpload,
+				    vegetation, &localInputs, materialReads);
+				addWork(staticTarget.Work);
+				std::vector<LocalShadowTileCopy::Region> restoreDepth;
+				for (const auto& view : target.Views)
+					restoreDepth.push_back({view.Tile, view.Tile, target.Depth->Dsvs[view.Tile.Page]->CPUHandle});
+				remote.TileCopy->Draw(graph, bindings, work,
+				    staticTarget.Depth->Texture.GetResource()->D3DResource.Get(), target.Depth->Texture.GetResource()->D3DResource.Get(),
+				    heap->GetHeap().Get(), staticTarget.Depth->Texture.GetSRV()->GPUHandle,
+				    std::move(restoreDepth), "restore owner static shadow tiles");
 				pass.Append(graph, bindings, 0, descriptors, mesh, *target.LightUpload, vegetation, &localInputs, materialReads);
 				addWork(target.Work);
 			}
@@ -1455,15 +1553,11 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 			owners.erase(lane);
 			if (savedBaseline) _shadowVertexBaselines[owner] = savedBaseline;
 			else _shadowVertexBaselines.erase(owner);
-			for (const auto& batch : batches) fallback(batch);
+			fallback();
 			continue;
 		}
 		if (remote.Vertices.Seed) ++remote.SeedVertices; // The scene import was prepended.
 		remote.Export = remote.Mirror.AppendExport(primary, primaryBindings, _work, restore.empty() ? Queue::Copy : Queue::Direct);
-		for (Id staticExport : staticExports)
-			primary.Operations[remote.Export].Dependencies.push_back(staticExport);
-		for (Id staticImport : staticImports)
-			graph.Operations[staticImport + 1].Dependencies.push_back(remote.Input); // Scene import was prepended.
 		if (remote.Vertices.Seed) baselineExports.emplace(owner, remote.Export);
 		else if (remote.Vertices.Clone && producer != baselineExports.end())
 			primary.Operations[remote.Export].Dependencies.push_back(producer->second);
@@ -1477,7 +1571,50 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 			if (remote.Import == Invalid) remote.Import = imported;
 			else primary.Operations[imported].Dependencies.push_back(remote.Import);
 		};
-		for (const auto& batch : batches)
+		const auto acceptExact = [&](const SceneLocalShadows::View& view, uint64_t order)
+		{
+			source.RemoteViews.push_back(view);
+			_localShadows->MarkDepthWritten(_slot, view.Light, view.Face);
+			source.Cache[view.Light].PublicationOrders[view.Face] = order;
+		};
+		const auto exportPage = [&](UINT page, const PageUpdate& update)
+		{
+			auto& target = *remote.Local->_slots.front().Depth;
+			auto transfer = std::make_shared<LocalShadowPageTransfer>(*_submissions, owner, target.Side, update.KeepPublication);
+			const auto exported = transfer->Export(graph, bindings, work,
+			    target.Texture.GetResource()->D3DResource.Get(), ownerSlices[page]);
+			const auto order = ++_shadowOrder;
+			ShadowPublication* publication = nullptr;
+			if (update.KeepPublication)
+			{
+				publication = &publish(update.Exact, order);
+				publication->LocalPage = page;
+				publication->Page = transfer;
+			}
+			for (const auto& [lightIndex, face] : update.Readable)
+			{
+				const auto& light = source.Lights[lightIndex];
+				const auto& cache = source.Cache[lightIndex];
+				const bool written = update.Updated.count({lightIndex, face}) != 0;
+				if (written) remote.FinalOrders[{light.EntityId, face}] = order;
+				if (!publication) continue;
+				auto& entry = publication->Lights[light.EntityId];
+				entry.Metadata = light;
+				entry.Generation = cache.Generation;
+				entry.PageOrders[face] = written ? order : cache.PublicationOrders[face];
+				if (written && cache.Latest) entry.Faces.emplace_back(0, face);
+			}
+			if (update.Exact)
+			{
+				remote.ExactExport = exported;
+				waitForOwner(transfer->Import(primary, primaryBindings, _work, localAtlas(), page));
+				for (const auto& batch : batches)
+					if (batch.Views.front().Tile.Page == page)
+						for (const auto& view : batch.Views) acceptExact(view, order);
+			}
+			remote.PageTransfers.push_back(std::move(transfer));
+		};
+		const auto exportTiles = [&](const Batch& batch)
 		{
 			const auto& batchViews = batch.Views;
 			const UINT side = batchViews.front().Tile.Side;
@@ -1485,41 +1622,51 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 			auto& target = *remote.Local->_slots.front().Depth;
 			auto transfer = std::make_shared<LocalShadowTileTransfer>(*_submissions, owner, side, count, false);
 			std::vector<GDX12LocalShadowTile> tiles;
-			for (const auto& view : batchViews) tiles.push_back(view.Tile);
-			transfer->Export(graph, bindings, work, *remote.TileCopy, target.Texture.GetResource()->D3DResource.Get(), std::move(tiles));
+			for (const auto& view : batchViews)
+			{
+				auto tile = view.Tile;
+				tile.Page = ownerSlices[tile.Page];
+				tiles.push_back(tile);
+			}
+			const auto exported = transfer->Export(graph, bindings, work, *remote.TileCopy,
+			    target.Texture.GetResource()->D3DResource.Get(), std::move(tiles));
 			ShadowPublication* publication = nullptr;
+			const auto order = ++_shadowOrder;
 			for (UINT index = 0; index < count; ++index)
 			{
 				const auto& view = batchViews[index];
+				const auto& light = source.Lights[view.Light];
+				remote.FinalOrders[{light.EntityId, view.Face}] = order;
 				if (!source.Cache[view.Light].Latest) continue;
 				if (!publication)
 				{
-					publication = &publish();
+					publication = &publish(!batch.Latest, order);
 					publication->Local = transfer;
-					publication->LocalResolution = side;
 				}
-				const auto& light = source.Lights[view.Light];
 				auto& entry = publication->Lights[light.EntityId];
 				entry.Metadata = light;
 				entry.Generation = source.Cache[view.Light].Generation;
 				entry.Faces.emplace_back(index, view.Face);
 			}
-			if (!latest)
+			if (!batch.Latest)
 			{
+				remote.ExactExport = exported;
 				waitForOwner(transfer->Stage(primary, primaryBindings, _work));
 				if (publication) publication->LocalStaged = true;
 				std::vector<LocalShadowTileCopy::Region> regions;
 				for (UINT index = 0; index < count; ++index) regions.push_back(makeRegion(index, batchViews[index].Tile));
 				transfer->Publish(primary, primaryBindings, _work, MainShadowTileCopy(), localAtlas(), std::move(regions));
-				source.RemoteViews.insert(source.RemoteViews.end(), batchViews.begin(), batchViews.end());
-				for (const auto& view : batchViews)
-				{
-					_localShadows->MarkDepthWritten(_slot, view.Light, view.Face);
-					if (source.Cache[view.Light].Latest)
-						source.Cache[view.Light].PublicationOrders[view.Face] = publication->Order;
-				}
+				for (const auto& view : batchViews) acceptExact(view, order);
 			}
 			remote.Transfers.push_back(std::move(transfer));
+		};
+		// Exact exports share the DIRECT timeline. Submit them before optional Latest traffic.
+		for (const bool latestResult : {false, true})
+		{
+			for (const auto& [page, update] : pageUpdates)
+				if (update.Full && update.Latest == latestResult) exportPage(page, update);
+			for (const auto& batch : batches)
+				if (batch.Latest == latestResult && !pageUpdates.at(batch.Views.front().Tile.Page).Full) exportTiles(batch);
 		}
 		if (remote.SunMask)
 		{
@@ -1530,7 +1677,7 @@ void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12R
 			remote.SunTransfer->Export(graph, bindings, work, *remote.Sun->Output(0));
 			if (publishSun)
 			{
-				auto& publication = publish();
+				auto& publication = publish(!latest, ++_shadowOrder);
 				publication.Sun = remote.SunTransfer;
 				publication.SunResolution = _resources.ShadowQuality.SunResolution;
 				publication.SunMask = remote.SunMask;
@@ -1570,10 +1717,11 @@ void SceneLighting::AddShadowExchanges(const Schedule& primary, std::vector<Exec
 		auto schedule = Compile(remote.Plan);
 		const Id input = packet(schedule, remote.Input);
 		const Id seed = remote.SeedVertices == Invalid ? Invalid : packet(schedule, remote.SeedVertices);
+		const Id exactExport = remote.ExactExport == Invalid ? Invalid : packet(schedule, remote.ExactExport);
 		remote.GPU.Begin(0);
 		remote.GPU.Reserve(schedule);
 		exchanges.push_back({packet(primary, remote.Export), remote.Import,
-		    [&remote, schedule = std::move(schedule), input, seed](CompletionToken source)
+		    [&remote, schedule = std::move(schedule), input, seed, exactExport](CompletionToken source)
 		    {
 			    std::vector<PacketWait> waits{{input, source}};
 			    if (remote.Vertices.Clone)
@@ -1586,13 +1734,14 @@ void SceneLighting::AddShadowExchanges(const Schedule& primary, std::vector<Exec
 				    if (!remote.Work.Record(op, cmd)) throw std::logic_error("Missing owner shadow work");
 			    }, nullptr, nullptr, nullptr, waits);
 			    remote.Produced = remote.GPU.Completions().back();
+			    remote.ExactProduced = exactExport == Invalid ? remote.Produced : remote.GPU.Completions().at(exactExport);
 			    for (const auto& [face, version] : remote.PendingStaticVersions)
 				    remote.StaticVersions[face] = version;
 			    remote.PendingStaticVersions.clear();
 			    if (seed != Invalid) remote.VertexBase->Ready = remote.GPU.Completions().at(seed);
 			    remote.VertexSource = remote.VertexBase->Source.Get();
 			    remote.VertexDeformationRevision = remote.Vertices.To;
-			    return remote.Produced;
+			    return remote.ExactProduced;
 		    }});
 	}
 }
@@ -1617,6 +1766,7 @@ void SceneLighting::RetireShadowSkinInputs(UINT slot)
 		if (!remote.Produced || !_submissions->Complete(remote.Produced)) continue;
 		remote.Work.Commands.clear(); // Retire captured upload buffers with their owner fence.
 		remote.Transfers.clear();
+		remote.PageTransfers.clear();
 		const auto& update = remote.Vertices;
 		auto& reported = update.Seed || update.Clone ? remote.ReportedVertexBaseline : remote.ReportedVertexDelta;
 		if (!reported && (update.TransferBytes || update.LocalBytes || update.BaselineBytes))

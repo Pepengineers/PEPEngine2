@@ -17,9 +17,10 @@ namespace Engine::UI
         };
         const Group& Root() const { return _root; }
 
-        bool Update(const std::vector<IConsoleVariable*>& variables, uint64_t revision, const ImGuiTextFilter& filter)
+        bool Update(const std::vector<IConsoleVariable*>& variables, uint64_t revision, const ImGuiTextFilter& filter,
+            unsigned viewVersion = 0)
         {
-            if (_revision == revision && _filter == filter.InputBuf) return false;
+            if (_revision == revision && _filter == filter.InputBuf && _viewVersion == viewVersion) return false;
             _root = {};
             for (size_t index = 0; index < variables.size(); ++index)
             {
@@ -39,12 +40,14 @@ namespace Engine::UI
             }
             _revision = revision;
             _filter = filter.InputBuf;
+            _viewVersion = viewVersion;
             return true;
         }
     private:
         // Cache names, not owners: scoped CVars may be destroyed between UI frames.
         Group _root;
         uint64_t _revision = UINT64_MAX;
+        unsigned _viewVersion = 0;
         std::string _filter;
     };
 }

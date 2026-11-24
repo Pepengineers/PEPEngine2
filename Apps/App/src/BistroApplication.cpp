@@ -49,24 +49,16 @@ bool SkipAutomaticBenchmark()
 }
 #endif
 
-struct BistroLocalShadowSettings
+const auto LocalShadowSync = []
 {
-	explicit BistroLocalShadowSettings(const std::wstring& name)
-	    : Adapter(L"Render.Shadows.Local." + name + L".Adapter", -1, L"Hardware GPU index; -1 uses GPU0",
-	              EConsoleVariableFlags::Default, [](int index) { return index >= -1; }),
-	      CrossSync(L"Render.Shadows.Local." + name + L".CrossSync", 1, L"Remote shadow freshness: 1 Exact, 3 Latest",
-	                EConsoleVariableFlags::Default, [](int mode) { return mode == 1 || mode == 3; })
-	{}
-	AutoConsoleVariable<int> Adapter, CrossSync;
-};
-
-const auto LocalShadowSettings = []
-{
-	std::unordered_map<std::string, std::unique_ptr<BistroLocalShadowSettings>> settings;
+	std::unordered_map<std::string, std::unique_ptr<AutoConsoleVariable<int>>> settings;
 	for (const auto& fixture : BistroLightPlacements)
 	{
 		const std::string name = fixture.Name;
-		settings.emplace(name, std::make_unique<BistroLocalShadowSettings>(std::wstring(name.begin(), name.end())));
+		settings.emplace(name, std::make_unique<AutoConsoleVariable<int>>(
+		    L"Render.Shadows.Local." + std::wstring(name.begin(), name.end()) + L".CrossSync",
+		    1, L"Remote shadow freshness: 1 Exact, 3 Latest",
+		    EConsoleVariableFlags::Default, [](int mode) { return mode == 1 || mode == 3; }));
 	}
 	return settings;
 }();
@@ -76,10 +68,9 @@ void UpdateLocalShadowSettings(World& world)
 	world.GetECS().ForEach<NameComponent, LightComponent>([](Entity, const NameComponent& name, LightComponent& light)
 	{
 		if (light.Type == LightType::Directional) return;
-		const auto settings = LocalShadowSettings.find(name.value);
-		if (settings == LocalShadowSettings.end()) return;
-		light.ShadowAdapter = settings->second->Adapter.GetValue();
-		light.CrossSync = static_cast<ShadowCrossSync>(settings->second->CrossSync.GetValue());
+		const auto setting = LocalShadowSync.find(name.value);
+		if (setting != LocalShadowSync.end())
+			light.CrossSync = static_cast<ShadowCrossSync>(setting->second->GetValue());
 	});
 }
 
@@ -166,7 +157,22 @@ std::vector<DeviceDesc> PrepareStartup()
 	console.InitializeWithOverlay(overlay, {}, [&] {
 		adapters = GDX12DeviceFactory::GetDeviceDescriptors();
 		ValidateStartupAdapters(console, startup, adapters);
-	}, MigrateBistroIniKey);
+	}, [](std::wstring& key)
+	{
+		MigrateBistroIniKey(key);
+		if (const auto page = LocalShadowPageAdapterIndex(key))
+		{
+			RegisterLocalShadowPageAdapter(*page);
+			return;
+		}
+		constexpr std::wstring_view local = L"Render.Shadows.Local.", adapter = L".Adapter";
+		if (key.size() <= local.size() + adapter.size() || _wcsnicmp(key.c_str(), local.data(), local.size()) != 0 ||
+		    _wcsicmp(key.c_str() + key.size() - adapter.size(), adapter.data()) != 0) return;
+		IConsoleVariable* sync = nullptr;
+		// Legacy per-light ownership has no stable mapping to a physical page. Preserve its sync CVar.
+		if (ConsoleModule{}.TryFindConsoleVariable(key.substr(0, key.size() - adapter.size()) + L".CrossSync", sync))
+			key.clear();
+	});
 	if (!overlay.empty())
 		Log::Info("BistroBenchmark", "Loaded startup queue defaults from ", overlay.u8string());
 	Log::Info("Bistro", "SCENE EXECUTOR; primary=", console.FindConsoleVariable(L"Render.PrimaryAdapter").GetInt(),

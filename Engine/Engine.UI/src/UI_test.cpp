@@ -87,7 +87,7 @@ namespace Engine::UI
                     Select(variable);
             }
 
-            void DrawAdapter(IConsoleVariable& variable)
+            void DrawAdapter(IConsoleVariable& variable, bool localShadowPage)
             {
                 const int requested = variable.GetInt();
                 const auto local = "Primary GPU (local): " + AdapterLabels.at(PrimaryIndex);
@@ -110,7 +110,10 @@ namespace Engine::UI
                     ImGui::EndCombo();
                 }
                 if (requested != -1 && !listed)
-                    ImGui::TextWrapped("This index is missing from the renderer hardware list.");
+                {
+                    if (localShadowPage) ImGui::TextWrapped("Active fallback: %s.", local.c_str());
+                    else ImGui::TextWrapped("This index is missing from the renderer hardware list.");
+                }
                 ImGui::TextWrapped("Configured value: %s. -1 uses the current primary GPU. "
                     "0, 1, ... are absolute indices in the renderer's filtered hardware list.", Current.c_str());
             }
@@ -121,13 +124,15 @@ namespace Engine::UI
                 const auto description = std::filesystem::path(variable.GetDescription()).u8string();
                 const bool worldCanvas = Name.rfind(L"App.UI.WorldCanvas.", 0) == 0;
                 const bool canvasAdapter = worldCanvas && Name.substr(Name.find_last_of(L'.') + 1) == L"Adapter";
+                const bool localShadowPage = LocalShadowPageAdapterIndex(Name).has_value();
+                const bool namedAdapter = canvasAdapter || localShadowPage;
                 const auto active = variable.GetString();
                 if (Draft == Current) Draft = active;
                 Current = active;
 
                 ImGui::PushID(name.c_str());
-                ImGui::TextWrapped("%s", canvasAdapter ? description.c_str() : name.c_str());
-                if (!description.empty() && !canvasAdapter) ImGui::TextWrapped("%s", description.c_str());
+                ImGui::TextWrapped("%s", namedAdapter ? description.c_str() : name.c_str());
+                if (!description.empty() && !namedAdapter) ImGui::TextWrapped("%s", description.c_str());
                 ImGui::Spacing();
                 if (variable.GetFlags() == EConsoleVariableFlags::ReadOnly)
                 {
@@ -140,7 +145,7 @@ namespace Engine::UI
                     }
                 }
                 else if (Name.substr(Name.find_last_of(L'.') + 1) == L"Adapter")
-                    DrawAdapter(variable);
+                    DrawAdapter(variable, localShadowPage);
                 else if (worldCanvas && Name.substr(Name.find_last_of(L'.') + 1) == L"CrossSync")
                 {
                     const int mode = variable.GetInt();
@@ -242,9 +247,18 @@ namespace Engine::UI
                 filter.Draw("Search", -90);
                 static SettingsCache settings;
                 static SettingEditor editor;
+                const UINT shadowPages = console.FindConsoleVariable(L"Render.Shadows.Local.Resolution").GetUInt()
+                    ? console.FindConsoleVariable(L"Render.Shadows.Local.AtlasCount").GetUInt() : 0u;
+                const auto inactiveShadowPage = [shadowPages](std::wstring_view name)
+                {
+                    const auto page = LocalShadowPageAdapterIndex(name);
+                    return page && *page >= shadowPages;
+                };
                 uint64_t revision;
-                const auto variables = console.GetConsoleVariables({}, &revision);
-                settings.Update(variables, revision, filter);
+                auto variables = console.GetConsoleVariables({}, &revision);
+                variables.erase(std::remove_if(variables.begin(), variables.end(), [&](const auto* variable)
+                { return inactiveShadowPage(variable->GetName()); }), variables.end());
+                settings.Update(variables, revision, filter, shadowPages);
 
                 const auto drawGroup = [&](auto&& self, const SettingsCache::Group& group) -> void
                 {
@@ -282,7 +296,8 @@ namespace Engine::UI
                 if (ImGui::BeginChild("Editor", ImVec2(0, 0), ImGuiChildFlags_Borders))
                 {
                     IConsoleVariable* variable = nullptr;
-                    if (!editor.Name.empty() && console.TryFindConsoleVariable(editor.Name, variable))
+                    if (!editor.Name.empty() && !inactiveShadowPage(editor.Name) &&
+                        console.TryFindConsoleVariable(editor.Name, variable))
                     {
                         ImGui::BeginDisabled(!SettingsEditingEnabled);
                         editor.Draw(*variable);

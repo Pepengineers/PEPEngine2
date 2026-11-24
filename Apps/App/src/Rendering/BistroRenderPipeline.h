@@ -81,10 +81,6 @@ class BistroRenderPipeline final : public IRenderPipeline
 	{
 		_lighting->AppendPublishedProbes(owners);
 	}
-	void AppendBenchmarkShadowOwners(std::vector<std::pair<UINT, BistroRender::Id>>& owners) const
-	{
-		_lighting->AppendBenchmarkShadowOwners(owners);
-	}
 	std::vector<std::pair<std::string, std::string>> PanelAdapters() const;
 	uint64_t PresentedFrames() const { return _presentedFrames; }
 	void SetBenchmarkTime(std::optional<double> seconds, bool localSkinning = true)

@@ -16,6 +16,7 @@ class QueueSubmission;
 
 class SceneLocalShadows
 {
+	struct Atlas;
   public:
 	SceneLocalShadows(GDX12DeviceResources&, RenderPipelineCommonData&, bool staticOnly = false, bool remote = false);
 	~SceneLocalShadows();
@@ -30,7 +31,8 @@ class SceneLocalShadows
 	    Graph&, std::vector<ID3D12Resource*>&, UINT slot, const std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 4>& scene,
 	    GDX12GeometryBuffer::RecordingBinding geometry, GDX12UploadBuffer<GDX12LocalLightConstants>& lights,
 	    const std::function<void(const GeometryTarget&, Graph&, std::vector<ID3D12Resource*>&)>& appendGrass = {},
-	    const std::array<Id, 5>* inputs = nullptr, const std::vector<Access>& materialTextures = {});
+	    const std::array<Id, 5>* inputs = nullptr, const std::vector<Access>& materialTextures = {},
+	    Atlas* fallbackDepth = nullptr);
 	bool Record(UINT slot, Id id, ID3D12GraphicsCommandList* cmd) const { return _slots.at(slot).Work.Record(id, cmd); }
 	GDX12Texture* Output(UINT slot);
 	bool HasAtlas(UINT slot) const { return bool(_slots.at(slot).Depth); }
@@ -42,8 +44,8 @@ class SceneLocalShadows
   private:
 	friend class SceneLighting;
 	using GrassAppender = std::function<void(const GeometryTarget&, Graph&, std::vector<ID3D12Resource*>&)>;
-	void AppendGrassViews(Graph& graph, std::vector<ID3D12Resource*>& bindings, UINT slot, Id atlas,
-	                      const GrassAppender& appendGrass);
+	void AppendGrassViews(Graph& graph, std::vector<ID3D12Resource*>& bindings, UINT slot,
+	                      Id atlas, Id fallback, const Atlas* fallbackDepth, const GrassAppender& appendGrass);
 	struct Input
 	{
 		GDX12IndirectDrawArgs Command{};
@@ -81,7 +83,6 @@ class SceneLocalShadows
 		float ScreenPixels = 0;
 		UINT LocalFallback = 0, ResidentFaces = 0, ReadyFaces = 0;
 		uint64_t Generation = 0;
-		Id Owner = 0;
 		bool Latest = false;
 		bool HasLight = false;
 		bool SelectionDirty = true;
@@ -90,7 +91,7 @@ class SceneLocalShadows
 	{
 		UINT Light, Face, First, OpaqueCount, MaskedCount;
 		GDX12LocalShadowTile Tile;
-		bool Dirty = true;
+		bool DrawIntoFinal = false;
 	};
 	struct Slot;
 	struct CullJob final : ParallelJob
@@ -129,9 +130,10 @@ class SceneLocalShadows
 		uint64_t SceneRevision = 0, GrassReceiverRevision = 0, GrassCasterRevision = 0;
 		NativeWork Work;
 	};
+	static void PackView(Slot& target, const FaceCommands& commands, UINT light, UINT face, GDX12LocalShadowTile tile);
 	static void DrawShadowViews(ID3D12GraphicsCommandList* cmd, const Slot& frame, ID3D12CommandSignature* signature,
 	                            ID3D12Resource* target, ID3D12PipelineState* opaquePipeline,
-	                            ID3D12PipelineState* maskedPipeline, bool clearDepth);
+	                            ID3D12PipelineState* maskedPipeline, bool clearDepth, const Atlas* fallbackDepth);
 	void UpdateCaster(UINT position, const Input& current);
 	void UpdateCamera(Slot&);
 	void UpdateLights(Slot&);
@@ -185,7 +187,6 @@ class SceneLocalShadows
 	std::vector<UINT> _commandGeneration, _materialGeneration;
 	UINT _changeGeneration = 0;
 	std::vector<GDX12RenderPrimitive> _grass;
-	std::vector<std::pair<GDX12LocalShadowKey, Id>> _placements;
 	std::vector<GDX12LocalShadowKey> _latestPlacements;
 	std::unordered_map<UINT, std::vector<UINT>> _instances, _transforms, _materials;
 	std::vector<UINT> _positions, _leaves;
