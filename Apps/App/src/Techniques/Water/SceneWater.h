@@ -3,6 +3,7 @@
 #include "Techniques/NativeWork.h"
 #include "Techniques/Water/BistroWaterRendering.h"
 #include "Graph/RenderGraphExecutor.h"
+#include "Techniques/SimulationPublication.h"
 
 namespace BistroRender
 {
@@ -15,6 +16,8 @@ class SceneWater
 	void SetRetirement(std::function<void()> retire);
 	void Prepare(float delta, Executor&, Id device);
 	Id ExecutionDevice() const;
+	bool BenchmarkReady() const;
+	void AppendBenchmarkPublications(std::vector<SimulationPublication>&) const;
 	void PauseIndependentClock();
 	void AddWaits(const Schedule&, std::vector<PacketWait>&);
 	void Submitted(const std::vector<CompletionToken>&);

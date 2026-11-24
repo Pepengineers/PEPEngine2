@@ -45,6 +45,7 @@ private:
     std::map<std::pair<std::string, std::string>, std::string> _groups;
     std::vector<std::string> _peers;
     std::pair<uint16_t, uint16_t> _pendingSize{};
+    std::filesystem::path _pendingPreset;
     struct Series
     {
         std::filesystem::path Path;

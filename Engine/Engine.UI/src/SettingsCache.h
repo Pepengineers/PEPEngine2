@@ -36,7 +36,9 @@ namespace Engine::UI
                     start = dot + 1;
                 }
                 if (!start) group = &_root.Children["General"];
-                group->Variables.push_back({ name, name.substr(start), description, index });
+                const auto label = name == "Render.SSR.Quality" ? "SSR quality" :
+                    name == "Render.ReflectionProbes.Quality" ? "Reflection probe quality" : name.substr(start);
+                group->Variables.push_back({ name, label, description, index });
             }
             _revision = revision;
             _filter = filter.InputBuf;

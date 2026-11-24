@@ -9,6 +9,49 @@
 namespace GDX12ReflectionSchedule
 {
     enum class Schedule { All, WholeProbe, FaceEach, OneFace };
+    enum class Frequency { Off, Low, Medium, High, Epic };
+
+    inline Frequency CanonicalFrequency(Frequency frequency, size_t count)
+    {
+        if (!count) return Frequency::Off;
+        if (count == 1 && frequency >= Frequency::Medium) return Frequency::Medium;
+        if (count == 2 && frequency == Frequency::High) return Frequency::Medium;
+        return frequency;
+    }
+
+    class SceneBudget
+    {
+    public:
+        std::vector<unsigned> Select(const std::vector<std::uint64_t>& probes, Frequency frequency)
+        {
+            frequency = CanonicalFrequency(frequency, probes.size());
+            if (_probes != probes || _frequency != frequency)
+            {
+                _probes = probes;
+                _frequency = frequency;
+                _cursor = 0;
+            }
+            std::vector<unsigned> work(probes.size());
+            if (frequency == Frequency::Off) return work;
+            if (frequency == Frequency::Low)
+            {
+                work[_cursor % probes.size()] = 1u << (_cursor / probes.size());
+                _cursor = (_cursor + 1) % (6 * probes.size());
+                return work;
+            }
+            const size_t count = frequency == Frequency::Epic ? probes.size() :
+                frequency == Frequency::High ? (probes.size() + 1) / 2 : 1;
+            for (size_t i = 0; i < count; ++i)
+                work[(_cursor + i) % probes.size()] = 63u;
+            _cursor = (_cursor + count) % probes.size();
+            return work;
+        }
+
+    private:
+        std::vector<std::uint64_t> _probes;
+        Frequency _frequency = Frequency::Off;
+        size_t _cursor = 0;
+    };
     struct Policy
     {
         Schedule Update = Schedule::All;

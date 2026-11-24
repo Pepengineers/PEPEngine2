@@ -1017,6 +1017,13 @@ std::array<Id, 2> SceneEnvironment::BenchmarkAtmosphereConsumers() const
 	}
 	return owners;
 }
+
+bool SceneEnvironment::BenchmarkReady() const
+{
+	if (_environment._source != SkySource::SkyAtmosphere) return true;
+	const auto consumers = BenchmarkAtmosphereConsumers();
+	return (!_remoteSkyView || consumers[0] != Invalid) && (!_remoteAerial || consumers[1] != Invalid);
+}
 void SceneEnvironment::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings)
 {
 	if (graph.Resources.size() != bindings.size())

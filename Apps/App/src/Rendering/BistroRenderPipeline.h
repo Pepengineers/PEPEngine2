@@ -77,6 +77,20 @@ class BistroRenderPipeline final : public IRenderPipeline
 	SkySource BenchmarkSkySource() const { return _benchmarkSky; }
 	bool BenchmarkLocalCloudsActive() const { return _environment->LocalCloudsActive(); }
 	auto BenchmarkPostPublication() const { return _post->BenchmarkPublication(); }
+	const auto& BenchmarkProbeFrame() const { return _lighting->BenchmarkProbeFrame(); }
+	void ResetBenchmarkProbeCaptures() { _lighting->ResetBenchmarkProbeCaptures(); }
+	BistroRender::CompletionToken BenchmarkFrameFence() const { return _executor->Completions().back(); }
+	bool BenchmarkPublicationsReady() const
+	{
+		return _lighting->Water().BenchmarkReady() && _lighting->Particles().BenchmarkReady() && _environment->BenchmarkReady();
+	}
+	std::vector<BistroRender::SimulationPublication> BenchmarkSimulations() const
+	{
+		std::vector<BistroRender::SimulationPublication> publications;
+		_lighting->Water().AppendBenchmarkPublications(publications);
+		_lighting->Particles().AppendBenchmarkPublications(publications);
+		return publications;
+	}
 	const auto& BenchmarkNISFailure() const { return _post->BenchmarkNISFailure(); }
 	void AppendBenchmarkProbes(std::vector<std::pair<std::string, BistroRender::Id>>& owners) const
 	{
@@ -97,7 +111,7 @@ class BistroRenderPipeline final : public IRenderPipeline
 		_lighting->RetireLocalShadows();
 	}
 	struct ProbeMemory { UINT64 Primary = 0, Owner = 0; };
-	ProbeMemory EstimateRemoteProbe(int hardwareIndex, UINT side) const;
+	ProbeMemory EstimateRemoteProbe(int hardwareIndex, UINT side, UINT count) const;
 	UINT64 LocalShadowTexels() const { return _lighting->LocalShadowTexels(); }
 	std::function<void()> CaptureBenchmarkPhysics(World&);
 	std::vector<std::pair<std::string, std::string>> BenchmarkAdapters() const;

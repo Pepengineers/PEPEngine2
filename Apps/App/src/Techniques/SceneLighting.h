@@ -56,6 +56,8 @@ class SceneLighting
 	{
 		_reflections->AppendPublishedOwners(owners);
 	}
+	const auto& BenchmarkProbeFrame() const { return _reflections->Frame(); }
+	void ResetBenchmarkProbeCaptures() { _reflections->Reset(); }
 	void DrainLightGrid();
 	void AppendGpuLightGrid(Graph&, std::vector<ID3D12Resource*>&);
 	void SubmitLightGrid(const Schedule&, std::vector<PacketWait>&);

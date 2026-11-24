@@ -55,10 +55,23 @@ class Executor
 	};
 	struct Slot
 	{
+		struct Timing
+		{
+			ComPtr<ID3D12QueryHeap> Heap;
+			GDX12ResourceHandle Readback;
+			uint64_t Frequency = 0, AnchorGpu = 0, AnchorCpu = 0;
+			UINT Capacity = 0, Count = 0;
+			bool Calibrated = false;
+		};
 		std::array<std::vector<List>, 3> Lists;
 		std::array<uint64_t, 3> Fences{};
+		std::array<Timing, 3> Timings;
+		std::vector<QueueSubmission::BenchmarkPacket> Samples;
+		uint64_t TimingEpoch = 0;
 		bool Poisoned = false;
 	};
+	void CollectTimings(Slot&);
+	void BeginTimings(Slot&, const Schedule&, const std::vector<ID3D12Resource*>&);
 	void Owner() const;
 	CompletionToken Token(Queue q, uint64_t value) const;
 	std::shared_ptr<QueueSubmission> _submissions;

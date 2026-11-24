@@ -98,7 +98,7 @@ Schedule Compile(const Graph& g, bool singleDirect) {
         if(next==Invalid) throw std::invalid_argument("dependency cycle");
         const auto& op=g.Operations[next];
         const auto queue=target(op);
-        Packet p{next,{},op.Accesses,{},{},op.Lists,op.OwnerRecording,queue,op.Name};
+        Packet p{next,{},op.Accesses,{},{},op.Lists,op.OwnerRecording,queue,op.Name,op.TransferBytes};
         p.Dependencies.reserve(offsets[next + 1] - offsets[next]);
         for (size_t edge = offsets[next]; edge < offsets[next + 1]; ++edge)
             p.Dependencies.push_back(remap[dependencies[edge]]);

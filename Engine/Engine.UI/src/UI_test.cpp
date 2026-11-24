@@ -80,8 +80,24 @@ namespace Engine::UI
             void Apply(IConsoleVariable& variable, std::string_view value)
             {
                 if (!variable.IsValidString(value))
+                {
                     Error = "Invalid value. Check the limits above.";
-                else if (!variable.SetConfigFromString(value))
+                    return;
+                }
+                if (Name == L"Render.SSR.Quality" || Name == L"Render.ReflectionProbes.Quality")
+                {
+                    const bool probes = Name == L"Render.ReflectionProbes.Quality";
+                    ConsoleModule console;
+                    ConsoleVariablePatch patch{{Name, std::string(value)},
+                        {probes ? L"Render.ReflectionProbes.Enabled" : L"Render.SSR.Enabled", value == "0" ? "false" : "true"}};
+                    IConsoleVariable* preset = nullptr;
+                    if (probes && console.TryFindConsoleVariable(L"Render.ReflectionProbes.UseQualityPreset", preset))
+                        patch.emplace_back(preset->GetName(), "true");
+                    if (const auto applied = console.ApplyPatch(patch); !applied.Error.empty()) Error = applied.Error;
+                    else Select(variable);
+                    return;
+                }
+                if (!variable.SetConfigFromString(value))
                     Error = "Could not save the value. See the engine log.";
                 else
                     Select(variable);

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "App.Base/ECS/World.h"
+#include "BistroProbeSettings.h"
 #include "Common/ConsoleVariables.h"
 #include "App.Base/Modules/RenderModule.h"
 #include "Engine.UI/UI_test.h"
@@ -29,11 +30,9 @@ namespace BistroReflections
     inline AutoConsoleVariable<int> Implementation(L"Render.ReflectionProbes.Implementation", 2,
         L"0 full dynamic, 1 baked static with dynamic overlay, 2 frozen manual capture", EConsoleVariableFlags::Default,
         [](int value) { return value >= 0 && value <= 2; });
-    inline AutoConsoleVariable<int> FirstAdapter(L"Render.ReflectionProbes.First.Adapter", -1,
-        L"DXGI hardware index for the first Bistro probe; -1 uses GPU0", EConsoleVariableFlags::Default,
-        [](int value) { return value >= -1; });
     inline AutoConsoleVariable<UINT> FirstFacesPerFrame(L"Render.ReflectionProbes.First.FacesPerFrame", 6,
-        L"Capture face budget for the first Bistro probe", EConsoleVariableFlags::Default,
+        L"Manual face budget for the first Bistro probe at default Epic UpdateFrequency with quality preset disabled",
+        EConsoleVariableFlags::Default,
         [](UINT value) { return value >= 1 && value <= 6; });
     inline AutoConsoleVariable<int> FirstImplementation(L"Render.ReflectionProbes.First.Implementation", -1,
         L"Capture mode of the first probe; -1 inherits Implementation", EConsoleVariableFlags::Default,
@@ -93,8 +92,11 @@ namespace BistroReflections
         void Update(World& world, float)
         {
             auto& ecs = world.GetECS();
-            const size_t requested = static_cast<size_t>(_interiorOnly ? (std::min)(Count.GetValue(), 10) : Count.GetValue());
-            const bool resetAnchors = _interiorOnly && (_seed != Seed.GetValue() || _reset != Reset.GetValue() || _entities.size() != requested);
+            const bool preset = UseQualityPreset.GetValue();
+            const auto settings = GetReflectionSettings();
+            const auto count = preset ? (settings.Enabled ? settings.Quality : 0) : Count.GetValue();
+            const size_t requested = static_cast<size_t>(_interiorOnly ? (std::min)(count, 10) : count);
+            const bool resetAnchors = _interiorOnly && (_seed != Seed.GetValue() || _reset != Reset.GetValue());
             if (resetAnchors)
             {
                 for (const auto entity : _entities) ecs.DestroyEntity(entity);
@@ -102,20 +104,21 @@ namespace BistroReflections
                 _reset = Reset.GetValue();
                 _entities.clear();
                 std::iota(_tableOrder.begin(), _tableOrder.begin() + 10, size_t{11});
-                std::mt19937 random(_seed ^ (unsigned(requested) * 0x9e3779b9u) ^ _reset);
+                std::mt19937 random(_seed ^ _reset);
                 std::shuffle(_tableOrder.begin(), _tableOrder.begin() + 10, random);
             }
             const bool recapture = _interiorOnly && _recapture != Recapture.GetValue();
             const bool visible = ShowSpheres.GetValue();
-            const auto resolution = Resolution.GetValue();
-            const auto samples = PrefilterSamples.GetValue();
+            const auto resolution = preset ? Side(settings.Quality) : Resolution.GetValue();
+            const auto samples = preset ? Samples(settings.Quality) : PrefilterSamples.GetValue();
             const auto implementation = Implementation.GetValue();
-            const auto adapter = FirstAdapter.GetValue();
+            std::array<int, AdapterNames.size()> adapters{};
+            for (size_t i = 0; i < adapters.size(); ++i) adapters[i] = Adapters[i]->GetValue();
             const auto firstFaces = FirstFacesPerFrame.GetValue();
             const auto firstImplementation = FirstImplementation.GetValue();
             if (_entities.size() == requested && _visible == visible &&
                 _resolution == resolution && _samples == samples && _implementation == implementation &&
-                _firstAdapter == adapter && _firstFaces == firstFaces && _firstImplementation == firstImplementation &&
+                _adapters == adapters && _firstFaces == firstFaces && _firstImplementation == firstImplementation &&
                 !recapture && !resetAnchors) return;
             auto& render = *BenchmarkEngine::GetLocator().GetModule<RenderModule>();
             if (_entities.size() != requested)
@@ -148,7 +151,8 @@ namespace BistroReflections
                 probe.Extents = Vector3(table.HalfSize);
                 probe.BlendDistance = 5;
                 probe.FacesPerFrame = index == 0 ? firstFaces : 6;
-                if (index == 0) probe.Adapter = adapter;
+                probe.BistroIndex = static_cast<UINT>(index);
+                if (index < adapters.size()) probe.Adapter = adapters[index];
                 probe.FarPlane = 15000;
                 _entities.push_back(entity.GetId());
                 if (_interiorOnly) Log::Info("BistroProbes", "seed=", _seed, "; table=", _tableOrder[index] + 1,
@@ -163,9 +167,9 @@ namespace BistroReflections
                 if (recapture) probe.Invalidate();
                 if (_resolution != resolution) probe.Resolution = resolution;
                 if (_samples != samples) probe.PrefilterSamples = samples;
+                if (index < adapters.size()) probe.Adapter = adapters[index];
                 if (index == 0)
                 {
-                    if (_firstAdapter != adapter) probe.Adapter = adapter;
                     if (_firstFaces != firstFaces) probe.FacesPerFrame = firstFaces;
                     if (_firstImplementation != firstImplementation || (firstImplementation < 0 && _implementation != implementation))
                         probe.Implementation = firstImplementation >= 0 ? firstImplementation : implementation;
@@ -195,7 +199,7 @@ namespace BistroReflections
             _resolution = resolution;
             _samples = samples;
             _implementation = implementation;
-            _firstAdapter = adapter;
+            _adapters = adapters;
             _firstFaces = firstFaces;
             _firstImplementation = firstImplementation;
             IndirectCommandBuildSystem{}.Tick(world, 0);
@@ -261,7 +265,8 @@ namespace BistroReflections
         UINT _resolution = Resolution.GetValue();
         UINT _samples = PrefilterSamples.GetValue();
         int _implementation = -1;
-        int _firstAdapter = -1, _firstImplementation = -1;
+        std::array<int, AdapterNames.size()> _adapters{};
+        int _firstImplementation = -1;
         UINT _firstFaces = 6;
     };
 }

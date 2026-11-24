@@ -189,6 +189,7 @@ void GDX12FluidParticlePass::PrepareFrame(std::vector<GDX12FluidInstance> instan
 {
 	_drawSources.clear();
 	_substeps = 0;
+	_integratedSeconds = 0;
 	if (role != _role)
 	{
 		if (!_states.empty()) _retire();
@@ -316,7 +317,9 @@ void GDX12FluidParticlePass::ExecuteSimulation(GDX12CommandList* commands, Simul
 		_substeps += steps.Count;
 		state.SolverHead = _solver.Record(*commands, state.Solver, state.SolverHead, settings, steps,
 		                                  state.Constants->GetElementAddress(constants));
-		if (slice) slice->IntegratedSeconds = double(steps.Dt) * steps.Count;
+		const double seconds = double(steps.Dt) * steps.Count;
+		_integratedSeconds += seconds;
+		if (slice) slice->IntegratedSeconds = seconds;
 		if (seedPending)
 		{
 			state.SeedFrameSlot = _resources.CurrFrameConstantsIndex;

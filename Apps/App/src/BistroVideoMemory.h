@@ -20,7 +20,6 @@ class BistroVideoMemory
 {
     using Bytes = uint64_t;
     using Charges = std::vector<Bytes>;
-    static constexpr wchar_t ProbeAdapterKey[] = L"Render.ReflectionProbes.First.Adapter";
     struct Level { int Value; Charges Cost; };
     struct Feature
     {
@@ -28,6 +27,7 @@ class BistroVideoMemory
         std::vector<Level> Levels;
         size_t Selected = 0, Requested = 0;
         bool ShowLevels = false;
+        std::vector<const wchar_t*> LinkedAdapters;
     };
 
     std::map<std::wstring, Charges> _accepted;
@@ -37,7 +37,7 @@ class BistroVideoMemory
     uint64_t _revision = UINT64_MAX;
     uint32_t _size = 0;
     UINT _acceptedProbeSide = 0;
-    int _acceptedProbeAdapter = -1;
+    std::map<std::wstring, int> _acceptedProbeAdapters;
     std::chrono::steady_clock::time_point _nextCheck{};
 
 public:
@@ -189,20 +189,33 @@ public:
             BistroWater::ParticleCount.GetValue();
         pass(L"Render.Water.Enabled", L"Render.Water.Quality", water * BistroWater::Count.GetValue() *
              (128 + 16 * frames), L"Render.Water.Adapter");
-        const Bytes face = BistroReflections::Resolution.GetValue();
-        const UINT probes = BistroReflections::Count.GetValue();
-        pass(L"Render.ReflectionProbes.Enabled", L"Render.ReflectionProbes.Quality",
-             probes ? face * face * 6 * (32 * probes + 32) : 0);
-        const int probeAdapter = value(ProbeAdapterKey);
-        if (probes && value(L"Render.ReflectionProbes.Enabled") && value(L"Render.ReflectionProbes.Quality") &&
-            owner(probeAdapter) != primary)
+        const auto probeSettings = GetReflectionSettings();
+        const bool probePreset = BistroReflections::UseQualityPreset.GetValue();
+        const UINT face = probePreset ? BistroReflections::Side(probeSettings.Quality) : BistroReflections::Resolution.GetValue();
+        const UINT probes = probePreset ? probeSettings.Quality : BistroReflections::Count.GetValue();
+        add(L"Render.ReflectionProbes.Quality", {0,1,2,3,4}, [&](int quality) {
+            const Bytes side = probePreset ? BistroReflections::Side(quality) : face;
+            const UINT count = probePreset ? quality : probes;
+            return charge(quality && value(L"Render.ReflectionProbes.Enabled") && count ?
+                side * side * 6 * (32 * count + 32) : 0, primary);
+        });
+        std::map<int, std::vector<const wchar_t*>> probeOwners;
+        if (probeSettings.Enabled)
+            for (size_t i = 0; i < (std::min)(size_t(probes), BistroReflections::AdapterNames.size()); ++i)
+            {
+                const auto key = BistroReflections::AdapterNames[i];
+                const int adapter = value(key);
+                if (owner(adapter) != primary) probeOwners[adapter].push_back(key);
+            }
+        for (const auto& [adapter, keys] : probeOwners)
         {
-            const auto mirror = pipeline.EstimateRemoteProbe(probeAdapter, UINT(face));
-            add(ProbeAdapterKey, {-1, probeAdapter}, [&](int index) {
+            const auto mirror = pipeline.EstimateRemoteProbe(adapter, face, UINT(keys.size()));
+            add(keys.front(), {-1, adapter}, [&](int index) {
                 auto cost = charge(index < 0 ? 0 : mirror.Primary, primary);
                 if (index >= 0) cost[owner(index)] = mirror.Owner;
                 return cost;
             });
+            features.back().LinkedAdapters = keys;
         }
         // Full output dimensions bound render-sized histories even when reconstruction is enabled.
         add(L"Render.AO.Quality", {0,1,2,3,4}, [&](int q)
@@ -280,8 +293,10 @@ private:
                 const auto previous = _accepted.find(f.Key);
                 const auto& level = f.Levels[f.Selected];
                 const auto& costs = level.Cost;
-                const bool probe = std::wstring_view(f.Key) == ProbeAdapterKey;
-                const bool sameProbeGeneration = probe && level.Value == _acceptedProbeAdapter &&
+                const bool probe = !f.LinkedAdapters.empty();
+                const auto oldAdapter = _acceptedProbeAdapters.find(f.Key);
+                const bool sameProbeGeneration = probe && oldAdapter != _acceptedProbeAdapters.end() &&
+                    level.Value == oldAdapter->second &&
                     probeSide == _acceptedProbeSide;
                 for (size_t i = 0; i < costs.size(); ++i)
                 {
@@ -380,6 +395,8 @@ private:
                 Log::Warning("Bistro", "VRAM budget limited ", f.Key, " from ", requested, " to ", level.Value);
                 LastLimit = std::wstring(f.Key) + L" " + std::to_wstring(requested) + L" -> " + std::to_wstring(level.Value);
                 patch.emplace_back(f.Key, std::to_string(level.Value));
+                for (size_t i = 1; i < f.LinkedAdapters.size(); ++i)
+                    patch.emplace_back(f.LinkedAdapters[i], std::to_string(level.Value));
             }
         }
         if (!patch.empty())
@@ -393,13 +410,13 @@ private:
             _replacementUntil = presented + frames;
         }
         _accepted.clear();
-        _acceptedProbeAdapter = -1;
+        _acceptedProbeAdapters.clear();
         _acceptedProbeSide = probeSide;
         for (const auto& f : features)
         {
             const auto& level = f.Levels[f.Selected];
             _accepted.emplace(f.Key, level.Cost);
-            if (std::wstring_view(f.Key) == ProbeAdapterKey) _acceptedProbeAdapter = level.Value;
+            if (!f.LinkedAdapters.empty()) _acceptedProbeAdapters.emplace(f.Key, level.Value);
         }
         _revision = IConsoleVariable::ValueRevision();
         _size = size;

@@ -103,6 +103,135 @@ CompletionToken Executor::Token(Queue q, uint64_t value) const
 {
 	return {_deviceId, q, value, _submissions->Incarnation()};
 }
+namespace
+{
+double QpcMilliseconds()
+{
+	static const double multiplier = [] {
+		LARGE_INTEGER frequency;
+		QueryPerformanceFrequency(&frequency);
+		return 1000.0 / double(frequency.QuadPart);
+	}();
+	return multiplier;
+}
+}
+
+void Executor::CollectTimings(Slot& slot)
+{
+	if (!slot.TimingEpoch || slot.Samples.empty()) return;
+	if (slot.TimingEpoch == _submissions->BenchmarkEpoch())
+	{
+		std::array<const uint64_t*, 3> ticks{};
+		std::array<UINT, 3> index{};
+		for (size_t q = 0; q < ticks.size(); ++q)
+		{
+			const auto& timing = slot.Timings[q];
+			if (!timing.Count) continue;
+			const D3D12_RANGE read{0, size_t(timing.Count) * sizeof(uint64_t)};
+			void* mapped = nullptr;
+			if (FAILED(timing.Readback->Map(0, &read, &mapped)))
+			{
+				_submissions->CheckHealth();
+				continue;
+			}
+			ticks[q] = static_cast<const uint64_t*>(mapped);
+		}
+		for (auto& sample : slot.Samples)
+		{
+			const auto q = QueueIndex(sample.Token.Target);
+			const auto& timing = slot.Timings[q];
+			if (!ticks[q]) continue;
+			const auto toMs = [&](uint64_t tick) {
+				return double(timing.AnchorCpu) * QpcMilliseconds() +
+					double(int64_t(tick - timing.AnchorGpu)) * 1000.0 / double(timing.Frequency);
+			};
+			sample.BeginMs = toMs(ticks[q][index[q]++]);
+			sample.EndMs = toMs(ticks[q][index[q]++]);
+			sample.Calibrated = timing.Calibrated;
+		}
+		const D3D12_RANGE noWrites{0, 0};
+		for (size_t q = 0; q < ticks.size(); ++q)
+			if (ticks[q]) slot.Timings[q].Readback->Unmap(0, &noWrites);
+		_submissions->AppendBenchmarkPackets(slot.TimingEpoch, std::move(slot.Samples));
+	}
+	slot.Samples.clear();
+	slot.TimingEpoch = 0;
+}
+
+void Executor::BeginTimings(Slot& slot, const Schedule& schedule, const std::vector<ID3D12Resource*>& resources)
+{
+	slot.TimingEpoch = _submissions->BenchmarkEpoch();
+	if (!slot.TimingEpoch) return;
+	for (auto& timing : slot.Timings) timing.Count = 0;
+	for (const auto& packet : schedule.Packets) slot.Timings[QueueIndex(packet.Target)].Count += 2;
+	for (const auto queue : {Queue::Direct, Queue::Compute, Queue::Copy})
+	{
+		auto& timing = slot.Timings[QueueIndex(queue)];
+		if (!timing.Count) continue;
+		auto* native = _submissions->_devices[_deviceId]->Queues[QueueIndex(queue)].Queue->GetCommandQueue().Get();
+		if (FAILED(native->GetTimestampFrequency(&timing.Frequency)) || !timing.Frequency)
+		{
+			timing.Count = 0;
+			continue;
+		}
+		if (timing.Capacity < timing.Count)
+		{
+			if (queue == Queue::Copy)
+			{
+				D3D12_FEATURE_DATA_D3D12_OPTIONS3 options{};
+				if (FAILED(_device.GetDevice()->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS3, &options, sizeof(options))) ||
+				    !options.CopyQueueTimestampQueriesSupported)
+				{
+					timing.Count = 0;
+					continue;
+				}
+			}
+			const UINT capacity = (std::max)(timing.Count, 2 * timing.Capacity);
+			const D3D12_QUERY_HEAP_DESC desc{queue == Queue::Copy ? D3D12_QUERY_HEAP_TYPE_COPY_QUEUE_TIMESTAMP :
+				D3D12_QUERY_HEAP_TYPE_TIMESTAMP, capacity, 0};
+			if (FAILED(_device.GetDevice()->CreateQueryHeap(&desc, IID_PPV_ARGS(timing.Heap.ReleaseAndGetAddressOf()))))
+			{
+				timing.Capacity = timing.Count = 0;
+				continue;
+			}
+			try
+			{
+				timing.Readback = _device.CreateResource(D3D12_HEAP_TYPE_READBACK,
+					CD3DX12_RESOURCE_DESC::Buffer(uint64_t(capacity) * sizeof(uint64_t)),
+					D3D12_RESOURCE_STATE_COPY_DEST, nullptr);
+			}
+			catch (const DxException&)
+			{
+				_submissions->CheckHealth();
+				timing.Capacity = timing.Count = 0;
+				continue;
+			}
+			timing.Capacity = capacity;
+		}
+		timing.AnchorGpu = timing.AnchorCpu = 0;
+		timing.Calibrated = SUCCEEDED(native->GetClockCalibration(&timing.AnchorGpu, &timing.AnchorCpu));
+	}
+	slot.Samples.resize(schedule.Packets.size());
+	for (size_t i = 0; i < schedule.Packets.size(); ++i)
+	{
+		const auto& packet = schedule.Packets[i];
+		auto& sample = slot.Samples[i];
+		sample.Name = packet.Name;
+		sample.SharedBytes = packet.TransferBytes;
+		if (sample.SharedBytes) continue;
+		for (const auto& access : packet.Accesses)
+		{
+			if ((access.Required & (D3D12_RESOURCE_STATE_COPY_SOURCE | D3D12_RESOURCE_STATE_COPY_DEST)) == 0)
+				continue;
+			auto* resource = resources[access.Resource];
+			const auto desc = resource->GetDesc();
+			if (desc.Dimension == D3D12_RESOURCE_DIMENSION_BUFFER &&
+			    (desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER))
+				sample.SharedBytes += desc.Width;
+		}
+	}
+}
+
 void Executor::Begin(uint32_t index)
 {
 	Owner();
@@ -123,6 +252,7 @@ void Executor::Begin(uint32_t index)
 			_submissions->Wait(Token(queue, value));
 		}
 	}
+	CollectTimings(slot);
 	_slot = index;
 	_begun = true;
 	_tokens.clear();
@@ -132,7 +262,7 @@ bool Executor::TryBegin(uint32_t index)
 {
 	Owner();
 	_submissions->CheckHealth();
-	const auto& slot = _slots.at(index);
+	auto& slot = _slots.at(index);
 	if (_aborted || slot.Poisoned)
 	{
 		throw std::logic_error("recording context aborted/quarantined");
@@ -147,6 +277,7 @@ bool Executor::TryBegin(uint32_t index)
 			}
 		}
 	}
+	CollectTimings(slot);
 	_slot = index;
 	_begun = true;
 	_tokens.clear();
@@ -166,6 +297,7 @@ void Executor::Drain()
 				_submissions->Wait(Token(queue, value));
 			}
 		}
+		CollectTimings(slot);
 	}
 	for (auto& slot : _slots)
 	{
@@ -363,12 +495,16 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 	std::vector<std::vector<std::function<void()>>> ownerRecords(schedule.Packets.size());
 	std::vector<uint8_t> closed(lists.size(), 1);
 	std::array<size_t, 3> offsets{0, counts[0], counts[0] + counts[1]}, used{};
+	BeginTimings(slot, schedule, resources);
+	std::array<UINT, 3> queries{};
 	for (Id i = 0; i < schedule.Packets.size(); ++i)
 	{
 		const auto& p = schedule.Packets[i];
 		RecordingGroup group;
 		packets.emplace_back();
 		const auto q = QueueIndex(p.Target);
+		const auto* timing = slot.TimingEpoch && slot.Timings[q].Count ? &slot.Timings[q] : nullptr;
+		const UINT query = std::exchange(queries[q], queries[q] + 2);
 		packets.back().reserve(p.Lists);
 		for (uint32_t j = 0; j < p.Lists; ++j)
 		{
@@ -380,7 +516,7 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 			}
 			packets.back().push_back(cmd);
 			RecordingGroup leaf{{},
-			                    [&, i, j, cmd, index]
+			                    [&, i, j, cmd, index, timing, query]
 			                    {
 				                    const auto& packet = schedule.Packets[i];
 				                    try
@@ -389,6 +525,8 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 					                    ThrowIfFailed(lists[index]->Allocator->Reset());
 					                    ThrowIfFailed(cmd->Reset(lists[index]->Allocator.Get(), nullptr));
 					                    closed[index] = 0;
+					                    if (timing && j == 0)
+						                    cmd->EndQuery(timing->Heap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, query);
 					                    const auto barriers = [&](const std::vector<Barrier>& bs, const char* phase)
 					                    {
 						                    PIXScopedEvent(cmd, PIX_COLOR(124, 143, 166), "%s / %s (%u)",
@@ -415,6 +553,12 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 					                    }
 					                    if (j + 1 == packet.Lists && !packet.After.empty())
 					                        barriers(packet.After, "after barriers");
+					                    if (timing && j + 1 == packet.Lists)
+					                    {
+						                    cmd->EndQuery(timing->Heap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, query + 1);
+						                    cmd->ResolveQueryData(timing->Heap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, query,
+						                        2, timing->Readback.Get(), uint64_t(query) * sizeof(uint64_t));
+					                    }
 					                    const auto closeResult = cmd->Close();
 					                    closed[index] = 1;
 					                    ThrowIfFailed(closeResult);
@@ -515,12 +659,21 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 				continue;
 			slot.Poisoned = true;
 			submitted = true;
+			if (slot.TimingEpoch)
+			{
+				auto& first = slot.Samples[batchBegin];
+				LARGE_INTEGER now;
+				QueryPerformanceCounter(&now);
+				first.SubmitMs = double(now.QuadPart) * QpcMilliseconds();
+				first.Dependencies = dependencies;
+			}
 			const auto token = _submissions->Submit(_deviceId, target, packets.data() + batchBegin, count, dependencies);
 			slot.Fences[QueueIndex(target)] = token.Value;
 			for (Id packet = batchBegin; packet <= i; ++packet)
 			{
 				_tokens[packet] = token.Value;
 				_completions[packet] = token;
+				if (slot.TimingEpoch) slot.Samples[packet].Token = token;
 			}
 			batchBegin = i + 1;
 			dependencies.clear();
@@ -541,10 +694,14 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 		{
 			_previousCompletion = slot.Fences[0];
 		}
+		if (slot.TimingEpoch)
+			for (auto& sample : slot.Samples) sample.Terminal = _completions.back();
 		return slot.Fences[QueueIndex(schedule.TerminalQueue)];
 	}
 	catch (...)
 	{
+		slot.TimingEpoch = 0;
+		slot.Samples.clear();
 		recorder.Finish();
 		if (submitted)
 		{

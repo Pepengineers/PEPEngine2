@@ -80,6 +80,7 @@ private:
     const GDX12ReflectionSettings* _externalSettings = nullptr;
     std::function<bool(UINT)> _ownsCapture;
     std::function<bool(UINT)> _captureAllowed;
+    std::function<UINT(UINT)> _sceneFaces;
     GDX12Texture _published;
     struct CaptureTextures { GDX12Texture Filtered, Depth; };
     std::optional<CaptureTextures> _capture;

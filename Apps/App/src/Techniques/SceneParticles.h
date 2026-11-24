@@ -1,5 +1,6 @@
 #pragma once
 #include "NativeWork.h"
+#include "SimulationPublication.h"
 #include "../Graph/RenderGraphExecutor.h"
 #include "Engine.RendererDX12/GDX12Particles.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12ParticlesPass.h"
@@ -17,6 +18,8 @@ public:
     static int SecondaryAdapter();
     void BeginSimulation(GDX12ParticleInteractionField, GDX12Texture* depth, Executor&, Id device, float worldRate, bool ownerDraw);
     Id ExecutionDevice() const;
+    bool BenchmarkReady() const;
+    void AppendBenchmarkPublications(std::vector<SimulationPublication>&) const;
     void PreserveConsumedBursts(const GDX12ParticleSimulation&);
     void PauseIndependentClock();
     void AddExchanges(const Schedule&, std::vector<PacketWait>&, std::vector<Executor::PacketExchange>&);
@@ -63,6 +66,7 @@ private:
         uint64_t Generation = 0;
         Id Export = Invalid, Import = Invalid, ImportPacket = Invalid;
         bool Attempted = false;
+        bool Consumed = false;
     };
     bool HasDrawSources(bool opaque) const;
     std::vector<Access> DrawReads(Graph&, std::vector<ID3D12Resource*>&, bool opaque);

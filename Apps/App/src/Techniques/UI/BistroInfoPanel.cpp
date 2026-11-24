@@ -140,6 +140,21 @@ void BistroInfoPanel::DrawPlacement(bool compact) const
 
 void BistroInfoPanel::ApplyResolution(Window& window)
 {
+    if (!_pendingPreset.empty())
+    {
+        const auto path = std::exchange(_pendingPreset, {});
+        ConsoleVariablePatch patch;
+        auto result = ConsoleModule::ReadPatchIni(path, patch);
+        if (result.Error.empty())
+            result = BenchmarkEngine::GetLocator().GetModule<ConsoleModule>()->ApplyPatch(patch);
+        if (!result.Error.empty())
+        {
+            _displayError = "Could not apply preset: " + result.Error;
+            _pendingSize = {};
+            return;
+        }
+        _displayError.clear();
+    }
     if (!_pendingSize.first) return;
     const auto [width, height] = _pendingSize;
     _pendingSize = {};
@@ -241,6 +256,23 @@ void BistroInfoPanel::DrawResult(const BistroBenchmark& benchmark, RunMode tab)
     const auto profile = _quality ? BistroPlacement::Quality : BistroPlacement::Performance;
     const auto slot = BistroBenchmark::ResultSlot(_selectedMode, profile);
     const auto& pass = benchmark.LastPass(slot);
+    if (_selectedMode == RunMode::SingleGPU || _selectedMode == RunMode::MultiGPU)
+    {
+        const auto& presets = benchmark.PlacementPresets(slot);
+        ImGui::BeginDisabled(!benchmark.CanStart());
+        for (size_t i = 0; i < presets.size(); ++i)
+        {
+            const auto& preset = presets[i];
+            if (preset.Path.empty()) continue;
+            if (ImGui::SmallButton(i ? "Apply upscaled preset" : "Apply native preset"))
+            {
+                _pendingPreset = preset.Path;
+                _pendingSize = {uint16_t(preset.Output.first), uint16_t(preset.Output.second)};
+            }
+        }
+        ImGui::EndDisabled();
+        if (!_displayError.empty()) ImGui::TextWrapped("%s", _displayError.c_str());
+    }
     if (pass.Frames.empty())
     {
         _compare.UpdateHistory(latest.Path);

@@ -13,6 +13,7 @@ struct GDX12ReflectionCaptureSettings
     UINT PrefilterSamples = 0;
     UINT UpdateInterval = 1;
     int Adapter = -1; // DXGI hardware index; -1 uses the primary adapter.
+    UINT BistroIndex = UINT_MAX;
 };
 
 struct GDX12ReflectionProbe : GDX12ReflectionCaptureSettings
@@ -34,6 +35,7 @@ struct GDX12ReflectionSettings
     int Quality = 2;
     bool Scheduled = false;
     GDX12ReflectionSchedule::Policy Policy;
+    GDX12ReflectionSchedule::Frequency Frequency = GDX12ReflectionSchedule::Frequency::Epic;
 };
 
 GDX12ReflectionSettings GetReflectionSettings();

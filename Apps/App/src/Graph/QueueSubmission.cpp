@@ -127,14 +127,31 @@ void QueueSubmission::BeginBenchmarkWaits()
 {
     std::lock_guard<std::mutex> lock(_mutex);
     _benchmarkWaits.clear();
+    _benchmarkPackets.clear();
     _benchmarking = true;
+    _benchmarkEpoch.store(++_nextBenchmarkEpoch, std::memory_order_relaxed);
 }
 
 std::vector<QueueSubmission::BenchmarkWait> QueueSubmission::EndBenchmarkWaits()
 {
     std::lock_guard<std::mutex> lock(_mutex);
     _benchmarking = false;
+    _benchmarkEpoch.store(0, std::memory_order_relaxed);
     return std::exchange(_benchmarkWaits, {});
+}
+
+void QueueSubmission::AppendBenchmarkPackets(uint64_t epoch, std::vector<BenchmarkPacket> packets)
+{
+    std::lock_guard<std::mutex> lock(_mutex);
+    if (!_benchmarking || epoch != _nextBenchmarkEpoch) return;
+    _benchmarkPackets.insert(_benchmarkPackets.end(), std::make_move_iterator(packets.begin()),
+        std::make_move_iterator(packets.end()));
+}
+
+std::vector<QueueSubmission::BenchmarkPacket> QueueSubmission::TakeBenchmarkPackets()
+{
+    std::lock_guard<std::mutex> lock(_mutex);
+    return std::exchange(_benchmarkPackets, {});
 }
 
 std::vector<int> QueueSubmission::BenchmarkAdapterIndices() const

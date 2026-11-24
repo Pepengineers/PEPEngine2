@@ -49,11 +49,11 @@ void BistroRenderPipeline::Initialize(RenderPipelineContext& c, const std::vecto
 	Log::Info("Renderer", "Bistro packet renderer initialized; one rendering path");
 }
 
-BistroRenderPipeline::ProbeMemory BistroRenderPipeline::EstimateRemoteProbe(int hardwareIndex, UINT side) const
+BistroRenderPipeline::ProbeMemory BistroRenderPipeline::EstimateRemoteProbe(int hardwareIndex, UINT side, UINT count) const
 {
 	auto& submit = *_executor->Submissions();
 	const auto owner = submit.SelectAdapter(hardwareIndex);
-	if (!owner) return {};
+	if (!owner || !count) return {};
 	auto& remote = submit.Device(owner);
 	auto& primary = submit.Device(0);
 	const auto footprints = [&](const D3D12_RESOURCE_DESC& shape)
@@ -77,10 +77,10 @@ BistroRenderPipeline::ProbeMemory BistroRenderPipeline::EstimateRemoteProbe(int 
 	const auto cube = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R16G16B16A16_FLOAT, side, side, 6,
 	                                               UINT16(GDX12RenderHelpers::MipCount(side)));
 	const auto shared = BistroRender::ShadowMemory::TransferBytes(primary, remote, (std::max)(UINT64(1), inputBytes)) +
-	                    BistroRender::ShadowMemory::TransferBytes(primary, remote, footprints(cube));
+	                    count * BistroRender::ShadowMemory::TransferBytes(primary, remote, footprints(cube));
 	cost.Primary = shared;
 	// Owner-local capture, convolution and baked textures, plus the shader-visible scene heap.
-	cost.Owner += shared + UINT64(side) * side * 6 * 64 +
+	cost.Owner += shared + UINT64(side) * side * 6 * (32 + 32 * count) +
 	    UINT64(remote.GetDevice()->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)) * 1000000;
 	return cost;
 }

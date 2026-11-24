@@ -8,6 +8,9 @@ static AutoConsoleVariable<bool> Enabled(L"Render.ReflectionProbes.Enabled", tru
     L"Enable local reflection probes. Default true.", EConsoleVariableFlags::Default);
 static AutoConsoleVariable<GDX12Quality> Quality(L"Render.ReflectionProbes.Quality", GDX12Quality::Mid,
     L"0 Off, 1 Low, 2 Mid (default), 3 High, 4 Epic.", EConsoleVariableFlags::Default);
+static AutoConsoleVariable<int> Frequency(L"Render.ReflectionProbes.UpdateFrequency", 4,
+    L"Bistro probe updates: 0 snapshot, 1 one face, 2 one probe, 3 half the probes, 4 all probes",
+    EConsoleVariableFlags::Default, [](int value) { return value >= 0 && value <= 4; });
 static AutoConsoleVariable<bool> Scheduled(L"Render.ReflectionProbes.Schedule.Enabled", false,
     L"Use the benchmark probe schedule and distance policy");
 static AutoConsoleVariable<int> Schedule(L"Render.ReflectionProbes.Schedule.Mode", 0,
@@ -23,6 +26,7 @@ GDX12ReflectionSettings GetReflectionSettings()
     result.Enabled = Enabled.GetValue() && result.Quality != 0;
     result.Scheduled = Scheduled.GetValue();
     result.Policy = {static_cast<GDX12ReflectionSchedule::Schedule>(Schedule.GetValue()), FullDistance.GetValue()};
+    result.Frequency = static_cast<GDX12ReflectionSchedule::Frequency>(Frequency.GetValue());
     return result;
 }
 

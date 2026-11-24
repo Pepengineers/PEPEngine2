@@ -1039,7 +1039,11 @@ void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, 
                                      Executor& primary, Id device, float worldRate, bool ownerDraw)
 {
 	_work.Commands.clear();
-	for (auto& lane : _remote) lane.Export = lane.Import = lane.ImportPacket = Invalid;
+	for (auto& lane : _remote)
+	{
+		lane.Export = lane.Import = lane.ImportPacket = Invalid;
+		lane.Consumed = false;
+	}
 	for (auto& sample : _visibilitySamples.at(_resources.CurrFrameConstantsIndex))
 	{
 		sample.Written = false;
@@ -1244,6 +1248,28 @@ Id SceneParticles::ExecutionDevice() const
 		for (const auto& lane : _remote)
 			if (lane.Solver && !lane.Layout.empty()) return lane.Solver->DeviceId;
 	return 0;
+}
+
+bool SceneParticles::BenchmarkReady() const
+{
+	const auto settings = GetParticleSettings();
+	if (!settings.Enabled || !settings.DrawEnabled) return true;
+	for (const auto& lane : _remote)
+		if (lane.Solver && !lane.Layout.empty() && !lane.Solver->Selected) return false;
+	return true;
+}
+
+void SceneParticles::AppendBenchmarkPublications(std::vector<SimulationPublication>& publications) const
+{
+	for (size_t i = 0; i < _remote.size(); ++i)
+	{
+		const auto& lane = _remote[i];
+		if (!lane.Solver || !lane.Consumed) continue;
+		std::lock_guard lock(lane.Solver->Mutex);
+		if (const auto* selected = lane.Solver->Selected)
+			publications.push_back({"ParticleAdapter", lane.Solver->DeviceId, i,
+			    selected->Generation, selected->Version, selected->SimulatedSeconds});
+	}
 }
 
 void SceneParticles::Submitted(const std::vector<CompletionToken>& completions)
@@ -1451,7 +1477,13 @@ void SceneParticles::AppendSimulationImports(Graph& graph, std::vector<ID3D12Res
 		auto& lane = _remote[i];
 		const bool interaction = i == size_t(Inputs::Interaction);
 		if (lane.Solver && interaction == opaque)
+		{
 			lane.Import = lane.Solver->AppendImport(_work, graph, bindings);
+			lane.Consumed = lane.Solver->Selected && std::any_of(lane.Solver->Selected->Snapshot.begin(),
+			    lane.Solver->Selected->Snapshot.end(), [opaque](const auto& emitter) {
+				    return (emitter.Blend == ParticleBlend::Opaque) == opaque;
+			    });
+		}
 	}
 }
 GDX12Resource* SceneParticles::VisibilityReadback(UINT slot, bool opaque, GDX12Device& device, Id owner)

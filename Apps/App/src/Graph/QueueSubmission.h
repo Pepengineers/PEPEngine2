@@ -31,8 +31,21 @@ public:
     const std::string& AdapterLabel(Id) const;
     void LogFirstImport(const char* technique, CompletionToken source, CompletionToken imported) const;
     struct BenchmarkWait { Id From, To; Queue SourceQueue, TargetQueue; uint64_t FirstFence, Count; };
+    struct BenchmarkPacket
+    {
+        std::string Name;
+        CompletionToken Token;
+        CompletionToken Terminal;
+        std::vector<CompletionToken> Dependencies;
+        double BeginMs = 0, EndMs = 0, SubmitMs = 0;
+        uint64_t SharedBytes = 0;
+        bool Calibrated = false;
+    };
     void BeginBenchmarkWaits();
     std::vector<BenchmarkWait> EndBenchmarkWaits();
+    uint64_t BenchmarkEpoch() const { return _benchmarkEpoch.load(std::memory_order_relaxed); }
+    void AppendBenchmarkPackets(uint64_t epoch, std::vector<BenchmarkPacket> packets);
+    std::vector<BenchmarkPacket> TakeBenchmarkPackets();
     std::vector<int> BenchmarkAdapterIndices() const;
     uint64_t Incarnation() const { return _incarnation; }
     struct TransferBuffer {
@@ -77,7 +90,10 @@ private:
     uint64_t _incarnation;
     mutable std::mutex _mutex;
     bool _benchmarking = false;
+    uint64_t _nextBenchmarkEpoch = 0;
+    std::atomic<uint64_t> _benchmarkEpoch{0};
     std::vector<BenchmarkWait> _benchmarkWaits;
+    std::vector<BenchmarkPacket> _benchmarkPackets;
     mutable std::atomic<bool> _quarantined{false};
 };
 }

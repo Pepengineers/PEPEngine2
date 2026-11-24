@@ -47,6 +47,7 @@ struct SceneWater::Remote
 		std::vector<GDX12FluidInstance> Instances;
 		GDX12FluidControls Controls{};
 		uint64_t Bytes = 0, Generation = 0, Version = 0;
+		double SimulatedSeconds = 0;
 		CompletionToken Ready, Reader;
 		bool Writing = false;
 	};
@@ -67,6 +68,7 @@ struct SceneWater::Remote
 	Snapshot *Selected = nullptr, *LastOrder = nullptr;
 	size_t Next = 0;
 	uint64_t Ordered = 0, Generation = 0, TotalSubsteps = 0;
+	double SimulatedSeconds = 0;
 	uint64_t DisplayFrames = 0, Imports = 0, Repeats = 0, Skipped = 0, LastShown = 0;
 	bool WaitForSelected = true;
 	int Mode = 1;
@@ -120,6 +122,7 @@ struct SceneWater::Remote
 			Mode = mode;
 			LastOrder = nullptr;
 			Ordered = TotalSubsteps = DisplayFrames = Imports = Repeats = Skipped = LastShown = 0;
+			SimulatedSeconds = 0;
 			++Generation;
 		}
 		Selected = nullptr;
@@ -219,9 +222,11 @@ struct SceneWater::Remote
 		}
 		if (generation != Generation) return;
 		TotalSubsteps += Pass.Substeps();
+		SimulatedSeconds += Pass.IntegratedSeconds();
 		if (slot)
 		{
 			slot->Version = ++Ordered;
+			slot->SimulatedSeconds = SimulatedSeconds;
 			LastOrder = slot;
 		}
 	}
@@ -649,6 +654,22 @@ void SceneWater::AddWaits(const Schedule& schedule, std::vector<PacketWait>& wai
 }
 
 Id SceneWater::ExecutionDevice() const { return _remote && !_remote->Seeds.empty() ? _remote->DeviceId : 0; }
+
+bool SceneWater::BenchmarkReady() const
+{
+	if (!_remote) return true;
+	std::lock_guard lock(_remote->Mutex);
+	return _remote->DisplayIds.empty() || (_remote->Selected && _drawPacket != Invalid);
+}
+
+void SceneWater::AppendBenchmarkPublications(std::vector<SimulationPublication>& publications) const
+{
+	if (!_remote || _drawPacket == Invalid) return;
+	std::lock_guard lock(_remote->Mutex);
+	if (const auto* selected = _remote->Selected)
+		publications.push_back({"WaterAdapter", _remote->DeviceId, 0,
+		    selected->Generation, selected->Version, selected->SimulatedSeconds});
+}
 
 void SceneWater::Submitted(const std::vector<CompletionToken>& completions)
 {

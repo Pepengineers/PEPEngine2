@@ -44,9 +44,10 @@ struct Operation {
     // ring allocation. Resources and packet boundaries are still plan-owned.
     bool OwnerRecording = false;
     Queue Target = Queue::Direct;
+    uint64_t TransferBytes = 0;
     bool operator==(const Operation& rhs) const {
         return Target == rhs.Target && Lists == rhs.Lists && SideEffect == rhs.SideEffect &&
-               OwnerRecording == rhs.OwnerRecording && Name == rhs.Name &&
+               OwnerRecording == rhs.OwnerRecording && Name == rhs.Name && TransferBytes == rhs.TransferBytes &&
                Dependencies == rhs.Dependencies && Accesses == rhs.Accesses;
     }
 };
@@ -78,6 +79,7 @@ struct Packet {
     bool OwnerRecording = false;
     Queue Target = Queue::Direct;
     std::string Name;
+    uint64_t TransferBytes = 0;
 };
 struct Schedule {
     std::vector<Packet> Packets;

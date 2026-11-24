@@ -90,7 +90,7 @@ class ProbeTransfer
         const std::vector<Access> accesses = exporting
             ? std::vector<Access>{{textureId, Mode::Read, CopySource}, {sharedId, Mode::Write, CopyDest}}
             : std::vector<Access>{{sharedId, Mode::Read, CopySource}, {textureId, Mode::Write, CopyDest}};
-        return work.Add(graph, exporting ? "remote export reflection probe faces" : "GPU0 publish remote reflection probe faces",
+        const auto operation = work.Add(graph, exporting ? "remote export reflection probe faces" : "GPU0 publish remote reflection probe faces",
                         accesses, [this, shared, texture, firstFace, faceCount, textureMips, baseMip, cubeIndex,
                                    exporting](auto* cmd) {
                             for (UINT face = firstFace; face < firstFace + faceCount; ++face)
@@ -104,6 +104,14 @@ class ProbeTransfer
                                     cmd->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
                                 }
                         });
+        auto& bytes = graph.Operations[operation].TransferBytes;
+        for (UINT face = firstFace; face < firstFace + faceCount; ++face)
+            for (UINT mip = 0; mip < _mips; ++mip)
+            {
+                const auto& footprint = _footprints[face * _mips + mip].Footprint;
+                bytes += UINT64(footprint.Width) * footprint.Height * 8;
+            }
+        return operation;
     }
 
     Id _remote;

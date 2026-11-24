@@ -391,6 +391,7 @@ void GDX12ReflectionProbePass::Prepare()
     const bool invalidate = _staticRevision != _resources->ReflectionStaticRevision ||
         _environmentRevision != _resources->ReflectionEnvironmentRevision;
     const bool staticGeometryChanged = _staticGeometryRevision != _resources->ReflectionStaticGeometryRevision;
+    const bool snapshot = _sceneFaces && settings.Frequency == GDX12ReflectionSchedule::Frequency::Off;
     UINT maximumCaptureResolution = 0;
     for (UINT i = 0; i < submitted.size(); ++i)
     {
@@ -404,13 +405,13 @@ void GDX12ReflectionProbePass::Prepare()
             probe.RebakePending = false;
             probe.LastUpdate = 0;
         }
-        else if (staticGeometryChanged && probe.Source.Implementation == 2)
+        else if (!snapshot && staticGeometryChanged && probe.Source.Implementation == 2)
         {
             probe.CapturedFaces = probe.BakedFaces = probe.NextFace = 0;
             probe.RebakePending = false;
             probe.LastUpdate = 0;
         }
-        else if (staticGeometryChanged || (invalidate && probe.Source.Implementation != 2))
+        else if (!snapshot && (staticGeometryChanged || (invalidate && probe.Source.Implementation != 2)))
         {
             // Finish the current generation before rebaking so changing lighting cannot starve publication.
             if (probe.CapturedFaces) probe.RebakePending = true;
@@ -428,7 +429,17 @@ void GDX12ReflectionProbePass::Prepare()
     _enabled = true;
     CreateCaptureTextures(maximumCaptureResolution);
     std::vector<GDX12ReflectionSchedule::Work> work(_probes.size());
-    if (settings.Scheduled)
+    if (_sceneFaces)
+    {
+        for (UINT i = 0; i < _probes.size(); ++i)
+        {
+            const auto& state = _probes[i];
+            if (state.OwnsCapture)
+                work[i].Faces = state.RawFaces == 63 && state.Ready &&
+                    SameReflectionCapture(state.Source, state.Published) ? _sceneFaces(i) : 63u;
+        }
+    }
+    else if (settings.Scheduled)
     {
         const auto camera = _commonData->CameraView.Invert().Translation();
         std::vector<GDX12ReflectionSchedule::Probe> schedule;
@@ -547,6 +558,7 @@ void GDX12ReflectionProbePass::ClearDenendencies()
     _externalSettings = nullptr;
     _ownsCapture = {};
     _captureAllowed = {};
+    _sceneFaces = {};
     _frames.clear();
     _probes.clear();
     _views.clear();

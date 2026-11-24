@@ -2,6 +2,9 @@
 #include "Engine.RendererDX12/GDX12LocalLights.h"
 
 #include "BistroBenchmarkCsv.h"
+#include "BistroPlacementMetrics.h"
+#include "BistroProbeSettings.h"
+#include "Techniques/SceneAO.h"
 #include "Engine.Core/ConsoleModule.h"
 #include "Engine.RendererDX12/GDX12Reconstruction.h"
 #include <array>
@@ -33,7 +36,7 @@ inline constexpr Technique Techniques[]{
     {L"Render.Particles.Enabled", L"Render.Particles.Quality", "particle"},
     {L"Render.Water.Enabled", L"Render.Water.Quality", "water"},
     {L"Render.Sky.Clouds.Enabled", L"Render.Sky.Clouds.Quality", "cloud"},
-    {L"Render.ReflectionProbes.Enabled", L"Render.ReflectionProbes.Quality", "environment"},
+    {L"Render.ReflectionProbes.Enabled", L"Render.ReflectionProbes.Quality", "reflection probes"},
     {L"Render.SSR.Enabled", L"Render.SSR.Quality", "SSR"},
     {L"Render.DOF.Enabled", L"Render.DOF.Quality", "DoF"},
     {L"Render.MotionBlur.Enabled", L"Render.MotionBlur.Quality", "motion blur"},
@@ -52,30 +55,34 @@ struct Placement
 {
     std::wstring Variable;
     std::string Owner;
+    std::wstring Sync;
+    std::vector<int> Modes;
 };
 
 inline const Placement Placements[]{
-    {L"Render.AO.Adapter", "AOAdapter"},
+    {L"Render.AO.Adapter", "AOAdapter", L"Render.AO.CrossSync", {1, 0}},
     {L"Render.LightGrid.Adapter", "LightGridAdapter"},
-    {L"Render.Particles.Adapter", "ParticleAdapter"},
-    {L"Render.Water.Adapter", "WaterAdapter"},
-    {L"Render.Wind.Adapter", "GrassWindAdapter"},
-    {L"App.UI.CloudPicture.Adapter", "CloudPictureAdapter"},
-    {L"Render.Sky.SkyView.Adapter", "SkyViewAdapter"},
-    {L"Render.Sky.AerialPerspective.Adapter", "AerialPerspectiveAdapter"},
+    {L"Render.Particles.Adapter", "ParticleAdapter", L"Render.Particles.CrossSync", {1, 0, 2, 3}},
+    {L"Render.Water.Adapter", "WaterAdapter", L"Render.Water.CrossSync", {1, 0, 2}},
+    {L"Render.Wind.Adapter", "GrassWindAdapter", L"Render.Wind.CrossSync", {1, 0}},
+    {L"App.UI.CloudPicture.Adapter", "CloudPictureAdapter", L"App.UI.CloudPicture.CrossSync", {1, 0, 2}},
+    {L"Render.Sky.SkyView.Adapter", "SkyViewAdapter", L"Render.Sky.SkyView.CrossSync", {1, 0, 3}},
+    {L"Render.Sky.AerialPerspective.Adapter", "AerialPerspectiveAdapter", L"Render.Sky.AerialPerspective.CrossSync", {1}},
     {L"Render.WBOIT.Adapter", "TransparencyAdapter"},
-    {L"App.UI.WorldCanvas.Atrium.Adapter", "AtriumCanvasAdapter"},
-    {L"App.UI.WorldCanvas.Terrace.Adapter", "TerraceCanvasAdapter"},
+    {L"App.UI.WorldCanvas.Atrium.Adapter", "AtriumCanvasAdapter", L"App.UI.WorldCanvas.Atrium.CrossSync", {1, 0}},
+    {L"App.UI.WorldCanvas.Terrace.Adapter", "TerraceCanvasAdapter", L"App.UI.WorldCanvas.Terrace.CrossSync", {1, 0}},
     {L"Render.Post.Adapter", "PostAdapter"},
     {L"App.UI.GameHUD.Adapter", "GameHUDAdapter"},
-    {L"Render.Shadows.Sun.Adapter", "SunShadowAdapter"},
+    {L"Render.Shadows.Sun.Adapter", "SunShadowAdapter", L"Render.Shadows.Sun.CrossSync", {1, 3}},
 };
-inline constexpr size_t AO = 0, Wind = 4, Post = 11, HUD = 12, SunShadow = 13;
-inline constexpr size_t WaterQuality = 4, SkinningQuality = 12;
+inline constexpr size_t AO = 0, Water = 3, Wind = 4, Post = 11, HUD = 12, SunShadow = 13;
+inline constexpr size_t FirstProbe = std::size(Placements);
+inline constexpr size_t WaterQuality = 4, ProbeQuality = 6, SSRQuality = 7, SkinningQuality = 12;
 inline constexpr size_t SunShadowQuality = std::size(Techniques) - 2, LocalShadowQuality = std::size(Techniques) - 1;
 
 enum Level { Off, Low, Medium, High, Epic };
 enum Profile { Performance, Quality };
+using Frequency = GDX12ReflectionSchedule::Frequency;
 inline constexpr double Threshold[]{60, 28};
 inline constexpr const char* ProfileName[]{"Performance", "Quality"};
 
@@ -85,12 +92,16 @@ struct Config
     int Provider = 0, Preset = 0;
     std::array<Level, std::size(Techniques)> Levels{};
     std::vector<int> Owners;
+    std::vector<int> Sync;
+    Frequency ProbeFrequency = Frequency::Low;
+    int ProbeCapture = 1, ProbeDelivery = 0;
     bool RemoteAOFilter = false;
 
     bool operator<(const Config& rhs) const
     {
-        return std::tie(Resolution, Provider, Preset, Levels, Owners, RemoteAOFilter) <
-            std::tie(rhs.Resolution, rhs.Provider, rhs.Preset, rhs.Levels, rhs.Owners, rhs.RemoteAOFilter);
+        return std::tie(Resolution, Provider, Preset, Levels, Owners, Sync, ProbeFrequency, ProbeCapture, ProbeDelivery, RemoteAOFilter) <
+            std::tie(rhs.Resolution, rhs.Provider, rhs.Preset, rhs.Levels, rhs.Owners, rhs.Sync, rhs.ProbeFrequency,
+                rhs.ProbeCapture, rhs.ProbeDelivery, rhs.RemoteAOFilter);
     }
 };
 
@@ -105,6 +116,7 @@ struct Result
     std::array<double, 7> SectionShadowTexels{{-1, -1, -1, -1, -1, -1, -1}};
     bool Valid = false, Remote = false, EquivalentInactiveOwners = true;
     std::array<bool, std::size(Techniques)> Activity{};
+    PlacementCosts Costs;
     std::string SourceCsv;
 };
 
@@ -114,6 +126,12 @@ struct Trial
     Config Settings;
     std::string Source;
     bool Full = false;
+};
+
+struct Preset
+{
+    std::filesystem::path Path;
+    Size Output{};
 };
 
 class Search
@@ -148,7 +166,8 @@ public:
                     if (size == _sizes.end()) continue;
                     result.Settings.Resolution = size - _sizes.begin();
                     result.Settings.Owners = _high.Owners;
-                    result.Settings = EffectiveSettings(std::move(result.Settings));
+                    result.Settings.Sync = _high.Sync;
+                    result.Settings = Canonical(std::move(result.Settings));
                     const auto source = result.SourceCsv.empty() ? std::filesystem::path(item.path()).replace_extension(".csv") :
                         (directory / std::filesystem::u8path(result.SourceCsv)).lexically_normal();
                     result.SourceCsv = source.lexically_relative(output.parent_path()).generic_u8string();
@@ -169,14 +188,13 @@ public:
     {
         _adapters = std::move(adapters);
         _remote = remote;
+        _aoDepthNormals = console.FindConsoleVariable(L"Render.DepthNormals.PrepassEnabled").GetBool();
         _windAlgorithm = console.FindConsoleVariable(L"Render.Wind.Algorithm").GetString();
         _preferredProvider = console.FindConsoleVariable(L"Render.Upscaler.Provider").GetInt();
         _preferredPreset = console.FindConsoleVariable(L"Render.Upscaler.Quality").GetInt();
         _placements.assign(std::begin(Placements), std::end(Placements));
-        if (console.FindConsoleVariable(L"Render.ReflectionProbes.Count").GetInt() > 0)
-            _placements.push_back({L"Render.ReflectionProbes.First.Adapter", "Probe 0"});
-        else
-            csv.Config("Render.ReflectionProbes.First.Adapter.Reason", "reflection probe count is zero");
+        for (size_t i = 0; i < BistroReflections::AdapterNames.size(); ++i)
+            _placements.push_back({BistroReflections::AdapterNames[i], "Probe " + std::to_string(i)});
         _firstLocalShadow = _placements.size();
         if (!shadowFixtures.empty())
         {
@@ -184,10 +202,8 @@ public:
             for (UINT page = 0; page < pages; ++page)
             {
                 RegisterLocalShadowPageSettings(page);
-                _placements.push_back({LocalShadowPageAdapterName(page), "Local shadow page " + std::to_string(page)});
-                auto name = LocalShadowPageCrossSyncName(page);
-                auto mode = console.FindConsoleVariable(name).GetString();
-                _localShadowSync.emplace_back(std::move(name), std::move(mode));
+                _placements.push_back({LocalShadowPageAdapterName(page), "Local shadow page " + std::to_string(page),
+                    LocalShadowPageCrossSyncName(page), {int(ShadowCrossSync::Exact), int(ShadowCrossSync::Latest)}});
             }
         }
         for (unsigned height : {480u, 720u, 900u, 1080u, 1440u, 2160u, screen.second})
@@ -196,6 +212,7 @@ public:
         std::sort(_sizes.begin(), _sizes.end());
         _sizes.erase(std::unique(_sizes.begin(), _sizes.end()), _sizes.end());
         _high.Owners.assign(_placements.size(), -1);
+        _high.Sync.assign(_placements.size(), -1);
         _high.Levels.fill(High);
         for (size_t i = 0; i < std::size(Techniques); ++i)
         {
@@ -237,11 +254,7 @@ public:
     Size Resolution(const Config& config) const { return _sizes.at(config.Resolution); }
     const auto& Resolutions() const { return _sizes; }
     const auto& Candidates() const { return _placements; }
-    std::optional<std::string_view> ShadowPageSync(size_t candidate) const
-    {
-        if (candidate < _firstLocalShadow) return {};
-        return _localShadowSync.at(candidate - _firstLocalShadow).second;
-    }
+    Config EffectiveConfig(Config config) const { return Canonical(std::move(config)); }
     int QualityValue(size_t technique, Level level) const { return _values[technique][level]; }
 
     ConsoleVariablePatch Patch(const Config& config) const
@@ -251,11 +264,18 @@ public:
             {L"Render.Upscaler.Quality", std::to_string(config.Preset)},
             {L"Render.AO.BlurOnSecondary", config.RemoteAOFilter ? "1" : "0"},
             {L"Render.Wind.Algorithm", config.Owners[Wind] >= 0 ? "1" : _windAlgorithm},
-            {L"Render.AO.CrossSync", "1"}, {L"Render.Water.CrossSync", "1"}, {L"Render.Particles.CrossSync", "1"},
-            {L"App.UI.CloudPicture.CrossSync", "1"}, {L"Render.Wind.CrossSync", "1"},
-            {L"Render.Sky.SkyView.CrossSync", "1"}, {L"Render.Sky.AerialPerspective.CrossSync", "1"},
-            {L"Render.Shadows.Sun.CrossSync", "1"},
-            {L"App.UI.WorldCanvas.Atrium.CrossSync", "1"}, {L"App.UI.WorldCanvas.Terrace.CrossSync", "1"},
+            {L"Render.ReflectionProbes.UseQualityPreset", "true"},
+            {L"Render.ReflectionProbes.Count", std::to_string(config.Levels[ProbeQuality])},
+            {L"Render.ReflectionProbes.Resolution", std::to_string(BistroReflections::Side(config.Levels[ProbeQuality] ?
+                config.Levels[ProbeQuality] : Medium))},
+            {L"Render.ReflectionProbes.PrefilterSamples", std::to_string(BistroReflections::Samples(config.Levels[ProbeQuality] ?
+                config.Levels[ProbeQuality] : Medium))},
+            {L"Render.ReflectionProbes.UpdateFrequency", std::to_string(int(config.ProbeFrequency))},
+            {L"Render.ReflectionProbes.Implementation", std::to_string(config.ProbeCapture)},
+            {L"Render.ReflectionProbes.First.Implementation", "-1"},
+            {L"Render.ReflectionProbes.Schedule.Enabled", "false"},
+            {L"Render.ReflectionProbes.TransferMode", std::to_string(config.ProbeDelivery)},
+            {L"Render.ReflectionProbes.ShowSpheres", "false"},
         };
         for (size_t i = 0; i < std::size(Techniques); ++i)
         {
@@ -265,8 +285,12 @@ public:
                 patch.emplace_back(Techniques[i].Quality, std::to_string(QualityValue(i, config.Levels[i])));
         }
         for (size_t i = 0; i < _placements.size(); ++i)
+        {
             patch.emplace_back(_placements[i].Variable, std::to_string(config.Owners[i]));
-        patch.insert(patch.end(), _localShadowSync.begin(), _localShadowSync.end());
+            if (!_placements[i].Modes.empty())
+                patch.emplace_back(_placements[i].Sync, std::to_string(config.Sync[i] < 0 ?
+                    _placements[i].Modes.front() : config.Sync[i]));
+        }
         return patch;
     }
 
@@ -322,6 +346,7 @@ public:
         if (!Upscaled())
         {
             Seed(seed);
+            if (!RemotePhase()) ScheduleReflectionVariants(seed, "native reflection settings");
             return true;
         }
         using U = GDX12UpscalerProvider;
@@ -347,6 +372,7 @@ public:
         if (RemotePhase())
             for (const auto& mode : modes) Seed(mode, true);
         for (const auto& mode : modes) Seed(mode);
+        if (!RemotePhase() && !modes.empty()) ScheduleReflectionVariants(modes.front(), "upscaled reflection settings", true);
         return !_pending.empty();
     }
 
@@ -358,14 +384,24 @@ public:
         SaveReferences();
     }
 
-    std::optional<Trial> NextProbe()
+    std::optional<Trial> NextProbe(BistroBenchmarkData::Csv& csv)
     {
         while (!_priority.empty() || !_pending.empty())
         {
             auto& queue = !_priority.empty() && (_pending.empty() || (++_probeIndex % 3 != 0)) ? _priority : _pending;
             auto trial = std::move(queue.front());
             queue.pop_front();
-            if (!_short.count(trial.Settings)) return trial;
+            if (_short.count(trial.Settings)) continue;
+            bool tooSlow = false;
+            for (size_t i = 0; i < _placements.size(); ++i)
+            {
+                if (trial.Settings.Sync[i] != 1 || !_slowWork.count(Workload(trial.Settings, i))) continue;
+                csv.Config("Trial." + std::to_string(trial.Id) + ".Pruned", _placements[i].Owner +
+                    ": measured producer work and publication cadence exceeded one target frame");
+                tooSlow = true;
+                break;
+            }
+            if (!tooSlow) return trial;
         }
         return {};
     }
@@ -419,6 +455,8 @@ public:
         }
         for (size_t i = 0; i < next.Owners.size(); ++i)
             next.Owners[i] = console.FindConsoleVariable(_placements[i].Variable).GetInt();
+        next.Levels[ProbeQuality] = Level((std::min)(int(next.Levels[ProbeQuality]),
+            console.FindConsoleVariable(L"Render.ReflectionProbes.Count").GetInt()));
         if (next.Provider == console.FindConsoleVariable(L"Render.Upscaler.Provider").GetInt())
             Schedule(next, "within VRAM budget", true);
         if (next.Resolution)
@@ -458,8 +496,14 @@ public:
                 _fullSettings.insert(trial.Settings);
             return;
         }
+        ObserveCosts(trial, result, csv);
         if (!result.Valid)
         {
+            if (rejection == "reflection face deadline missed")
+            {
+                ExpandPolicies(trial, result);
+                ScheduleReflectionVariants(trial.Settings, "different reflection workload after missed deadline", true);
+            }
             _failedProbes.insert(trial.Settings);
             ++_rejected[Upscaled()];
             if (outputUnavailable && trial.Settings.Resolution)
@@ -486,8 +530,10 @@ public:
         Expand(trial, result, csv);
     }
 
-    void Report(BistroBenchmarkData::Csv& csv, std::string_view reason) const
+    std::array<Preset, 2> Report(BistroBenchmarkData::Csv& csv, std::string_view reason,
+        ConsoleModule& console, const std::filesystem::path& output) const
     {
+        std::array<Preset, 2> presets;
         for (bool upscaled : {false, true})
         {
             const auto prefix = std::string(upscaled ? "Upscaled." : "Native.") + ProfileName[_profile] + ".";
@@ -495,6 +541,22 @@ public:
             const auto* reference = BestReference(upscaled);
             const auto* best = remote && (!reference || Better(*remote, *reference)) ? remote : reference;
             ReportResult(csv, prefix, best);
+            if (best && best->Fps >= Threshold[_profile])
+            {
+                auto path = output.parent_path() / (output.stem().wstring() + (upscaled ? L"-upscaled.ini" : L"-native.ini"));
+                auto patch = Patch(best->Settings);
+                for (const auto* name : {L"Render.ReflectionProbes.Seed", L"Render.ReflectionProbes.Reset",
+                    L"Render.Shadows.Local.AtlasCount"})
+                    patch.emplace_back(name, console.FindConsoleVariable(name).GetString());
+                patch.emplace_back(L"Render.FrameGeneration.Provider", "0");
+                const auto saved = console.SavePatchIni(path, patch);
+                if (saved.Error.empty())
+                {
+                    csv.Config(prefix + "PresetFile", path.filename().u8string());
+                    presets[upscaled] = {std::move(path), best->Output};
+                }
+                else csv.Config(prefix + "PresetError", saved.Error);
+            }
             if (_remote)
             {
                 ReportResult(csv, prefix + "SingleGPU.", reference);
@@ -534,6 +596,7 @@ public:
             csv.Config(prefix + "RejectedProbes", std::to_string(_rejected[upscaled]));
             csv.Config(prefix + "StopReason", reason);
         }
+        return presets;
     }
 
     bool Upscaled() const { return (_phase & 1u) != 0; }
@@ -546,6 +609,38 @@ private:
         {
             auto& level = config.Levels[i];
             if (level != Off && (_values[i][level] < 0 || _values[i][level] == _values[i][High])) level = High;
+        }
+        return config;
+    }
+
+    Config Canonical(Config config) const
+    {
+        config = EffectiveSettings(std::move(config));
+        for (const auto [technique, owner] : {std::pair<size_t, size_t>{0, AO}, {2, Wind}, {3, 2},
+                {4, 3}, {10, 6}, {10, 7}, {13, HUD}, {16, 5}, {17, SunShadow}})
+            if (config.Levels[technique] == Off) config.Owners[owner] = -1;
+        if (config.Owners[AO] >= 0)
+        {
+            const auto settings = GetAmbientOcclusionSettings(QualityValue(AO, config.Levels[AO]));
+            if (!BistroRender::SceneAO::SupportsRemote(settings, _aoDepthNormals)) config.Owners[AO] = -1;
+            if (settings.Implementation == 3) config.RemoteAOFilter = false;
+        }
+        if (config.Owners[AO] < 0) config.RemoteAOFilter = false;
+        const auto probes = config.Levels[ProbeQuality];
+        std::fill(config.Owners.begin() + FirstProbe + probes, config.Owners.begin() + _firstLocalShadow, -1);
+        const auto remoteProbes = std::count_if(config.Owners.begin() + FirstProbe,
+            config.Owners.begin() + _firstLocalShadow, [](int owner) { return owner >= 0; });
+        config.ProbeFrequency = GDX12ReflectionSchedule::CanonicalFrequency(config.ProbeFrequency, probes);
+        if (!probes) config.ProbeCapture = 0;
+        if (!remoteProbes || config.ProbeFrequency <= Frequency::Low || (remoteProbes == 1 && config.ProbeDelivery == 1))
+            config.ProbeDelivery = 0;
+        if (config.Levels[LocalShadowQuality] == Off)
+            std::fill(config.Owners.begin() + _firstLocalShadow, config.Owners.end(), -1);
+        for (size_t i = 0; i < _placements.size(); ++i)
+        {
+            const auto& modes = _placements[i].Modes;
+            if (config.Owners[i] < 0 || modes.empty()) config.Sync[i] = -1;
+            else if (std::find(modes.begin(), modes.end(), config.Sync[i]) == modes.end()) config.Sync[i] = modes.front();
         }
         return config;
     }
@@ -593,6 +688,11 @@ private:
         r.SectionShadowTexels.fill(-1);
         if (!(input >> r.Id >> r.Settings.Provider >> r.Settings.Preset >> r.Output.first >> r.Output.second >>
             r.Render.first >> r.Render.second >> r.Fps >> r.P95 >> std::quoted(r.SourceCsv))) return false;
+        int frequency;
+        if (!(input >> frequency >> r.Settings.ProbeCapture >> r.Settings.ProbeDelivery) ||
+            frequency < 0 || frequency > int(Frequency::Epic) ||
+            r.Settings.ProbeCapture < 0 || r.Settings.ProbeCapture > 1 || r.Settings.ProbeDelivery != 0) return false;
+        r.Settings.ProbeFrequency = Frequency(frequency);
         if (!std::isfinite(r.Fps) || r.Fps <= 0 || !std::isfinite(r.P95) || r.P95 <= 0 ||
             r.Settings.Provider < 0 || r.Settings.Provider >= int(GDX12UpscalerProvider::Count) ||
             r.Settings.Preset < 0 || r.Settings.Preset >= int(GDX12UpscalerQuality::Count)) return false;
@@ -625,7 +725,8 @@ private:
         {
             output << r.Id << ' ' << r.Settings.Provider << ' ' << r.Settings.Preset << ' ' <<
                 r.Output.first << ' ' << r.Output.second << ' ' << r.Render.first << ' ' << r.Render.second <<
-                ' ' << r.Fps << ' ' << r.P95 << ' ' << std::quoted(r.SourceCsv);
+                ' ' << r.Fps << ' ' << r.P95 << ' ' << std::quoted(r.SourceCsv) << ' ' <<
+                int(r.Settings.ProbeFrequency) << ' ' << r.Settings.ProbeCapture << ' ' << r.Settings.ProbeDelivery;
             for (size_t i = 0; i < r.Activity.size(); ++i)
                 output << ' ' << unsigned(r.Settings.Levels[i]) << ' ' << r.Activity[i];
             if (r.ShadowTexels)
@@ -654,7 +755,9 @@ private:
             return false;
         return a.Output == b.Output && a.Render == b.Render && a.Settings.Provider == b.Settings.Provider &&
             a.Settings.Preset == b.Settings.Preset && a.Activity == b.Activity && a.Settings.Levels == b.Settings.Levels &&
-            a.Settings.Owners[Wind] == b.Settings.Owners[Wind];
+            a.Settings.Owners[Wind] == b.Settings.Owners[Wind] &&
+            a.Settings.ProbeFrequency == b.Settings.ProbeFrequency && a.Settings.ProbeCapture == b.Settings.ProbeCapture &&
+            a.Settings.ProbeDelivery == b.Settings.ProbeDelivery && a.Settings.Sync == b.Settings.Sync;
     }
 
     const Result* BestReference(bool upscaled) const
@@ -695,21 +798,39 @@ private:
 
     void Schedule(Config config, const std::string& source, bool priority = false)
     {
-        config = EffectiveSettings(std::move(config));
-        // Owners of disabled techniques cannot change the publication or the schedule.
-        for (const auto [technique, owner] : {std::pair<size_t, size_t>{0, AO}, {2, Wind}, {3, 2},
-                {4, 3}, {10, 6}, {10, 7}, {13, HUD}, {16, 5}, {17, SunShadow}})
-            if (config.Levels[technique] == Off) config.Owners[owner] = -1;
-        if (config.Owners[AO] < 0) config.RemoteAOFilter = false;
-        if (config.Levels[6] == Off && _firstLocalShadow > std::size(Placements))
-            config.Owners[std::size(Placements)] = -1;
-        if (config.Levels[18] == Off)
-            std::fill(config.Owners.begin() + _firstLocalShadow, config.Owners.end(), -1);
+        config = Canonical(std::move(config));
         if (RemotePhase() && std::all_of(config.Owners.begin(), config.Owners.end(), [](int owner) { return owner < 0; })) return;
         if (!_scheduled.insert(config).second) return;
         auto trial = Make(config, source, false);
         if (priority) _priority.push_back(std::move(trial));
         else _pending.push_back(std::move(trial));
+    }
+
+    void ScheduleReflectionVariants(const Config& config, const std::string& source, bool priority = false)
+    {
+        auto next = config;
+        for (const auto quality : {Off, Low, Medium, High, Epic})
+        {
+            next.Levels[SSRQuality] = quality;
+            Schedule(next, source, priority);
+        }
+        for (const auto quality : {Low, Medium, High, Epic, Off})
+        {
+            next = config;
+            next.Levels[ProbeQuality] = quality;
+            if (config.Levels[ProbeQuality] == Off) next.ProbeFrequency = Frequency::Low;
+            Schedule(next, source, priority);
+        }
+        if (!config.Levels[ProbeQuality]) return;
+        next = config;
+        for (const auto frequency : {Frequency::Off, Frequency::Low, Frequency::Medium, Frequency::High, Frequency::Epic})
+        {
+            next.ProbeFrequency = frequency;
+            Schedule(next, source, priority);
+        }
+        next = config;
+        next.ProbeCapture = 1 - next.ProbeCapture;
+        Schedule(next, source, priority);
     }
 
     void Seed(const Config& config, bool postOnly = false, bool priority = false)
@@ -729,6 +850,14 @@ private:
             if (!postOnly)
             {
                 next = config;
+                if (next.Levels[ProbeQuality])
+                {
+                    next.Owners[FirstProbe] = adapter;
+                    Schedule(next, "reflection probe placement", priority);
+                    std::fill_n(next.Owners.begin() + FirstProbe, next.Levels[ProbeQuality], adapter);
+                    Schedule(next, "all probes on one adapter", priority);
+                }
+                next = config;
                 next.Owners[AO] = adapter;
                 next.RemoteAOFilter = true;
                 Schedule(next, "AO and filter on one adapter", priority);
@@ -740,6 +869,7 @@ private:
         {
             for (size_t i = 0; i < _placements.size(); ++i)
             {
+                if (i >= FirstProbe && i < _firstLocalShadow && i - FirstProbe >= config.Levels[ProbeQuality]) continue;
                 auto owners = config.Owners;
                 owners[i] = adapter;
                 seeds.push_back(owners);
@@ -766,6 +896,64 @@ private:
         }
     }
 
+    Config Workload(Config config, size_t placement) const
+    {
+        const int owner = config.Owners[placement];
+        for (size_t i = 0; i < config.Owners.size(); ++i)
+            if (i != placement && config.Owners[i] != owner)
+            {
+                config.Owners[i] = -1;
+                config.Sync[i] = -1;
+            }
+        return config;
+    }
+
+    void ObserveCosts(const Trial& trial, const Result& result, BistroBenchmarkData::Csv& csv)
+    {
+        const double targetMs = 1000. / (_profile == Performance ? 60 : 30);
+        for (size_t i = 0; i < FirstProbe; ++i)
+        {
+            // These exact modes request a version per frame even when their inputs stay unchanged.
+            if (i != AO && i != Water && i != Wind) continue;
+            const int owner = trial.Settings.Owners[i];
+            if (owner < 0 || owner != result.Settings.Owners[i] || trial.Settings.Sync[i] != 1) continue;
+            const auto found = result.Costs.find({_placements[i].Owner, BistroRender::Id(owner + 1)});
+            if (found == result.Costs.end()) continue;
+            const auto& cost = found->second;
+            if (cost.TimedVersions < 8 || cost.ImportedVersions < 4 || cost.ReadyIntervals < 7 ||
+                cost.SlowVersions < .8 * cost.TimedVersions || cost.ReadySpanMs <= cost.ReadyIntervals * targetMs)
+                continue;
+            _slowWork.insert(Workload(trial.Settings, i));
+            csv.Config("Trial." + std::to_string(trial.Id) + ".OverBudgetProducer", _placements[i].Owner);
+        }
+    }
+
+    void ExpandPolicies(const Trial& trial, const Result& result)
+    {
+        const auto& config = trial.Settings;
+        auto next = config;
+        const auto source = " / trial " + std::to_string(trial.Id);
+        for (size_t i = 0; i < _placements.size(); ++i)
+        {
+            if (config.Owners[i] < 0 || result.Settings.Owners[i] != config.Owners[i]) continue;
+            const auto cost = result.Costs.find({_placements[i].Owner, BistroRender::Id(config.Owners[i] + 1)});
+            const bool waits = cost != result.Costs.end() && cost->second.PrimaryWaitMs > 0;
+            for (const auto mode : _placements[i].Modes)
+            {
+                next = config;
+                next.Sync[i] = mode;
+                Schedule(next, "publication policy" + source, waits);
+            }
+        }
+        if (config.ProbeFrequency > Frequency::Low)
+            for (const auto mode : {0, 1, 2})
+            {
+                next = config;
+                next.ProbeDelivery = mode;
+                Schedule(next, "reflection transfer policy" + source);
+            }
+    }
+
     void Expand(const Trial& trial, const Result& result, BistroBenchmarkData::Csv& csv)
     {
         const auto& config = trial.Settings;
@@ -776,6 +964,9 @@ private:
             Schedule(next, std::string(reason) + " / trial " + source, priority);
         };
         auto next = config;
+        if (result.Fps >= threshold * .75)
+            ScheduleReflectionVariants(config, "reflection options / trial " + source);
+        ExpandPolicies(trial, result);
         if (result.ThresholdFps < threshold)
         {
             if (config.Resolution)
@@ -921,6 +1112,27 @@ private:
         const bool meetsA = a.Fps >= threshold, meetsB = b.Fps >= threshold;
         if (meetsA != meetsB) return meetsA;
         if (!meetsA && !preferDetail && a.Fps != b.Fps) return a.Fps > b.Fps;
+        if (meetsA && a.Output == b.Output && a.Render == b.Render && a.Settings.Provider == b.Settings.Provider &&
+            a.Settings.Preset == b.Settings.Preset && a.Settings.Levels[LocalShadowQuality] == b.Settings.Levels[LocalShadowQuality])
+        {
+            const auto comparable = [&](const Result& result) {
+                auto levels = result.Settings.Levels;
+                for (size_t i = 0; i < levels.size(); ++i)
+                    if (!result.Activity[i] || i == ProbeQuality) levels[i] = Off;
+                return levels;
+            };
+            if (comparable(a) == comparable(b))
+            {
+                const auto rankProbe = [&](const Result& result) {
+                    const int quality = result.Activity[ProbeQuality] ? result.Settings.Levels[ProbeQuality] : Off;
+                    const int cadence = quality ? int(result.Settings.ProbeFrequency) : 0;
+                    return _profile == Quality ? std::pair{quality, cadence} : std::pair{cadence, quality};
+                };
+                if (rankProbe(a) != rankProbe(b)) return rankProbe(a) > rankProbe(b);
+                if (a.Fps != b.Fps) return a.Fps > b.Fps;
+                if (a.P95 != b.P95) return a.P95 < b.P95;
+            }
+        }
         const auto count = [](const Result& r, Level level)
         {
             size_t n = 0;
@@ -948,6 +1160,7 @@ private:
         if (a.Settings.Provider != b.Settings.Provider || a.Settings.Preset != b.Settings.Preset ||
             a.Fps < b.Fps || a.Output.first < b.Output.first || a.Output.second < b.Output.second ||
             a.Render.first < b.Render.first || a.Render.second < b.Render.second ||
+            a.Settings.ProbeFrequency < b.Settings.ProbeFrequency ||
             ((a.Activity[LocalShadowQuality] || b.Activity[LocalShadowQuality]) &&
              (!a.ShadowTexels || !b.ShadowTexels || a.ShadowTexels < b.ShadowTexels)))
             return false;
@@ -995,10 +1208,14 @@ private:
         {
             csv.Config(prefix + std::filesystem::path(_placements[i].Variable).u8string() + ".EffectiveOwner",
                 std::to_string(r->Settings.Owners[i]));
-            if (const auto sync = ShadowPageSync(i))
-                csv.Config(prefix + std::filesystem::path(_localShadowSync[i - _firstLocalShadow].first).u8string(),
-                    r->Settings.Owners[i] < 0 ? "local" : *sync);
+            if (!_placements[i].Modes.empty())
+                csv.Config(prefix + std::filesystem::path(_placements[i].Sync).u8string() + ".Effective",
+                    r->Settings.Sync[i] < 0 ? "local" : std::to_string(r->Settings.Sync[i]));
         }
+        for (const auto& [name, value] : Patch(r->Settings))
+            csv.Config(prefix + "Preset." + std::filesystem::path(name).u8string(), value);
+        csv.Config(prefix + "ReflectionPreference", _profile == Quality ?
+            "spatial quality, update cadence, FPS/P95" : "update cadence, spatial quality, FPS/P95");
         for (size_t i = 0; i < r->Activity.size(); ++i)
             if (r->Activity[i]) csv.Config(prefix + "Technique", std::string(Techniques[i].Pass) + "=" +
                 (HasQualityScale(i) ? std::to_string(QualityValue(i, r->Settings.Levels[i])) : "enabled"));
@@ -1010,7 +1227,7 @@ private:
 
     unsigned _phase = 0;
     Profile _profile;
-    bool _remote = false;
+    bool _remote = false, _aoDepthNormals = false;
     unsigned _probeIndex = 0;
     size_t _nextId = 0;
     int _preferredProvider = 0, _preferredPreset = 0;
@@ -1020,12 +1237,12 @@ private:
     std::vector<int> _adapters;
     std::vector<Placement> _placements;
     size_t _firstLocalShadow = 0;
-    ConsoleVariablePatch _localShadowSync;
     std::vector<Size> _sizes;
     std::array<std::array<int, Epic + 1>, std::size(Techniques)> _values{};
     std::array<bool, std::size(Techniques)> _available{};
     std::deque<Trial> _pending, _priority;
     std::set<Config> _scheduled;
+    std::set<Config> _slowWork;
     std::map<Config, Result> _short;
     std::set<Config> _failedProbes;
     std::set<Config> _fullSettings, _retryFull;
