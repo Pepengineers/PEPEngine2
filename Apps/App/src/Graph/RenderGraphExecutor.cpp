@@ -208,7 +208,7 @@ void Executor::Reserve(const Schedule& schedule)
 uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Resource*>& resources,
                            const Record& record, GDX12CommandList* prefix, GDX12CommandList* suffix,
                            const std::atomic<bool>* cancellation, const std::vector<PacketWait>& waits,
-                           const std::vector<PacketExchange>& exchanges)
+                           const std::vector<PacketExchange>& exchanges, Id signalAfter)
 {
 	Owner();
 	if (!_begun)
@@ -286,6 +286,12 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 		throw std::invalid_argument("prefix/suffix must be DIRECT lists");
 	}
 	std::vector<bool> endBatch(schedule.Packets.size(), false);
+	if (signalAfter != Invalid)
+	{
+		if (signalAfter >= schedule.Packets.size())
+			throw std::invalid_argument("submission boundary has no packet");
+		endBatch[signalAfter] = true;
+	}
 	for (const auto& wait : waits)
 		if (wait.Packet) endBatch[wait.Packet - 1] = true;
 	for (const auto& exchange : exchanges)

@@ -162,6 +162,7 @@ class SceneLocalShadows
 	void PrepareAtlases(UINT pageSide, UINT pages);
 	void MarkDepthWritten(UINT slot, UINT light, UINT face);
 	void Allocate(UINT slot, SceneLocalShadows& staticPass, UINT effectiveCeiling);
+	void UpdateLayout(const Slot&, UINT effectiveCeiling);
 	void Pack(Slot&);
 	void GatherMissing(Slot&, UINT lightIndex, UINT faces);
 	void ResetLayout();
@@ -172,6 +173,27 @@ class SceneLocalShadows
 		std::array<GDX12LocalShadowTile, 6> Tiles;
 		uint64_t Generation;
 	};
+	struct PlacementRequest
+	{
+		UINT Index, Faces, Desired;
+		float Pixels;
+		std::pair<UINT, uint64_t> Key;
+		bool operator==(const PlacementRequest& other) const
+		{
+			return Index == other.Index && Faces == other.Faces && Desired == other.Desired &&
+			    Pixels == other.Pixels && Key == other.Key;
+		}
+	};
+	struct AtlasLayout
+	{
+		UINT Ceiling = 0, Side = 0, Pages = 0;
+		UINT Placed = 0, Downgraded = 0, Skipped = 0;
+		std::vector<PlacementRequest> Requests;
+		std::vector<Placement> Placements;
+		std::vector<UINT64> OccupiedTexels;
+	};
+	AtlasLayout _layout;
+	std::vector<PlacementRequest> _placementRequests;
 	std::map<std::pair<UINT, uint64_t>, Placement> _previousPlacement;
 	uint64_t _generation = 0;
 	GDX12DeviceResources& _resources;

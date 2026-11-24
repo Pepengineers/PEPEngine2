@@ -1028,22 +1028,15 @@ private:
 };
 }
 
-void SceneLocalShadows::Allocate(UINT slot, SceneLocalShadows& staticPass, UINT effectiveCeiling)
+void SceneLocalShadows::UpdateLayout(const Slot& frame, UINT effectiveCeiling)
 {
-	auto& frame = _slots.at(slot);
-	auto& statics = staticPass._slots.at(slot);
-	frame.Ready.Complete();
 	std::vector<UINT> tiers{0};
 	for (UINT side = 16; side < effectiveCeiling; side *= 2) tiers.push_back(side);
 	if (effectiveCeiling) tiers.push_back(effectiveCeiling);
 
-	struct Request
-	{
-		UINT Index, Faces, Desired;
-		float Pixels;
-		std::pair<UINT, uint64_t> Key;
-	};
-	std::vector<Request> requests;
+	auto& requests = _placementRequests;
+	requests.clear();
+	requests.reserve(frame.Cache.size());
 	for (UINT i = 0; i < frame.Cache.size(); ++i)
 	{
 		const auto& cache = frame.Cache[i];
@@ -1066,15 +1059,24 @@ void SceneLocalShadows::Allocate(UINT slot, SceneLocalShadows& staticPass, UINT 
 			desired = UINT(std::lower_bound(tiers.begin(), tiers.end(), previous) - tiers.begin());
 		requests.push_back({i, LocalShadowFaceCount(cache.Light), desired, cache.Needed ? cache.ScreenPixels : -1.f, key});
 	}
-	std::sort(requests.begin(), requests.end(), [](const Request& a, const Request& b)
+	const UINT pages = frame.Depth ? frame.Depth->Pages : 0;
+	const UINT pageSide = frame.Depth ? frame.Depth->Side : 0;
+	auto& layout = _layout;
+	if (layout.Ceiling == effectiveCeiling && layout.Side == pageSide && layout.Pages == pages &&
+	    layout.Placements.size() == frame.Cache.size() && layout.Requests == requests)
+		return;
+
+	layout.Ceiling = effectiveCeiling;
+	layout.Side = pageSide;
+	layout.Pages = pages;
+	layout.Requests = requests;
+	std::sort(requests.begin(), requests.end(), [](const PlacementRequest& a, const PlacementRequest& b)
 	{
 		return a.Pixels != b.Pixels ? a.Pixels > b.Pixels : a.Key < b.Key;
 	});
 
-	const UINT pages = frame.Depth ? frame.Depth->Pages : 0;
-	const UINT pageSide = frame.Depth ? frame.Depth->Side : 0;
 	UINT64 freeTexels = UINT64(pageSide) * pageSide * pages;
-	const auto area = [](const Request& request, UINT side) { return UINT64(side) * side * request.Faces; };
+	const auto area = [](const PlacementRequest& request, UINT side) { return UINT64(side) * side * request.Faces; };
 	const auto coverageCost = [&](UINT side)
 	{
 		UINT64 cost = 0;
@@ -1093,9 +1095,9 @@ void SceneLocalShadows::Allocate(UINT slot, SceneLocalShadows& staticPass, UINT 
 		pendingCoverage = coverageCost(coverageSide);
 	}
 	FreeShadowPages free(pageSide, pages);
-	frame.OccupiedTexels.assign(pages, 0);
-	frame.Placed = frame.Downgraded = frame.Skipped = 0;
-	std::vector<Placement> layout(frame.Cache.size());
+	layout.OccupiedTexels.assign(pages, 0);
+	layout.Placed = layout.Downgraded = layout.Skipped = 0;
+	layout.Placements.assign(frame.Cache.size(), {});
 	decltype(_previousPlacement) placements;
 	for (const auto& request : requests)
 	{
@@ -1103,7 +1105,7 @@ void SceneLocalShadows::Allocate(UINT slot, SceneLocalShadows& staticPass, UINT 
 		const bool needed = frame.Cache[request.Index].Needed != 0;
 		const UINT coverage = (std::min)(tiers[request.Desired], coverageSide);
 		if (needed) pendingCoverage -= area(request, coverage);
-		auto& placed = layout[request.Index];
+		auto& placed = layout.Placements[request.Index];
 		for (UINT tier = request.Desired; tier; --tier)
 		{
 			const UINT side = tiers[tier];
@@ -1144,26 +1146,37 @@ void SceneLocalShadows::Allocate(UINT slot, SceneLocalShadows& staticPass, UINT 
 				    ? previous->second.Generation : ++_generation;
 				placements.emplace(request.Key, placed);
 				for (UINT face = 0; face < request.Faces; ++face)
-					frame.OccupiedTexels[placed.Tiles[face].Page] += UINT64(side) * side;
+					layout.OccupiedTexels[placed.Tiles[face].Page] += UINT64(side) * side;
 				if (needed)
 				{
-					++frame.Placed;
-					if (tier != request.Desired) ++frame.Downgraded;
+					++layout.Placed;
+					if (tier != request.Desired) ++layout.Downgraded;
 				}
 				break;
 			}
 			if (!needed) break;
 		}
-		if (needed && !placed.Resolution) ++frame.Skipped;
+		if (needed && !placed.Resolution) ++layout.Skipped;
 	}
 	_previousPlacement.swap(placements);
+}
 
+void SceneLocalShadows::Allocate(UINT slot, SceneLocalShadows& staticPass, UINT effectiveCeiling)
+{
+	auto& frame = _slots.at(slot);
+	auto& statics = staticPass._slots.at(slot);
+	frame.Ready.Complete();
+	UpdateLayout(frame, effectiveCeiling);
+	frame.OccupiedTexels = _layout.OccupiedTexels;
+	frame.Placed = _layout.Placed;
+	frame.Downgraded = _layout.Downgraded;
+	frame.Skipped = _layout.Skipped;
 	for (UINT i = 0; i < frame.Cache.size(); ++i)
 	{
 		for (auto* pass : {&frame, &statics})
 		{
 			auto& cache = pass->Cache[i];
-			const auto& placed = layout[i];
+			const auto& placed = _layout.Placements[i];
 			if (cache.Tiles != placed.Tiles)
 			{
 				for (UINT face = 0; face < cache.Tiles.size(); ++face)
@@ -1298,6 +1311,7 @@ UINT64 SceneLocalShadows::ShadowTexels(UINT slot) const
 
 void SceneLocalShadows::ResetLayout()
 {
+	_layout = {};
 	_previousPlacement.clear();
 	for (auto& frame : _slots)
 	{

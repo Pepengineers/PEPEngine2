@@ -38,7 +38,7 @@ class Executor
 	uint64_t Execute(const Schedule&, const std::vector<ID3D12Resource*>&, const Record&,
 	                 GDX12CommandList* prefix = nullptr, GDX12CommandList* suffix = nullptr,
 	                 const std::atomic<bool>* cancellation = nullptr, const std::vector<PacketWait>& waits = {},
-	                 const std::vector<PacketExchange>& exchanges = {});
+	                 const std::vector<PacketExchange>& exchanges = {}, Id signalAfter = Invalid);
 	void Drain();
 	const auto& ExchangeCompletions() const { return _exchangeCompletions; }
 	// Each value belongs to the queue selected by its packet, not one timeline.
