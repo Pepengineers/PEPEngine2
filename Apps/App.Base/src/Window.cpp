@@ -9,7 +9,7 @@ bool Window::Initialize()
 {
     // Compute window rectangle dimensions based on requested client area dimensions.
     RECT WindowRect = {0, 0, WindowWidth, WindowHeight};
-    AdjustWindowRect(&WindowRect, WS_OVERLAPPEDWINDOW, false);
+    AdjustWindowRectExForDpi(&WindowRect, WS_OVERLAPPEDWINDOW, false, 0, GetDpiForSystem());
     int Width = WindowRect.right - WindowRect.left;
     int Height = WindowRect.bottom - WindowRect.top;
 
@@ -31,6 +31,7 @@ bool Window::Initialize()
         return false;
     }
 
+    SetWindowSize(WindowWidth, WindowHeight);
     ShowWindow(MainWndHandle, SW_SHOW);
     UpdateWindow(MainWndHandle);
 
@@ -48,7 +49,7 @@ void Window::SetWindowSize(uint16_t width, uint16_t height)
     }
 
     RECT WindowRect = {0, 0, WindowWidth, WindowHeight};
-    AdjustWindowRect(&WindowRect, WS_OVERLAPPEDWINDOW, false);
+    AdjustWindowRectExForDpi(&WindowRect, WS_OVERLAPPEDWINDOW, false, 0, GetDpiForWindow(MainWndHandle));
     int Width = WindowRect.right - WindowRect.left;
     int Height = WindowRect.bottom - WindowRect.top;
 
@@ -79,7 +80,9 @@ HWND Window::GetWindowHandle() const
 
 float Window::GetAspectRatio() const
 {
-    return WindowHeight == 0 ? 0.0f : static_cast<float>(WindowWidth) / WindowHeight;
+    uint16_t width, height;
+    GetWindowSize(width, height);
+    return height == 0 ? 0.0f : static_cast<float>(width) / height;
 }
 
 const std::wstring& Window::GetWindowTitle() const

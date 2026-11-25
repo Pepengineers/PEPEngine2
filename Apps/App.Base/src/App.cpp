@@ -166,18 +166,22 @@ LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         }
         return 0;
 
+    case WM_DPICHANGED:
+        {
+            const auto* rect = reinterpret_cast<const RECT*>(lParam);
+            SetWindowPos(hwnd, nullptr, rect->left, rect->top,
+                rect->right - rect->left, rect->bottom - rect->top,
+                SWP_NOZORDER | SWP_NOACTIVATE);
+            return 0;
+        }
+
     // WM_SIZE is sent when the user resizes the window.
     case WM_SIZE:
         {
-            // Save the new client area dimensions.
             if (_window == nullptr)
             {
                 return 0;
             }
-
-            auto newWindowWidth = LOWORD(lParam);
-            auto newWindowHeight = HIWORD(lParam);
-            _window->SetWindowSize(newWindowWidth, newWindowHeight);
 
             if (wParam == SIZE_MINIMIZED)
             {

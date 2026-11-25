@@ -10,6 +10,7 @@ public:
 
     bool Initialize();
 
+    // Sets the client area size in physical pixels.
     void SetWindowSize(uint16_t width, uint16_t height);
     void GetWindowSize(uint16_t& width, uint16_t& height) const;
 
