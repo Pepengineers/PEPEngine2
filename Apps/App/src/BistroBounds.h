@@ -87,7 +87,7 @@ namespace BistroBounds
             {
                 BoundingBox bounds;
                 local.Transform(bounds, WorldMatrix(ecs.Get<TransformComponent>(entity)));
-                auto box = std::make_unique<Box>(ecs.Get<NameComponent>(entity).value, bounds, color, 0, true);
+                auto box = std::make_unique<Box>(ecs.Get<NameComponent>(entity).value, bounds, color, 0.0f, true);
                 box->Follow(local, WorldMatrix(ecs.Get<TransformComponent>(entity)));
                 _tracked.emplace_back(entity, box.get());
                 _boxes.push_back(std::move(box));

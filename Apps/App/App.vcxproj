@@ -90,7 +90,9 @@
     <ClInclude Include="src\Techniques\Grass\SceneGrass.h" />
     <ClCompile Include="src\Techniques\Grass\GDX12GrassWind.cpp" />
     <ClCompile Include="src\Techniques\Grass\BistroGrassGeometry.cpp" />
-    <ClCompile Include="src\BistroApplication.cpp" />
+    <ClCompile Include="src\BistroApplication.cpp">
+      <AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
     <ClCompile Include="src\Graph\RenderGraphCompiler.cpp" />
     <ClCompile Include="src\Graph\RenderGraphExecutor.cpp" />
     <ClCompile Include="src\Graph\QueueSubmission.cpp" />
