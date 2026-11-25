@@ -221,11 +221,8 @@ public:
 
     struct CompletedPass
     {
-        std::string Name;
         std::filesystem::path Path;
         BistroBenchmarkData::RunMode Mode;
-        BistroBenchmarkData::Stats Timing;
-        std::vector<BistroBenchmarkData::Frame> Frames;
     };
     BistroBenchmarkData::RunMode CurrentMode() const { return _runMode; }
     static size_t ResultSlot(BistroBenchmarkData::RunMode mode, BistroPlacement::Profile profile)
@@ -244,7 +241,7 @@ public:
 
     size_t LatestResultSlot() const { return _latestResultSlot; }
     const CompletedPass& LastPass(size_t slot) const { return _lastPasses.at(slot); }
-    const auto& PlacementPresets(size_t slot) const { return _placementPresets.at(slot); }
+    const auto& ReportPath() const { return _path; }
     const std::string& Message() const { return _message; }
     double FlightTime() const { return _active ? Duration() : FlightSeconds.GetValue(); }
     double BaseWarmup() const { return _active ? _warmup : WarmupSeconds.GetValue(); }
@@ -1532,7 +1529,7 @@ private:
         BeginNextPlacementPhase(world, console, pipeline);
     }
 
-    void Start(World& world, ConsoleModule& console, const RenderModule& render, BistroRenderPipeline& pipeline,
+    void Start(World& world, ConsoleModule& console, RenderModule& render, BistroRenderPipeline& pipeline,
         ::Window& window, Action action)
     {
         _multiGPU = action == Action::MultiGPU || action == Action::PlacementRun;
@@ -1589,6 +1586,11 @@ private:
         _path = directory / ("bistro-" + id + ".csv");
         _csv.Open(_path);
         _csv.Config("RunId", id);
+        for (const auto& [name, value] : RenderConfig(console))
+            if (name.rfind(L"Render.", 0) == 0 || name.rfind(L"App.UI.", 0) == 0)
+                _csv.Config("Before." + std::filesystem::path(name).u8string(), value);
+        for (const auto& [name, value] : EffectiveConfig(render))
+            _csv.Config("Before." + name, value);
 #if defined(_DEBUG) || defined(DEBUG)
         _csv.Config("Build", "Debug");
 #else
@@ -1749,8 +1751,7 @@ private:
         if (std::string_view(status) == "completed" && timing.Count)
         {
             _latestResultSlot = ResultSlot(_runMode, _placementProfile);
-            _lastPasses[_latestResultSlot] = {StageName(),
-                _path.parent_path() / std::filesystem::u8path(pass), _runMode, timing, _frames};
+            _lastPasses[_latestResultSlot] = {_path.parent_path() / std::filesystem::u8path(pass), _runMode};
         }
         if (_stage == Stage::Placement) _trialLastPass = std::move(pass);
     }
@@ -2358,7 +2359,7 @@ private:
                 WriteLeg(status);
                 if (_trialPending) WritePlacementTrialReport(status);
                 if (!_manualPlacement)
-                    _placementPresets[ResultSlot(_runMode, _placementProfile)] = _placementSearch.Report(_csv, status, console, _path);
+                    _placementSearch.Report(_csv, status, console, _path);
                 _csv.Config("StopReason", status);
                 _csv.Config("ElapsedSeconds", Csv::Number(SecondsSince(_started)));
             }
@@ -2585,7 +2586,6 @@ private:
     BistroBenchmarkData::RunMode _runMode = BistroBenchmarkData::RunMode::Manual;
     size_t _latestResultSlot = 0;
     std::array<CompletedPass, 6> _lastPasses{};
-    std::array<std::array<BistroPlacement::Preset, 2>, 6> _placementPresets{};
     double _warmup = 3;
     float _paintingHold = 5;
     bool _multiGPU = false;

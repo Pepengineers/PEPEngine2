@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <filesystem>
 #include <map>
 #include <string>
@@ -13,20 +14,30 @@ class BistroComparePanel
     void UpdateHistory(const std::filesystem::path& latestCompleted, bool force = false);
     bool LatestQuality(const char* mode) const;
     bool LatestSingleGpuIsAsync() const;
-    void DrawLatest(const char* mode, const char* profile, bool fps);
+    void DrawLatest(const char* mode, const char* profile, bool fps, bool canApply,
+        std::filesystem::path& pendingPreset, std::pair<uint16_t, uint16_t>& pendingSize);
     void Draw(const std::filesystem::path& latestCompleted);
 
   private:
     struct Pass
     {
         std::filesystem::path Path;
-        std::string Label;
+        std::string Label, Mask;
+        bool FullRoute;
+    };
+    using Values = std::map<std::string, std::string>;
+    struct Winner
+    {
+        Values Fields, Settings;
+        int RunIndex = -1, PassIndex = -1;
     };
     struct Run
     {
         std::filesystem::path Path;
         std::string Label, Mode, Profile;
-        std::map<std::string, std::string> Settings;
+        Values Settings, Before, TrialPasses, MaskBits;
+        std::array<Winner, 2> Winners;
+        std::string SelectedMask;
         std::vector<Pass> Passes;
     };
     struct Selection
@@ -45,9 +56,10 @@ class BistroComparePanel
         double Fps = 0, P95 = 0, MaxMs = 0, MaxFps = 0;
     };
     void Refresh();
+    bool _upscaled = false;
     void Select(Selection &, int run, int pass);
     void DrawSelection(Selection &, const char *label);
-    static void DrawPlot(const Selection* series, size_t count, bool fps);
+    static void DrawPlot(const Selection* series, size_t count, bool fps, double target = 0);
     using Filter = std::pair<std::string, std::string>;
     struct Entry
     {

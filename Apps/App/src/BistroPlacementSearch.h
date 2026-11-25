@@ -132,12 +132,6 @@ struct Trial
     bool Full = false;
 };
 
-struct Preset
-{
-    std::filesystem::path Path;
-    Size Output{};
-};
-
 class Search
 {
 public:
@@ -591,10 +585,9 @@ public:
         }
     }
 
-    std::array<Preset, 2> Report(BistroBenchmarkData::Csv& csv, std::string_view reason,
+    void Report(BistroBenchmarkData::Csv& csv, std::string_view reason,
         ConsoleModule& console, const std::filesystem::path& output) const
     {
-        std::array<Preset, 2> presets;
         for (bool upscaled : {false, true})
         {
             const auto prefix = std::string(upscaled ? "Upscaled." : "Native.") + ProfileName[_profile] + ".";
@@ -606,6 +599,7 @@ public:
             {
                 auto path = output.parent_path() / (output.stem().wstring() + (upscaled ? L"-upscaled.ini" : L"-native.ini"));
                 auto patch = Patch(best->Settings);
+                const auto extraBegin = patch.size();
                 for (const auto* name : {L"Render.ReflectionProbes.Seed", L"Render.ReflectionProbes.Reset",
                     L"Render.Shadows.Local.AtlasCount"})
                     patch.emplace_back(name, console.FindConsoleVariable(name).GetString());
@@ -614,7 +608,8 @@ public:
                 if (saved.Error.empty())
                 {
                     csv.Config(prefix + "PresetFile", path.filename().u8string());
-                    presets[upscaled] = {std::move(path), best->Output};
+                    for (size_t i = extraBegin; i < patch.size(); ++i)
+                        csv.Config(prefix + "Preset." + std::filesystem::path(patch[i].first).u8string(), patch[i].second);
                 }
                 else csv.Config(prefix + "PresetError", saved.Error);
             }
@@ -657,7 +652,6 @@ public:
             csv.Config(prefix + "RejectedProbes", std::to_string(_rejected[upscaled]));
             csv.Config(prefix + "StopReason", reason);
         }
-        return presets;
     }
 
     bool Upscaled() const { return (_phase & 1u) != 0; }

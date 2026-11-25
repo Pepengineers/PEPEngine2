@@ -1,10 +1,8 @@
 #include "BistroInfoPanel.h"
-#include "BistroPlot.h"
 #include "BistroBenchmark.h"
 #include "Engine.Core/BenchmarkEngine.h"
 #include "Engine.UI/UI_test.h"
 #include <imgui/imgui.h>
-#include <shellapi.h>
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
@@ -213,11 +211,11 @@ void BistroInfoPanel::DrawResult(const BistroBenchmark& benchmark, RunMode tab)
 {
     const auto latestSlot = benchmark.LatestResultSlot();
     const auto& latest = benchmark.LastPass(latestSlot);
+    _compare.UpdateHistory(benchmark.Active() ? latest.Path : benchmark.ReportPath());
     const bool changedTab = !_resultTab || *_resultTab != tab;
     _resultTab = tab;
     if (changedTab)
     {
-        _compare.UpdateHistory(latest.Path);
         _selectedMode = tab == RunMode::SingleGPU && _compare.LatestSingleGpuIsAsync() ? RunMode::Async : tab;
         _quality = _compare.LatestQuality(ModeName(tab));
     }
@@ -228,7 +226,7 @@ void BistroInfoPanel::DrawResult(const BistroBenchmark& benchmark, RunMode tab)
         if (latest.Mode == RunMode::SingleGPU || latest.Mode == RunMode::MultiGPU)
             _quality = latestSlot == BistroBenchmark::ResultSlot(latest.Mode, BistroPlacement::Quality);
     }
-    Heading("Last completed pass");
+    Heading("Benchmark results");
     constexpr std::array modes{RunMode::Manual, RunMode::Async, RunMode::SingleGPU, RunMode::MultiGPU};
     for (auto mode : modes)
     {
@@ -237,7 +235,6 @@ void BistroInfoPanel::DrawResult(const BistroBenchmark& benchmark, RunMode tab)
         if (ImGui::RadioButton(ModeName(mode), mode == _selectedMode) && mode != _selectedMode)
         {
             _selectedMode = mode;
-            _compare.UpdateHistory(latest.Path);
             _quality = _compare.LatestQuality(ModeName(mode));
         }
         ImGui::PopStyleColor();
@@ -254,116 +251,10 @@ void BistroInfoPanel::DrawResult(const BistroBenchmark& benchmark, RunMode tab)
     if (ImGui::RadioButton("FPS", _plotFps)) _plotFps = true;
 
     const auto profile = _quality ? BistroPlacement::Quality : BistroPlacement::Performance;
-    const auto slot = BistroBenchmark::ResultSlot(_selectedMode, profile);
-    const auto& pass = benchmark.LastPass(slot);
-    if (_selectedMode == RunMode::SingleGPU || _selectedMode == RunMode::MultiGPU)
-    {
-        const auto& presets = benchmark.PlacementPresets(slot);
-        ImGui::BeginDisabled(!benchmark.CanStart());
-        for (size_t i = 0; i < presets.size(); ++i)
-        {
-            const auto& preset = presets[i];
-            if (preset.Path.empty()) continue;
-            if (ImGui::SmallButton(i ? "Apply upscaled preset" : "Apply native preset"))
-            {
-                _pendingPreset = preset.Path;
-                _pendingSize = {uint16_t(preset.Output.first), uint16_t(preset.Output.second)};
-            }
-        }
-        ImGui::EndDisabled();
-        if (!_displayError.empty()) ImGui::TextWrapped("%s", _displayError.c_str());
-    }
-    if (pass.Frames.empty())
-    {
-        _compare.UpdateHistory(latest.Path);
-        const bool profiled = _selectedMode == RunMode::SingleGPU || _selectedMode == RunMode::MultiGPU;
-        _compare.DrawLatest(ModeName(_selectedMode), profiled ? BistroPlacement::ProfileName[profile] : "", _plotFps);
-        return;
-    }
-    auto& series = _series[slot];
-    ImGui::Text("%s    %.1f FPS avg    %.1f ms avg    %.1f ms P95", pass.Name.c_str(),
-        pass.Timing.Mean > 0 ? 1000 / pass.Timing.Mean : 0, pass.Timing.Mean, pass.Timing.P95);
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Open CSV"))
-        _csvError = reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", pass.Path.c_str(), nullptr, nullptr, SW_SHOWNORMAL)) <= 32
-            ? "Could not open the pass CSV." : "";
-    const float startTime = float(pass.Frames.front().RouteSeconds);
-    const float duration = std::max(.001f, float(pass.Frames.back().RouteSeconds) - startTime);
-    if (series.Path != pass.Path)
-    {
-        series = {};
-        series.Path = pass.Path;
-        // Keep both extrema per time bin, in arrival order, so brief stalls remain visible.
-        const double start = pass.Frames.front().RouteSeconds;
-        const double span = std::max(.001, pass.Frames.back().RouteSeconds - start);
-        size_t first = 0;
-        while (first < pass.Frames.size())
-        {
-            const int bin = int((pass.Frames[first].RouteSeconds - start) * 512 / span);
-            size_t low = first, high = first, i = first + 1;
-            for (; i < pass.Frames.size() && int((pass.Frames[i].RouteSeconds - start) * 512 / span) == bin; ++i)
-            {
-                if (pass.Frames[i].IntervalMs < pass.Frames[low].IntervalMs) low = i;
-                if (pass.Frames[i].IntervalMs > pass.Frames[high].IntervalMs) high = i;
-            }
-            const auto point = [&](size_t k) {
-                const float ms = float(pass.Frames[k].IntervalMs);
-                series.Points.emplace_back(float(pass.Frames[k].RouteSeconds), ms);
-                series.MaxMs = std::max(series.MaxMs, ms);
-                if (ms > 0) series.MaxFps = std::max(series.MaxFps, 1000.f / ms);
-            };
-            point(std::min(low, high));
-            if (low != high) point(std::max(low, high));
-            first = i;
-        }
-    }
-    const float maxValue = std::max(1.f, _plotFps ? series.MaxFps : series.MaxMs);
-    if (!_csvError.empty()) ImGui::TextUnformatted(_csvError.c_str());
-    const auto origin = ImGui::GetCursorScreenPos();
-    const float width = std::max(1.f, ImGui::GetContentRegionAvail().x - 68.f);
-    const float height = std::clamp(ImGui::GetContentRegionAvail().y - 30.f, 85.f, 175.f);
-    const ImVec2 top{origin.x + 44, origin.y + 5};
-    auto* draw = ImGui::GetWindowDrawList();
-    const auto value = [&](float ms) { return _plotFps ? (ms > 0 ? 1000.f / ms : 0.f) : ms; };
-    for (int i = 0; i <= 4; ++i)
-    {
-        const float fraction = i * .25f;
-        const float y = top.y + height * (1 - fraction);
-        const float x = top.x + width * fraction;
-        char label[32];
-        std::snprintf(label, sizeof(label), "%.0f", maxValue * fraction);
-        draw->AddText({origin.x, y - 5}, ImGui::GetColorU32(ImGuiCol_TextDisabled), label);
-        draw->AddLine({top.x, y}, {top.x + width, y}, ImGui::GetColorU32(ImGuiCol_Border));
-        std::snprintf(label, sizeof(label), "%.1fs", startTime + duration * fraction);
-        draw->AddText({x - ImGui::CalcTextSize(label).x / 2, top.y + height + 3}, ImGui::GetColorU32(ImGuiCol_TextDisabled), label);
-    }
-    ImVec2 previous{};
-    bool first = true;
-    for (const auto& point : series.Points)
-    {
-        const ImVec2 pos{top.x + width * (point.first - startTime) / duration, top.y + height * (1 - value(point.second) / maxValue)};
-        if (!first) draw->AddLine(previous, pos, ImGui::GetColorU32(TraceColor(_selectedMode)), 1.5f);
-        previous = pos;
-        first = false;
-    }
-    ImGui::SetCursorScreenPos(top);
-    ImGui::InvisibleButton("##pass cursor", {width, height});
-    if (ImGui::IsItemHovered())
-    {
-        const float x = std::clamp(ImGui::GetMousePos().x, top.x, top.x + width);
-        const double time = startTime + (x - top.x) / width * duration;
-        const size_t index = BistroPlot::NearestFrame(pass.Frames, time);
-        const auto& frame = pass.Frames[index];
-        const ImVec2 pos{top.x + width * (float(frame.RouteSeconds) - startTime) / duration,
-            top.y + height * (1 - value(float(frame.IntervalMs)) / maxValue)};
-        draw->AddLine({x, top.y}, {x, top.y + height}, ImGui::GetColorU32(ImGuiCol_TextDisabled));
-        draw->AddCircleFilled(pos, 4, ImGui::GetColorU32(TraceColor(_selectedMode)));
-        ImGui::BeginTooltip();
-        BistroPlot::DrawFrameDetails(index + 1, frame.RouteSeconds, BistroBenchmark::SectionName(frame.Section),
-                                     frame.Milliseconds, frame.IntervalMs);
-        ImGui::EndTooltip();
-    }
-    ImGui::Dummy({0, 20});
+    const bool profiled = _selectedMode == RunMode::SingleGPU || _selectedMode == RunMode::MultiGPU;
+    _compare.DrawLatest(ModeName(_selectedMode), profiled ? BistroPlacement::ProfileName[profile] : "", _plotFps,
+        benchmark.CanStart(), _pendingPreset, _pendingSize);
+    if (!_displayError.empty()) ImGui::TextWrapped("%s", _displayError.c_str());
 }
 void BistroInfoPanel::Draw(RenderModule& render, BistroRenderPipeline& pipeline,
     BistroBenchmark& benchmark, float frameSeconds)
@@ -485,7 +376,7 @@ void BistroInfoPanel::Draw(RenderModule& render, BistroRenderPipeline& pipeline,
                 if (ImGui::BeginTabItem("Compare"))
                 {
                     comparing = true;
-                    _compare.Draw(benchmark.LastPass(benchmark.LatestResultSlot()).Path);
+                    _compare.Draw(benchmark.Active() ? benchmark.LastPass(benchmark.LatestResultSlot()).Path : benchmark.ReportPath());
                     ImGui::EndTabItem();
                 }
                 ImGui::EndTabBar();

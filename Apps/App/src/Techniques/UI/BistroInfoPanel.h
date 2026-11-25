@@ -46,18 +46,11 @@ private:
     std::vector<std::string> _peers;
     std::pair<uint16_t, uint16_t> _pendingSize{};
     std::filesystem::path _pendingPreset;
-    struct Series
-    {
-        std::filesystem::path Path;
-        std::vector<std::pair<float, float>> Points;
-        float MaxMs = 0, MaxFps = 0;
-    };
-    std::array<Series, 6> _series;
     BistroBenchmarkData::RunMode _selectedMode{};
     std::filesystem::path _latestResult;
     std::optional<BistroBenchmarkData::RunMode> _resultTab;
     bool _quality = false;
-    std::string _displayError, _csvError;
+    std::string _displayError;
     bool _plotFps = false;
     std::string _primary;
     bool _compact = false, _hidden = false, _checkPlacement = true;
