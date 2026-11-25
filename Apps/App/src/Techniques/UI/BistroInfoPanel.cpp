@@ -49,10 +49,18 @@ void EnumSelector(const char* label, IConsoleVariable& setting, std::string& err
 
 void ProfileButtons(BistroBenchmark& benchmark, Action action)
 {
-    Heading("Profile search");
-    if (ImGui::Button("Performance", {-1, 30})) benchmark.Launch(action, BistroPlacement::Performance);
-    if (ImGui::Button("Quality", {-1, 30})) benchmark.Launch(action, BistroPlacement::Quality);
+    const float width = std::min(10.f * ImGui::GetFontSize(), ImGui::GetContentRegionAvail().x);
+    if (ImGui::Button("Performance", {width, 0})) benchmark.Launch(action, BistroPlacement::Performance);
+    if (ImGui::GetContentRegionAvail().x >= 2 * width + ImGui::GetStyle().ItemSpacing.x) ImGui::SameLine();
+    if (ImGui::Button("Quality", {width, 0})) benchmark.Launch(action, BistroPlacement::Quality);
 }
+}
+
+void BistroInfoPanel::InitializeFont()
+{
+    auto* atlas = ImGui::GetIO().Fonts;
+    if (atlas->Fonts.empty()) atlas->AddFontDefault();
+    _fullFont = atlas->AddFontDefaultVector();
 }
 
 void BistroInfoPanel::RefreshPlacement(const BistroRenderPipeline& pipeline)
@@ -168,7 +176,8 @@ void BistroInfoPanel::DrawCurrentSettings(RenderModule& render)
     auto& provider = console->FindConsoleVariable(L"Render.Upscaler.Provider");
     auto& quality = console->FindConsoleVariable(L"Render.Upscaler.Quality");
     const auto dimensions = [](unsigned w, unsigned h) { return std::to_string(w) + " x " + std::to_string(h); };
-    if (ImGui::BeginTable("Output settings", 3, ImGuiTableFlags_SizingStretchSame))
+    const float width = std::min(ImGui::GetContentRegionAvail().x, 54.f * ImGui::GetFontSize());
+    if (ImGui::BeginTable("Output settings", 3, ImGuiTableFlags_SizingStretchSame, {width, 0}))
     {
         ImGui::TableNextColumn();
         ImGui::TextDisabled("Output resolution");
@@ -292,11 +301,20 @@ void BistroInfoPanel::Draw(RenderModule& render, BistroRenderPipeline& pipeline,
     }
     else
     {
+        // Size the type for the available viewport. Whole two-pixel steps reuse baked glyphs on resize.
+        const float size = std::min(vp->Size.x / 120.f, vp->Size.y / 64.f);
+        ImGui::PushFont(_fullFont, std::clamp(2.f * std::round(size * .5f), 14.f, 48.f));
+        const float em = ImGui::GetFontSize();
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, { .5f * em, .28f * em });
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, { .6f * em, .28f * em });
+        ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, { .4f * em, .16f * em });
+        ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarSize, .95f * em);
         ImGui::SetNextWindowPos(vp->GetCenter(), ImGuiCond_Always, {.5f,.5f});
         ImGui::SetNextWindowSize({vp->Size.x * .9f, vp->Size.y * .9f}, ImGuiCond_Always);
     }
     ImGui::SetNextWindowViewport(vp->ID);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {14,12});
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, compact ? ImVec2{14,12} :
+        ImVec2{ImGui::GetFontSize(), .8f * ImGui::GetFontSize()});
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 6.f);
     ImGui::PushStyleColor(ImGuiCol_WindowBg, {.055f,.073f,.09f,.97f});
     if (ImGui::Begin("##BistroBenchmark", nullptr, ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoTitleBar |
@@ -324,7 +342,7 @@ void BistroInfoPanel::Draw(RenderModule& render, BistroRenderPipeline& pipeline,
                 {
                     ImGui::BeginDisabled(!benchmark.CanStart());
                     DrawCurrentSettings(render);
-                    if (ImGui::Button("Run one pass", {160,32})) benchmark.Launch(Action::PlacementRun);
+                    if (ImGui::Button("Run one pass", {10.f * ImGui::GetFontSize(), 0})) benchmark.Launch(Action::PlacementRun);
                     ImGui::EndDisabled();
                     ImGui::SameLine();
                     ImGui::TextDisabled("Route %.0f s   /   Warmup %g s   /   At each painting %g s", benchmark.FlightTime(), benchmark.BaseWarmup(), benchmark.PaintingHold());
@@ -337,14 +355,17 @@ void BistroInfoPanel::Draw(RenderModule& render, BistroRenderPipeline& pipeline,
                     tab = RunMode::SingleGPU;
                     ImGui::Text("Scene GPU   %s", _primary.c_str());
                     ImGui::BeginDisabled(!benchmark.CanStart());
-                    if (ImGui::BeginTable("Single GPU actions", 2, ImGuiTableFlags_SizingStretchSame))
+                    const float width = std::min(ImGui::GetContentRegionAvail().x, 46.f * ImGui::GetFontSize());
+                    if (ImGui::BeginTable("Single GPU actions", 2, ImGuiTableFlags_SizingStretchSame, {width, 0}))
                     {
                         ImGui::TableNextColumn();
                         Heading("Queue placement");
-                        if (ImGui::Button("Quick search", {-1,30})) benchmark.Launch(Action::Search);
-                        if (ImGui::Button("Full sweep", {-1,30})) benchmark.Launch(Action::Exhaustive);
+                        const float buttonWidth = std::min(10.f * ImGui::GetFontSize(), ImGui::GetContentRegionAvail().x);
+                        if (ImGui::Button("Quick search", {buttonWidth, 0})) benchmark.Launch(Action::Search);
+                        if (ImGui::GetContentRegionAvail().x >= 2 * buttonWidth + ImGui::GetStyle().ItemSpacing.x) ImGui::SameLine();
+                        if (ImGui::Button("Full sweep", {buttonWidth, 0})) benchmark.Launch(Action::Exhaustive);
                         ImGui::TableNextColumn();
-                        ImGui::TextDisabled("Profile search   %g min", BistroBenchmark::PlacementBudgetSeconds.GetValue() / 60.f);
+                        ImGui::TextColored(Accent, "Profile search   %g min", BistroBenchmark::PlacementBudgetSeconds.GetValue() / 60.f);
                         ProfileButtons(benchmark, Action::SingleGPU);
                         ImGui::EndTable();
                     }
@@ -382,4 +403,9 @@ void BistroInfoPanel::Draw(RenderModule& render, BistroRenderPipeline& pipeline,
     ImGui::End();
     ImGui::PopStyleColor();
     ImGui::PopStyleVar(2);
+    if (!compact)
+    {
+        ImGui::PopStyleVar(4);
+        ImGui::PopFont();
+    }
 }

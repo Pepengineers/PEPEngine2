@@ -15,11 +15,13 @@ class BistroBenchmark;
 class BistroRenderPipeline;
 class RenderModule;
 class Window;
+struct ImFont;
 namespace BistroBenchmarkData { enum class RunMode; }
 
 class BistroInfoPanel
 {
 public:
+    void InitializeFont();
     void Hide() { _hidden = true; _count = _next = 0; _frames = 0; _elapsed = _displayFps = 0; }
     void Show(bool compact = false) { _hidden = false; _compact = compact; _checkPlacement = true; }
     void Toggle(bool compact)
@@ -39,6 +41,7 @@ private:
     void DrawLivePlot() const;
 
     BistroComparePanel _compare;
+    ImFont* _fullFont = nullptr;
     std::vector<Placement> _placement;
     std::map<std::pair<std::string, std::string>, std::string> _groups;
     std::vector<std::string> _peers;

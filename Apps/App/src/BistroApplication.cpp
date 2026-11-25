@@ -214,6 +214,7 @@ class BistroApplication final : public App
 		BistroParticles::Update(world);
 		InitializeCamera(world);
 		_benchmark.Initialize(world, _bistroCharacters, *_bistroPipeline);
+		_info.InitializeFont();
 		Engine::UI::EnableApplicationUIInput();
 		Engine::UI::HideSettings();
 		Engine::UI::SetDebugReconstructionStatusVisible(false);

@@ -143,7 +143,9 @@ void DrawSettings(const Settings& values, const Settings& before, const char* ti
     const auto custom = std::to_string(int(BistroRender::CloudPictureQuality::Custom));
     const auto table = [&](bool changes)
     {
-        if (!ImGui::BeginTable(changes ? "Changes" : "Settings", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable)) return;
+        const float width = std::min(ImGui::GetContentRegionAvail().x, 80.f * ImGui::GetFontSize());
+        if (!ImGui::BeginTable(changes ? "Changes" : "Settings", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable,
+            {width, 0})) return;
         ImGui::TableSetupColumn("Setting", ImGuiTableColumnFlags_WidthStretch, 2);
         ImGui::TableSetupColumn("Before run");
         ImGui::TableSetupColumn("Selected");
@@ -578,25 +580,34 @@ void BistroComparePanel::DrawPlot(const Selection* series, size_t count, bool fp
                            a.Mode == b.Mode ? "  (dashed)" : "");
     }
     const ImVec2 origin = ImGui::GetCursorScreenPos();
-    const float width = std::max(1.f, ImGui::GetContentRegionAvail().x - 66);
-    const float height = count == 2 ? 215.f : std::clamp(ImGui::GetContentRegionAvail().y - 30.f, 85.f, 175.f);
-    const ImVec2 top{origin.x + 40, origin.y + 10};
+    const float em = ImGui::GetFontSize();
+    const ImVec2 available = ImGui::GetContentRegionAvail();
+    const float yLabelWidth = ImGui::CalcTextSize(format(peak, "%.1f").c_str()).x;
+    const float timeLabelWidth = ImGui::CalcTextSize(format(end, "%.1fs").c_str()).x;
+    const float left = std::max(yLabelWidth + .75f * em, .5f * timeLabelWidth);
+    const float width = std::max(1.f, available.x - left - .5f * timeLabelWidth);
+    const float height = std::clamp(available.y * .45f, 7.f * em, (count == 2 ? 18.f : 16.f) * em);
+    const ImVec2 top{origin.x + left, origin.y + .6f * em};
+    const float stroke = std::max(1.f, .12f * em);
+    const float dashLength = std::round(.5f * em);
+    const float dashPeriod = dashLength + std::max(1.f, std::round(.3f * em));
     auto *draw = ImGui::GetWindowDrawList();
     const auto muted = ImGui::GetColorU32(ImGuiCol_TextDisabled);
     for (int i = 0; i <= 4; ++i)
     {
         const float f = i * .25f, y = top.y + height * (1 - f);
         draw->AddLine({top.x, y}, {top.x + width, y}, ImGui::GetColorU32(ImGuiCol_Border));
-        draw->AddText({origin.x, y - 7}, muted, format(peak * f, "%.1f").c_str());
+        draw->AddText({origin.x, y - .5f * em}, muted, format(peak * f, "%.1f").c_str());
         const auto tick = format(begin + f * span, "%.1fs");
-        draw->AddText({top.x + width * f - ImGui::CalcTextSize(tick.c_str()).x / 2, top.y + height + 4}, muted,
-                      tick.c_str());
+        if ((i == 0 || i == 4) || width >= 4.f * (timeLabelWidth + .5f * em))
+            draw->AddText({top.x + width * f - ImGui::CalcTextSize(tick.c_str()).x / 2, top.y + height + .25f * em},
+                          muted, tick.c_str());
     }
     if (target > 0)
     {
         const float y = top.y + height * float(1 - (fps ? target : 1000. / target) / peak);
-        for (float x = 0; x < width; x += 10)
-            draw->AddLine({top.x + x, y}, {top.x + std::min(x + 6, width), y}, muted);
+        for (float x = 0; x < width; x += dashPeriod)
+            draw->AddLine({top.x + x, y}, {top.x + std::min(x + dashLength, width), y}, muted, stroke);
     }
     const auto point = [&](const Selection::Sample &sample) {
         const double value = fps ? 1000 / sample.IntervalMs : sample.IntervalMs;
@@ -608,7 +619,7 @@ void BistroComparePanel::DrawPlot(const Selection* series, size_t count, bool fp
         const auto& s = series[iSeries];
         const auto color = Color(s.Mode);
         ImVec2 previous = point(s.Samples[s.Trace.front()]);
-        draw->AddCircleFilled(previous, 2, color);
+        draw->AddCircleFilled(previous, .15f * em, color);
         float phase = 0;
         for (size_t i = 1; i < s.Trace.size(); ++i)
         {
@@ -618,17 +629,17 @@ void BistroComparePanel::DrawPlot(const Selection* series, size_t count, bool fp
                 const float dx = p.x - previous.x, dy = p.y - previous.y, length = std::hypot(dx, dy);
                 for (float d = 0; d < length;)
                 {
-                    const float step = std::min(length - d, (phase < 6 ? 6.f : 10.f) - phase);
-                    if (phase < 6)
+                    const float step = std::min(length - d, (phase < dashLength ? dashLength : dashPeriod) - phase);
+                    if (phase < dashLength)
                         draw->AddLine({previous.x + dx * d / length, previous.y + dy * d / length},
                                       {previous.x + dx * (d + step) / length, previous.y + dy * (d + step) / length},
-                                      color, 1.6f);
+                                      color, stroke);
                     d += step;
-                    phase = std::fmod(phase + step, 10.f);
+                    phase = std::fmod(phase + step, dashPeriod);
                 }
             }
             else
-                draw->AddLine(previous, p, color, 1.6f);
+                draw->AddLine(previous, p, color, stroke);
             previous = p;
         }
     }
@@ -638,7 +649,7 @@ void BistroComparePanel::DrawPlot(const Selection* series, size_t count, bool fp
     {
         const float x = std::clamp(ImGui::GetMousePos().x, top.x, top.x + width);
         const double t = begin + (x - top.x) / width * span;
-        draw->AddLine({x, top.y}, {x, top.y + height}, muted);
+        draw->AddLine({x, top.y}, {x, top.y + height}, muted, stroke);
         ImGui::BeginTooltip();
         ImGui::Text("Route %.2f s", t);
         for (size_t iSeries = 0; iSeries < count; ++iSeries)
@@ -652,8 +663,8 @@ void BistroComparePanel::DrawPlot(const Selection* series, size_t count, bool fp
             }
             const auto& sample = s.Samples[BistroPlot::NearestFrame(s.Samples, t)];
             const auto pos = point(sample);
-            draw->AddCircleFilled(pos, 4, Color(s.Mode));
-            draw->AddCircle(pos, 4, muted);
+            draw->AddCircleFilled(pos, .3f * em, Color(s.Mode));
+            draw->AddCircle(pos, .3f * em, muted);
             ImGui::Separator();
             if (count == 2) ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(Color(s.Mode)), "%c   %s", id, s.Mode.c_str());
             BistroPlot::DrawFrameDetails(sample.Number, sample.RouteSeconds, sample.Section.c_str(), sample.FrameMs,
@@ -661,7 +672,7 @@ void BistroComparePanel::DrawPlot(const Selection* series, size_t count, bool fp
         }
         ImGui::EndTooltip();
     }
-    ImGui::Dummy({0, 20});
+    ImGui::Dummy({0, 1.4f * em});
     if (count != 2) return;
     const auto version = Value(a.Settings, "RouteVersion");
     const bool sameRoute = !version.empty() && version == Value(b.Settings, "RouteVersion") &&
