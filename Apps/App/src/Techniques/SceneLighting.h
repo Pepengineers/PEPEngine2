@@ -6,6 +6,7 @@
 #include "SceneTransparency.h"
 #include "SceneProbePreview.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12DeferredLightingPass.h"
+#include "Engine.RendererDX12/GDX12SSRSettings.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12SSSRPass.h"
 #include <map>
 #include <chrono>

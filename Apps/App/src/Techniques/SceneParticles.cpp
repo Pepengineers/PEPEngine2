@@ -152,6 +152,7 @@ struct SceneParticles::Remote
 	InputShape Shape;
 	D3D12_PLACED_SUBRESOURCE_FOOTPRINT InputFootprint{};
 	UINT64 CameraOffset = 0;
+	UINT64 DepthCameraPayload = 0;
 	uint64_t InputVersion = 0, ConsumedInput = 0;
 	uint64_t LocalInputVersion = 0;
 	InputSlot* InputWrite = nullptr;
@@ -301,13 +302,16 @@ struct SceneParticles::Remote
 			view.Texture2D.MipLevels = 1;
 			D3D12_PLACED_SUBRESOURCE_FOOTPRINT primaryFootprint{};
 			UINT64 primaryBytes = 0;
-			device->GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &InputFootprint, nullptr, nullptr, &bytes);
+			UINT rows = 0;
+			UINT64 rowBytes = 0;
+			device->GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &InputFootprint, &rows, &rowBytes, &bytes);
 			Submit->Device(0).GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &primaryFootprint, nullptr, nullptr, &primaryBytes);
 			if (!bytes || bytes == UINT64_MAX || bytes != primaryBytes ||
 			    primaryFootprint.Footprint.RowPitch != InputFootprint.Footprint.RowPitch)
 				throw std::runtime_error("Particle depth transfer requires matching adapter footprints");
 			CameraOffset = (bytes + 255) & ~UINT64(255);
 			bytes = CameraOffset + sizeof(GDX12CameraConstants);
+			DepthCameraPayload = rows * rowBytes + sizeof(GDX12CameraConstants);
 			InputCamera.D3DResource = device->CreateResource(D3D12_HEAP_TYPE_DEFAULT,
 			    CD3DX12_RESOURCE_DESC::Buffer(sizeof(GDX12CameraConstants)), D3D12_RESOURCE_STATE_COMMON);
 		}
@@ -379,13 +383,15 @@ struct SceneParticles::Remote
 		if (camera)
 		{
 			copies.push_back(ResourceAccess(graph, bindings, camera, Mode::Read));
-			return work.Add(graph, "GPU0 export particle depth and camera", std::move(copies),
+			const Id copy = work.Add(graph, "GPU0 export particle depth and camera", std::move(copies),
 			    [shared, source, camera = camera->D3DResource.Get(), cameraSourceOffset,
 			     layout = InputFootprint, cameraOffset = CameraOffset](auto* cmd) {
 				    const CD3DX12_TEXTURE_COPY_LOCATION dst(shared, layout), src(source, 0u);
 				    cmd->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
 				    cmd->CopyBufferRegion(shared, cameraOffset, camera, cameraSourceOffset, sizeof(GDX12CameraConstants));
 			    }, {}, Queue::Copy);
+			graph.Operations[copy].TransferBytes = DepthCameraPayload;
+			return copy;
 		}
 		return work.Add(graph, "GPU0 export particle interaction field", std::move(copies),
 		    [shared, source, bytes = Shape.Width](auto* cmd) { cmd->CopyBufferRegion(shared, 0, source, 0, bytes); }, {}, Queue::Copy);
@@ -593,12 +599,13 @@ struct SceneParticles::Remote
 			{
 				auto* camera = InputCamera.D3DResource.Get();
 				copies.push_back(ResourceAccess(graph, bindings, &InputCamera, Mode::Write, CopyDest));
-				work.Add(graph, "GPU1 import particle depth and camera", std::move(copies),
+				const Id copy = work.Add(graph, "GPU1 import particle depth and camera", std::move(copies),
 				    [shared, target, camera, layout = InputFootprint, cameraOffset = CameraOffset](auto* cmd) {
 					    const CD3DX12_TEXTURE_COPY_LOCATION dst(target, 0u), src(shared, layout);
 					    cmd->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
 					    cmd->CopyBufferRegion(camera, 0, shared, cameraOffset, sizeof(GDX12CameraConstants));
 				    }, {}, Queue::Compute);
+				graph.Operations[copy].TransferBytes = DepthCameraPayload;
 			}
 			else
 				work.Add(graph, "GPU1 import particle interaction field", std::move(copies),

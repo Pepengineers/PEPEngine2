@@ -75,6 +75,7 @@ struct ScreenTransfer
 	QueueSubmission::TransferBuffer Buffer;
 	D3D12_PLACED_SUBRESOURCE_FOOTPRINT Layout{};
 	UINT64 Bytes = 0;
+	UINT64 PayloadBytes = 0;
 	Id From = Invalid, To = Invalid;
 
 	void Prepare(const QueueSubmission& submit, Id from, Id to, const D3D12_RESOURCE_DESC& desc)
@@ -83,7 +84,9 @@ struct ScreenTransfer
 		    Layout.Footprint.Height == desc.Height && Layout.Footprint.Format == desc.Format) return;
 		D3D12_PLACED_SUBRESOURCE_FOOTPRINT target{};
 		UINT64 targetBytes = 0;
-		submit.Device(from).GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &Layout, nullptr, nullptr, &Bytes);
+		UINT rows = 0;
+		UINT64 rowBytes = 0;
+		submit.Device(from).GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &Layout, &rows, &rowBytes, &Bytes);
 		submit.Device(to).GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &target, nullptr, nullptr, &targetBytes);
 		if (!Bytes || Bytes == UINT64_MAX || Bytes != targetBytes || Layout.Offset != target.Offset ||
 		    Layout.Footprint.RowPitch != target.Footprint.RowPitch || Layout.Footprint.Format != target.Footprint.Format ||
@@ -91,6 +94,7 @@ struct ScreenTransfer
 		    Layout.Footprint.Depth != target.Footprint.Depth)
 			throw std::runtime_error("Screen transfer requires matching adapter footprints");
 		Buffer = submit.CreateTransferBuffer(from, to, Bytes);
+		PayloadBytes = rows * rowBytes;
 		From = from;
 		To = to;
 	}
@@ -105,9 +109,11 @@ struct ScreenTransfer
 		const auto dest = exporting ? shared : tex;
 		const auto read = NativeWork::ResourceFor(graph, bindings, source.pResource, name);
 		const auto write = NativeWork::ResourceFor(graph, bindings, dest.pResource, name);
-		return work.Add(graph, name,
+		const Id copy = work.Add(graph, name,
 		    {{read, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE}, {write, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
 		    [source, dest](auto* cmd) { cmd->CopyTextureRegion(&dest, 0, 0, 0, &source, nullptr); });
+		graph.Operations[copy].TransferBytes = PayloadBytes;
+		return copy;
 	}
 };
 
@@ -694,11 +700,10 @@ Id ScenePostUI::AppendReconstruction(Graph& graph, std::vector<ID3D12Resource*>&
 		                                                      {resource(depth), Mode::Read},
 		                                                      {resource(motion), Mode::Read},
 		                                                      {&camera, Mode::Read},
-		                                                      {resource(_blur._motion.get()), Mode::ReadWrite},
-		                                                      {resource(_blur._velocity.get()), Mode::ReadWrite}};
+		                                                      {resource(_blur._motion.get()), Mode::ReadWrite}};
 		if (_blur._preparedBlur)
 		{
-			for (auto* image : {_blur._color.get(), _blur._tileMax.get(), _blur._neighborMax.get()})
+			for (auto* image : {_blur._color.get(), _blur._velocity.get(), _blur._tileMax.get(), _blur._neighborMax.get()})
 			{
 				accesses.emplace_back(resource(image), Mode::ReadWrite);
 			}
@@ -792,7 +797,7 @@ void ScenePostUI::EnsureHudSource()
 	if (_resources.TextureReplicaLoaders.find(HudAtlasName) != _resources.TextureReplicaLoaders.end()) return;
 	const auto path = std::filesystem::path(ASSETS_FOLDER) / "Textures/UI/BistroDemoHUD.png";
 	_render.SetTextureReplicaSource(HudAtlasName, Engine::Core::ETextureType::Color, [path](auto&) {
-		return Engine::Core::AssetManager::GetInstance().LoadTexture(path);
+		return Engine::Core::AssetManager::GetInstance().Textures().Load(path, Engine::Core::ETextureType::Color);
 	});
 }
 
@@ -814,8 +819,8 @@ ScenePostUI::HudRaster& ScenePostUI::LocalHud(GDX12DeviceResources& atlasSources
 		auto* texture = _render.GetTextureByName(HudAtlasName);
 		if (!texture)
 		{
-			const auto* asset = Engine::Core::AssetManager::GetInstance().LoadTexture(
-			    std::filesystem::path(ASSETS_FOLDER) / "Textures/UI/BistroDemoHUD.png");
+			const auto* asset = Engine::Core::AssetManager::GetInstance().Textures().Load(
+			    std::filesystem::path(ASSETS_FOLDER) / "Textures/UI/BistroDemoHUD.png", Engine::Core::ETextureType::Color);
 			if (!asset) throw std::runtime_error("Missing Bistro demo HUD atlas");
 			texture = _render.CreateTexture(HudAtlasName, asset, Engine::Core::ETextureType::Color);
 		}

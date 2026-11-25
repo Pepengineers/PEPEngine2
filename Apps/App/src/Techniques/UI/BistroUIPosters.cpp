@@ -105,6 +105,7 @@ namespace
     {
         QueueSubmission::TransferBuffer Buffer;
         D3D12_PLACED_SUBRESOURCE_FOOTPRINT Layout{};
+        UINT64 PayloadBytes = 0;
 
         void Prepare(QueueSubmission& submission, Id device, const D3D12_RESOURCE_DESC& desc)
         {
@@ -112,12 +113,15 @@ namespace
                 Layout.Footprint.Format == desc.Format) return;
             D3D12_PLACED_SUBRESOURCE_FOOTPRINT primary{}, remote{};
             UINT64 bytes = 0, remoteBytes = 0;
-            submission.Device(0).GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &primary, nullptr, nullptr, &bytes);
+            UINT rows = 0;
+            UINT64 rowBytes = 0;
+            submission.Device(0).GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &primary, &rows, &rowBytes, &bytes);
             submission.Device(device).GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &remote, nullptr, nullptr, &remoteBytes);
             if (!bytes || bytes == UINT64_MAX || bytes != remoteBytes || primary.Footprint.RowPitch != remote.Footprint.RowPitch)
                 throw std::runtime_error("World canvas requires matching adapter texture footprints");
             Buffer = submission.CreateTransferBuffer(device, bytes);
             Layout = primary;
+            PayloadBytes = rows * rowBytes;
         }
 
         Id Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work,
@@ -128,10 +132,12 @@ namespace
             const CD3DX12_TEXTURE_COPY_LOCATION imageLocation(image, 0u), bufferLocation(buffer, Layout);
             const auto source = exportImage ? imageLocation : bufferLocation;
             const auto dest = exportImage ? bufferLocation : imageLocation;
-            return work.Add(graph, name,
+            const Id copy = work.Add(graph, name,
                 {Bind(graph, bindings, source.pResource, "canvas transfer source", Mode::Read, CopyRead),
                  Bind(graph, bindings, dest.pResource, "canvas transfer destination", Mode::Write, CopyWrite)},
                 [source, dest](auto* cmd) { cmd->CopyTextureRegion(&dest, 0, 0, 0, &source, nullptr); }, {}, queue);
+            graph.Operations[copy].TransferBytes = PayloadBytes;
+            return copy;
         }
     };
 

@@ -256,11 +256,12 @@ struct SceneGrass::RemoteWind
 		auto* shared = frame.Shared.Resources[1].Get();
 		accesses.push_back({NativeWork::ResourceFor(graph, bindings, shared, "shared wind velocity"),
 		                    Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST});
-		work.Add(graph, "secondary export ProjectedGrid velocity", std::move(accesses),
+		const Id publish = work.Add(graph, "secondary export ProjectedGrid velocity", std::move(accesses),
 		    [shared, copies = std::move(copies)](auto* cmd)
 		    {
 			    for (const auto& copy : copies) cmd->CopyBufferRegion(shared, copy.Offset, copy.Buffer, 0, copy.Bytes);
 		    }, {}, Queue::Compute);
+		graph.Operations[publish].TransferBytes = bytes;
 		const auto schedule = Compile(graph);
 		Recorder.Reserve(schedule);
 		Recorder.Execute(schedule, bindings, [&](Id operation, uint32_t, auto* cmd) { work.Record(operation, cmd); });
@@ -547,11 +548,14 @@ void SceneGrass::AppendWindImport(Graph& graph, std::vector<ID3D12Resource*>& bi
 			}
 		}
 		if (copies.empty()) continue;
+		uint64_t bytes = 0;
+		for (const auto& copy : copies) bytes += copy.Bytes;
 		import.Operation = work.Add(graph, "GPU0 import ProjectedGrid publication", std::move(accesses),
 		    [shared, copies = std::move(copies)](auto* cmd)
 		    {
 			    for (const auto& copy : copies) cmd->CopyBufferRegion(copy.Buffer, 0, shared, copy.Offset, copy.Bytes);
 		    }, {}, Queue::Copy);
+		graph.Operations[import.Operation].TransferBytes = bytes;
 	}
 }
 

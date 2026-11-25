@@ -131,17 +131,21 @@ struct SharedImage
 {
     QueueSubmission::TransferBuffer Buffer;
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT Layout{};
+    uint64_t PayloadBytes = 0;
 
     void Initialize(QueueSubmission& submit, Id device, const D3D12_RESOURCE_DESC& desc)
     {
         uint64_t bytes = 0, primaryBytes = 0;
         D3D12_PLACED_SUBRESOURCE_FOOTPRINT primary{};
-        submit.Device(device).GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &Layout, nullptr, nullptr, &bytes);
+        UINT rows = 0;
+        UINT64 rowBytes = 0;
+        submit.Device(device).GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &Layout, &rows, &rowBytes, &bytes);
         submit.Device(0).GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &primary, nullptr, nullptr, &primaryBytes);
         if (!bytes || bytes == UINT64_MAX || bytes != primaryBytes ||
             Layout.Footprint.RowPitch != primary.Footprint.RowPitch)
             throw std::runtime_error("AO adapters need matching texture footprints");
         Buffer = submit.CreateTransferBuffer(device, bytes);
+        PayloadBytes = rows * rowBytes;
     }
     ID3D12Resource* Resource(Id device) const { return Buffer.Resources.at(device).Get(); }
 
@@ -259,6 +263,8 @@ struct SceneAO::Remote
         }
         graph.Operations.push_back({"GPU1 export AO visibility",
             {{pingPong[BlurPasses % 2], Mode::Read, CopyRead}, {3, Mode::Write, CopyWrite}}});
+        graph.Operations.front().TransferBytes = DepthTransfer.PayloadBytes + NormalTransfer.PayloadBytes;
+        graph.Operations.back().TransferBytes = VisibilityTransfer.PayloadBytes;
         for (auto& operation : graph.Operations) operation.Target = Queue::Compute;
         ScheduleGPU1 = Compile(graph);
         assert(ScheduleGPU1.Packets.front().Operation == 0);
@@ -409,6 +415,8 @@ struct SceneAO::Remote
             graph.Operations.back().Accesses.push_back({LocalEdges, Mode::Read, CopyRead});
             graph.Operations.back().Accesses.push_back({sharedEdges, Mode::Write, CopyWrite});
         }
+        graph.Operations.front().TransferBytes = DepthTransfer.PayloadBytes + NormalTransfer.PayloadBytes;
+        graph.Operations.back().TransferBytes = VisibilityTransfer.PayloadBytes + EdgeTransfer.PayloadBytes;
         for (auto& operation : graph.Operations) operation.Target = Queue::Compute;
         ScheduleGPU1 = Compile(graph);
         assert(ScheduleGPU1.Packets.front().Operation == 0);
@@ -722,8 +730,8 @@ void SceneAO::Freeze(GDX12Texture* depth, GDX12Texture* normals, GDX12Texture* m
     gtao.FalloffRange = s.GTAOFalloff;
     gtao.ThinOccluderCompensation = s.GTAOThinOccluder;
     XeGTAO::GTAOConstants xe{};
-    XeGTAO::GTAOUpdateConstants(xe, _width, _height, gtao, &_projection._11, true,
-                                _common.Upscaler ? temporalIndex++ : 0);
+    const bool temporal = _common.Upscaler && (_common.Upscaler->GetFlags() & RENDER_PASS_FLAG_USE_JITTER);
+    XeGTAO::GTAOUpdateConstants(xe, _width, _height, gtao, &_projection._11, true, temporal ? temporalIndex++ : 0);
     xe.NDCToViewAdd.x += _projection._31 / _projection._11;
     xe.NDCToViewAdd.y += _projection._32 / _projection._22;
     xe.DenoiseBlurBeta = s.DenoisePasses ? .2f + s.Sharpness : 1e4f;
@@ -861,6 +869,7 @@ void SceneAO::AppendRemoteDepth(Graph& graph, std::vector<ID3D12Resource*>& bind
     _depthExport = _work.Add(graph, "HBAO GPU0 export half-depth",
         {plan.access(inputs.Depth, Mode::Read, CopyRead), {buffer, Mode::Write, CopyWrite}},
         [=](auto* cmd) { remote->DepthTransfer.Export(cmd, 0, source); }, {}, Queue::Copy);
+    graph.Operations[_depthExport].TransferBytes = remote->DepthTransfer.PayloadBytes;
 }
 
 void SceneAO::AppendEarlyInputs(Graph& graph, std::vector<ID3D12Resource*>& bindings, Id ready)
@@ -882,6 +891,7 @@ void SceneAO::AppendEarlyInputs(Graph& graph, std::vector<ID3D12Resource*>& bind
             remote->DepthTransfer.Export(cmd, 0, depthSource);
             remote->NormalTransfer.Export(cmd, 0, normalSource);
         }, {}, Queue::Copy);
+    graph.Operations[_depthExport].TransferBytes = remote->DepthTransfer.PayloadBytes + remote->NormalTransfer.PayloadBytes;
 }
 
 void SceneAO::AppendXeImport(Plan& plan, GDX12Texture& terms, GDX12Texture& edges)
@@ -904,6 +914,7 @@ void SceneAO::AppendXeImport(Plan& plan, GDX12Texture& terms, GDX12Texture& edge
             remote->VisibilityTransfer.Import(cmd, 0, termsTarget);
             if (remote->LocalXePasses) remote->EdgeTransfer.Import(cmd, 0, edgeTarget);
         }, {_depthExport}, Queue::Copy);
+    plan.graph.Operations[_visibilityImport].TransferBytes = remote->VisibilityTransfer.PayloadBytes + remote->EdgeTransfer.PayloadBytes;
 }
 
 void SceneAO::AppendRawVisibility(Plan& plan, const PreparedInputs& inputs, GDX12Texture& visibility)
@@ -928,6 +939,7 @@ void SceneAO::AppendVisibilityImport(Plan& plan, GDX12Texture& visibility)
     _visibilityImport = _work.Add(plan.graph, std::string(AOName(remote->Implementation)) + " GPU0 import visibility",
         {{buffer, Mode::Read, CopyRead}, plan.access(&visibility, Mode::Write, CopyWrite)},
         [=](auto* cmd) { remote->VisibilityTransfer.Import(cmd, 0, target); }, {_depthExport}, Queue::Copy);
+    plan.graph.Operations[_visibilityImport].TransferBytes = remote->VisibilityTransfer.PayloadBytes;
 }
 
 void SceneAO::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings)

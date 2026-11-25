@@ -9,8 +9,8 @@ cbuffer Parameters : register(b0)
     uint Samples;
     float ShutterFraction;
     float MaxRadius;
-    uint BlurEnabled;
     uint ResetMotion;
+    uint Padding0;
     float2 OutputSize;
     float CenterWeight;
     float VelocityThreshold;
@@ -33,10 +33,8 @@ RWTexture2D<float2> NeighborResult : register(u4);
 
 uint2 TileCount() { return (Size + TileSize - 1) / TileSize; }
 
-[numthreads(8, 8, 1)]
-void Prepare(uint2 p : SV_DispatchThreadID)
+float2 SurfaceMotion(uint2 p)
 {
-    if (any(p >= Size)) return;
     float2 motion = Motion[p];
     if (Depth[p] == 0)
     {
@@ -54,12 +52,25 @@ void Prepare(uint2 p : SV_DispatchThreadID)
         float4 feature = FeatureMotion[p];
         if (feature.w > 0.00001f) motion = lerp(motion, feature.xy / feature.w, saturate(feature.w));
     }
-    if (ResetMotion != 0 || !all(isfinite(motion))) motion = 0;
+    return ResetMotion == 0 && all(isfinite(motion)) ? motion : 0;
+}
+
+[numthreads(8, 8, 1)]
+void PrepareMotionOnly(uint2 p : SV_DispatchThreadID)
+{
+    if (all(p < Size)) CompleteMotion[p] = SurfaceMotion(p);
+}
+
+[numthreads(8, 8, 1)]
+void Prepare(uint2 p : SV_DispatchThreadID)
+{
+    if (any(p >= Size)) return;
+    float2 motion = SurfaceMotion(p);
     CompleteMotion[p] = motion;
     // NDC -> output pixels, then HALF of a centered shutter interval.
     float2 radius = motion * float2(0.5f, -0.5f) * OutputSize * ShutterFraction * 0.5f;
     radius *= min(1.0f, MaxRadius / max(length(radius), 0.00001f));
-    PreparedVelocity[p] = BlurEnabled != 0 ? radius * Size / OutputSize : 0;
+    PreparedVelocity[p] = radius * Size / OutputSize;
 }
 
 groupshared float2 TileVelocities[256];

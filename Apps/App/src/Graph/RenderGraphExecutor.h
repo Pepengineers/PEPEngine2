@@ -35,10 +35,13 @@ class Executor
 	// Explicit owner-only capacity growth after Begin retired the selected slot.
 	// Execute still rejects an unreserved plan; workers never allocate lists.
 	void Reserve(const Schedule& schedule);
+	// Only a timestamp-only prefix may run concurrently with slot-local packets.
+	enum class FrameStart { Ordered, TimestampOnly };
 	uint64_t Execute(const Schedule&, const std::vector<ID3D12Resource*>&, const Record&,
 	                 GDX12CommandList* prefix = nullptr, GDX12CommandList* suffix = nullptr,
 	                 const std::atomic<bool>* cancellation = nullptr, const std::vector<PacketWait>& waits = {},
-	                 const std::vector<PacketExchange>& exchanges = {}, Id signalAfter = Invalid);
+	                 const std::vector<PacketExchange>& exchanges = {}, Id signalAfter = Invalid,
+	                 FrameStart frameStart = FrameStart::Ordered);
 	void Drain();
 	const auto& ExchangeCompletions() const { return _exchangeCompletions; }
 	// Each value belongs to the queue selected by its packet, not one timeline.
@@ -83,6 +86,7 @@ class Executor
 	std::vector<uint64_t> _tokens;
 	std::vector<CompletionToken> _completions, _exchangeCompletions;
 	uint64_t _previousCompletion = 0; // DIRECT terminal protects cross-frame persistent resources
+	uint64_t _lastOpaqueFrame = 0; // external lists may reference resources from any slot
 	uint32_t _slot = 0;
 	bool _begun = false;
 	bool _aborted = false; // partial frame requires resource-state rebuild

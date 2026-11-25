@@ -1,6 +1,5 @@
 #pragma once
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
-#include "Engine.RendererDX12/GDX12SSRSettings.h"
 struct FfxSssrContext;
 namespace BistroRender { class SceneLighting; }
 
@@ -35,7 +34,6 @@ private:
     XMFLOAT2 _previousJitter = {};
     uint64_t _historyRevision = UINT64_MAX;
     uint64_t _environmentRevision = UINT64_MAX;
-    GDX12SSRSettings _previousSettings = {};
     bool _staticIBLOnly = false;
     void CreateContext();
     void DestroyContext();

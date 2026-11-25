@@ -8,6 +8,12 @@
 
 namespace Engine::Core
 {
+	struct TextureSource
+	{
+		std::filesystem::path Path;
+		ETextureType Type = ETextureType::Unknown;
+	};
+
 	/// Concrete asset registry for texture resources.
 	///
 	/// Builds on TypedAssetRegistry to reuse the common typed storage and lifecycle logic:
@@ -16,11 +22,12 @@ namespace Engine::Core
 	///   - caching and unloading loaded texture data;
 	///   - source-path queries and loaded-count tracking.
 	///
-	/// Unlike MeshRegistry, textures do not need custom locator metadata:
-	/// the resolved source path itself is sufficient as the per-record metadata.
-	class TextureRegistry : public TypedAssetRegistry<Texture, TextureHandle, std::filesystem::path>
+	/// Color and data uses of one image can have different mip chains.
+	class TextureRegistry : public TypedAssetRegistry<Texture, TextureHandle, TextureSource>
 	{
 	public:
+		[[nodiscard]] TextureHandle Register(const std::filesystem::path& path, ETextureType type = ETextureType::Unknown);
+		[[nodiscard]] TextureHandle FindHandle(const std::filesystem::path& path, ETextureType type = ETextureType::Unknown) const;
 		/// Returns the texture data associated with the given handle,
 		/// or nullptr if the handle is invalid or the texture has not been cached yet.
 		[[nodiscard]] const Texture* GetTexture(TextureHandle handle) const;
@@ -30,12 +37,12 @@ namespace Engine::Core
 		[[nodiscard]] const Texture* FindTexture(const std::filesystem::path& path) const;
 
 		/// Loads a texture from cache or from disk and caches the result.
-		[[nodiscard]] const Texture* Load(const std::filesystem::path& path);
+		[[nodiscard]] const Texture* Load(const std::filesystem::path& path, ETextureType type = ETextureType::Unknown);
 
 		/// Loads a texture from cache or from disk and returns its handle via outHandle.
 		/// If the texture is already registered, outHandle receives the existing handle.
 		/// On failure returns nullptr and resets outHandle to an invalid handle.
-		[[nodiscard]] const Texture* Load(const std::filesystem::path& path, TextureHandle& outHandle);
+		[[nodiscard]] const Texture* Load(const std::filesystem::path& path, TextureHandle& outHandle, ETextureType type = ETextureType::Unknown);
 
 		/// Loads a texture from cache or from disk and returns the default texture on failure.
 		[[nodiscard]] const Texture* LoadOrDefault(const std::filesystem::path& path);
@@ -57,15 +64,13 @@ namespace Engine::Core
 		[[nodiscard]] std::filesystem::path ResolveSourcePath(const std::filesystem::path& path) const override;
 
 		/// Creates texture metadata for a newly registered path.
-		/// For textures the metadata is just the resolved source path itself.
-		[[nodiscard]] std::filesystem::path MakeMetadataForRegisteredPath(const std::filesystem::path& resolvedSourcePath) const override;
+		[[nodiscard]] TextureSource MakeMetadataForRegisteredPath(const std::filesystem::path& resolvedSourcePath) const override;
 
 		/// Extracts the canonical source path from stored texture metadata.
-		[[nodiscard]] std::filesystem::path GetSourcePathFromMetadata(const std::filesystem::path& metadata) const override;
+		[[nodiscard]] std::filesystem::path GetSourcePathFromMetadata(const TextureSource& metadata) const override;
 
 		/// Rebuilds the registry cache key from stored texture metadata.
-		/// For textures this is just the normalized source path key.
-		[[nodiscard]] std::wstring GetCacheKeyFromMetadata(const std::filesystem::path& metadata) const override;
+		[[nodiscard]] std::wstring GetCacheKeyFromMetadata(const TextureSource& metadata) const override;
 
 		/// Returns the singular asset type name used in log messages.
 		[[nodiscard]] const wchar_t* GetAssetTypeName() const override;

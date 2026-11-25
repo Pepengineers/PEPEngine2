@@ -113,6 +113,8 @@ void GDX12ReflectionProbePass::Initialize()
     D3D_SHADER_MACRO filtering[] = { { "LOCAL_PROBE_FILTER", "1" }, { nullptr, nullptr } };
     _filterPSO = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _filterRoot.get(),
         SHADERS_FOLDER "EnvironmentIBL.hlsl", "PrefilterCS", filtering);
+    _downsamplePSO = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _filterRoot.get(),
+        SHADERS_FOLDER "EnvironmentIBL.hlsl", "DownsampleProbeCS", filtering);
     _signature = GDX12RenderHelpers::CreateIndexedDrawSignature(_resources->Device, _captureRoot.get());
 
     _frames.resize(_resources->FrameConstants.size());
@@ -295,7 +297,7 @@ void GDX12ReflectionProbePass::CreateCaptureTextures(UINT resolution)
             view.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
             view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
             view.TextureCube.MostDetailedMip = mip;
-            view.TextureCube.MipLevels = 1;
+            view.TextureCube.MipLevels = captureMips - mip;
             descriptor->InitAsSRV(probe.Raw->GetResource()->D3DResource.Get(), &view,
                 _resources->SRV_UAV_Heap.get(), _resources->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength));
             probe.RawMipSRVs.push_back(std::move(descriptor));

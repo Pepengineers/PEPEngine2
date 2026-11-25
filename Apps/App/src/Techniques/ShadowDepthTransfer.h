@@ -51,7 +51,8 @@ class ShadowDepthTransfer
 		const auto depthId = NativeWork::ResourceFor(graph, bindings, depth, "shadow depth array");
 		const auto source = exporting ? depthId : sharedId;
 		const auto destination = exporting ? sharedId : depthId;
-		return work.Add(graph, exporting ? "export shadow depth slices" : "import shadow depth slices",
+		const UINT64 bytes = UINT64(_resolution) * _resolution * sizeof(float) * slices.size();
+		const Id copy = work.Add(graph, exporting ? "export shadow depth slices" : "import shadow depth slices",
 		                {{source, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE},
 		                 {destination, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
 		                [this, depth, shared, slices = std::move(slices), exporting](auto* cmd)
@@ -65,6 +66,8 @@ class ShadowDepthTransfer
 				                cmd->CopyTextureRegion(&to, 0, 0, 0, &from, nullptr);
 			                }
 		                });
+		graph.Operations[copy].TransferBytes = bytes;
+		return copy;
 	}
 
 	void ImportPageRegions(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work,
@@ -74,7 +77,10 @@ class ShadowDepthTransfer
 		const auto source = NativeWork::ResourceFor(graph, bindings, shared, "cross-adapter shadow depth");
 		const auto destination = NativeWork::ResourceFor(graph, bindings, staging, "shadow page staging");
 		const auto footprint = _footprints.front();
-		work.Add(graph, "import selected shadow page regions",
+		UINT64 bytes = 0;
+		for (const auto& region : regions)
+			bytes += UINT64(region.right - region.left) * (region.bottom - region.top) * (region.back - region.front) * sizeof(float);
+		const Id copy = work.Add(graph, "import selected shadow page regions",
 		    {{source, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE},
 		     {destination, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
 		    [shared, staging, footprint, regions = std::move(regions)](auto* cmd)
@@ -84,6 +90,7 @@ class ShadowDepthTransfer
 			    for (const auto& region : regions)
 				    cmd->CopyTextureRegion(&to, region.left, region.top, 0, &from, &region);
 		    });
+		graph.Operations[copy].TransferBytes = bytes;
 	}
 
   private:

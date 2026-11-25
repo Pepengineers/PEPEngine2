@@ -32,7 +32,8 @@ namespace Engine::Core
 		///
 		/// Returns nullptr on any validation or loading failure.
         // compressedCache prepares BC7 plus a disposable DDS cache; leave false for CPU pixel editing/alpha merging.
-		[[nodiscard]] static std::unique_ptr<Texture> LoadTextureAsset(const std::filesystem::path& sourcePath, bool compressedCache = false);
+		[[nodiscard]] static std::unique_ptr<Texture> LoadTextureAsset(const std::filesystem::path& sourcePath,
+			bool compressedCache = false, ETextureType type = ETextureType::Unknown);
 
 		static std::unique_ptr<Texture> PrepareBC7(std::unique_ptr<Texture> texture, const std::filesystem::path& cache);
 

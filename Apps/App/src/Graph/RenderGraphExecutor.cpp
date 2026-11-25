@@ -217,8 +217,12 @@ void Executor::BeginTimings(Slot& slot, const Schedule& schedule, const std::vec
 		const auto& packet = schedule.Packets[i];
 		auto& sample = slot.Samples[i];
 		sample.Name = packet.Name;
-		sample.SharedBytes = packet.TransferBytes;
-		if (sample.SharedBytes) continue;
+		if (packet.TransferBytes)
+		{
+			sample.SharedBytes = *packet.TransferBytes;
+			continue;
+		}
+		sample.SharedBytes = 0;
 		for (const auto& access : packet.Accesses)
 		{
 			if ((access.Required & (D3D12_RESOURCE_STATE_COPY_SOURCE | D3D12_RESOURCE_STATE_COPY_DEST)) == 0)
@@ -340,7 +344,7 @@ void Executor::Reserve(const Schedule& schedule)
 uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Resource*>& resources,
                            const Record& record, GDX12CommandList* prefix, GDX12CommandList* suffix,
                            const std::atomic<bool>* cancellation, const std::vector<PacketWait>& waits,
-                           const std::vector<PacketExchange>& exchanges, Id signalAfter)
+                           const std::vector<PacketExchange>& exchanges, Id signalAfter, FrameStart frameStart)
 {
 	Owner();
 	if (!_begun)
@@ -418,6 +422,21 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 		throw std::invalid_argument("prefix/suffix must be DIRECT lists");
 	}
 	std::vector<bool> endBatch(schedule.Packets.size(), false);
+	if (_lastOpaqueFrame <= slot.Fences[0]) _lastOpaqueFrame = 0; // Begin retired this slot.
+	const bool allowSlotOverlap = schedule.FrameBoundary && frameStart == FrameStart::TimestampOnly &&
+	    !_submissions->BenchmarkEpoch();
+	std::vector<bool> waitForFrameStart(schedule.Packets.size(), false);
+	std::array<bool, 3> ordered{};
+	for (Id i = 0; i < schedule.Packets.size(); ++i)
+	{
+		const auto& packet = schedule.Packets[i];
+		if (!schedule.FrameBoundary || packet.Target == Queue::Direct || ordered[QueueIndex(packet.Target)]) continue;
+		if (allowSlotOverlap && packet.FrameSlotLocal) continue;
+		ordered[QueueIndex(packet.Target)] = true;
+		waitForFrameStart[i] = true;
+		// Submit any preceding slot-local work before the first persistent-resource wait.
+		if (i) endBatch[i - 1] = true;
+	}
 	if (signalAfter != Invalid)
 	{
 		if (signalAfter >= schedule.Packets.size())
@@ -611,7 +630,7 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 	Recorder recorder(_jobs, std::move(groups), cancellation);
 	bool submitted = false;
 	uint64_t prefixFence = 0;
-	std::array<bool, 3> queueStarted{};
+	std::array<bool, 3> opaqueFrameJoined{};
 	Id batchBegin = 0;
 	std::vector<CompletionToken> dependencies;
 	try
@@ -638,19 +657,17 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 			const auto target = schedule.Packets[i].Target;
 			// Only published fences enter native waits; failed recording cannot
 			// strand another queue behind a token that will never be signalled.
-			if (schedule.FrameBoundary && target != Queue::Direct && !queueStarted[QueueIndex(target)])
+			if (waitForFrameStart[i])
 			{
-				// Persistent resources can be shared across slots; their prior
-				// frame's DIRECT terminal joins every queue before a new writer.
-				if (_previousCompletion)
-				{
-					dependencies.push_back(Token(Queue::Direct, _previousCompletion));
-				}
-				if (prefixFence)
-				{
-					dependencies.push_back(Token(Queue::Direct, prefixFence));
-				}
-				queueStarted[QueueIndex(target)] = true;
+				// The prefix follows the previous terminal on the same DIRECT timeline.
+				const auto fence = prefixFence ? prefixFence : _previousCompletion;
+				if (fence) dependencies.push_back(Token(Queue::Direct, fence));
+				opaqueFrameJoined[QueueIndex(target)] = true;
+			}
+			else if (allowSlotOverlap && _lastOpaqueFrame && target != Queue::Direct && !opaqueFrameJoined[QueueIndex(target)])
+			{
+				dependencies.push_back(Token(Queue::Direct, _lastOpaqueFrame));
+				opaqueFrameJoined[QueueIndex(target)] = true;
 			}
 			for (auto dep : schedule.Packets[i].Dependencies)
 			{
@@ -716,6 +733,7 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 		if (schedule.FrameBoundary)
 		{
 			_previousCompletion = slot.Fences[0];
+			if (suffix || (prefix && frameStart == FrameStart::Ordered)) _lastOpaqueFrame = _previousCompletion;
 		}
 		if (slot.TimingEpoch)
 			for (auto& sample : slot.Samples) sample.Terminal = _completions.back();

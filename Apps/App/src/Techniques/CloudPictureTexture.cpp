@@ -74,6 +74,7 @@ struct CloudPictureTexture::Impl
 		std::unique_ptr<GDX12DescriptorHeap> Heap;
 		GDX12ResourceHandle Output;
 		D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{};
+		UINT64 PayloadBytes = 0;
 		std::mutex Mutex;
 		std::condition_variable Changed;
 		Event StopEvent = MakeEvent(TRUE), ExportEvent = MakeEvent(FALSE);
@@ -163,14 +164,15 @@ struct CloudPictureTexture::Impl
 		const bool frameSync = Mode != CloudPictureMode::Independent;
 		const size_t historySlots = Mode == CloudPictureMode::PreviousFrame ? 1 : 0;
 		remote.Slots.resize(frameSync ? Slots.size() + historySlots : 3);
-		remote.ExportSchedule = BuildExportSchedule();
 		if (frameSync)
 			remote.FrameExecutor = std::make_unique<Executor>(Submit, DeviceId, UINT(Slots.size()), 1);
 		const auto desc = CD3DX12_RESOURCE_DESC::Tex2D(
 		    Format, Width, Height, 1, 1, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
 		uint64_t bytes = 0, primaryBytes = 0;
 		D3D12_PLACED_SUBRESOURCE_FOOTPRINT primaryFootprint{};
-		device.GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &remote.Footprint, nullptr, nullptr, &bytes);
+		UINT rows = 0;
+		UINT64 rowBytes = 0;
+		device.GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &remote.Footprint, &rows, &rowBytes, &bytes);
 		Primary.Device->GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &primaryFootprint, nullptr, nullptr,
 		                                                  &primaryBytes);
 		if (!bytes || bytes == UINT64_MAX || bytes != primaryBytes ||
@@ -179,6 +181,8 @@ struct CloudPictureTexture::Impl
 			throw std::runtime_error("CloudPicture adapters need matching RGBA8 transfer footprints");
 		}
 		remote.Output = device.CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc, D3D12_RESOURCE_STATE_COMMON);
+		remote.PayloadBytes = rows * rowBytes;
+		remote.ExportSchedule = BuildExportSchedule();
 		remote.Heap = std::make_unique<GDX12DescriptorHeap>(&device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1,
 		                                                  D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
 		D3D12_UNORDERED_ACCESS_VIEW_DESC uav{};
@@ -257,6 +261,7 @@ struct CloudPictureTexture::Impl
 		    {"cloud picture GPU1 generation", {{0, Mode::Write, UnorderedAccess}}},
 		    {"cloud picture GPU1 export",
 		     {{0, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE}, {1, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}}}};
+		graph.Operations.back().TransferBytes = Remote->PayloadBytes;
 		for (auto& operation : graph.Operations)
 		{
 			operation.Target = Queue::Compute;
@@ -484,6 +489,7 @@ void CloudPictureTexture::Append(Graph& graph, std::vector<ID3D12Resource*>& bin
 			    const CD3DX12_TEXTURE_COPY_LOCATION source(shared, footprint), target(display, 0u);
 			    cmd->CopyTextureRegion(&target, 0, 0, 0, &source, nullptr);
 		    }, {}, Queue::Copy);
+		graph.Operations[p.ImportOperation].TransferBytes = remote.PayloadBytes;
 		return;
 	}
 	const auto parameters = p.Parameters;
@@ -491,6 +497,7 @@ void CloudPictureTexture::Append(Graph& graph, std::vector<ID3D12Resource*>& bin
 	p.Work.Add(graph, "cloud picture generation", {{output, Mode::Write, UnorderedAccess}},
 	           [&p, parameters, uav](auto* cmd) { p.Dispatch(cmd, parameters, uav); }, {},
 	           AsyncCloudPicture.GetValue() ? Queue::Compute : Queue::Direct);
+	graph.Operations.back().FrameSlotLocal = true; // One output and UAV per frame slot, constants copied into the list.
 }
 bool CloudPictureTexture::Record(Id id, ID3D12GraphicsCommandList* cmd)
 {

@@ -429,14 +429,30 @@ void GDX12FrameGeneration::BeginFrame(RenderPipelineCommonData& common)
 
 void GDX12FrameGeneration::BeginRendering(RenderPipelineCommonData& common)
 {
+    BeginRenderSubmission(common);
+    PublishFrameConstants(common);
+}
+
+void GDX12FrameGeneration::BeginRenderSubmission(RenderPipelineCommonData& common)
+{
+    auto& p = *_impl;
+    if (!p.ActiveFrame) return;
+    try
+    {
+        p.Marker(sl::PCLMarker::eSimulationEnd, XELL_SIMULATION_END);
+        p.Marker(sl::PCLMarker::eRenderSubmitStart, XELL_RENDERSUBMIT_START);
+    }
+    catch (const std::exception& e) { p.Fail(e.what()); p.Stop(); common.StreamlineFrame = nullptr; }
+}
+
+void GDX12FrameGeneration::PublishFrameConstants(RenderPipelineCommonData& common)
+{
     auto& p = *_impl;
     if (!p.ActiveFrame) return;
     p.FrameHistory = common.HistoryRevision;
     p.FrameReset = p.ResetNext || p.History != common.HistoryRevision || common.ResetHistory;
     try
     {
-        p.Marker(sl::PCLMarker::eSimulationEnd, XELL_SIMULATION_END);
-        p.Marker(sl::PCLMarker::eRenderSubmitStart, XELL_RENDERSUBMIT_START);
         if (p.Token)
         {
             sl::Constants constants{};
@@ -456,7 +472,7 @@ void GDX12FrameGeneration::BeginRendering(RenderPipelineCommonData& common)
             constants.depthInverted = sl::Boolean::eTrue; constants.cameraMotionIncluded = sl::Boolean::eTrue;
             constants.motionVectors3D = sl::Boolean::eFalse; constants.orthographicProjection = sl::Boolean::eFalse;
             constants.motionVectorsDilated = sl::Boolean::eFalse; constants.motionVectorsJittered = sl::Boolean::eFalse;
-            constants.reset = p.FrameReset ? sl::Boolean::eTrue : sl::Boolean::eFalse;
+            constants.reset = (p.FrameReset || common.ResetUpscalerHistory) ? sl::Boolean::eTrue : sl::Boolean::eFalse;
             CheckSL(GDX12StreamlineSDK::Get().SetConstants(constants, *p.Token, p.Viewport), "Common frame constants");
         }
     }

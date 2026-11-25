@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 #include <ostream>
@@ -44,9 +45,12 @@ struct Operation {
     // ring allocation. Resources and packet boundaries are still plan-owned.
     bool OwnerRecording = false;
     Queue Target = Queue::Direct;
-    uint64_t TransferBytes = 0;
+    std::optional<uint64_t> TransferBytes;
+    // All mutable GPU data and descriptor ranges are private to the retired frame
+    // slot, including indirect accesses by the callback. In-frame dependencies still apply.
+    bool FrameSlotLocal = false;
     bool operator==(const Operation& rhs) const {
-        return Target == rhs.Target && Lists == rhs.Lists && SideEffect == rhs.SideEffect &&
+        return Target == rhs.Target && Lists == rhs.Lists && SideEffect == rhs.SideEffect && FrameSlotLocal == rhs.FrameSlotLocal &&
                OwnerRecording == rhs.OwnerRecording && Name == rhs.Name && TransferBytes == rhs.TransferBytes &&
                Dependencies == rhs.Dependencies && Accesses == rhs.Accesses;
     }
@@ -85,9 +89,10 @@ struct Packet {
     bool OwnerRecording = false;
     Queue Target = Queue::Direct;
     std::string Name;
-    uint64_t TransferBytes = 0;
+    std::optional<uint64_t> TransferBytes;
     // Earlier packets require a separate native execute. Synthetic/opaque packets run alone.
     Id EarliestSubmitStart = Invalid;
+    bool FrameSlotLocal = false;
 };
 struct Schedule {
     std::vector<Packet> Packets;

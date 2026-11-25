@@ -27,6 +27,7 @@ class ProbeInputMirror
     {
         _pending.clear();
         _bytes = 0;
+        _payloadBytes = 0;
         _sealed = false;
     }
 
@@ -76,17 +77,19 @@ class ProbeInputMirror
             {
                 if (!patches.empty() || !ranges.empty() || baseline)
                     throw std::invalid_argument("Partial mirror copies require a buffer");
-                item.TransferBytes = mirror.Bytes;
+                item.TransferBytes = mirror.PayloadBytes;
             }
-            if (offset > UINT64_MAX - item.TransferBytes)
+            const UINT64 stagingBytes = mirror.Footprints.empty() ? item.TransferBytes : mirror.Bytes;
+            if (offset > UINT64_MAX - stagingBytes)
                 throw std::overflow_error("Probe input transfer exceeds buffer size range");
-            _bytes = offset + item.TransferBytes;
+            _bytes = offset + stagingBytes;
+            _payloadBytes += item.TransferBytes;
             _pending.emplace(source, std::move(item));
         }
         return mirror.Local.Get();
     }
 
-    UINT64 TransferBytes() const { return _bytes; }
+    UINT64 TransferBytes() const { return _payloadBytes; }
     bool Contains(ID3D12Resource* source) const { return _mirrors.count(source) != 0; }
     bool PendingCopy(ID3D12Resource* source) const { return _pending.count(source) != 0; }
     UINT64 PendingTransferBytes(ID3D12Resource* source) const
@@ -129,6 +132,7 @@ class ProbeInputMirror
         GDX12ResourceHandle Local;
         std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> Footprints;
         UINT64 Bytes = 0;
+        UINT64 PayloadBytes = 0;
         bool Initialized = false;
     };
 
@@ -221,9 +225,11 @@ class ProbeInputMirror
             const UINT count = UINT(shape.MipLevels) * shape.DepthOrArraySize;
             mirror.Footprints.resize(count);
             std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> local(count);
+            std::vector<UINT> rows(count);
+            std::vector<UINT64> rowBytes(count);
             UINT64 localBytes = 0;
             _submit.Device(0).GetDevice()->GetCopyableFootprints(&shape, 0, count, 0, mirror.Footprints.data(),
-                                                                nullptr, nullptr, &mirror.Bytes);
+                                                                rows.data(), rowBytes.data(), &mirror.Bytes);
             device->GetCopyableFootprints(&shape, 0, count, 0, local.data(), nullptr, nullptr, &localBytes);
             if (!mirror.Bytes || mirror.Bytes == UINT64_MAX || localBytes != mirror.Bytes)
                 throw std::runtime_error("Probe input texture has incompatible adapter footprints");
@@ -231,6 +237,7 @@ class ProbeInputMirror
             {
                 const auto& a = mirror.Footprints[i];
                 const auto& b = local[i];
+                mirror.PayloadBytes += rowBytes[i] * rows[i] * a.Footprint.Depth;
                 if (a.Offset != b.Offset || a.Footprint.Format != b.Footprint.Format ||
                     a.Footprint.Width != b.Footprint.Width || a.Footprint.Height != b.Footprint.Height ||
                     a.Footprint.Depth != b.Footprint.Depth || a.Footprint.RowPitch != b.Footprint.RowPitch)
@@ -299,7 +306,7 @@ class ProbeInputMirror
                 }
             if (importing) mirror.Initialized = true;
         }
-        return work.Add(graph, importing ? "probe owner import scene inputs" : "GPU0 export probe scene inputs",
+        const Id operation = work.Add(graph, importing ? "probe owner import scene inputs" : "GPU0 export probe scene inputs",
                         std::move(accesses), [shared, importing, copies = std::move(copies)](auto* cmd) {
             for (const auto& copy : copies)
             {
@@ -332,6 +339,8 @@ class ProbeInputMirror
                 }
             }
         }, {}, queue);
+        graph.Operations[operation].TransferBytes = _payloadBytes;
+        return operation;
     }
 
     QueueSubmission& _submit;
@@ -341,6 +350,7 @@ class ProbeInputMirror
     QueueSubmission::TransferBuffer _transfer;
     UINT64 _capacity = 0;
     UINT64 _bytes = 0;
+    UINT64 _payloadBytes = 0;
     bool _sealed = false;
 };
 } // namespace BistroRender

@@ -59,7 +59,7 @@ class BistroRenderPipeline final : public IRenderPipeline
 	}
 	const RenderPipelineBindings& GetBindings() const override { return _bindings; }
 	uint64_t ExecuteFrame(RenderPipelineContext&, GDX12CommandList*,
-	                      const std::function<void(GDX12CommandList*)>&) override;
+	                      const std::function<void(GDX12CommandList*)>&, PrefixContents = PrefixContents::Opaque) override;
 	void FramePresented() override;
 	void BeforePresent() override { _beforePresent = std::chrono::steady_clock::now(); }
 	auto PresentTime() const { return _beforePresent; }

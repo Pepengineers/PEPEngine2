@@ -82,10 +82,11 @@ public:
     std::pair<size_t, size_t> GetWorldProbeReadiness() const { return _pipeline->GetWorldProbeReadiness(); }
     const GDX12ShadowQuality& GetShadowQuality() const { return _primaryResources.ShadowQuality; }
     D3D12MA::Statistics GetMemoryStatistics() const;
+    // DIRECT start/end timestamp interval. Independent frame-slot work may start on another queue earlier.
     double GetPrimaryGPUTimeMS();
     GDX12GPUTimingTotals GetPrimaryGPUTimingTotals();
     double GetSkeletalPreparationTimeMS() const { return _skeletalPreparationTimeMS; }
-    double GetGPUFrameTimeMS() const;
+    double GetGPUFrameTimeMS() const; // Same DIRECT interval as GetPrimaryGPUTimeMS.
     void WriteRenderGraph(std::ostream& output) const;
     void BeginTextureUploadBatch(std::uint64_t budgetBytes);
     void EndTextureUploadBatch();

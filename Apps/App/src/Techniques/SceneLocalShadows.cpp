@@ -805,7 +805,11 @@ void SceneLocalShadows::Pack(Slot& frame)
 void SceneLocalShadows::UpdateCamera(Slot& frame)
 {
 	XMFLOAT4X4 viewProjection;
-	const auto viewProjectionMatrix = _common.CameraView * _common.CameraProjection;
+	// Cull and estimate coverage against one frustum covering the full +/- half-pixel jitter.
+	// CameraViewToClip is the stable projection before per-frame jitter is applied.
+	const auto guard = Matrix::CreateScale(float(frame.Width) / (float(frame.Width) + 1.0f),
+	                                      float(frame.Height) / (float(frame.Height) + 1.0f), 1.0f);
+	const auto viewProjectionMatrix = _common.CameraView * _common.CameraViewToClip * guard;
 	XMStoreFloat4x4(&viewProjection, XMMatrixTranspose(viewProjectionMatrix));
 	if (frame.Camera && std::memcmp(&frame.CameraMatrix, &viewProjection, sizeof(viewProjection)) == 0)
 	{

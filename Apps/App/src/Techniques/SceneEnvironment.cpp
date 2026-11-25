@@ -356,11 +356,13 @@ struct SceneEnvironment::RemoteAtmosphere
 		}
 		const char* name = Aerial() ? (import ? "GPU0 import aerial pair" : "aerial pair export")
 		                           : (import ? "GPU0 import visible SkyView" : "SkyView export");
-		return work.Add(graph, name, std::move(accesses), [this, sources, destinations, import](auto* cmd) {
+		const Id copy = work.Add(graph, name, std::move(accesses), [this, sources, destinations, import](auto* cmd) {
 			for (UINT i = 0; i < OutputCount; ++i)
 				cmd->CopyTextureRegion(&destinations[i], 0, 0, 0, &sources[i], nullptr);
 			if (import && Aerial()) RecordedCopies = OutputCount;
 		}, {}, import ? Queue::Copy : Queue::Compute);
+		graph.Operations[copy].TransferBytes = Payload;
+		return copy;
 	}
 
 	void BeginDisplay()

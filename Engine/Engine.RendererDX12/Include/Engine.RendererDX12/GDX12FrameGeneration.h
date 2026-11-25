@@ -39,6 +39,8 @@ public:
     void SetSuspended(bool);
     void BeginFrame(RenderPipelineCommonData&);
     void BeginRendering(RenderPipelineCommonData&);
+    void BeginRenderSubmission(RenderPipelineCommonData&);
+    void PublishFrameConstants(RenderPipelineCommonData&);
     void Prepare(GDX12CommandList*, GDX12Texture* depth, GDX12Texture* motion, RenderPipelineCommonData&);
     void EndRendering();
     void BeforePresent();

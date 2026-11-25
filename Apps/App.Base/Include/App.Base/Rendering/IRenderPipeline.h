@@ -39,8 +39,9 @@ public:
     virtual void PrepareFrame(RenderPipelineContext&) = 0;
     virtual void RebuildExecution(RenderPipelineContext&) {}
     virtual void DrainExecution() {}
+    enum class PrefixContents { Opaque, TimestampOnly };
     virtual uint64_t ExecuteFrame(RenderPipelineContext&, GDX12CommandList*,
-        const std::function<void(GDX12CommandList*)>&) = 0;
+        const std::function<void(GDX12CommandList*)>&, PrefixContents = PrefixContents::Opaque) = 0;
     virtual void BeforePresent() {}
     virtual void FramePresented() {}
     virtual void WriteExecution(std::ostream&) const {}

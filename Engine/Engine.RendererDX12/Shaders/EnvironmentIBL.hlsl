@@ -82,14 +82,30 @@ void IrradianceCS(uint3 id : SV_DispatchThreadID)
     OutputCube[id] = float4(irradiance * (PBR_PI / irradianceSamples), 1);
 }
 
+#ifdef LOCAL_PROBE_FILTER
+uint ProbeFace(uint dispatchFace)
+{
+    uint faces = PrefilterFaces;
+    for (uint i = 0; i < dispatchFace; ++i) faces &= faces - 1;
+    return firstbitlow(faces);
+}
+
+[numthreads(8, 8, 1)]
+void DownsampleProbeCS(uint3 id : SV_DispatchThreadID)
+{
+    if (any(id.xy >= OutputSize)) return;
+    id.z = ProbeFace(id.z);
+    // At half resolution the bilinear lookup averages four source texels in linear HDR.
+    OutputCube[id] = SourceEnvironment.SampleLevel(EnvironmentSampler, CubeDirection(id), 0);
+}
+#endif
+
 [numthreads(8, 8, 1)]
 void PrefilterCS(uint3 id : SV_DispatchThreadID)
 {
     if (any(id.xy >= OutputSize)) return;
 #ifdef LOCAL_PROBE_FILTER
-    uint faces = PrefilterFaces;
-    for (uint i = 0; i < id.z; ++i) faces &= faces - 1;
-    id.z = firstbitlow(faces);
+    id.z = ProbeFace(id.z);
 #endif
     float3 n = CubeDirection(id);
     if (Roughness == 0.0f)

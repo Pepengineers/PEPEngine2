@@ -22,19 +22,37 @@ namespace Engine::Core
 		return resolvedPath.lexically_normal();
 	}
 
-	std::filesystem::path TextureRegistry::MakeMetadataForRegisteredPath(const std::filesystem::path& resolvedSourcePath) const
+	TextureSource TextureRegistry::MakeMetadataForRegisteredPath(const std::filesystem::path& resolvedSourcePath) const
 	{
-		return resolvedSourcePath;
+		return {resolvedSourcePath};
 	}
 
-	std::filesystem::path TextureRegistry::GetSourcePathFromMetadata(const std::filesystem::path& metadata) const
+	std::filesystem::path TextureRegistry::GetSourcePathFromMetadata(const TextureSource& metadata) const
 	{
-		return metadata;
+		return metadata.Path;
 	}
 
-	std::wstring TextureRegistry::GetCacheKeyFromMetadata(const std::filesystem::path& metadata) const
+	std::wstring TextureRegistry::GetCacheKeyFromMetadata(const TextureSource& metadata) const
 	{
-		return BuildCacheKeyFromResolvedPath(metadata);
+		auto key = BuildCacheKeyFromResolvedPath(metadata.Path);
+		if (metadata.Type != ETextureType::Unknown)
+			key += L"#type:" + std::to_wstring(static_cast<unsigned>(metadata.Type));
+		return key;
+	}
+
+	TextureHandle TextureRegistry::Register(const std::filesystem::path& path, ETextureType type)
+	{
+		if (path.empty()) return {};
+		TextureSource source{ResolveSourcePath(path), type};
+		const auto registration = RegisterResolvedPath(source.Path, GetCacheKeyFromMetadata(source));
+		return FinalizeRegistration(registration, std::move(source));
+	}
+
+	TextureHandle TextureRegistry::FindHandle(const std::filesystem::path& path, ETextureType type) const
+	{
+		if (path.empty()) return {};
+		const auto value = FindHandleValueByKey(GetCacheKeyFromMetadata({ResolveSourcePath(path), type}));
+		return value == InvalidHandleValue ? TextureHandle{} : MakeHandleFromValue(value, L"find texture handle");
 	}
 
 	const wchar_t* TextureRegistry::GetAssetTypeName() const
@@ -52,13 +70,13 @@ namespace Engine::Core
 		return GetTexture(FindHandle(path));
 	}
 
-	const Texture* TextureRegistry::Load(const std::filesystem::path& path)
+	const Texture* TextureRegistry::Load(const std::filesystem::path& path, ETextureType type)
 	{
 		TextureHandle loadedHandle = {};
-		return Load(path, loadedHandle);
+		return Load(path, loadedHandle, type);
 	}
 
-	const Texture* TextureRegistry::Load(const std::filesystem::path& path, TextureHandle& outHandle)
+	const Texture* TextureRegistry::Load(const std::filesystem::path& path, TextureHandle& outHandle, ETextureType type)
 	{
 		outHandle = {};
 
@@ -68,7 +86,7 @@ namespace Engine::Core
 			return nullptr;
 		}
 
-		const TextureHandle textureHandle = Register(path);
+		const TextureHandle textureHandle = Register(path, type);
 		if (!textureHandle.IsValid())
 		{
 			return nullptr;
@@ -92,7 +110,7 @@ namespace Engine::Core
 
 		WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Loading texture from path: " + sourcePath.generic_wstring() + L"\n");
 
-		std::unique_ptr<Texture> loadedTexture = TextureLoader::LoadTextureAsset(sourcePath);
+		std::unique_ptr<Texture> loadedTexture = TextureLoader::LoadTextureAsset(sourcePath, false, type);
 		if (loadedTexture == nullptr)
 		{
 			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to load texture from path: " + sourcePath.generic_wstring() + L"\n");

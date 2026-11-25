@@ -105,6 +105,7 @@ Schedule Compile(const Graph& g, bool singleDirect) {
             p.EarliestSubmitStart = (std::max)(p.EarliestSubmitStart, remap[dep] + 1);
         if (op.SideEffect || op.OwnerRecording || op.Accesses.empty()) p.EarliestSubmitStart = Invalid;
         p.Dependencies.reserve(offsets[next + 1] - offsets[next]);
+        p.FrameSlotLocal = op.FrameSlotLocal;
         for (size_t edge = offsets[next]; edge < offsets[next + 1]; ++edge)
             p.Dependencies.push_back(remap[dependencies[edge]]);
         for(auto a:op.Accesses) {

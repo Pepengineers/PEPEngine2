@@ -1,4 +1,5 @@
 #include "BistroRenderPipeline.h"
+#include "Engine.RendererDX12/GDX12FrameGeneration.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.RendererDX12/GDX12SwapChain.h"
 #include "Engine.Core/BenchmarkEngine.h"
@@ -110,7 +111,7 @@ void BistroRenderPipeline::PrepareFrame(RenderPipelineContext& c)
 }
 
 uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12CommandList* prefix,
-                                            const std::function<void(GDX12CommandList*)>& finish)
+                                            const std::function<void(GDX12CommandList*)>& finish, PrefixContents prefixContents)
 {
 	const auto slot = c.Primary.CurrFrameConstantsIndex;
 	_executorSlot = slot;
@@ -246,6 +247,8 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 			graph.Operations.back().Dependencies.push_back(ready);
 	};
 	_schedule = _geometry->Plan(slot, append, prelude, singleDirect, afterInteraction, afterDepth, afterDepthNormals);
+	// Effects on either post adapter can request a reset while preparing this frame.
+	c.BackBuffer->GetFrameGeneration().PublishFrameConstants(c.Common);
 	const auto& schedule = *_schedule;
 	_executor->Reserve(schedule);
 	const auto record = [&](BistroRender::Id op, uint32_t list, ID3D12GraphicsCommandList* commands)
@@ -273,8 +276,12 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 		_lighting->SubmitLightGrid(schedule, waits);
 		_post->SubmitHud(schedule, waits);
 		_geometry->SubmitSkinning(slot, schedule, waits);
+		// RenderModule's prefix only writes the DIRECT start timestamp. During
+		// benchmarking it must precede all queues included in the measured interval.
+		const auto frameStart = prefixContents == PrefixContents::TimestampOnly && !_benchmarkTime ?
+		    BistroRender::Executor::FrameStart::TimestampOnly : BistroRender::Executor::FrameStart::Ordered;
 		completion = _executor->Execute(schedule, _geometry->PlannedResources(slot), record, prefix, nullptr, nullptr, waits,
-		                                exchanges);
+		                                exchanges, BistroRender::Invalid, frameStart);
 		if (_benchmarkTime)
 		{
 			_benchmarkSky = c.Primary.Sky.Source;

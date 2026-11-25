@@ -75,7 +75,7 @@ private:
     std::vector<ProbeState> _probes;
     std::vector<FrameData> _frames;
     std::unique_ptr<GDX12RootSignature> _captureRoot, _cullRoot, _filterRoot;
-    ComPtr<ID3D12PipelineState> _capturePSO, _skyPSO, _cullPSO, _clearPSO, _filterPSO;
+    ComPtr<ID3D12PipelineState> _capturePSO, _skyPSO, _cullPSO, _clearPSO, _filterPSO, _downsamplePSO;
     ComPtr<ID3D12CommandSignature> _signature;
     const GDX12ReflectionSettings* _externalSettings = nullptr;
     std::function<bool(UINT)> _ownsCapture;

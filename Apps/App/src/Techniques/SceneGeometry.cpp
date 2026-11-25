@@ -472,10 +472,12 @@ void SceneGeometry::AppendSkinImports(Graph& graph, Slot& slot)
 {
 	slot.SkinImports.Commands.clear();
 	slot.SkinImport = Invalid;
+	UINT64 bytes = 0;
 	std::vector<Access> accesses{{VertexResource, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}};
 	for (const auto& [owner, remote] : slot.RemoteSkin)
 	{
 		if (remote.Ranges.empty()) continue;
+		bytes += UINT64(remote.VertexCount) * sizeof(Vertex);
 		const Id shared = NativeWork::ResourceFor(graph, slot.PlannedBindings,
 		    remote.Transfer.Resources[0].Get(), "shared exact skinning output");
 		accesses.push_back({shared, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE});
@@ -490,6 +492,7 @@ void SceneGeometry::AppendSkinImports(Graph& graph, Slot& slot)
 				        remote.Transfer.Resources[0].Get(), UINT64(range.FirstVertex) * sizeof(Vertex),
 				        range.Work.VertexBytes());
 	    }, {}, Queue::Copy);
+	graph.Operations[slot.SkinImport].TransferBytes = bytes;
 }
 
 void SceneGeometry::SubmitSkinning(UINT index, const Schedule& primary, std::vector<PacketWait>& waits)
@@ -535,6 +538,8 @@ void SceneGeometry::SubmitSkinning(UINT index, const Schedule& primary, std::vec
 		Operation exportRanges{"owner export exact skinning ranges",
 		    {{vertices, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE}, {shared, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}}};
 		exportRanges.Target = Queue::Copy;
+		const UINT64 bytes = UINT64(remote.VertexCount) * sizeof(Vertex);
+		exportRanges.TransferBytes = bytes;
 		graph.Operations = {std::move(palette), std::move(skin), std::move(exportRanges)};
 		const auto schedule = Compile(graph);
 		remote.GPU.Begin(0);
@@ -547,7 +552,7 @@ void SceneGeometry::SubmitSkinning(UINT index, const Schedule& primary, std::vec
 				for (const auto& range : remote.Ranges)
 					range.Work.Record(cmd, output->GetGPUVirtualAddress(), range.FirstVertex);
 			else
-				cmd->CopyBufferRegion(transfer, 0, output, 0, UINT64(remote.VertexCount) * sizeof(Vertex));
+				cmd->CopyBufferRegion(transfer, 0, output, 0, bytes);
 		});
 		waits.push_back({Id(imported - primary.Packets.begin()), remote.GPU.Completions().back()});
 	}
@@ -680,6 +685,7 @@ Graph SceneGeometry::BuildBasePlan(Slot& s)
 	Operation upload{"scene upload buckets"};
 	upload.Lists = UploadBucketCount;
 	upload.Target = Queue::Copy;
+	upload.FrameSlotLocal = true; // Source and DEFAULT buffers are both owned by s.
 	for (UINT i = 0; i < 4; ++i)
 	{
 		if (s.Buffers[i].Upload)
@@ -701,6 +707,7 @@ Graph SceneGeometry::BuildBasePlan(Slot& s)
 		cull.Accesses.push_back({i, Mode::ReadWrite, UnorderedAccess});
 	}
 	cull.Target = Queue::Compute;
+	cull.FrameSlotLocal = true; // Reads this slot's camera and scene buffers; writes its indirect buffers.
 	for (auto& a : cull.Accesses)
 	{
 		if (a.Usage == Mode::Read)
@@ -709,6 +716,7 @@ Graph SceneGeometry::BuildBasePlan(Slot& s)
 		}
 	}
 	g.Operations[ClearCountsOperation].Target = Queue::Compute;
+	g.Operations[ClearCountsOperation].FrameSlotLocal = true;
 	g.Operations.push_back(cull);
 	Operation depth{s.DepthNormals ? "scene DepthNormals ExecuteIndirect" : "scene depth ExecuteIndirect"};
 	for (UINT i : {0u, 2u, 3u})
@@ -965,6 +973,12 @@ std::shared_ptr<const Schedule> SceneGeometry::Plan(UINT index, const AppendTech
 		auto inserted = order.insert(order.begin() + insertion, exportOp);
 		if (restoreOp != Invalid) order.insert(inserted + 1, restoreOp);
 	}
+	// These producers consume only frozen slot data. Issue them before persistent
+	// simulations or shadow exports can block their queues on the previous frame.
+	if (!singleDirect)
+		std::stable_partition(order.begin(), order.end(), [](Id id) {
+			return id == SceneUploadOperation || id == ClearCountsOperation || id == CullingOperation;
+		});
 	std::vector<Id> remap(g.Operations.size(), Invalid);
 	for (Id i = 0; i < order.size(); ++i)
 	{

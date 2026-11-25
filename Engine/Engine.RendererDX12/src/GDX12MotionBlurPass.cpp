@@ -51,6 +51,7 @@ void GDX12MotionBlurPass::Initialize()
     root.NumSingleUAVSlots = 5;
     _root = std::make_unique<GDX12RootSignature>(_resources->Device, root);
     _prepare = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _root.get(), SHADERS_FOLDER "MotionBlur.hlsl", "Prepare");
+    _prepareMotionOnly = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _root.get(), SHADERS_FOLDER "MotionBlur.hlsl", "PrepareMotionOnly");
     _tiles = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _root.get(), SHADERS_FOLDER "MotionBlur.hlsl", "Tiles");
     _neighbors = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _root.get(), SHADERS_FOLDER "MotionBlur.hlsl", "Neighbors");
     _gather = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _root.get(), SHADERS_FOLDER "MotionBlur.hlsl", "Gather");
@@ -113,13 +114,10 @@ void GDX12MotionBlurPass::PrepareRecording(bool completeMotionRequired)
                     &target == _motion.get() ? L"MotionBlur.CompleteMotion" : L"MotionBlur.Velocity");
             }
         };
-        if (_prepareMotion)
-        {
-            initialize(*_motion, DXGI_FORMAT_R16G16_FLOAT);
-            initialize(*_velocity, DXGI_FORMAT_R16G16_FLOAT);
-        }
+        if (_prepareMotion) initialize(*_motion, DXGI_FORMAT_R16G16_FLOAT);
         if (_preparedBlur)
         {
+            initialize(*_velocity, DXGI_FORMAT_R16G16_FLOAT);
             initialize(*_color, DXGI_FORMAT_R16G16B16A16_FLOAT);
             if (_tileSize != tileSize) ResizeTiles(tileSize);
         }
@@ -153,7 +151,7 @@ void GDX12MotionBlurPass::RecordCommands(GDX12CommandList* commands, GDX12Textur
     {
         UINT Width, Height, TileSize, Samples;
         float Shutter, Radius;
-        UINT Blur, Reset;
+        UINT Reset, Padding0;
         float OutputWidth, OutputHeight, CenterWeight, VelocityThreshold;
         UINT FeatureMotion, Padding[3];
     };
@@ -161,7 +159,7 @@ void GDX12MotionBlurPass::RecordCommands(GDX12CommandList* commands, GDX12Textur
     if (featureMotion && (featureMotion->GetWidth() != width || featureMotion->GetHeight() != height))
         throw std::invalid_argument("Particle motion must match the motion blur input grid");
     const Parameters parameters = { width, height, tileSize, settings.Samples,
-        settings.ShutterFraction, settings.MaxRadius, blur, _commonData->ResetHistory,
+        settings.ShutterFraction, settings.MaxRadius, _commonData->ResetHistory, 0,
         static_cast<float>(_commonData->WindowWidth), static_cast<float>(_commonData->WindowHeight),
         settings.CenterWeight, settings.VelocityThreshold, featureMotion != nullptr, {} };
     GDX12_SCOPED_EVENT(commands, "Feature-aware motion blur", Colors::Coral);
@@ -174,19 +172,22 @@ void GDX12MotionBlurPass::RecordCommands(GDX12CommandList* commands, GDX12Textur
     for (UINT i = 0; i < 3; ++i) commands->ResourceBarrier({ inputs[i]->GetResource()->GetNonPixelShaderResourceBarrier() });
     if (featureMotion) commands->ResourceBarrier({ featureMotion->GetResource()->GetNonPixelShaderResourceBarrier() });
     commands->SetComputeSRV(6, (featureMotion ? featureMotion : inputs[0])->GetSRV()->GPUHandle);
-    commands->ResourceBarrier({ _motion->GetResource()->GetUnorderedAccessBarrier(),
-        _velocity->GetResource()->GetUnorderedAccessBarrier() });
+    commands->ResourceBarrier({ _motion->GetResource()->GetUnorderedAccessBarrier() });
     commands->SetComputeSRV(1, inputs[1]->GetSRV()->GPUHandle);
     commands->SetComputeSRV(2, inputs[2]->GetSRV()->GPUHandle);
     commands->SetComputeUAV(1, _motion->GetUAV()->GPUHandle);
-    commands->SetComputeUAV(2, _velocity->GetUAV()->GPUHandle);
-    commands->SetPipelineState(_prepare.Get());
-    commands->Dispatch((width + 7) / 8, (height + 7) / 8, 1);
-    commands->ResourceBarrier({ _motion->GetResource()->GetNonPixelShaderResourceBarrier(),
-        _velocity->GetResource()->GetNonPixelShaderResourceBarrier() });
     if (blur)
     {
-        commands->ResourceBarrier({ _tileMax->GetResource()->GetUnorderedAccessBarrier() });
+        commands->ResourceBarrier({ _velocity->GetResource()->GetUnorderedAccessBarrier() });
+        commands->SetComputeUAV(2, _velocity->GetUAV()->GPUHandle);
+    }
+    commands->SetPipelineState(blur ? _prepare.Get() : _prepareMotionOnly.Get());
+    commands->Dispatch((width + 7) / 8, (height + 7) / 8, 1);
+    commands->ResourceBarrier({ _motion->GetResource()->GetNonPixelShaderResourceBarrier() });
+    if (blur)
+    {
+        commands->ResourceBarrier({ _velocity->GetResource()->GetNonPixelShaderResourceBarrier(),
+            _tileMax->GetResource()->GetUnorderedAccessBarrier() });
         commands->SetComputeSRV(3, _velocity->GetSRV()->GPUHandle);
         commands->SetComputeUAV(3, _tileMax->GetUAV()->GPUHandle);
         commands->SetPipelineState(_tiles.Get());
@@ -233,6 +234,7 @@ void GDX12MotionBlurPass::ClearDenendencies()
     _neighborMax.reset();
     _root.reset();
     _prepare.Reset();
+    _prepareMotionOnly.Reset();
     _tiles.Reset();
     _neighbors.Reset();
     _gather.Reset();

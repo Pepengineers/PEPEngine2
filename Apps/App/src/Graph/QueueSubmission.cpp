@@ -5,8 +5,6 @@
 #include <algorithm>
 #include <atomic>
 #include <stdexcept>
-#include <thread>
-#include <chrono>
 #include <climits>
 #include <cassert>
 #include <filesystem>
@@ -262,8 +260,15 @@ bool QueueSubmission::Complete(CompletionToken token) const {
     return value>=token.Value;
 }
 void QueueSubmission::Wait(CompletionToken token) const {
-    // Polling also observes removal of the OTHER device behind a shared wait.
-    while(!Complete(token)) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    if (Complete(token)) return;
+    std::unique_ptr<void, decltype(&CloseHandle)> event(CreateEventW(nullptr, FALSE, FALSE, nullptr), CloseHandle);
+    if (!event) ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
+    NotifyOnCompletion(token, event.get());
+    do {
+        const auto result = WaitForSingleObject(event.get(), 100);
+        if (result == WAIT_FAILED) ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
+        // An otherwise healthy queue may be waiting for a removed peer device.
+    } while (!Complete(token));
 }
 GraphResourceInfo QueueSubmission::ValidateResource(Id id, ID3D12Resource* resource) const {
     const auto info = GraphResourceInfo::Read(resource);

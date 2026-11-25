@@ -83,8 +83,11 @@ struct SceneReflections::Remote
     std::vector<Id> PrimaryImports;
     CompletionToken LastWork;
     Id PrimaryExport = Invalid, RemoteImport = Invalid;
-    uint64_t EnvironmentRevision = UINT64_MAX, MeshRevision = UINT64_MAX;
-    uint64_t VertexDeformationRevision = UINT64_MAX;
+    uint64_t EnvironmentRevision = UINT64_MAX;
+    struct GeometryVersion
+    {
+        uint64_t Mesh = UINT64_MAX, Deformation = 0;
+    } MirroredGeometry, PlannedGeometry;
     bool WorkPlanned = false;
 };
 
@@ -599,12 +602,17 @@ void SceneReflections::AppendRemote(Graph& primary, std::vector<ID3D12Resource*>
         }
         in.Geometry = scene.Geometry;
         const auto meshRevision = _resources.GeometryBuffer->GetMeshCacheRevision();
-        const bool meshChanged = remote.MeshRevision != meshRevision;
-        const bool verticesChanged = meshChanged || remote.VertexDeformationRevision != geometry._vertexDeformationRevision;
-        remote.MeshRevision = meshRevision;
-        remote.VertexDeformationRevision = geometry._vertexDeformationRevision;
-        in.Geometry.VertexResource = mirror(SceneVertices, verticesChanged);
+        const bool meshChanged = remote.MirroredGeometry.Mesh != meshRevision;
+        auto* sourceVertices = primaryBindings.at(SceneVertices);
+        const bool seedVertices = meshChanged || !remote.Mirror.Contains(sourceVertices);
+        std::vector<ProbeInputMirror::BufferRange> vertexRanges;
+        if (!seedVertices && remote.MirroredGeometry.Deformation != geometry._vertexDeformationRevision)
+            for (const auto& [first, end] : geometry.ChangedVertexRanges(remote.MirroredGeometry.Deformation))
+                vertexRanges.push_back({UINT64(first) * sizeof(Vertex), UINT64(end - first) * sizeof(Vertex)});
+        in.Geometry.VertexResource = remote.Mirror.Mirror(primary, primaryBindings, sourceVertices,
+            SceneVertices, seedVertices, {}, std::move(vertexRanges));
         in.Geometry.IndexResource = mirror(SceneIndices, meshChanged);
+        remote.PlannedGeometry = {meshRevision, geometry._vertexDeformationRevision};
         in.Vertex = bind(in.Geometry.VertexResource);
         in.Index = bind(in.Geometry.IndexResource);
         in.Geometry.Vertices.BufferLocation = in.Geometry.VertexResource->GetGPUVirtualAddress();
@@ -809,6 +817,7 @@ void SceneReflections::AddExchanges(const Schedule& primary, std::vector<PacketW
             if (inputImport != Invalid) waits.push_back({inputImport, source});
             remote.GPU.Execute(schedule, remote.Bindings, record, nullptr, nullptr, nullptr, waits);
             remote.LastWork = remote.GPU.Completions().back();
+            if (inputImport != Invalid) remote.MirroredGeometry = remote.PlannedGeometry;
             for (const auto& filtered : remote.Filtered)
             {
                 auto& generation = remote.Probes.at(remote.Indices[filtered.Probe]);
@@ -1081,15 +1090,15 @@ void SceneReflections::AppendCapture(Graph& graph, std::vector<ID3D12Resource*>&
         p.SelectProbe(probe);
         const UINT base = captureMips - p._mips, mips = p._mips;
         auto* root = p._filterRoot.get();
-        auto* pipeline = p._filterPSO.Get();
-        const auto input = state.RawMipSRVs[base]->GPUHandle;
         const UINT samples = state.Source.PrefilterSamples;
-        for (UINT mip = 0; mip < mips; ++mip)
-        {
+        auto* scratch = capture.Filtered.GetResource()->D3DResource.Get();
+        auto* raw = state.Raw->GetResource()->D3DResource.Get();
+        const auto dispatchFilter = [&](UINT mip, UINT sourceMip, float roughness, ID3D12PipelineState* pipeline,
+                                        const char* name) {
             const UINT size = p._resolution >> mip;
-            const float roughness = float(mip) / (mips - 1);
+            const auto input = state.RawMipSRVs[base + sourceMip]->GPUHandle;
             const auto output = p._filterUAVs[base + mip]->GPUHandle;
-            work.Add(graph, "probe GGX prefilter mip " + std::to_string(mip),
+            work.Add(graph, name + std::to_string(mip),
                      {texture(state.Raw.get(), Mode::Read, read), texture(&capture.Filtered, Mode::Write, UnorderedAccess)},
                      [=](auto* cmd) {
                          cmd->SetDescriptorHeaps(1, &heap);
@@ -1107,8 +1116,28 @@ void SceneReflections::AppendCapture(Graph& graph, std::vector<ID3D12Resource*>&
                          cmd->SetComputeRootDescriptorTable(root->GetURootParamIndex(0), output);
                          cmd->Dispatch((size + 7) / 8, (size + 7) / 8, faceCount);
                      });
+        };
+        // Retain other faces' raw pyramids between incremental captures. On first publication
+        // all six base faces are complete and all six pyramids are built before GGX samples them.
+        for (UINT mip = 1; mip < mips; ++mip)
+        {
+            dispatchFilter(mip, mip - 1, 0, p._downsamplePSO.Get(), "probe radiance downsample mip ");
+            work.Add(graph, "store probe radiance mip " + std::to_string(mip),
+                     {texture(&capture.Filtered, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE),
+                      texture(state.Raw.get(), Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST)},
+                     [=](auto* cmd) {
+                         for (UINT face = 0; face < 6; ++face)
+                         {
+                             if (!(filtered & (1u << face))) continue;
+                             const UINT slice = face * captureMips + base + mip;
+                             const CD3DX12_TEXTURE_COPY_LOCATION src(scratch, slice), dst(raw, slice);
+                             cmd->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+                         }
+                     });
         }
-        auto* source = capture.Filtered.GetResource()->D3DResource.Get();
+        for (UINT mip = 0; mip < mips; ++mip)
+            dispatchFilter(mip, 0, float(mip) / (mips - 1), p._filterPSO.Get(), "probe GGX prefilter mip ");
+        auto* source = scratch;
         auto* destination = p._published.GetResource()->D3DResource.Get();
         const UINT publishedMips = p._publishedMips;
         const UINT publishedBaseMip = publishedMips - mips;

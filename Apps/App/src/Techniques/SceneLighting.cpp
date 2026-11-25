@@ -631,6 +631,7 @@ void SceneLighting::SubmitLightGrid(const Schedule& primary, std::vector<PacketW
 	    {{maskResource, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE},
 	     {resource(shared, "shared light grid masks"), Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
 	    [=](auto* cmd) { cmd->CopyBufferRegion(shared, 0, masks, 0, bytes); });
+	plan.Operations[publish].TransferBytes = bytes;
 	const auto schedule = Compile(plan);
 	owner.GPU.Reserve(schedule);
 	owner.GPU.Execute(schedule, bindings, [&work](Id id, UINT, auto* cmd) {
@@ -1777,6 +1778,7 @@ void SceneLighting::AppendDeferred(Graph& graph, std::vector<ID3D12Resource*>& b
 		    {{input, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE},
 		     {resource(&masks->GetResource()), Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
 		    [=](auto* cmd) { cmd->CopyBufferRegion(destination, 0, shared, 0, bytes); }, {}, Queue::Copy);
+		graph.Operations[slot->Import].TransferBytes = bytes;
 	}
 
 	const Id deferred = work.Add(graph, "clustered deferred lighting", UniqueLightingAccesses(lighting),
@@ -1844,11 +1846,6 @@ GDX12Texture* SceneLighting::AppendSSR(Graph& graph, std::vector<ID3D12Resource*
 	}
 	auto& p = *ssr;
 	const auto settings = _ssrSettings;
-	const bool settingsChanged = settings != p._previousSettings;
-	if (settingsChanged)
-	{
-		_common.ResetUpscalerHistory = true;
-	}
 	const Matrix view = _common.CameraView, projection = _common.CameraProjection, viewProjection = view * projection;
 	const XMFLOAT2 jitter{_common.ActiveCameraJitterOffsetX, _common.ActiveCameraJitterOffsetY};
 	const auto history = _common.HistoryRevision;
@@ -1856,10 +1853,11 @@ GDX12Texture* SceneLighting::AppendSSR(Graph& graph, std::vector<ID3D12Resource*
 	// history discontinuities. The SDK's private denoiser history persists
 	// across those imports and is retired/recreated only on real resets.
 	bool contextCreated = false;
-	if (!p._context || _forceReset || settingsChanged || p._historyRevision != history ||
+	if (!p._context || _forceReset || p._historyRevision != history ||
 	    p._environmentRevision != _resources.ReflectionEnvironmentRevision)
 	{
 		p.CreateContext();
+		_common.ResetUpscalerHistory = true;
 		contextCreated = true;
 		p._previousViewProjection = viewProjection;
 		p._previousJitter = jitter;
@@ -1992,7 +1990,6 @@ GDX12Texture* SceneLighting::AppendSSR(Graph& graph, std::vector<ID3D12Resource*
 	p._previousJitter = jitter;
 	p._historyRevision = history;
 	p._environmentRevision = _resources.ReflectionEnvironmentRevision;
-	p._previousSettings = settings;
 	_forceReset = false;
 
 	return &p._color;

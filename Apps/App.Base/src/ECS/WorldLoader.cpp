@@ -19,6 +19,7 @@
 #include "Engine.Core/Logging/Logger.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
@@ -438,7 +439,7 @@ namespace
             return cachedTextureIterator->second;
         }
 
-        const Engine::Core::Texture* texture = assetManager.LoadTexture(texturePath);
+        const Engine::Core::Texture* texture = assetManager.Textures().Load(texturePath, textureType);
         if (texture == nullptr)
         {
             return nullptr;
@@ -452,8 +453,8 @@ namespace
         {
             const auto format = texture->GetFormat();
             const bool compressed = format == DXGI_FORMAT_BC7_UNORM || format == DXGI_FORMAT_BC7_UNORM_SRGB;
-            renderModule.SetTextureReplicaSource(textureName, textureType, [texturePath, compressed](auto& temporary) {
-                temporary = Engine::Core::TextureLoader::LoadTextureAsset(texturePath, compressed);
+            renderModule.SetTextureReplicaSource(textureName, textureType, [texturePath, compressed, textureType](auto& temporary) {
+                temporary = Engine::Core::TextureLoader::LoadTextureAsset(texturePath, compressed, textureType);
                 return temporary.get();
             }, maxDimension);
         }
@@ -498,8 +499,8 @@ namespace
             return cachedTextureIterator->second;
         }
 
-        const Engine::Core::Texture* diffuseTexture = assetManager.LoadTexture(diffuseTexturePath);
-        const Engine::Core::Texture* opacityTexture = assetManager.LoadTexture(opacityTexturePath);
+        const Engine::Core::Texture* diffuseTexture = assetManager.Textures().Load(diffuseTexturePath, Engine::Core::ETextureType::Color);
+        const Engine::Core::Texture* opacityTexture = assetManager.Textures().Load(opacityTexturePath, Engine::Core::ETextureType::Data);
         if (diffuseTexture == nullptr || opacityTexture == nullptr)
         {
             return LoadSceneGpuTexture(renderModule, assetManager, diffuseTexturePath, Engine::Core::ETextureType::Color, sceneName,
@@ -508,10 +509,10 @@ namespace
 
         const auto opacityKey = Engine::Core::AssetCachePath(opacityTexturePath, "alpha");
         const auto cache = opacityKey.empty() ? std::filesystem::path{} :
-            Engine::Core::AssetCachePath(diffuseTexturePath, opacityKey.filename().string() + "-merged-bc7-v1.dds");
+            Engine::Core::AssetCachePath(diffuseTexturePath, opacityKey.filename().string() + "-merged-srgb-bc7-v2.dds");
         auto prepare = [cache](const auto& diffuse, const auto& opacity) {
             if (!cache.empty() && std::filesystem::is_regular_file(cache))
-                if (auto cached = Engine::Core::TextureLoader::LoadTextureAsset(cache)) return cached;
+                if (auto cached = Engine::Core::TextureLoader::LoadTextureAsset(cache, false, Engine::Core::ETextureType::Color)) return cached;
             return Engine::Core::TextureLoader::PrepareBC7(TryCreateDiffuseTextureWithOpacityAlpha(diffuse, opacity), cache);
         };
         auto mergedTexture = prepare(*diffuseTexture, *opacityTexture);
@@ -528,8 +529,8 @@ namespace
         if (created)
             renderModule.SetTextureReplicaSource(textureName, Engine::Core::ETextureType::Color,
                 [diffuseTexturePath, opacityTexturePath, prepare](auto& temporary) -> const Engine::Core::Texture* {
-                    const auto diffuse = Engine::Core::TextureLoader::LoadTextureAsset(diffuseTexturePath);
-                    const auto opacity = Engine::Core::TextureLoader::LoadTextureAsset(opacityTexturePath);
+                    const auto diffuse = Engine::Core::TextureLoader::LoadTextureAsset(diffuseTexturePath, false, Engine::Core::ETextureType::Color);
+                    const auto opacity = Engine::Core::TextureLoader::LoadTextureAsset(opacityTexturePath, false, Engine::Core::ETextureType::Data);
                     if (diffuse && opacity) temporary = prepare(*diffuse, *opacity);
                     return temporary.get();
                 }, maxDimension);
@@ -892,16 +893,39 @@ namespace
         }
     };
 
+    struct MaterialTextureSource
+    {
+        const std::filesystem::path& Path;
+        Engine::Core::ETextureType Type;
+        bool NeedsPixels = false;
+    };
+
+    std::array<MaterialTextureSource, 6> MaterialTextureSources(const Engine::Core::MeshMaterial& material)
+    {
+        using Type = Engine::Core::ETextureType;
+        return {{{material.DiffuseTexturePath, Type::Color, !material.OpacityTexturePath.empty()},
+                 {material.NormalTexturePath, Type::Data}, {material.SpecularTexturePath, Type::Color},
+                 {material.RoughnessTexturePath, Type::Data}, {material.EmissiveTexturePath, Type::Color},
+                 {material.OpacityTexturePath, Type::Data, true}}};
+    }
+
     struct TextureDecodeJob final : ParallelJob
     {
-        std::vector<std::filesystem::path> Paths;
-        std::unordered_set<std::wstring> RawPaths;
+        struct Input
+        {
+            std::filesystem::path Path;
+            Engine::Core::TextureHandle Handle;
+            Engine::Core::ETextureType Type;
+        };
+        std::vector<Input> Inputs;
+        std::unordered_set<std::uint32_t> RawHandles;
         std::vector<std::unique_ptr<Engine::Core::Texture>> Results;
         size_t Begin = 0;
         void Execute(size_t index) override
         {
-            const auto& path = Paths[Begin + index];
-            Results[index] = Engine::Core::TextureLoader::LoadTextureAsset(path, !RawPaths.count(path.wstring()));
+            const auto& input = Inputs[Begin + index];
+            Results[index] = Engine::Core::TextureLoader::LoadTextureAsset(input.Path,
+                !RawHandles.count(input.Handle.GetValue()), input.Type);
         }
     };
 
@@ -951,7 +975,6 @@ namespace
         Log::Info("Loading", "CPU mesh import completed in ", LastLoadingMeasurements.ImportSeconds, " s");
 
         TextureDecodeJob textures;
-        std::vector<Engine::Core::TextureHandle> textureHandles;
         std::unordered_set<std::uint32_t> seen;
         estimates.clear();
         for (const auto& path : objPaths)
@@ -960,36 +983,28 @@ namespace
             if (!mesh) return false;
             for (const auto& material : mesh->GetMaterials())
             {
-                if (!material.OpacityTexturePath.empty())
+                for (const auto& texture : MaterialTextureSources(material))
                 {
-                    for (const auto& raw : { material.DiffuseTexturePath, material.OpacityTexturePath })
-                    {
-                        const auto handle = assets.Textures().Register(raw);
-                        if (handle.IsValid()) textures.RawPaths.insert(assets.Textures().GetSourcePath(handle).wstring());
-                    }
-                }
-                for (const auto& texturePath : { material.DiffuseTexturePath, material.NormalTexturePath,
-                    material.SpecularTexturePath, material.RoughnessTexturePath, material.EmissiveTexturePath, material.OpacityTexturePath })
-                {
-                    if (texturePath.empty()) continue;
-                    const auto handle = assets.Textures().Register(texturePath);
-                    if (!handle.IsValid() || !seen.insert(handle.GetValue()).second || assets.Textures().GetTexture(handle)) continue;
+                    if (texture.Path.empty()) continue;
+                    const auto handle = assets.Textures().Register(texture.Path, texture.Type);
+                    if (!handle.IsValid()) continue;
+                    if (texture.NeedsPixels) textures.RawHandles.insert(handle.GetValue());
+                    if (!seen.insert(handle.GetValue()).second || assets.Textures().GetTexture(handle)) continue;
                     const auto source = assets.Textures().GetSourcePath(handle);
-                    textures.Paths.push_back(source);
-                    textureHandles.push_back(handle);
+                    textures.Inputs.push_back({source, handle, texture.Type});
                     estimates.push_back(Engine::Core::TextureLoader::EstimateTransientBytes(source));
                 }
             }
         }
-        LastLoadingMeasurements.TextureCount = textures.Paths.size();
-        Log::Info("Loading", "Decoding ", textures.Paths.size(), " unique textures");
-        for (size_t begin = 0; begin < textures.Paths.size();)
+        LastLoadingMeasurements.TextureCount = textures.Inputs.size();
+        Log::Info("Loading", "Decoding ", textures.Inputs.size(), " unique textures");
+        for (size_t begin = 0; begin < textures.Inputs.size();)
         {
-            if (auto* app = App::GetInstance()) app->ReportLoading(L"Preparing textures " + std::to_wstring(begin) + L"/" + std::to_wstring(textures.Paths.size()));
+            if (auto* app = App::GetInstance()) app->ReportLoading(L"Preparing textures " + std::to_wstring(begin) + L"/" + std::to_wstring(textures.Inputs.size()));
             const auto end = LoadingBatchEnd(estimates, begin, budget, jobs.GetThreadCount());
-            Log::Info("Loading", "Texture batch ", begin, "..", end, " of ", textures.Paths.size());
+            Log::Info("Loading", "Texture batch ", begin, "..", end, " of ", textures.Inputs.size());
             if (estimates[begin] > budget)
-                Log::Warning("Loading", "Texture decode exceeds the estimated budget; decoding alone: ", textures.Paths[begin]);
+                Log::Warning("Loading", "Texture decode exceeds the estimated budget; decoding alone: ", textures.Inputs[begin].Path);
             textures.Begin = begin;
             textures.Results.resize(end - begin);
             LastLoadingMeasurements.MaxTextureTasks = (std::max)(LastLoadingMeasurements.MaxTextureTasks, end - begin);
@@ -997,7 +1012,7 @@ namespace
             if (auto* app = App::GetInstance()) app->WaitForLoading(work); else work.Complete();
             for (size_t index = begin; index < end; ++index)
                 if (textures.Results[index - begin])
-                    if (!assets.Textures().Cache(textureHandles[index], std::move(textures.Results[index - begin]))) return false;
+                    if (!assets.Textures().Cache(textures.Inputs[index].Handle, std::move(textures.Results[index - begin]))) return false;
             begin = end;
         }
         LastLoadingMeasurements.TextureSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - imported).count();
@@ -1084,11 +1099,10 @@ namespace
         {
             const auto* mesh = assetManager.Meshes().FindMesh(path);
             for (const auto& material : mesh->GetMaterials())
-                for (const auto& texturePath : { material.DiffuseTexturePath, material.NormalTexturePath,
-                    material.SpecularTexturePath, material.RoughnessTexturePath, material.EmissiveTexturePath, material.OpacityTexturePath })
+                for (const auto& source : MaterialTextureSources(material))
                 {
-                    if (texturePath.empty()) continue;
-                    const auto handle = assetManager.Textures().FindHandle(texturePath);
+                    if (source.Path.empty()) continue;
+                    const auto handle = assetManager.Textures().FindHandle(source.Path, source.Type);
                     if (!handle.IsValid() || !releasedTextures.insert(handle.GetValue()).second) continue;
                     if (const auto* texture = assetManager.Textures().GetTexture(handle))
                         for (const auto& subresource : texture->GetSubresources()) releasedBytes += subresource.Data.size();

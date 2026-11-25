@@ -196,7 +196,7 @@ struct SceneWater::Remote
 			for (const auto& source : Pass.DrawSources())
 				accesses.push_back({NativeWork::ResourceFor(graph, bindings, source.Particles->GetResource().D3DResource.Get(),
 				    "water packed display"), Mode::Read, CopyRead});
-			Work.Add(graph, "GPU1 export water display", std::move(accesses), [this, shared, slot](auto* cmd) {
+			const Id publish = Work.Add(graph, "GPU1 export water display", std::move(accesses), [this, shared, slot](auto* cmd) {
 				const auto& sources = Pass.DrawSources();
 				for (size_t i = 0; i < sources.size(); ++i)
 				{
@@ -205,6 +205,9 @@ struct SceneWater::Remote
 					    0, uint64_t(range.Count) * sizeof(XMFLOAT4));
 				}
 			}, {}, Queue::Compute);
+			uint64_t bytes = 0;
+			for (const auto& range : slot->Ranges) bytes += uint64_t(range.Count) * sizeof(XMFLOAT4);
+			graph.Operations[publish].TransferBytes = bytes;
 		}
 		const auto schedule = Compile(graph);
 		executor.Reserve(schedule);
@@ -617,6 +620,7 @@ void SceneWater::AppendDraw(Graph& graph, std::vector<ID3D12Resource*>& bindings
 		auto* shared = snapshot.Shared.Resources[0].Get();
 		std::vector<Access> copies{{NativeWork::ResourceFor(graph, bindings, shared, "shared water display"), Mode::Read, CopyRead}};
 		std::vector<std::pair<ID3D12Resource*, Remote::Range>> targets;
+		uint64_t bytes = 0;
 		for (const auto& source : sources)
 		{
 			const auto range = std::find_if(snapshot.Ranges.begin(), snapshot.Ranges.end(), [&](const auto& item) {
@@ -627,11 +631,13 @@ void SceneWater::AppendDraw(Graph& graph, std::vector<ID3D12Resource*>& bindings
 			auto* target = source.Particles->GetResource().D3DResource.Get();
 			copies.push_back({NativeWork::ResourceFor(graph, bindings, target, "local water display"), Mode::Write, CopyWrite});
 			targets.push_back({target, *range});
+			bytes += uint64_t(range->Count) * sizeof(XMFLOAT4);
 		}
 		_import = _work.Add(graph, "GPU0 import water display", std::move(copies), [shared, targets = std::move(targets)](auto* cmd) {
 			for (const auto& [target, range] : targets)
 				cmd->CopyBufferRegion(target, 0, shared, range.Offset, uint64_t(range.Count) * sizeof(XMFLOAT4));
 		}, {}, Queue::Copy);
+		graph.Operations[_import].TransferBytes = bytes;
 	}
 	auto accesses = _surface.NativeSurfaceAccesses(sources);
 	accesses.push_back({hdr->GetResource(), GDX12AccessMode::ReadWrite, D3D12_RESOURCE_STATE_RENDER_TARGET});

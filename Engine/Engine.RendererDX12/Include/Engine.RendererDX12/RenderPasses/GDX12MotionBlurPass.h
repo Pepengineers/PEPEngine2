@@ -25,7 +25,7 @@ private:
     void ResizeTiles(UINT tileSize);
     std::unique_ptr<GDX12Texture> _color, _motion, _velocity, _tileMax, _neighborMax;
     std::unique_ptr<GDX12RootSignature> _root;
-    ComPtr<ID3D12PipelineState> _prepare, _tiles, _neighbors, _gather;
+    ComPtr<ID3D12PipelineState> _prepare, _prepareMotionOnly, _tiles, _neighbors, _gather;
     UINT _tileSize = 0;
     bool _wasEnabled = false;
     bool _passthroughWhenDisabled = false, _prepareMotion = true, _preparedBlur = false;

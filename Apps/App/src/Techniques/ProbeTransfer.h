@@ -104,13 +104,14 @@ class ProbeTransfer
                                     cmd->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
                                 }
                         });
-        auto& bytes = graph.Operations[operation].TransferBytes;
+        UINT64 bytes = 0;
         for (UINT face = firstFace; face < firstFace + faceCount; ++face)
             for (UINT mip = 0; mip < _mips; ++mip)
             {
                 const auto& footprint = _footprints[face * _mips + mip].Footprint;
                 bytes += UINT64(footprint.Width) * footprint.Height * 8;
             }
+        graph.Operations[operation].TransferBytes = bytes;
         return operation;
     }
 

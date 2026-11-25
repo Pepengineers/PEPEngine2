@@ -164,7 +164,8 @@ namespace
 		const DirectX::Image* images,
 		const size_t imageCount,
 		DirectX::ScratchImage& mipChain,
-		const std::filesystem::path& sourcePath)
+		const std::filesystem::path& sourcePath,
+		DirectX::TEX_FILTER_FLAGS filter = DirectX::TEX_FILTER_DEFAULT)
 	{
 		if (images == nullptr || imageCount == 0 || !CanGenerateMipMaps(metadata))
 		{
@@ -175,7 +176,7 @@ namespace
 			images,
 			imageCount,
 			metadata,
-			DirectX::TEX_FILTER_DEFAULT,
+			filter,
 			0,
 			mipChain);
 
@@ -230,7 +231,9 @@ namespace
 		baseImage.pixels = const_cast<std::uint8_t*>(reinterpret_cast<const std::uint8_t*>(baseSubresource.Data.data()));
 
 		DirectX::ScratchImage mipChain;
-		if (!TryGenerateMipMaps(metadata, &baseImage, 1, mipChain, sourcePath))
+		const auto filter = texture.GetType() == Engine::Core::ETextureType::Color
+			? DirectX::TEX_FILTER_SRGB : DirectX::TEX_FILTER_DEFAULT;
+		if (!TryGenerateMipMaps(metadata, &baseImage, 1, mipChain, sourcePath, filter))
 		{
 			return nullptr;
 		}
@@ -248,7 +251,8 @@ namespace
 	/// The decoded pixels are always converted to DXGI_FORMAT_R8G8B8A8_UNORM regardless
 	/// of the source pixel format. A full mip chain is generated when supported.
 	/// Returns nullptr on any failure.
-	std::unique_ptr<Engine::Core::Texture> LoadTextureFromWicFile(const std::filesystem::path& sourcePath)
+	std::unique_ptr<Engine::Core::Texture> LoadTextureFromWicFile(const std::filesystem::path& sourcePath,
+		Engine::Core::ETextureType type)
     {
     	using Microsoft::WRL::ComPtr;
 
@@ -350,7 +354,7 @@ namespace
 
     	Engine::Core::TextureDesc textureDesc = {};
     	textureDesc.Dimension = Engine::Core::ETextureDimension::Texture2D;
-		textureDesc.Type = Engine::Core::ETextureType::Unknown;
+		textureDesc.Type = type;
     	textureDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     	textureDesc.Width = static_cast<std::uint32_t>(width);
     	textureDesc.Height = static_cast<std::uint32_t>(height);
@@ -540,14 +544,15 @@ namespace Engine::Core
 		return estimate;
 	}
 
-	std::unique_ptr<Texture> TextureLoader::LoadTextureAsset(const std::filesystem::path& sourcePath, bool compressedCache)
+	std::unique_ptr<Texture> TextureLoader::LoadTextureAsset(const std::filesystem::path& sourcePath, bool compressedCache, ETextureType type)
 	{
-        const auto cache = compressedCache ? AssetCachePath(sourcePath, "bc7-v1.dds") : std::filesystem::path{};
+        const auto cache = compressedCache ? AssetCachePath(sourcePath,
+            type == ETextureType::Color ? "bc7-srgb-v2.dds" : "bc7-linear-v2.dds") : std::filesystem::path{};
         if (!cache.empty() && std::filesystem::is_regular_file(cache))
         {
             DirectX::ScratchImage cached;
             if (SUCCEEDED(DirectX::LoadFromDDSFile(cache.c_str(), DirectX::DDS_FLAGS_NONE, nullptr, cached)))
-                return CreateTextureFromScratchImage(cached.GetMetadata(), cached, ETextureType::Unknown);
+                return CreateTextureFromScratchImage(cached.GetMetadata(), cached, type);
         }
 		Log::Info("Texture", "Decoding texture: ", sourcePath);
 		if (sourcePath.empty())
@@ -608,11 +613,11 @@ namespace Engine::Core
 				textureMetadata = mipChain.GetMetadata();
 			}
 
-			loadedTexture = CreateTextureFromScratchImage(textureMetadata, *textureImage, ETextureType::Unknown);
+			loadedTexture = CreateTextureFromScratchImage(textureMetadata, *textureImage, type);
 		}
 		else
 		{
-			loadedTexture = LoadTextureFromWicFile(sourcePath);
+			loadedTexture = LoadTextureFromWicFile(sourcePath, type);
 		}
 
 		if (loadedTexture == nullptr)

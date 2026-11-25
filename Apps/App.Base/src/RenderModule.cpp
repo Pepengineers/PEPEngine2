@@ -258,13 +258,13 @@ AutoConsoleVariable<UINT> RenderModule::MaterialMaxDimension(L"Render.Textures.M
 GPUTexture* RenderModule::LoadMaterialTexture(const std::string& name, const std::filesystem::path& path, ETextureType type)
 {
     if (auto* existing = GetTextureByName(name)) return existing;
-    const auto image = TextureLoader::LoadTextureAsset(path, true);
+    const auto image = TextureLoader::LoadTextureAsset(path, true, type);
     if (!image) return nullptr;
     const UINT limit = MaterialMaxDimension.GetValue();
     auto* texture = CreateTexture(name, image.get(), type, limit);
     if (texture)
-        SetTextureReplicaSource(name, type, [path](auto& temporary) {
-            temporary = TextureLoader::LoadTextureAsset(path, true);
+        SetTextureReplicaSource(name, type, [path, type](auto& temporary) {
+            temporary = TextureLoader::LoadTextureAsset(path, true, type);
             return temporary.get();
         }, limit);
     return texture;
@@ -983,7 +983,7 @@ void RenderModule::OnRender()
 {
     if (!_gpu) throw std::logic_error("Renderer device domain is quarantined");
     _RPcommonData.Jobs = &App::GetInstance()->GetJobs();
-    _backBuffer->GetFrameGeneration().BeginRendering(_RPcommonData);
+    _backBuffer->GetFrameGeneration().BeginRenderSubmission(_RPcommonData);
     _primaryResources.BeginMeshPrimitiveUpdate();
     auto context = PipelineContext();
     _pipeline->PrepareMaterialBindings(context);
@@ -999,7 +999,7 @@ void RenderModule::OnRender()
     _pipeline->PrepareFrame(context);
     RefreshPipelineFlags();
     const auto completion = _pipeline->ExecuteFrame(context, commands,
-        [&](GDX12CommandList* list) { _primaryGPUTimer->Stop(list); });
+        [&](GDX12CommandList* list) { _primaryGPUTimer->Stop(list); }, IRenderPipeline::PrefixContents::TimestampOnly);
     ++_frameSubmission;
     GetCurrentPrimaryFrameConstants()->FenceValue = completion;
     _primaryGPUTimer->OnCommandListExecuted(completion);
