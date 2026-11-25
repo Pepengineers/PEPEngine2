@@ -878,7 +878,8 @@ private:
             if (!exeLength || exeLength == std::size(executable))
                 throw std::runtime_error("Cannot identify benchmark executable");
             std::ostringstream conditions;
-            conditions << "bistro-baseline-v10 " << std::setprecision(17) << Duration() << ' ' << _paintingHold << ' ' << _warmup << ' ' <<
+            conditions << (_placementProfile == BistroPlacement::Quality ? "bistro-baseline-v11 " : "bistro-baseline-v10 ") <<
+                std::setprecision(17) << Duration() << ' ' << _paintingHold << ' ' << _warmup << ' ' <<
                 std::filesystem::last_write_time(executable).time_since_epoch().count() << ' ' <<
                 pipeline.BenchmarkSubmissions().AdapterLabel(0) << ' ' <<
                 world.GetTimeScale() << ' ' << _characters->Seed() << ' ' << _startupLayout;
@@ -968,8 +969,8 @@ private:
             if (!first) Apply(console, _placementSearch.Patch(_trial.Settings));
             pipeline.ResetBenchmarkProbeCaptures();
             const auto [width, height] = _placementSearch.Resolution(_trial.Settings);
-            if (_placementSearch.LowFirst())
-                Log::Info("BistroBenchmark", "SingleGPU Performance trial ", _trial.Id, "; ", _trial.Source,
+            if (_placementSearch.LowFirst() || _placementSearch.HighFirst())
+                Log::Info("BistroBenchmark", "SingleGPU ", BistroPlacement::ProfileName[_placementProfile], " trial ", _trial.Id, "; ", _trial.Source,
                     "; requested output=", width, "x", height, "; provider=", _trial.Settings.Provider,
                     "; preset=", _trial.Settings.Preset);
             const auto hwnd = _placementWindow->GetWindowHandle();
@@ -1175,7 +1176,7 @@ private:
                         _trialReason = "requested output size unavailable";
                     else if (int(status.Effective) != _trial.Settings.Provider ||
                         (status.Effective == GDX12UpscalerProvider::Native) != (_trialResult.Render == _trialResult.Output) ||
-                        (_placementSearch.LowFirst() && _trial.Settings.Provider &&
+                        ((_placementSearch.LowFirst() || _placementSearch.HighFirst()) && _trial.Settings.Provider &&
                          (_trialResult.Render.first >= _trialResult.Output.first || _trialResult.Render.second >= _trialResult.Output.second)))
                         _trialReason = "requested image mode unavailable";
                 }
@@ -1208,6 +1209,19 @@ private:
             return;
         }
         ObservePlacement(pipeline);
+        if (_placementSearch.HighFirst() && !_manualPlacement && _placementWindowIndex == 0 && _frames.empty())
+        {
+            _csv.Config(_trialPrefix + "PreparationAndWarmupSeconds", Csv::Number(Seconds(_trialStarted, now)));
+            if (_calibrating)
+            {
+                const auto [published, expected] = pipeline.GetWorldProbeReadiness();
+                Log::Info("BistroBenchmark", "SingleGPU Quality trial ", _trial.Id,
+                    "; measuring after preparation and warmup; probes=", published, "/", expected,
+                    "; effective output=", _trialResult.Output.first, "x", _trialResult.Output.second,
+                    "; render=", _trialResult.Render.first, "x", _trialResult.Render.second,
+                    "; warmup seconds=", LegWarmup());
+            }
+        }
         const double toleranceMs = _placementProfile == BistroPlacement::Performance ? 2000. / 60 : 1000. / 30;
         _trialFreshness.Observe(pipeline.BenchmarkProbeFrame(), now, toleranceMs);
         const auto bytes = pipeline.BenchmarkTransferBytes();
@@ -1383,7 +1397,8 @@ private:
             _trialResult.P95 = *rank;
         }
         if (_trialReason.empty() && _trialResult.Fps <= 0) _trialReason = "no rendered samples";
-        if (_trialReason.empty() && !_manualPlacement && (!_calibrating || _placementSearch.LowFirst()) && _trialFreshness.Missed)
+        if (_trialReason.empty() && !_manualPlacement &&
+            (!_calibrating || _placementSearch.LowFirst() || _placementSearch.HighFirst()) && _trialFreshness.Missed)
             _trialReason = "reflection face deadline missed";
         ReportPlacementEvidence(pipeline);
         _trialResult.Valid = _trialReason.empty();
@@ -1393,8 +1408,8 @@ private:
         _csv.Config(_trialPrefix + "P95ms", Csv::Number(_trialResult.P95));
         _csv.Config(_trialPrefix + "WallSeconds", Csv::Number(SecondsSince(_trialStarted)));
         WritePlacementTrialReport(_trialResult.Valid ? "measured" : _trialReason);
-        if (!_manualPlacement && _placementSearch.LowFirst())
-            Log::Info("BistroBenchmark", "SingleGPU Performance trial ", _trial.Id,
+        if (!_manualPlacement && (_placementSearch.LowFirst() || _placementSearch.HighFirst()))
+            Log::Info("BistroBenchmark", "SingleGPU ", BistroPlacement::ProfileName[_placementProfile], " trial ", _trial.Id,
                 "; effective output=", _trialResult.Output.first, "x", _trialResult.Output.second,
                 "; render=", _trialResult.Render.first, "x", _trialResult.Render.second,
                 "; measured FPS=", _trialResult.ThresholdFps, "; status=", _trialResult.Valid ? "measured" : _trialReason);
@@ -1432,7 +1447,7 @@ private:
             if (_trialResult.Activity[i])
             {
                 _csv.Config(_trialPrefix + "ActiveTechnique", BistroPlacement::Techniques[i].Pass);
-                if (!_manualPlacement && _placementSearch.LowFirst())
+                if (!_manualPlacement && (_placementSearch.LowFirst() || _placementSearch.HighFirst()))
                     _csv.Config(_trialPrefix + "ActiveTechniqueLevel", std::string(BistroPlacement::Techniques[i].Pass) + "=" +
                         (BistroPlacement::Techniques[i].Quality ?
                             std::to_string(_placementSearch.QualityValue(i, _trialResult.Settings.Levels[i])) : "On"));
@@ -1457,7 +1472,8 @@ private:
         const double probeAndFull = PlacementProbeCost() + PlacementFullCost();
         for (; _placementPhase < 4 && Clock::now() < _placementDeadline; ++_placementPhase)
         {
-            if (!_placementSearch.LowFirst() && _placementPhase == 0 && Seconds(Clock::now(), _placementDeadline) < 2 * probeAndFull &&
+            if (!_placementSearch.LowFirst() && !_placementSearch.HighFirst() && _placementPhase == 0 &&
+                Seconds(Clock::now(), _placementDeadline) < 2 * probeAndFull &&
                 _placementSearch.HasReference(false) && !_placementSearch.HasReference(true))
                 continue;
             if (!_placementSearch.BeginPhase(_placementPhase)) continue;
@@ -1480,6 +1496,19 @@ private:
     {
         const double fullCost = PlacementFullCost();
         const double remaining = Seconds(now, _phaseDeadline);
+        if (_placementSearch.HighFirst())
+        {
+            if (remaining >= fullCost)
+                if (auto trial = _placementSearch.NextQualityTrial(_csv, remaining >= PlacementProbeCost() + fullCost))
+                {
+                    BeginPlacementTrial(world, console, pipeline, std::move(*trial));
+                    return;
+                }
+            _placementSearch.EndPhase();
+            ++_placementPhase;
+            BeginNextPlacementPhase(world, console, pipeline);
+            return;
+        }
         if (remaining >= fullCost)
             if (auto confirmation = _placementSearch.PerformanceConfirmation(_csv))
             {

@@ -249,7 +249,7 @@ public:
 	}
 
 private:
-	static auto StagingShape(UINT side)
+	static CD3DX12_RESOURCE_DESC StagingShape(UINT side)
 	{
 		return ShadowMemory::Depth(side, 1, D3D12_RESOURCE_FLAG_NONE);
 	}

@@ -176,7 +176,7 @@ public:
                         (directory / std::filesystem::u8path(result.SourceCsv)).lexically_normal();
                     result.SourceCsv = source.lexically_relative(output.parent_path()).generic_u8string();
                     if (_remote && completed[bool(result.Settings.Provider)]) _cachedMode[bool(result.Settings.Provider)] = true;
-                    if (!LowFirst()) _fullSettings.insert(result.Settings);
+                    if (!LowFirst() && !HighFirst()) _fullSettings.insert(result.Settings);
                     ObserveComposition(result);
                     _references.push_back(result);
                 }
@@ -317,6 +317,7 @@ public:
     ConsoleVariablePatch ControlledSettings() const { return Patch(_high); }
 
     bool LowFirst() const { return _profile == Performance && !_remote; }
+    bool HighFirst() const { return _profile == Quality && !_remote; }
 
     Trial Calibration()
     {
@@ -329,6 +330,11 @@ public:
             return trial;
         }
         auto settings = _high;
+        if (HighFirst())
+        {
+            settings.Resolution = _sizes.size() - 1;
+            return Make(settings, "maximum Native output with full High and route checkpoints", true);
+        }
         if (const auto* reference = BestReference(false)) settings.Resolution = reference->Settings.Resolution;
         return Make(settings, "native route checkpoints", true);
     }
@@ -352,6 +358,14 @@ public:
         _short.clear();
         _failedProbes.clear();
         if (!NeedsPhase(phase)) return false;
+        if (HighFirst())
+        {
+            _quality = {};
+            auto high = _high;
+            high.Resolution = _sizes.size() - 1;
+            _quality.Modes = Upscaled() ? UpscalerModes(high) : std::vector<Config>{high};
+            return !_quality.Modes.empty();
+        }
         if (LowFirst())
         {
             _performance = {};
@@ -403,9 +417,9 @@ public:
     void EndPhase()
     {
         if (RemotePhase() || !HasReference(Upscaled())) return;
-        if (LowFirst())
+        if (LowFirst() || HighFirst())
         {
-            if (BestReference(Upscaled())->Fps < Threshold[Performance]) return;
+            if (BestReference(Upscaled())->Fps < Threshold[_profile]) return;
         }
         else if (_confirmed.size() == _confirmedBeforePhase && (_short.empty() || Finalist())) return;
         _completedMode[Upscaled()] = true;
@@ -447,6 +461,16 @@ public:
         }
     }
 
+    std::optional<Trial> NextQualityTrial(BistroBenchmarkData::Csv& csv, bool canProbe)
+    {
+        if (_pending.empty())
+            if (auto full = AdvanceQuality(csv, canProbe)) return full;
+        if (canProbe)
+            if (auto probe = NextProbe(csv)) return probe;
+        if (const auto* finalist = QualityFinalist()) return Confirm(*finalist);
+        return {};
+    }
+
     const Result* Finalist() const
     {
         const auto* incumbent = RemotePhase() ? Best(Upscaled(), true) : BestReference(Upscaled());
@@ -482,7 +506,7 @@ public:
 
     void ScheduleWithinVideoMemory(const Trial& trial, ConsoleModule& console, Size output)
     {
-        if (LowFirst()) return;
+        if (LowFirst() || HighFirst()) return;
         auto next = trial.Settings;
         while (next.Resolution && (_sizes[next.Resolution].first > output.first || _sizes[next.Resolution].second > output.second))
             --next.Resolution;
@@ -514,6 +538,19 @@ public:
         const bool outputUnavailable = rejection == "requested output size unavailable";
         if (trial.Full)
         {
+            if (HighFirst())
+            {
+                _fullSettings.insert(trial.Settings);
+                if (result.Valid && trial.Settings.Owners == result.Settings.Owners)
+                {
+                    ObserveComposition(result);
+                    _confirmed.push_back(result);
+                    SaveReferences();
+                }
+                else if (rejection == "reflection face deadline missed")
+                    _freshnessFailures.insert(trial.Settings);
+                return;
+            }
             if (LowFirst() && _performance.ConfirmingHigh && trial.Settings == _performance.Quality)
             {
                 _performance.ConfirmingHigh = false;
@@ -563,6 +600,11 @@ public:
             _failedProbes.insert(trial.Settings);
             ++_rejected[Upscaled()];
             if (LowFirst()) return;
+            if (HighFirst())
+            {
+                if (rejection == "reflection face deadline missed") _freshnessFailures.insert(trial.Settings);
+                return;
+            }
             if (rejection == "reflection face deadline missed")
             {
                 ExpandPolicies(trial, result);
@@ -589,6 +631,21 @@ public:
         if (result.Fps < Threshold[_profile] && (!detail || Better(result, *detail, true))) detail = result;
         auto& nearMiss = _nearMiss[Upscaled()];
         if (result.Fps < Threshold[_profile] && (!nearMiss || result.Fps > nearMiss->Fps)) nearMiss = result;
+        if (HighFirst())
+        {
+            if (_quality.Stage == QualityStage::Reduce)
+                if (const auto* base = QualityShort(_quality.Candidate))
+                {
+                    const auto* full = QualityFull(_quality.Candidate);
+                    const double deficit = 1000. / (full ? full->Fps : ShortFps(*base)) - 1000. / Threshold[Quality];
+                    const double saved = 1000. / base->Fps - 1000. / result.Fps;
+                    const auto key = "Trial." + std::to_string(result.Id) + ".QualityTrade.";
+                    csv.Config(key + "ComparedTrial", std::to_string(base->Id));
+                    csv.Config(key + "DeficitMs", BistroBenchmarkData::Csv::Number((std::max)(0., deficit)));
+                    csv.Config(key + "SavedMeanMs", BistroBenchmarkData::Csv::Number(saved));
+                }
+            return;
+        }
         if (!LowFirst()) Expand(trial, result, csv);
         else if (_performance.Stage == PerformanceStage::RemovalResults && ShortFps(result) >= Threshold[Performance])
         {
@@ -671,6 +728,17 @@ public:
     bool RemotePhase() const { return _phase >= 2; }
 
 private:
+    enum class QualityStage { High, Epic, Reduce, Reflections, Fallback, Remove };
+
+    struct QualityProgress
+    {
+        QualityStage Stage = QualityStage::High;
+        size_t Mode = 0;
+        std::vector<Config> Modes;
+        Config Anchor, Candidate;
+        std::vector<Config> Alternatives;
+    };
+
     enum class PerformanceStage { Saved, Lower, Remove, RemovalResults, Raise, Refine, Neighbor, High, Reduce,
         ReductionResults, NeighborHigh, Improve, Done };
 
@@ -776,7 +844,324 @@ private:
         _performance.Modes = Upscaled() ? UpscalerModes(_minimum) : std::vector<Config>{_minimum};
     }
 
-    double ShortFps(const Result& result) const { return LowFirst() ? result.ThresholdFps : result.Fps; }
+    double ShortFps(const Result& result) const { return LowFirst() || HighFirst() ? result.ThresholdFps : result.Fps; }
+
+    const Result* QualityFull(const Config& settings) const
+    {
+        for (const auto& result : _confirmed)
+            if (result.Settings == settings) return &result;
+        if (!_fullSettings.count(settings))
+            for (const auto& result : _references)
+                if (result.Settings == settings) return &result;
+        return nullptr;
+    }
+
+    const Result* QualityShort(const Config& settings) const
+    {
+        const auto found = _short.find(settings);
+        return found == _short.end() ? nullptr : &found->second;
+    }
+
+    const Result* QualityFinalist(const std::vector<Config>* alternatives = nullptr, const Result* reductionBase = nullptr) const
+    {
+        const Result* best = nullptr;
+        bool bestCovers = false;
+        const auto* fullBase = reductionBase ? QualityFull(reductionBase->Settings) : nullptr;
+        const double deficit = reductionBase ? (std::max)(0., 1000. / (fullBase ? fullBase->Fps : ShortFps(*reductionBase)) -
+            1000. / Threshold[Quality]) : 0.;
+        for (const auto& [settings, result] : _short)
+        {
+            if ((alternatives && std::find(alternatives->begin(), alternatives->end(), settings) == alternatives->end()) ||
+                ShortFps(result) < Threshold[Quality] * .96 || _fullSettings.count(settings) || QualityFull(settings)) continue;
+            const auto pruned = [&](const Result& full)
+            {
+                return full.Fps >= Threshold[Quality] && !_fullSettings.count(full.Settings) &&
+                    QualityOutranks(full, result);
+            };
+            if (std::any_of(_references.begin(), _references.end(), pruned) ||
+                std::any_of(_confirmed.begin(), _confirmed.end(), [&](const Result& full) {
+                    return full.Fps >= Threshold[Quality] && QualityOutranks(full, result);
+                })) continue;
+            const bool covers = reductionBase && ShortFps(result) >= Threshold[Quality] &&
+                1000. / reductionBase->Fps - 1000. / result.Fps >= deficit;
+            if (!best || (covers != bestCovers ? covers : Better(result, *best, false, true)))
+            {
+                best = &result;
+                bestCovers = covers;
+            }
+        }
+        return best;
+    }
+
+    size_t SmallerQualityResolution(size_t current) const
+    {
+        const unsigned target = _sizes[current].second / 2;
+        size_t best = 0;
+        for (size_t i = 1; i < current; ++i)
+            if (std::abs(int64_t(_sizes[i].second) - target) < std::abs(int64_t(_sizes[best].second) - target)) best = i;
+        return best;
+    }
+
+    void QueueQualityAlternative(Config settings, const std::string& source)
+    {
+        settings = Canonical(std::move(settings));
+        if (std::find(_quality.Alternatives.begin(), _quality.Alternatives.end(), settings) != _quality.Alternatives.end()) return;
+        _quality.Alternatives.push_back(settings);
+        if (!QualityFull(settings) && !_fullSettings.count(settings)) Schedule(settings, source);
+    }
+
+    std::optional<Trial> AdvanceQuality(BistroBenchmarkData::Csv& csv, bool canProbe)
+    {
+        auto& progress = _quality;
+        const double threshold = Threshold[Quality];
+        const auto passes = [&](const Result* result) { return result && result->Fps >= threshold; };
+        const auto bestFull = [&]()
+        {
+            const Result* best = nullptr;
+            for (const auto& config : progress.Alternatives)
+                if (const auto* result = QualityFull(config); passes(result) && (!best || Better(*result, *best))) best = result;
+            return best;
+        };
+        const auto finishMode = [&]()
+        {
+            progress.Alternatives.clear();
+            progress.Stage = QualityStage::High;
+            ++progress.Mode;
+        };
+        while (progress.Mode < progress.Modes.size() && _pending.empty())
+        {
+            auto mode = progress.Modes[progress.Mode];
+            switch (progress.Stage)
+            {
+            case QualityStage::High:
+            {
+                size_t upper = _sizes.size();
+                std::optional<size_t> lower;
+                const char* source = mode.ProbeFrequency == Frequency::Off ?
+                    "maximum output with full High and static probes after a freshness rejection" : "maximum output with full High";
+                auto staticProbes = progress.Modes[progress.Mode];
+                staticProbes.ProbeFrequency = Frequency::Off;
+                for (;;)
+                {
+                    const auto* full = QualityFull(mode);
+                    const auto* sample = QualityShort(mode);
+                    const bool triedFull = full || _fullSettings.count(mode);
+                    const bool passed = triedFull ? passes(full) && QualityComplete(*full) :
+                        sample && ShortFps(*sample) >= threshold * .96;
+                    if (!triedFull && !sample && !_failedProbes.count(mode))
+                    {
+                        if (canProbe) Schedule(mode, source);
+                        return {};
+                    }
+                    if (passed)
+                    {
+                        lower = mode.Resolution;
+                        if (upper == *lower + 1)
+                        {
+                            if (!full) return Confirm(*sample);
+                            progress.Anchor = mode;
+                            progress.Stage = QualityStage::Epic;
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        upper = mode.Resolution;
+                        if (mode.ProbeFrequency != Frequency::Off && _freshnessFailures.count(mode) &&
+                            std::find(progress.Modes.begin(), progress.Modes.end(), staticProbes) == progress.Modes.end())
+                            progress.Modes.insert(progress.Modes.begin() + progress.Mode + 1, staticProbes);
+                    }
+                    if (lower)
+                    {
+                        mode.Resolution = *lower + (upper - *lower) / 2;
+                        source = "refine full High output between passing and failing steps";
+                    }
+                    else if (mode.Resolution)
+                    {
+                        mode.Resolution = SmallerQualityResolution(mode.Resolution);
+                        source = "halve output height after full High missed the target";
+                    }
+                    else
+                    {
+                        if (mode.ProbeFrequency != Frequency::Off && progress.Mode + 1 < progress.Modes.size() &&
+                            progress.Modes[progress.Mode + 1] == staticProbes) finishMode();
+                        else
+                        {
+                            progress.Anchor = mode;
+                            progress.Stage = QualityStage::Fallback;
+                        }
+                        break;
+                    }
+                }
+                break;
+            }
+            case QualityStage::Epic:
+            {
+                auto epic = progress.Anchor;
+                const auto& high = *QualityFull(progress.Anchor);
+                for (size_t i = 0; i < epic.Levels.size(); ++i)
+                    if (high.Activity[i] && PerformanceScale(i) && QualityValue(i, Epic) != QualityValue(i, High))
+                        epic.Levels[i] = Epic;
+                if (epic.Levels != progress.Anchor.Levels)
+                {
+                    if (const auto* full = QualityFull(epic); passes(full) && QualityComplete(*full))
+                        progress.Anchor = epic;
+                    else if (!_failedProbes.count(epic))
+                    {
+                        if (const auto* sample = QualityShort(epic))
+                        {
+                            if (!_fullSettings.count(epic) && !QualityFull(epic) && ShortFps(*sample) >= threshold * .96)
+                                return Confirm(*sample);
+                        }
+                        else
+                        {
+                            if (canProbe) Schedule(epic, "all Epic at confirmed High output");
+                            return {};
+                        }
+                    }
+                    if (epic.Levels != progress.Anchor.Levels)
+                    {
+                        progress.Candidate = epic;
+                        progress.Stage = QualityStage::Reduce;
+                        break;
+                    }
+                }
+                progress.Stage = QualityStage::Reflections;
+                break;
+            }
+            case QualityStage::Reduce:
+            {
+                if (!canProbe && progress.Alternatives.empty()) return {};
+                if (progress.Alternatives.empty())
+                    for (size_t i = 0; i < progress.Candidate.Levels.size(); ++i)
+                        if (progress.Candidate.Levels[i] == Epic)
+                        {
+                            auto next = progress.Candidate;
+                            next.Levels[i] = High;
+                            QueueQualityAlternative(next, "measure Epic to High frame-time change for " + std::string(Techniques[i].Pass));
+                        }
+                if (!_pending.empty()) break;
+                const auto* base = QualityShort(progress.Candidate);
+                if (const auto* finalist = QualityFinalist(&progress.Alternatives, base)) return Confirm(*finalist);
+                if (const auto* full = bestFull())
+                {
+                    if (Better(*full, *QualityFull(progress.Anchor))) progress.Anchor = full->Settings;
+                    progress.Alternatives.clear();
+                    progress.Stage = QualityStage::Reflections;
+                    break;
+                }
+                const Result* saving = nullptr;
+                for (const auto& config : progress.Alternatives)
+                    if (const auto* sample = QualityShort(config); sample && (!base || sample->Fps > base->Fps) &&
+                        (!saving || sample->Fps > saving->Fps || (sample->Fps == saving->Fps && Better(*sample, *saving, true, true))))
+                        saving = sample;
+                progress.Alternatives.clear();
+                if (saving && !(saving->Settings == progress.Anchor))
+                    progress.Candidate = saving->Settings;
+                else progress.Stage = QualityStage::Reflections;
+                break;
+            }
+            case QualityStage::Reflections:
+            {
+                if (!canProbe && progress.Alternatives.empty()) return {};
+                if (progress.Alternatives.empty() && progress.Anchor.Levels[ProbeQuality] != Off)
+                    for (int frequency = int(Frequency::Epic); frequency >= int(progress.Anchor.ProbeFrequency); --frequency)
+                        for (int capture : {progress.Anchor.ProbeCapture, 1 - progress.Anchor.ProbeCapture})
+                        {
+                            auto next = progress.Anchor;
+                            next.ProbeFrequency = Frequency(frequency);
+                            next.ProbeCapture = capture;
+                            QueueQualityAlternative(next, "probe cadence and capture at confirmed spatial quality");
+                        }
+                if (!_pending.empty()) break;
+                if (const auto* finalist = QualityFinalist(&progress.Alternatives)) return Confirm(*finalist);
+                finishMode();
+                break;
+            }
+            case QualityStage::Fallback:
+            {
+                if (!canProbe && progress.Alternatives.empty()) return {};
+                auto minimum = progress.Anchor;
+                minimum.Levels = _minimum.Levels;
+                minimum = Canonical(std::move(minimum));
+                if (progress.Alternatives.empty())
+                {
+                    auto medium = progress.Anchor;
+                    for (size_t i = 0; i < medium.Levels.size(); ++i)
+                        if (PerformanceScale(i) && QualityValue(i, Medium) != QualityValue(i, High))
+                        {
+                            auto next = progress.Anchor;
+                            next.Levels[i] = medium.Levels[i] = Medium;
+                            QueueQualityAlternative(next, "reduce one technique after High failed at minimum output");
+                        }
+                    QueueQualityAlternative(medium, "full Medium after High failed at minimum output");
+                    QueueQualityAlternative(minimum, "minimum active levels at minimum output");
+                }
+                if (!_pending.empty()) break;
+                if (const auto* finalist = QualityFinalist(&progress.Alternatives)) return Confirm(*finalist);
+                const auto* full = bestFull();
+                progress.Alternatives.clear();
+                if (full && QualityComplete(*full))
+                {
+                    progress.Anchor = full->Settings;
+                    progress.Stage = QualityStage::Reflections;
+                }
+                else if (const auto* measure = QualityFull(minimum); measure && measure->Fps < threshold)
+                {
+                    progress.Anchor = minimum;
+                    progress.Stage = QualityStage::Remove;
+                }
+                else if (!_fullSettings.count(minimum) && QualityShort(minimum) && ShortFps(*QualityShort(minimum)) < threshold)
+                {
+                    progress.Anchor = minimum;
+                    progress.Stage = QualityStage::Remove;
+                }
+                else finishMode();
+                break;
+            }
+            case QualityStage::Remove:
+            {
+                if (!canProbe && progress.Alternatives.empty()) return {};
+                if (progress.Alternatives.empty())
+                {
+                    const auto* base = QualityFull(progress.Anchor);
+                    if (!base) base = QualityShort(progress.Anchor);
+                    WriteRemovalEvidence(*base, csv);
+                    for (size_t i = 0; i < base->Activity.size(); ++i)
+                        if (base->Activity[i] && (Techniques[i].Enable || Techniques[i].ScaledOff))
+                        {
+                            auto next = progress.Anchor;
+                            next.Levels[i] = Off;
+                            QueueQualityAlternative(next, "remove " + std::string(Techniques[i].Pass) +
+                                " at minimum active levels after trial " + std::to_string(base->Id));
+                        }
+                }
+                if (!_pending.empty()) break;
+                if (const auto* finalist = QualityFinalist(&progress.Alternatives)) return Confirm(*finalist);
+                if (bestFull()) { finishMode(); break; }
+                const Result* best = nullptr;
+                double bestFps = 0;
+                for (const auto& config : progress.Alternatives)
+                {
+                    const auto* measured = QualityFull(config);
+                    double fps = measured ? measured->Fps : 0;
+                    if (!measured && !_fullSettings.count(config)) measured = QualityShort(config);
+                    if (measured && !fps) fps = ShortFps(*measured);
+                    if (fps > bestFps && fps < threshold)
+                    {
+                        best = measured;
+                        bestFps = fps;
+                    }
+                }
+                progress.Alternatives.clear();
+                if (best) progress.Anchor = best->Settings;
+                else finishMode();
+                break;
+            }
+            }
+        }
+        return {};
+    }
 
     const Result* PerformanceMeasure(const Config& settings, bool reuseCalibration = false) const
     {
@@ -1140,7 +1525,12 @@ private:
     void ObserveComposition(const Result& result)
     {
         if (std::find(result.Settings.Levels.begin(), result.Settings.Levels.end(), Off) != result.Settings.Levels.end()) return;
-        for (size_t i = 0; i < _available.size(); ++i) _available[i] |= result.Activity[i];
+        auto& available = _qualityAvailable[bool(result.Settings.Provider)];
+        for (size_t i = 0; i < _available.size(); ++i)
+        {
+            _available[i] |= result.Activity[i];
+            available[i] |= result.Activity[i];
+        }
     }
 
     static bool ReadReference(std::istream& file, Result& r)
@@ -1229,7 +1619,8 @@ private:
         const Result* best = Best(upscaled, false);
         if (LowFirst()) return best;
         for (const auto& r : _references)
-            if (bool(r.Settings.Provider) == upscaled && (!best || Better(r, *best, false, false, true))) best = &r;
+            if (bool(r.Settings.Provider) == upscaled && (!HighFirst() || !_fullSettings.count(r.Settings)) &&
+                (!best || Better(r, *best, false, false, true))) best = &r;
         return best;
     }
 
@@ -1580,6 +1971,46 @@ private:
         return high > medium;
     }
 
+    bool QualityComplete(const Result& result) const
+    {
+        const auto& available = _qualityAvailable[bool(result.Settings.Provider)];
+        for (size_t i = 0; i < available.size(); ++i)
+            if (available[i] && !result.Activity[i]) return false;
+        return true;
+    }
+
+    auto QualityImageRank(const Result& result) const
+    {
+        bool allHigh = true;
+        unsigned active = 0, high = 0, medium = 0, epic = 0;
+        for (size_t i = 0; i < result.Activity.size(); ++i)
+        {
+            if (!result.Activity[i]) continue;
+            ++active;
+            if (!PerformanceScale(i)) continue;
+            const auto level = result.Settings.Levels[i];
+            allHigh &= level >= High;
+            // Adaptive local shadows are compared using rendered texel coverage, not the ceiling alone.
+            if (i == LocalShadowQuality) continue;
+            high += level >= High;
+            medium += level >= Medium;
+            epic += level == Epic;
+        }
+        const uint64_t pixels = uint64_t(result.Output.first) * result.Output.second;
+        const auto probe = result.Activity[ProbeQuality] ? result.Settings.Levels[ProbeQuality] : Off;
+        return std::tuple{QualityComplete(result), active, allHigh, allHigh ? pixels : 0, high, medium, pixels, epic,
+            probe, probe == Off ? Frequency::Off : result.Settings.ProbeFrequency};
+    }
+
+    bool QualityOutranks(const Result& full, const Result& sample) const
+    {
+        const auto& a = full.Settings;
+        const auto& b = sample.Settings;
+        if (a.Provider != b.Provider || a.Preset != b.Preset || full.Activity != sample.Activity) return false;
+        if (full.Output != sample.Output && (a.ProbeFrequency != b.ProbeFrequency || a.ProbeCapture != b.ProbeCapture)) return false;
+        return QualityImageRank(full) > QualityImageRank(sample);
+    }
+
     bool Better(const Result& a, const Result& b, bool preferDetail = false, bool shortWindow = false,
         bool compareReferences = false) const
     {
@@ -1589,6 +2020,14 @@ private:
         const bool meetsA = fpsA >= threshold, meetsB = fpsB >= threshold;
         if (meetsA != meetsB) return meetsA;
         if (!meetsA && !preferDetail && fpsA != fpsB) return fpsA > fpsB;
+        if (HighFirst() || (_profile == Quality && compareReferences))
+        {
+            const auto rank = [&](const Result& result) {
+                return std::tuple{QualityImageRank(result), result.ShadowTexels,
+                    uint64_t(result.Render.first) * result.Render.second, result.Fps, -result.P95};
+            };
+            return rank(a) > rank(b);
+        }
         if (meetsA && a.Output == b.Output && a.Render == b.Render && a.Settings.Provider == b.Settings.Provider &&
             a.Settings.Preset == b.Settings.Preset && a.Settings.Levels[LocalShadowQuality] == b.Settings.Levels[LocalShadowQuality])
         {
@@ -1662,7 +2101,7 @@ private:
         const Result* best = nullptr;
         for (const auto& result : _confirmed)
             if (bool(result.Settings.Provider) == upscaled && result.Remote == remote &&
-                (!best || Better(result, *best)))
+                (!best || Better(result, *best, false, false, !remote && _profile == Quality)))
                 best = &result;
         return best;
     }
@@ -1670,7 +2109,7 @@ private:
     void ReportResult(BistroBenchmarkData::Csv& csv, const std::string& prefix, const Result* r) const
     {
         csv.Config(prefix + "Status", !r || r->Fps < Threshold[_profile] ? "not found during search" :
-            _profile == Quality && r->Fps < 30 ? "confirmed within tolerance" : "confirmed");
+            _profile != Quality ? "confirmed" : r->Fps < 30 ? "confirmed within tolerance" : "confirmed at or above target");
         if (!r) return;
         csv.Config(prefix + "Trial", std::to_string(r->Id));
         if (!r->SourceCsv.empty())
@@ -1716,6 +2155,7 @@ private:
     std::mt19937 _random{20261122};
     Config _high, _minimum;
     PerformanceProgress _performance;
+    QualityProgress _quality;
     size_t _calibrationId = 0;
     std::optional<Result> _calibration;
     std::vector<int> _adapters;
@@ -1725,11 +2165,13 @@ private:
     std::array<std::array<int, Epic + 1>, std::size(Techniques)> _values{};
     std::array<bool, std::size(Techniques)> _fixedQuality{};
     std::array<bool, std::size(Techniques)> _available{};
+    std::array<std::array<bool, std::size(Techniques)>, 2> _qualityAvailable{};
     std::deque<Trial> _pending, _priority;
     std::set<Config> _scheduled;
     std::set<Config> _slowWork;
     std::map<Config, Result> _short;
     std::set<Config> _failedProbes;
+    std::set<Config> _freshnessFailures;
     std::set<Config> _fullSettings, _retryFull;
     std::vector<Result> _confirmed;
     std::vector<Result> _references;
