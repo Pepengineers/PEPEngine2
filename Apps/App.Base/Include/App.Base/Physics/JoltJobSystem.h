@@ -18,7 +18,9 @@ public:
     void WaitForJobs(Barrier* barrier) override;
 
 private:
-    struct ScheduledJob;
+    struct ReadyBatch;
+    template<class GetJob>
+    void SubmitReadyJobs(JPH::uint count, GetJob getJob);
     void QueueJob(Job* job) override;
     void QueueJobs(Job** jobs, JPH::uint count) override;
     void FreeJob(Job* job) override;
