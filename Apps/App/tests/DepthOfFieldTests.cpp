@@ -606,7 +606,7 @@ int main(int argc, char** argv)
         Require(mutex != nullptr, "Cannot create GPU validation mutex");
         auto wait = WaitForSingleObject(mutex, INFINITE);
         Require(wait == WAIT_OBJECT_0 || wait == WAIT_ABANDONED, "Cannot acquire GPU validation mutex");
-        if (argc == 2 && std::string(argv[1]) == "--five-frames") Set(L"Render.NumFrames", "5");
+        if (argc == 2 && std::string(argv[1]) == "--five-frames") Set(L"Render.Device.FramesInFlight", "5");
         ComPtr<ID3D12Debug> debug;
         ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)));
         debug->EnableDebugLayer();

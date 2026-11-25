@@ -90,8 +90,8 @@ public:
                 if (id != _trialId) OpenTrial(id);
                 const auto field = name.substr(dot + 1);
                 if (field == "FPS" || field == "P95ms" || field == "Status" ||
-                    field == "Source" || field == "Scope" || field == "OutputResolution" ||
-                    field == "RenderResolution" || field == "LastPassCSV" ||
+                    field == "Source" || field == "Scope" || field == "Render.Display.OutputResolution" ||
+                    field == "Render.Display.InternalResolution" || field == "LastPassCSV" ||
                     field == "Partial" || field == "CompletedPasses")
                     Write(_file, row);
                 if (field == "LastPassCSV" || (field.size() >= 13 && field.substr(field.size() - 13) == "ReusedPassCSV"))

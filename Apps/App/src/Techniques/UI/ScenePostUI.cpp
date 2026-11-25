@@ -23,7 +23,7 @@ namespace BistroRender
 {
 namespace
 {
-AutoConsoleVariable<int> HudAdapter(L"App.UI.GameHUD.Adapter", -1,
+AutoConsoleVariable<int> HudAdapter(L"Render.GameHUD.Adapter", -1,
     L"DXGI index for Bistro's game HUD. -1 renders locally.", EConsoleVariableFlags::Default,
     [](int index) { return index >= -1; });
 

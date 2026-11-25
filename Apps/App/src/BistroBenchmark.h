@@ -86,7 +86,7 @@ class BistroBenchmark
 
     static constexpr std::array Techniques{
         L"Render.AO.AsyncCompute", L"Render.Sky.AsyncCompute", L"Render.LightGrid.AsyncCompute", L"Render.Particles.AsyncCompute",
-        L"Render.Water.AsyncCompute", L"App.UI.CloudPicture.AsyncCompute"};
+        L"Render.Water.AsyncCompute", L"Render.CloudPicture.AsyncCompute"};
     static constexpr double Budget = 600, FinishReserve = 4;
     static constexpr unsigned Cases = 1u << Techniques.size();
     inline static AutoConsoleVariable<float> FlightSeconds{L"App.Benchmark.FlightSeconds", 100.f,

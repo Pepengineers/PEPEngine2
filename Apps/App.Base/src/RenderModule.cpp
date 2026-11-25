@@ -30,7 +30,7 @@
 #include <cmath>
 #include "Common/ConsoleVariables.h"
 
-static AutoConsoleVariable<int> PrimaryAdapter(L"Render.PrimaryAdapter", 0,
+static AutoConsoleVariable<int> PrimaryAdapter(L"Render.Device.PrimaryAdapter", 0,
     L"Primary adapter in the renderer hardware list. Startup only.", EConsoleVariableFlags::ReadOnly);
 RenderModule::GpuOwners::GpuOwners() = default;
 RenderModule::GpuOwners::~GpuOwners() = default;
@@ -929,7 +929,7 @@ void RenderModule::OnUpdate()
     if (width && height) _pipeline->UpdateFrameSettings(context);
     RefreshPipelineFlags();
     auto consoleModule = BenchmarkEngine::GetLocator().GetModule<ConsoleModule>();
-    const auto numFrames = consoleModule->FindConsoleVariable(L"Render.NumFrames").GetUInt();
+    const auto numFrames = consoleModule->FindConsoleVariable(L"Render.Device.FramesInFlight").GetUInt();
 
     //sync & update Primary Device
     _primaryResources.CurrFrameConstantsIndex = (_primaryResources.CurrFrameConstantsIndex + 1) % numFrames;

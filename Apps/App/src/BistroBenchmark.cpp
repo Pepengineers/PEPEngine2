@@ -550,10 +550,10 @@ BistroBenchmark::Config BistroBenchmark::EffectiveConfig(RenderModule& render)
     {
         return std::to_string(width) + "x" + std::to_string(height);
     };
-    return {{"OutputResolution", dimensions(common.WindowWidth, common.WindowHeight)},
-        {"RenderResolution", dimensions(common.DownscaledWidth, common.DownscaledHeight)},
-        {"EffectiveUpscaler", std::to_string(int(render.GetReconstructionStatus().Effective))},
-        {"EffectiveFrameGeneration", std::to_string(int(render.GetFrameGenerationStatus().Effective))}};
+    return {{"Render.Display.OutputResolution", dimensions(common.WindowWidth, common.WindowHeight)},
+        {"Render.Display.InternalResolution", dimensions(common.DownscaledWidth, common.DownscaledHeight)},
+        {"Render.Upscaler.EffectiveProvider", std::to_string(int(render.GetReconstructionStatus().Effective))},
+        {"Render.FrameGeneration.EffectiveProvider", std::to_string(int(render.GetFrameGenerationStatus().Effective))}};
 }
 
 ConsoleVariablePatch BistroBenchmark::RenderConfig(ConsoleModule& console)

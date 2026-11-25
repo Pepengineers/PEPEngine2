@@ -18,7 +18,7 @@ namespace Engine::UI
 {
     namespace
     {
-        AutoConsoleVariable<CanvasQuality> QualitySetting(L"App.UI.WorldCanvas.Quality", CanvasQuality::Low,
+        AutoConsoleVariable<CanvasQuality> QualitySetting(L"Render.WorldCanvas.Quality", CanvasQuality::Low,
             L"World canvas raster resolution and effect detail.");
 
         class CanvasContextScope

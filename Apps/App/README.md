@@ -24,7 +24,7 @@ Editor/Benchmark application targets are not part of this renderer.
 
 ### Finding settings in F1 and Startup.ini
 
-Rendering settings are grouped by technique under `Render`. For example, `Render.AO` contains quality, algorithm, adapter, synchronization and queue settings. `Adapter` selects the GPU, `CrossSync` selects which remote publication the primary uses, and `AsyncCompute` requests local COMPUTE work. `Render.Queues.AsyncEnabled=false` forces local work onto DIRECT. Game UI settings are under `App.UI`. Scene population, physics and benchmark controls are under `App`.
+Rendering settings are grouped by technique under `Render`. For example, `Render.AO` contains quality, algorithm, adapter, synchronization and queue settings. `Adapter` selects the GPU, `CrossSync` selects which remote publication the primary uses, and `AsyncCompute` requests local COMPUTE work. `Render.Queues.AsyncEnabled=false` forces local work onto DIRECT. Cloud picture, world canvas and game HUD use the same technique hierarchy (`Render.CloudPicture`, `Render.WorldCanvas`, `Render.GameHUD`). Scene population, physics and benchmark controls are under `App`.
 
 Use `Render.Water` for the SPH simulation, `Render.ReflectionProbes` for local probes, and `Render.Sky` for sky and environment lighting. Each local shadow fixture has its own group. Bistro accepts the previous key names when loading startup INIs and benchmark overlays.
 
@@ -87,9 +87,9 @@ Use `--read-texture=Scene.DepthNormals.Normals` or
 
 ### World-space billboards
 
-In F1, open **App → UI → CloudPicture** to configure the CLOUDS poster. Its material samples the generated texture directly. A remote producer transfers the selected image once to the primary GPU, where both the surface and reflections sample it. `Adapter` selects the producer (`-1` follows the primary GPU). `CrossSync` selects the publication as described below. `Quality` selects the generated texture size: Low 512x254, Medium 1024x512 (startup), High 2048x1024, or Epic 4096x2048. Performance and Quality searches vary this setting. Custom uses `Width` and `Height`. `SpeedScale`, `Enabled` and `AsyncCompute` are in the same group. `AsyncCompute` controls local generation.
+In F1, open **Render → CloudPicture** to configure the CLOUDS poster. Its material samples the generated texture directly. A remote producer transfers the selected image once to the primary GPU, where both the surface and reflections sample it. `Adapter` selects the producer (`-1` follows the primary GPU). `CrossSync` selects the publication as described below. `Quality` selects the generated texture size: Low 512x254, Medium 1024x512 (startup), High 2048x1024, or Epic 4096x2048. Performance and Quality searches vary this setting. Custom uses `Width` and `Height`. `SpeedScale`, `Enabled` and `AsyncCompute` are in the same group. `AsyncCompute` controls local generation.
 
-NEON DISTRICT and ASTRA have their own UI rendering. Open `App.UI.WorldCanvas.Atrium` or `App.UI.WorldCanvas.Terrace` to set the corresponding poster’s `Adapter` and `CrossSync`. Remote mode `1` (default) shows the current frame. Mode `0` shows the previous frame after a current-frame bootstrap. Both use the current frame on the primary GPU.
+NEON DISTRICT and ASTRA have their own UI rendering. Open `Render.WorldCanvas.Atrium` or `Render.WorldCanvas.Terrace` to set the corresponding poster’s `Adapter` and `CrossSync`. Remote mode `1` (default) shows the current frame. Mode `0` shows the previous frame after a current-frame bootstrap. Both use the current frame on the primary GPU.
 
 ### Two-adapter synchronization
 
@@ -113,9 +113,9 @@ before the first draw that samples it. Unchanged inputs reuse the current pair.
 SkyView and Aerial Perspective share the input tables when assigned to the same
 secondary GPU. Both adapter selectors show GPU names in F1.
 
-In F1, each technique can select its GPU by name. `App.UI.CloudPicture.Adapter`,
+In F1, each technique can select its GPU by name. `Render.CloudPicture.Adapter`,
 `Render.AO.Adapter`, `Render.Particles.Adapter`, `Render.Water.Adapter` and `Render.Wind.Adapter` use absolute
-indices in the same hardware list as the startup-only `Render.PrimaryAdapter`.
+indices in the same hardware list as the startup-only `Render.Device.PrimaryAdapter`.
 The default `-1` and the current primary index both run locally. Techniques can
 share a remote GPU or use different ones. Changing a selection takes effect
 during the run. In the table, GPU0 means the primary and GPU1 means the selected
@@ -161,7 +161,7 @@ imports its velocity grids. Local and Analytic wind keep evaluation on GPU0.
 ### Remote ambient occlusion
 
 Set `Render.AO.Adapter` to a secondary DXGI index from the same list as
-`Render.PrimaryAdapter`. The default `-1` runs AO locally. An unavailable
+`Render.Device.PrimaryAdapter`. The default `-1` runs AO locally. An unavailable
 adapter, an unsupported grid, or a missing required prepass falls back to local AO.
 
 | `Render.AO.Implementation` | Remote grids (`Render.AO.Resolution`) | GPU0 в†’ GPU1 | Filter |
@@ -218,7 +218,7 @@ keeps its pool, and changing GPU owners resets it from the authored seed.
 ### Remote particles
 
 Set `Render.Particles.Adapter` to a secondary DXGI index from the same list as
-`Render.PrimaryAdapter`. The default `-1` runs simulation on GPU0. Marked
+`Render.Device.PrimaryAdapter`. The default `-1` runs simulation on GPU0. Marked
 transparent emitters with frame-only inputs can use GPU1. Bistro enables this
 for Terrace Embers, Interior Dust and Table Steam. These emitters share one
 publication. Planter Fireflies use a separate publication and import the

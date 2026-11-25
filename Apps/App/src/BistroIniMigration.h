@@ -8,6 +8,9 @@
 inline void MigrateBistroIniKey(std::wstring& key)
 {
     constexpr std::pair<const wchar_t*, const wchar_t*> renamed[]{
+        {L"App.RenderInBackground", L"App.Window.RenderInBackground"},
+        {L"Render.NumFrames", L"Render.Device.FramesInFlight"},
+        {L"Render.PrimaryAdapter", L"Render.Device.PrimaryAdapter"},
         {L"App.Async.Queues", L"Render.Queues.AsyncEnabled"},
         {L"App.Async.AO", L"Render.AO.AsyncCompute"},
         {L"App.Async.Environment", L"Render.Sky.AsyncCompute"},
@@ -24,11 +27,11 @@ inline void MigrateBistroIniKey(std::wstring& key)
         {L"App.DepthNormalsPrepass", L"Render.DepthNormals.PrepassEnabled"},
         {L"App.NPC.Skinning.Adapter", L"Render.Skinning.NPC.Adapter"},
         {L"App.Fox.Skinning.Adapter", L"Render.Skinning.Fox.Adapter"},
-        {L"App.Async.CloudPicture", L"App.UI.CloudPicture.AsyncCompute"},
-        {L"App.UI.WorldCanvas.Adapter.Atrium", L"App.UI.WorldCanvas.Atrium.Adapter"},
-        {L"App.UI.WorldCanvas.Adapter.Terrace", L"App.UI.WorldCanvas.Terrace.Adapter"},
-        {L"App.UI.WorldCanvas.CrossSync.Atrium", L"App.UI.WorldCanvas.Atrium.CrossSync"},
-        {L"App.UI.WorldCanvas.CrossSync.Terrace", L"App.UI.WorldCanvas.Terrace.CrossSync"},
+        {L"App.Async.CloudPicture", L"Render.CloudPicture.AsyncCompute"},
+        {L"App.UI.WorldCanvas.Adapter.Atrium", L"Render.WorldCanvas.Atrium.Adapter"},
+        {L"App.UI.WorldCanvas.Adapter.Terrace", L"Render.WorldCanvas.Terrace.Adapter"},
+        {L"App.UI.WorldCanvas.CrossSync.Atrium", L"Render.WorldCanvas.Atrium.CrossSync"},
+        {L"App.UI.WorldCanvas.CrossSync.Terrace", L"Render.WorldCanvas.Terrace.CrossSync"},
         {L"App.UI.WorldCanvas.Adapter.Clouds", L""},
         {L"App.UI.WorldCanvas.CrossSync.Clouds", L""}
     };
@@ -45,7 +48,10 @@ inline void MigrateBistroIniKey(std::wstring& key)
         }
     }
     constexpr std::pair<std::wstring_view, std::wstring_view> groups[]{
-        {L"App.CloudPicture.", L"App.UI.CloudPicture."},
+        {L"App.UI.CloudPicture.", L"Render.CloudPicture."},
+        {L"App.UI.GameHUD.", L"Render.GameHUD."},
+        {L"App.UI.WorldCanvas.", L"Render.WorldCanvas."},
+        {L"App.CloudPicture.", L"Render.CloudPicture."},
         {L"App.AO.", L"Render.AO."},
         {L"App.Grass.Wind.", L"Render.Wind."},
         {L"App.Grass.", L"Render.Grass."},
@@ -63,8 +69,8 @@ inline void MigrateBistroIniKey(std::wstring& key)
         {L"Render.Clouds.", L"Render.Sky.Clouds."},
         {L"App.WBOIT.", L"Render.WBOIT."},
         {L"App.Post.", L"Render.Post."},
-        {L"Render.UI.GameHUD.", L"App.UI.GameHUD."},
-        {L"Render.UI.WorldCanvas.", L"App.UI.WorldCanvas."}
+        {L"Render.UI.GameHUD.", L"Render.GameHUD."},
+        {L"Render.UI.WorldCanvas.", L"Render.WorldCanvas."}
     };
     for (const auto& [previous, current] : groups) {
         if (_wcsnicmp(key.c_str(), previous.data(), previous.size()) == 0) {

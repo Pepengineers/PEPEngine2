@@ -102,8 +102,8 @@ void ValidateStartupAdapters(ConsoleModule& console, const std::filesystem::path
         Log::Info("Bistro", "Hardware GPU [", index, "] ", adapters[index].Name);
 
     ConsoleVariablePatch reset{
-        {L"Render.PrimaryAdapter", "0"},
-        {L"App.UI.CloudPicture.Adapter", "-1"},
+        {L"Render.Device.PrimaryAdapter", "0"},
+        {L"Render.CloudPicture.Adapter", "-1"},
         {L"Render.AO.Adapter", "-1"},
         {L"Render.Particles.Adapter", "-1"},
         {L"Render.Water.Adapter", "-1"},
@@ -160,7 +160,7 @@ std::vector<DeviceDesc> PrepareStartup()
 	});
 	if (!overlay.empty())
 		Log::Info("BistroBenchmark", "Loaded startup queue defaults from ", overlay.u8string());
-	Log::Info("Bistro", "SCENE EXECUTOR; primary=", console.FindConsoleVariable(L"Render.PrimaryAdapter").GetInt(),
+	Log::Info("Bistro", "SCENE EXECUTOR; primary=", console.FindConsoleVariable(L"Render.Device.PrimaryAdapter").GetInt(),
 	          "; Render.Queues.AsyncEnabled=",
 	          console.FindConsoleVariable(L"Render.Queues.AsyncEnabled").GetBool(),
 	          " Render.Water.Adapter=", console.FindConsoleVariable(L"Render.Water.Adapter").GetInt(),

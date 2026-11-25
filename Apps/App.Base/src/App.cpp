@@ -25,7 +25,7 @@ using namespace DirectX;
 namespace Private
 {
     static AutoConsoleVariable<bool> RenderInBackground(
-        L"App.RenderInBackground", true, L"Continue rendering without window focus. Minimize and resize still pause.");
+        L"App.Window.RenderInBackground", true, L"Continue rendering without window focus. Minimize and resize still pause.");
     static AutoConsoleVariable<int> JobThreadCount(
         L"Jobs.ThreadCount", 0, L"Total job threads including the caller; <= 0 uses hardware concurrency. Restart required.",
         EConsoleVariableFlags::ReadOnly);

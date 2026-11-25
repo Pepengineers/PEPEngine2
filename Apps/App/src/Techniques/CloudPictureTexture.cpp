@@ -16,10 +16,10 @@ namespace BistroRender
 {
 namespace
 {
-AutoConsoleVariable<bool> AsyncCloudPicture(L"App.UI.CloudPicture.AsyncCompute", false,
+AutoConsoleVariable<bool> AsyncCloudPicture(L"Render.CloudPicture.AsyncCompute", false,
                                             L"Run local Cloud Picture generation on the COMPUTE queue.",
                                             EConsoleVariableFlags::Default);
-AutoConsoleVariable<float> SpeedScale(L"App.UI.CloudPicture.SpeedScale", 4.f,
+AutoConsoleVariable<float> SpeedScale(L"Render.CloudPicture.SpeedScale", 4.f,
                                       L"Cloud picture animation speed multiplier; 1 is the original animation speed.",
                                       EConsoleVariableFlags::Default,
                                       [](float value) { return std::isfinite(value) && value >= 0 && value <= 100; });

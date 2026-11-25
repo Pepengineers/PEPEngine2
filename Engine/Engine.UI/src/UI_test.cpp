@@ -160,7 +160,7 @@ namespace Engine::UI
             {
                 const auto name = std::filesystem::path(Name).u8string();
                 const auto description = std::filesystem::path(variable.GetDescription()).u8string();
-                const bool worldCanvas = Name.rfind(L"App.UI.WorldCanvas.", 0) == 0;
+                const bool worldCanvas = Name.rfind(L"Render.WorldCanvas.", 0) == 0;
                 const bool canvasAdapter = worldCanvas && Name.substr(Name.find_last_of(L'.') + 1) == L"Adapter";
                 const bool localShadowPage = LocalShadowPageAdapterIndex(Name).has_value();
                 const bool localShadowSync = LocalShadowPageCrossSyncIndex(Name).has_value();
@@ -177,7 +177,7 @@ namespace Engine::UI
                 {
                     ImGui::TextDisabled("Locked during this run");
                     ImGui::TextWrapped("Current value: %s", Current.c_str());
-                    if (Name == L"Render.PrimaryAdapter")
+                    if (Name == L"Render.Device.PrimaryAdapter")
                     {
                         ImGui::TextWrapped("Primary GPU: %s", AdapterLabels.at(PrimaryIndex).c_str());
                         ImGui::TextWrapped("Startup hardware index (0, 1, ...). -1 is only valid for technique settings.");

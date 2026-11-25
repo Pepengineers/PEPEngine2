@@ -21,17 +21,17 @@ bool ParseValue(std::string_view text, BistroRender::CloudPictureMode& mode) {
 
 namespace BistroRender {
 namespace {
-AutoConsoleVariable<bool> Enabled(L"App.UI.CloudPicture.Enabled", true, L"Show the cloud picture in Bistro.");
+AutoConsoleVariable<bool> Enabled(L"Render.CloudPicture.Enabled", true, L"Show the cloud picture in Bistro.");
 // Old configs that specify only Width/Height keep their explicit dimensions.
-AutoConsoleVariable<CloudPictureQuality> Quality(L"App.UI.CloudPicture.Quality", CloudPictureQuality::Custom,
+AutoConsoleVariable<CloudPictureQuality> Quality(L"Render.CloudPicture.Quality", CloudPictureQuality::Custom,
     L"Texture size: Low 512x254, Medium 1024x512, High 2048x1024, Epic 4096x2048, Custom uses Width/Height.");
-AutoConsoleVariable<int> Width(L"App.UI.CloudPicture.Width", 1024, L"Cloud picture custom texture width.",
+AutoConsoleVariable<int> Width(L"Render.CloudPicture.Width", 1024, L"Cloud picture custom texture width.",
     EConsoleVariableFlags::Default, [](int v) { return v > 0 && v <= D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION; });
-AutoConsoleVariable<int> Height(L"App.UI.CloudPicture.Height", 512, L"Cloud picture custom texture height.",
+AutoConsoleVariable<int> Height(L"Render.CloudPicture.Height", 512, L"Cloud picture custom texture height.",
     EConsoleVariableFlags::Default, [](int v) { return v > 0 && v <= D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION; });
-AutoConsoleVariable<int> Adapter(L"App.UI.CloudPicture.Adapter", -1,
-    L"Cloud Picture GPU in the Render.PrimaryAdapter hardware list. -1 uses the primary GPU.");
-AutoConsoleVariable<CloudPictureMode> CrossSync(L"App.UI.CloudPicture.CrossSync", CloudPictureMode::PreviousFrame,
+AutoConsoleVariable<int> Adapter(L"Render.CloudPicture.Adapter", -1,
+    L"Cloud Picture GPU in the Render.Device.PrimaryAdapter hardware list. -1 uses the primary GPU.");
+AutoConsoleVariable<CloudPictureMode> CrossSync(L"Render.CloudPicture.CrossSync", CloudPictureMode::PreviousFrame,
     L"Remote clouds: 0 exact previous (first uses current), 1 exact current, 2 independent GPU1 and latest completed (first can wait for export).");
 struct Settings {
     bool Active;

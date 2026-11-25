@@ -20,14 +20,14 @@ $saved = $null
 $fixture = (git -C $repo show 206b3b08f2ee9d629797e5ccedfdd4d4fc79d8b9:Config/Engine.ini) -join "`n"
 if ($LASTEXITCODE) { throw 'Cannot load committed benchmark fixture' }
 $settings = [ordered]@{
-    'App.NPC.Count' = "$People"; 'App.Fox.Count' = "$Foxes"; 'App.RenderInBackground' = 'true'
+    'App.NPC.Count' = "$People"; 'App.Fox.Count' = "$Foxes"; 'App.Window.RenderInBackground' = 'true'
     'App.ReflectionProbes.Count' = '0'; 'App.Grass.Count' = '0'; 'App.Water.Count' = '0'; 'App.Particles.Count' = '0'
     'App.ReflectionProbes.ShowSpheres' = 'false'; 'App.Bounds.Show' = 'false'
     'Render.Skinning.Enabled' = 'true'; 'Render.Skinning.Quality' = '3'
     'Render.Upscaler.Provider' = '0'; 'Render.FrameGeneration.Provider' = '0'; 'Render.AO.Enabled' = '0'
     'Render.SSR.Enabled' = 'false'; 'Render.Reflection.Enabled' = 'false'; 'Render.MotionBlur.Enabled' = 'false'
     'Render.DOF.Enabled' = 'false'; 'Render.Particles.Enabled' = 'false'; 'Render.Grass.Enabled' = 'false'
-    'Render.Fluid.Enabled' = 'false'; 'Render.NumFrames' = '3'; 'Jobs.ThreadCount' = '4'
+    'Render.Fluid.Enabled' = 'false'; 'Render.Device.FramesInFlight' = '3'; 'Jobs.ThreadCount' = '4'
 }
 if ($Instancing -ne 'Original') { $settings['Render.Skinning.Instancing'] = ($Instancing -eq 'On').ToString().ToLowerInvariant() }
 foreach ($entry in $settings.GetEnumerator()) {

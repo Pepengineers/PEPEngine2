@@ -94,8 +94,7 @@ std::optional<double> Number(const std::string &s)
 
 void ReadSetting(Settings &settings, const std::string &name, const std::string &value)
 {
-    static const std::array keys{"OutputResolution", "RenderResolution", "EffectiveUpscaler", "EffectiveFrameGeneration",
-                                 "PaintingHoldSeconds", "RouteSeconds", "WarmupSeconds", "RouteVersion", "MeasurementVersion"};
+    static const std::array keys{"PaintingHoldSeconds", "RouteSeconds", "WarmupSeconds", "RouteVersion", "MeasurementVersion"};
     if (name.rfind("Render.", 0) == 0 || name.rfind("App.", 0) == 0 || std::find(keys.begin(), keys.end(), name) != keys.end())
         settings[name] = value;
 }
@@ -111,8 +110,8 @@ std::string DisplayValue(const std::string& key, const std::string& value)
     if (value.empty()) return "--";
     if (value == "true") return "On";
     if (value == "false") return "Off";
-    auto name = key == "EffectiveUpscaler" ? "Render.Upscaler.Provider" :
-        key == "EffectiveFrameGeneration" ? "Render.FrameGeneration.Provider" : key;
+    auto name = key == "Render.Upscaler.EffectiveProvider" ? "Render.Upscaler.Provider" :
+        key == "Render.FrameGeneration.EffectiveProvider" ? "Render.FrameGeneration.Provider" : key;
     IConsoleVariable* variable{};
     int id{};
     const auto parsed = std::from_chars(value.data(), value.data() + value.size(), id);
@@ -122,7 +121,7 @@ std::string DisplayValue(const std::string& key, const std::string& value)
     if (BenchmarkEngine::GetLocator().GetModule<ConsoleModule>()->TryFindConsoleVariable(fs::u8path(name).wstring(), variable))
     {
         const auto label = variable->GetEnumValueName(id);
-        if (key == "App.UI.CloudPicture.Quality" && id >= 0 && size_t(id) < BistroRender::CloudPictureSizes.size())
+        if (key == "Render.CloudPicture.Quality" && id >= 0 && size_t(id) < BistroRender::CloudPictureSizes.size())
         {
             const auto [width, height] = BistroRender::CloudPictureSizes[id];
             return std::string(label) + " (" + std::to_string(width) + "x" + std::to_string(height) + ")";
@@ -138,8 +137,8 @@ std::string DisplayValue(const std::string& key, const std::string& value)
     }
     if (key == "Render.AO.CrossSync" || key == "Render.Wind.CrossSync" ||
         key == "Render.Particles.CrossSync" || key == "Render.Water.CrossSync" ||
-        key == "Render.Sky.SkyView.CrossSync" || key == "App.UI.WorldCanvas.Atrium.CrossSync" ||
-        key == "App.UI.WorldCanvas.Terrace.CrossSync")
+        key == "Render.Sky.SkyView.CrossSync" || key == "Render.WorldCanvas.Atrium.CrossSync" ||
+        key == "Render.WorldCanvas.Terrace.CrossSync")
     {
         if (id == 0) return "Previous frame";
         if (id == 1) return "Current frame";
@@ -151,30 +150,24 @@ std::string DisplayValue(const std::string& key, const std::string& value)
     return value;
 }
 
-enum class SettingsGroup { Image, Quality, Placement, Other, Count };
-
-SettingsGroup GroupForSetting(const std::string& key)
+std::string SettingGroup(std::string_view key)
 {
-    if (key == "OutputResolution" || key == "RenderResolution" || key == "EffectiveUpscaler" ||
-        key == "EffectiveFrameGeneration" || key.rfind("Render.Upscaler.", 0) == 0 ||
-        key.rfind("Render.FrameGeneration.", 0) == 0)
-        return SettingsGroup::Image;
-    if (key.find("Adapter") != key.npos || key.find("Owner") != key.npos ||
-        key.find("Sync") != key.npos || key.find("AsyncCompute") != key.npos ||
-        key.find("Placement") != key.npos || key.find("TransferMode") != key.npos ||
-        key.find("OnSecondary") != key.npos || key.rfind("Render.Queues.", 0) == 0)
-        return SettingsGroup::Placement;
-    if (key.rfind("Render.", 0) == 0 || key.rfind("App.UI.", 0) == 0) return SettingsGroup::Quality;
-    return SettingsGroup::Other;
+    const auto root = key.find('.');
+    if (root == key.npos) return "Benchmark";
+    const auto end = key.rfind('.');
+    if (root == end) return std::string(key.substr(0, root));
+    return std::string(key.substr(root + 1, end - root - 1));
 }
 
 std::string SettingLabel(std::string_view key)
 {
-    if (key == "OutputResolution") return "Output resolution";
-    if (key == "RenderResolution") return "Internal render resolution";
-    if (key == "EffectiveUpscaler") return "Effective upscaler";
-    if (key == "EffectiveFrameGeneration") return "Effective frame generation";
-    for (const std::string_view prefix : {"Render.", "App.UI.", "App."})
+    if (key == "Provider") return "Requested provider";
+    if (key == "CrossSync") return "Cross-GPU synchronization";
+    if (key == "Render.Display.OutputResolution") return "Output resolution";
+    if (key == "Render.Display.InternalResolution") return "Internal render resolution";
+    if (key == "Render.Upscaler.EffectiveProvider") return "Effective upscaler";
+    if (key == "Render.FrameGeneration.EffectiveProvider") return "Effective frame generation";
+    for (const std::string_view prefix : {"Render.", "App."})
         if (key.substr(0, prefix.size()) == prefix) { key.remove_prefix(prefix.size()); break; }
     const auto lower = [](char c) { return c >= 'a' && c <= 'z'; };
     const auto upper = [](char c) { return c >= 'A' && c <= 'Z'; };
@@ -213,7 +206,7 @@ Change SettingChange(const std::string& key, const std::string& before, const st
         if (oldValue == newValue) return Change::Changed;
         return oldValue < newValue ? Change::Higher : Change::Lower;
     };
-    if (key == "OutputResolution" || key == "RenderResolution")
+    if (key == "Render.Display.OutputResolution" || key == "Render.Display.InternalResolution")
     {
         const auto pixels = [](const std::string& s) -> std::optional<double> {
             const auto split = s.find('x');
@@ -253,23 +246,23 @@ void DrawSettings(const Settings& values, const Settings& before, const char* ti
                   const char* resultColumn = "Measured")
 {
     const auto display = [&](const char* key) { return DisplayValue(key, Value(values, key)); };
-    if (values.count("OutputResolution"))
+    if (values.count("Render.Display.OutputResolution"))
     {
-        const auto quality = Value(values, "EffectiveUpscaler") == "0" ? "" : " / " + display("Render.Upscaler.Quality");
-        ImGui::TextWrapped("%s%s  |  %s render -> %s output", display("EffectiveUpscaler").c_str(), quality.c_str(),
-            display("RenderResolution").c_str(), display("OutputResolution").c_str());
+        const auto quality = Value(values, "Render.Upscaler.EffectiveProvider") == "0" ? "" : " / " + display("Render.Upscaler.Quality");
+        ImGui::TextWrapped("%s%s  |  %s render -> %s output", display("Render.Upscaler.EffectiveProvider").c_str(), quality.c_str(),
+            display("Render.Display.InternalResolution").c_str(), display("Render.Display.OutputResolution").c_str());
     }
     const auto table = [&](bool changes)
     {
-        std::array<std::vector<Settings::const_iterator>, size_t(SettingsGroup::Count)> groups;
-        const auto& pictureQuality = Value(values, "App.UI.CloudPicture.Quality");
+        std::map<std::string, std::vector<Settings::const_iterator>> groups;
+        const auto& pictureQuality = Value(values, "Render.CloudPicture.Quality");
         const auto custom = std::to_string(int(BistroRender::CloudPictureQuality::Custom));
         size_t total = 0;
         for (auto it = values.begin(); it != values.end(); ++it)
         {
             const auto& [key, value] = *it;
             if (key == "RouteSeconds" || key == "WarmupSeconds" || key == "PaintingHoldSeconds") continue;
-            if ((key == "App.UI.CloudPicture.Width" || key == "App.UI.CloudPicture.Height") &&
+            if ((key == "Render.CloudPicture.Width" || key == "Render.CloudPicture.Height") &&
                 !pictureQuality.empty() && pictureQuality != custom) continue;
             if (changes)
             {
@@ -277,7 +270,7 @@ void DrawSettings(const Settings& values, const Settings& before, const char* ti
                 if (old.empty() || old == value) continue;
                 if (const auto a = SettingNumber(old); a && a == SettingNumber(value)) continue;
             }
-            groups[size_t(GroupForSetting(key))].push_back(it);
+            groups[SettingGroup(key)].push_back(it);
             ++total;
         }
         if (!total)
@@ -294,24 +287,23 @@ void DrawSettings(const Settings& values, const Settings& before, const char* ti
         ImGui::TableSetupColumn("Before run", ImGuiTableColumnFlags_WidthStretch, 1.f);
         ImGui::TableSetupColumn(resultColumn, ImGuiTableColumnFlags_WidthStretch, 1.5f);
         ImGui::TableHeadersRow();
-        constexpr const char* categories[]{"Image", "Graphics quality and effects", "GPU placement and queues", "Other"};
-        for (size_t group = 0; group < groups.size(); ++group)
+        for (const auto& [group, rows] : groups)
         {
-            if (groups[group].empty()) continue;
+            const auto title = SettingLabel(group);
             ImGui::TableNextRow();
             ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, ImGui::GetColorU32(ImGuiCol_Header));
             ImGui::TableSetColumnIndex(0);
-            const bool expanded = ImGui::TreeNodeEx(categories[group],
+            const bool expanded = ImGui::TreeNodeEx(title.c_str(),
                 ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_SpanAvailWidth |
-                (changes && group != size_t(SettingsGroup::Other) ? ImGuiTreeNodeFlags_DefaultOpen : 0),
-                "%s (%zu)", categories[group], groups[group].size());
+                (changes ? ImGuiTreeNodeFlags_DefaultOpen : 0),
+                "%s (%zu)", title.c_str(), rows.size());
             if (!expanded) continue;
-            for (const auto it : groups[group])
+            for (const auto it : rows)
             {
                 const auto& [key, value] = *it;
                 ImGui::TableNextRow();
                 ImGui::TableSetColumnIndex(0);
-                ImGui::TextWrapped("%s", SettingLabel(key).c_str());
+                ImGui::TextWrapped("%s", SettingLabel(std::string_view(key).substr(key.rfind('.') + 1)).c_str());
                 if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", key.c_str());
                 ImGui::TableSetColumnIndex(1);
                 const auto& old = Value(before, key);
@@ -354,7 +346,7 @@ std::string RunMode(const std::string &mode)
     if (mode.find("search") != mode.npos) return "Async";
     return "Unknown";
 }
-ImU32 Color(const std::string &mode)
+ImU32 RunModeColor(const std::string &mode)
 {
     if (mode == "Manual") return IM_COL32(92, 224, 166, 255);
     if (mode == "Async") return IM_COL32(255, 184, 61, 255);
@@ -522,9 +514,9 @@ void BistroComparePanel::Refresh(bool force)
         {
             winner.RunIndex = winner.PassIndex = -1;
             if (Value(winner.Fields, "Trial").empty()) continue;
-            winner.Settings["OutputResolution"] = Value(winner.Fields, "Output");
-            winner.Settings["RenderResolution"] = Value(winner.Fields, "Render");
-            winner.Settings["EffectiveUpscaler"] = Value(winner.Fields, "Provider");
+            winner.Settings["Render.Display.OutputResolution"] = Value(winner.Fields, "Output");
+            winner.Settings["Render.Display.InternalResolution"] = Value(winner.Fields, "Render");
+            winner.Settings["Render.Upscaler.EffectiveProvider"] = Value(winner.Fields, "Provider");
             winner.Settings["Render.FrameGeneration.Provider"] = "0";
             const auto& source = Value(winner.Fields, "CSV");
             const auto path = source.empty() ? run.Path : (run.Path.parent_path() / fs::u8path(source)).lexically_normal();
@@ -734,9 +726,9 @@ void BistroComparePanel::DrawPlot(const Selection* series, size_t count, bool fp
     };
     if (count == 2)
     {
-        ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(Color(a.Mode)), "A   %s", a.Mode.c_str());
+        ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(RunModeColor(a.Mode)), "A   %s", a.Mode.c_str());
         ImGui::SameLine();
-        ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(Color(b.Mode)), "B   %s%s", b.Mode.c_str(),
+        ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(RunModeColor(b.Mode)), "B   %s%s", b.Mode.c_str(),
                            a.Mode == b.Mode ? "  (dashed)" : "");
     }
     const ImVec2 origin = ImGui::GetCursorScreenPos();
@@ -777,7 +769,7 @@ void BistroComparePanel::DrawPlot(const Selection* series, size_t count, bool fp
     for (size_t iSeries = 0; iSeries < count; ++iSeries)
     {
         const auto& s = series[iSeries];
-        const auto color = Color(s.Mode);
+        const auto color = RunModeColor(s.Mode);
         ImVec2 previous = point(s.Samples[s.Trace.front()]);
         draw->AddCircleFilled(previous, .15f * em, color);
         float phase = 0;
@@ -823,10 +815,10 @@ void BistroComparePanel::DrawPlot(const Selection* series, size_t count, bool fp
             }
             const auto& sample = s.Samples[BistroPlot::NearestFrame(s.Samples, t)];
             const auto pos = point(sample);
-            draw->AddCircleFilled(pos, .3f * em, Color(s.Mode));
+            draw->AddCircleFilled(pos, .3f * em, RunModeColor(s.Mode));
             draw->AddCircle(pos, .3f * em, muted);
             ImGui::Separator();
-            if (count == 2) ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(Color(s.Mode)), "%c   %s", id, s.Mode.c_str());
+            if (count == 2) ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(RunModeColor(s.Mode)), "%c   %s", id, s.Mode.c_str());
             BistroPlot::DrawFrameDetails(sample.Number, sample.RouteSeconds, sample.Section.c_str(), sample.FrameMs,
                                          sample.IntervalMs);
         }
@@ -930,8 +922,8 @@ void BistroComparePanel::DrawPlacementComparison(const Winner& winner)
                  {"Status", "Status"}, {"Output", "Output"}, {"Internal render", "Render"},
                  {"Application FPS", "FPS"}, {"Frame interval P95 (ms)", "P95ms"}})
             row(label, Value(single.Fields, field), Value(multi.Fields, field));
-        row("Upscaler", DisplayValue("EffectiveUpscaler", Value(single.Fields, "Provider")),
-                        DisplayValue("EffectiveUpscaler", Value(multi.Fields, "Provider")));
+        row("Upscaler", DisplayValue("Render.Upscaler.EffectiveProvider", Value(single.Fields, "Provider")),
+                        DisplayValue("Render.Upscaler.EffectiveProvider", Value(multi.Fields, "Provider")));
         ImGui::EndTable();
     }
     if (const auto gain = Number(Value(winner.Fields, "SameImageFpsGainPct")))
@@ -1144,10 +1136,10 @@ void BistroComparePanel::Draw(const fs::path& latestCompleted)
     DrawSelection(_selected[1], "Compare with B");
     ImGui::Separator();
     for (const auto &[key, label] :
-         std::initializer_list<std::pair<const char *, const char *>>{{"OutputResolution", "Output"},
-                                                                      {"RenderResolution", "Internal render"},
+         std::initializer_list<std::pair<const char *, const char *>>{{"Render.Display.OutputResolution", "Output"},
+                                                                      {"Render.Display.InternalResolution", "Internal render"},
                                                                       {"Render.Upscaler.Provider", "Requested upscaler"},
-                                                                      {"EffectiveUpscaler", "Effective upscaler"},
+                                                                      {"Render.Upscaler.EffectiveProvider", "Effective upscaler"},
                                                                       {"Render.Upscaler.Quality", "Upscaler quality"},
                                                                       {"RouteSeconds", "Route (s)"},
                                                                       {"PaintingHoldSeconds", "Painting hold (s)"},

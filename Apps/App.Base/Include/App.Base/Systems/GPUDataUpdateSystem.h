@@ -20,7 +20,7 @@ protected:
     {
         _render = BenchmarkEngine::GetLocator().GetModule<RenderModule>().get();
         _numFrames = BenchmarkEngine::GetLocator().GetModule<ConsoleModule>()
-            ->FindConsoleVariable(L"Render.NumFrames").GetInt();
+            ->FindConsoleVariable(L"Render.Device.FramesInFlight").GetInt();
     }
     size_t GetWorkCount(World& world) const override { return world.GetECS().GetPool<TransformComponent>().Size(); }
     void TickRange(World& world, float, size_t begin, size_t end) override

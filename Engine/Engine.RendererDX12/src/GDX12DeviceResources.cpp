@@ -10,7 +10,7 @@
 #include <algorithm>
 
 static AutoConsoleVariable<UINT> NumFrameConstantVariable(
-    L"Render.NumFrames",
+    L"Render.Device.FramesInFlight",
     3,
     L"Number of buffered frames. Positive integer; set before GPU initialization.",
     EConsoleVariableFlags::ReadOnly,

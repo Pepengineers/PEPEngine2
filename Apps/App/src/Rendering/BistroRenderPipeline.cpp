@@ -40,7 +40,7 @@ void BistroRenderPipeline::Initialize(RenderPipelineContext& c, const std::vecto
 	_bindings.PrimaryPasses.push_back(&_sceneFlags);
 	_bindings.Reconstruction = &_post->Reconstruction();
 	ConsoleModule console;
-	const int primaryIndex = console.FindConsoleVariable(L"Render.PrimaryAdapter").GetInt();
+	const int primaryIndex = console.FindConsoleVariable(L"Render.Device.PrimaryAdapter").GetInt();
 	auto submissions = std::make_shared<BistroRender::QueueSubmission>(*c.Primary.Device,
 	    adapters, primaryIndex);
 	Log::Info("Renderer", "Bistro primary GPU ", submissions->AdapterLabel(0));
