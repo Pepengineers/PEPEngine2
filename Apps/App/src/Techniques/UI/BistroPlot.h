@@ -5,6 +5,47 @@
 
 namespace BistroPlot
 {
+inline void ContinueRowIfFits(float width, float gap = -1.f)
+{
+    if (gap < 0) gap = ImGui::GetStyle().ItemSpacing.x;
+    const float right = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+    if (ImGui::GetItemRectMax().x + gap + width <= right)
+        ImGui::SameLine(0.f, gap);
+}
+
+inline bool Choice(const char* label, const char* first, const char* second, bool secondSelected, bool continueRow = false)
+{
+    const auto& style = ImGui::GetStyle();
+    const float secondWidth = ImGui::CalcTextSize(second).x + 2.f * style.FramePadding.x;
+    if (continueRow)
+    {
+        const float firstWidth = ImGui::CalcTextSize(first).x + 2.f * style.FramePadding.x;
+        ContinueRowIfFits(std::max(ImGui::CalcTextSize(label).x, firstWidth + 1.f + secondWidth), 1.5f * ImGui::GetFontSize());
+    }
+    ImGui::PushID(label);
+    ImGui::BeginGroup();
+    ImGui::TextUnformatted(label);
+    const auto option = [&](const char* text, bool selected)
+    {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(selected ? ImGuiCol_ButtonActive : ImGuiCol_FrameBg));
+        const bool pressed = ImGui::Button(text);
+        ImGui::PopStyleColor();
+        if (selected)
+        {
+            const auto min = ImGui::GetItemRectMin(), max = ImGui::GetItemRectMax();
+            const float thickness = std::max(2.f, ImGui::GetFontSize() * .1f);
+            ImGui::GetWindowDrawList()->AddRectFilled({min.x, max.y - thickness}, max, ImGui::GetColorU32(ImGuiCol_CheckMark));
+        }
+        return pressed;
+    };
+    if (option(first, !secondSelected)) secondSelected = false;
+    ContinueRowIfFits(secondWidth, 1.f);
+    if (option(second, secondSelected)) secondSelected = true;
+    ImGui::EndGroup();
+    ImGui::PopID();
+    return secondSelected;
+}
+
 template<class Samples>
 size_t NearestFrame(const Samples& samples, double time)
 {

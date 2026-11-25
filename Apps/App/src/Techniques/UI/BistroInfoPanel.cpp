@@ -1,4 +1,5 @@
 #include "BistroInfoPanel.h"
+#include "BistroPlot.h"
 #include "App.Base/Window.h"
 #include "BistroBenchmark.h"
 #include "Engine.Core/BenchmarkEngine.h"
@@ -49,9 +50,9 @@ void EnumSelector(const char* label, IConsoleVariable& setting, std::string& err
 
 void ProfileButtons(BistroBenchmark& benchmark, Action action)
 {
-    const float width = std::min(10.f * ImGui::GetFontSize(), ImGui::GetContentRegionAvail().x);
+    const float width = std::min(9.f * ImGui::GetFontSize(), ImGui::GetContentRegionAvail().x);
     if (ImGui::Button("Performance", {width, 0})) benchmark.Launch(action, BistroPlacement::Performance);
-    if (ImGui::GetContentRegionAvail().x >= 2 * width + ImGui::GetStyle().ItemSpacing.x) ImGui::SameLine();
+    BistroPlot::ContinueRowIfFits(width);
     if (ImGui::Button("Quality", {width, 0})) benchmark.Launch(action, BistroPlacement::Quality);
 }
 }
@@ -234,32 +235,34 @@ void BistroInfoPanel::DrawResult(const BistroBenchmark& benchmark, RunMode tab)
         if (latest.Mode == RunMode::SingleGPU || latest.Mode == RunMode::MultiGPU)
             _quality = latestSlot == BistroBenchmark::ResultSlot(latest.Mode, BistroPlacement::Quality);
     }
-    Heading("Benchmark results");
+    ImGui::SeparatorText("Benchmark results");
+    ImGui::PushID("result filters");
+    ImGui::BeginGroup();
+    ImGui::TextUnformatted("Run mode");
+    ImGui::SetNextItemWidth(std::min(10.f * ImGui::GetFontSize(), ImGui::GetContentRegionAvail().x));
     constexpr std::array modes{RunMode::Manual, RunMode::Async, RunMode::SingleGPU, RunMode::MultiGPU};
-    for (auto mode : modes)
+    if (ImGui::BeginCombo("##mode", ModeName(_selectedMode)))
     {
-        ImGui::SameLine();
-        ImGui::PushStyleColor(ImGuiCol_Text, TraceColor(mode));
-        if (ImGui::RadioButton(ModeName(mode), mode == _selectedMode) && mode != _selectedMode)
+        for (auto mode : modes)
         {
-            _selectedMode = mode;
-            _quality = _compare.LatestQuality(ModeName(mode));
+            const bool selected = mode == _selectedMode;
+            if (ImGui::Selectable(ModeName(mode), selected) && !selected)
+            {
+                _selectedMode = mode;
+                _quality = _compare.LatestQuality(ModeName(mode));
+            }
+            if (selected) ImGui::SetItemDefaultFocus();
         }
-        ImGui::PopStyleColor();
+        ImGui::EndCombo();
     }
-    if (_selectedMode == RunMode::SingleGPU || _selectedMode == RunMode::MultiGPU)
-    {
-        if (ImGui::RadioButton("Performance##results", !_quality)) _quality = false;
-        ImGui::SameLine();
-        if (ImGui::RadioButton("Quality##results", _quality)) _quality = true;
-        ImGui::SameLine();
-    }
-    if (ImGui::RadioButton("Frame interval (ms)", !_plotFps)) _plotFps = false;
-    ImGui::SameLine();
-    if (ImGui::RadioButton("FPS", _plotFps)) _plotFps = true;
+    ImGui::EndGroup();
+    const bool profiled = _selectedMode == RunMode::SingleGPU || _selectedMode == RunMode::MultiGPU;
+    if (profiled) _quality = BistroPlot::Choice("Profile", "Performance", "Quality", _quality, true);
+    _plotFps = BistroPlot::Choice("Chart units", "Frame interval (ms)", "FPS", _plotFps, true);
+    ImGui::PopID();
+    ImGui::Spacing();
 
     const auto profile = _quality ? BistroPlacement::Quality : BistroPlacement::Performance;
-    const bool profiled = _selectedMode == RunMode::SingleGPU || _selectedMode == RunMode::MultiGPU;
     _compare.DrawLatest(ModeName(_selectedMode), profiled ? BistroPlacement::ProfileName[profile] : "", _plotFps,
         benchmark.CanStart(), _pendingPreset, _pendingSize);
     if (!_displayError.empty()) ImGui::TextWrapped("%s", _displayError.c_str());
@@ -355,20 +358,18 @@ void BistroInfoPanel::Draw(RenderModule& render, BistroRenderPipeline& pipeline,
                     tab = RunMode::SingleGPU;
                     ImGui::Text("Scene GPU   %s", _primary.c_str());
                     ImGui::BeginDisabled(!benchmark.CanStart());
-                    const float width = std::min(ImGui::GetContentRegionAvail().x, 46.f * ImGui::GetFontSize());
-                    if (ImGui::BeginTable("Single GPU actions", 2, ImGuiTableFlags_SizingStretchSame, {width, 0}))
-                    {
-                        ImGui::TableNextColumn();
-                        Heading("Queue placement");
-                        const float buttonWidth = std::min(10.f * ImGui::GetFontSize(), ImGui::GetContentRegionAvail().x);
-                        if (ImGui::Button("Quick search", {buttonWidth, 0})) benchmark.Launch(Action::Search);
-                        if (ImGui::GetContentRegionAvail().x >= 2 * buttonWidth + ImGui::GetStyle().ItemSpacing.x) ImGui::SameLine();
-                        if (ImGui::Button("Full sweep", {buttonWidth, 0})) benchmark.Launch(Action::Exhaustive);
-                        ImGui::TableNextColumn();
-                        ImGui::TextColored(Accent, "Profile search   %g min", BistroBenchmark::PlacementBudgetSeconds.GetValue() / 60.f);
-                        ProfileButtons(benchmark, Action::SingleGPU);
-                        ImGui::EndTable();
-                    }
+                    const float buttonWidth = std::min(9.f * ImGui::GetFontSize(), ImGui::GetContentRegionAvail().x);
+                    ImGui::BeginGroup();
+                    Heading("Search queue placement");
+                    if (ImGui::Button("Quick search", {buttonWidth, 0})) benchmark.Launch(Action::Search);
+                    BistroPlot::ContinueRowIfFits(buttonWidth);
+                    if (ImGui::Button("Full sweep", {buttonWidth, 0})) benchmark.Launch(Action::Exhaustive);
+                    ImGui::EndGroup();
+                    BistroPlot::ContinueRowIfFits(2.f * buttonWidth + ImGui::GetStyle().ItemSpacing.x);
+                    ImGui::BeginGroup();
+                    ImGui::TextColored(Accent, "Search presets (%g min)", BistroBenchmark::PlacementBudgetSeconds.GetValue() / 60.f);
+                    ProfileButtons(benchmark, Action::SingleGPU);
+                    ImGui::EndGroup();
                     ImGui::EndDisabled();
                     ImGui::EndTabItem();
                 }
