@@ -23,6 +23,13 @@ public:
     // Returns index of the first non-taken slot in the heap, starting from given index
     // maxRange == 0 means no range
     UINT GetAvailableIndex(UINT startIndex = 0, UINT maxRange = 0);
+
+    // Reserves contiguous slots for APIs that write a descriptor range themselves.
+    // The caller owns the range and must release it before this heap is destroyed.
+    UINT AllocateRange(UINT count, UINT startIndex = 0);
+    // Releases a previously reserved range after its GPU users have completed.
+    void ReleaseRange(UINT firstIndex, UINT count);
+
     D3D12_CPU_DESCRIPTOR_HANDLE GetCPUHandle(UINT index = 0) const;
     D3D12_GPU_DESCRIPTOR_HANDLE GetGPUHandle(UINT index = 0) const;
 

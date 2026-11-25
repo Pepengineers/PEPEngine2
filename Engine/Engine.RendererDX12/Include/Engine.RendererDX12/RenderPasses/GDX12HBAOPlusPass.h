@@ -21,19 +21,16 @@ private:
     {
         ~ContextResources();
         GFSDK_SSAO_Context_D3D12* Context = nullptr;
-        std::unique_ptr<GDX12DescriptorHeap> ShaderHeap;
-        std::unique_ptr<GDX12DescriptorHeap> RTVHeap;
-        ComPtr<ID3D12Resource> Depth;
-        ComPtr<ID3D12Resource> Normals;
+        // Non-owning device resources; this context owns only the reserved ranges.
+        GDX12DeviceResources* DeviceResources = nullptr;
+        UINT ShaderDescriptorsStart = UINT_MAX;
+        UINT RTVDescriptorsStart = UINT_MAX;
     };
 
-    // Creates the SDK context and its private heaps on the pass's GPU.
+    // Creates the SDK context using reserved ranges in the pass GPU's shared heaps.
     // FrameGraph waits for this resource slot before its upload data is reused.
     ContextResources& GetContext(PassExecutionContext& context);
 
-    // Updates SRVs only when their input resource changes. Retained references
-    // keep cached resource addresses valid until their descriptors are replaced.
-    static void UpdateInputViews(PassExecutionContext& context, ContextResources& slot);
     static void Check(GFSDK_SSAO_Status result, const char* operation);
 
     GFSDK_SSAO_Parameters _parameters;

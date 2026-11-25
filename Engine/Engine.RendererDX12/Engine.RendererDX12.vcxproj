@@ -40,6 +40,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12DeferredLightingPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12SSAOPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12HBAOPass.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12XeGTAOPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12HBAOPlusPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12SkyBoxPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12TemporalAntiAliasingPass.h" />
@@ -102,6 +103,7 @@
     <ClCompile Include="src\GDX12DeferredLightingPass.cpp" />
     <ClCompile Include="src\GDX12SSAOPass.cpp" />
     <ClCompile Include="src\GDX12HBAOPass.cpp" />
+    <ClCompile Include="src\GDX12XeGTAOPass.cpp" />
     <ClCompile Include="src\GDX12HBAOPlusPass.cpp" />
     <ClCompile Include="src\GDX12SkyBoxPass.cpp" />
     <ClCompile Include="src\GDX12TemporalAntiAliasingPass.cpp" />
@@ -134,6 +136,7 @@
     <None Include="Shaders\DeferredLightingPass.hlsl" />
     <None Include="Shaders\SSAOPass.hlsl" />
     <None Include="Shaders\HBAOPass.hlsl" />
+    <None Include="Shaders\XeGTAOPass.hlsl" />
     <None Include="Shaders\SkyBoxPass.hlsl" />
     <None Include="Shaders\TemporalAntiAliasingPass.hlsl" />
     <None Include="Shaders\IBLPrecomputePass.hlsl" />

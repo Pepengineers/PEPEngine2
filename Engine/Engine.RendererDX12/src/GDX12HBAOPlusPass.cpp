@@ -5,7 +5,13 @@ GDX12HBAOPlusPass::GDX12HBAOPlusPass()
 { _flags = RENDER_PASS_FLAG_USE_CAMERAS; }
 
 GDX12HBAOPlusPass::ContextResources::~ContextResources()
-{ if (Context) { Context->Release(); } }
+{
+    if (Context) { Context->Release(); }
+    if (ShaderDescriptorsStart != UINT_MAX)
+    { DeviceResources->SRV_UAV_Heap->ReleaseRange(ShaderDescriptorsStart, GFSDK_SSAO_NUM_DESCRIPTORS_CBV_SRV_UAV_HEAP_D3D12); }
+    if (RTVDescriptorsStart != UINT_MAX)
+    { DeviceResources->RTVHeap->ReleaseRange(RTVDescriptorsStart, GFSDK_SSAO_NUM_DESCRIPTORS_RTV_HEAP_D3D12); }
+}
 
 void GDX12HBAOPlusPass::Describe(PassDescription& description) const
 {
@@ -68,41 +74,19 @@ GDX12HBAOPlusPass::ContextResources& GDX12HBAOPlusPass::GetContext(PassExecution
     if (!slot)
     {
         auto resources = std::make_unique<ContextResources>();
-        resources->ShaderHeap = std::make_unique<GDX12DescriptorHeap>(device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-            GFSDK_SSAO_NUM_DESCRIPTORS_CBV_SRV_UAV_HEAP_D3D12 + 2, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
-        resources->RTVHeap = std::make_unique<GDX12DescriptorHeap>(device, D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
-            GFSDK_SSAO_NUM_DESCRIPTORS_RTV_HEAP_D3D12, D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
+        resources->DeviceResources = context.GetDeviceResources();
+        resources->ShaderDescriptorsStart = resources->DeviceResources->SRV_UAV_Heap->AllocateRange(
+            GFSDK_SSAO_NUM_DESCRIPTORS_CBV_SRV_UAV_HEAP_D3D12, TextureResources_StartIndex);
+        resources->RTVDescriptorsStart = resources->DeviceResources->RTVHeap->AllocateRange(GFSDK_SSAO_NUM_DESCRIPTORS_RTV_HEAP_D3D12);
         GFSDK_SSAO_DescriptorHeaps_D3D12 heaps;
-        heaps.CBV_SRV_UAV.pDescHeap = resources->ShaderHeap->GetHeap().Get();
-        heaps.CBV_SRV_UAV.BaseIndex = 2;
-        heaps.RTV.pDescHeap = resources->RTVHeap->GetHeap().Get();
+        heaps.CBV_SRV_UAV.pDescHeap = resources->DeviceResources->SRV_UAV_Heap->GetHeap().Get();
+        heaps.CBV_SRV_UAV.BaseIndex = resources->ShaderDescriptorsStart;
+        heaps.RTV.pDescHeap = resources->DeviceResources->RTVHeap->GetHeap().Get();
+        heaps.RTV.BaseIndex = resources->RTVDescriptorsStart;
         Check(GFSDK_SSAO_CreateContext_D3D12(device->GetDevice().Get(), 1, heaps, &resources->Context), "create context");
         slot = std::move(resources);
     }
     return *slot;
-}
-
-void GDX12HBAOPlusPass::UpdateInputViews(PassExecutionContext& context, ContextResources& slot)
-{
-    auto* device = context.GetDevice()->GetDevice().Get();
-    auto* depth = context.GetInputTexture("InDepthBuffer").GetTexture()->GetResource()->D3DResource.Get();
-    auto* normals = context.GetInputTexture("InNormalRoughness").GetTexture()->GetResource()->D3DResource.Get();
-    D3D12_SHADER_RESOURCE_VIEW_DESC view = {};
-    view.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-    view.Texture2D.MipLevels = 1;
-    if (slot.Depth.Get() != depth)
-    {
-        view.Format = DXGI_FORMAT_R32_FLOAT;
-        device->CreateShaderResourceView(depth, &view, slot.ShaderHeap->GetCPUHandle(0));
-        slot.Depth = depth;
-    }
-    if (slot.Normals.Get() != normals)
-    {
-        view.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-        device->CreateShaderResourceView(normals, &view, slot.ShaderHeap->GetCPUHandle(1));
-        slot.Normals = normals;
-    }
 }
 
 void GDX12HBAOPlusPass::Execute(PassExecutionContext& context)
@@ -120,7 +104,8 @@ void GDX12HBAOPlusPass::Execute(PassExecutionContext& context)
     }
 
     auto& slot = GetContext(context);
-    UpdateInputViews(context, slot);
+    auto* depth = context.GetInputTexture("InDepthBuffer").GetTexture();
+    auto* normals = context.GetInputTexture("InNormalRoughness").GetTexture();
 
     const auto* frame = context.GetFrameData();
     const auto size = context.GetOutputResourceDescription("OutAmbientOcclusion").GetSize();
@@ -133,19 +118,19 @@ void GDX12HBAOPlusPass::Execute(PassExecutionContext& context)
     input.DepthData.DepthTextureType = GFSDK_SSAO_HARDWARE_DEPTHS;
     input.DepthData.ProjectionMatrix.Data = GFSDK_SSAO_Float4x4(&projection._11);
     input.DepthData.MetersToViewSpaceUnits = 100.0f;
-    input.DepthData.FullResDepthTextureSRV.pResource = slot.Depth.Get();
-    input.DepthData.FullResDepthTextureSRV.GpuHandle = slot.ShaderHeap->GetGPUHandle(0).ptr;
+    input.DepthData.FullResDepthTextureSRV.pResource = depth->GetResource()->D3DResource.Get();
+    input.DepthData.FullResDepthTextureSRV.GpuHandle = context.GetInputTexture("InDepthBuffer").GetSRV()->GPUHandle.ptr;
     input.NormalData.Enable = true;
     input.NormalData.WorldToViewMatrix.Data = GFSDK_SSAO_Float4x4(&worldToView._11);
-    input.NormalData.FullResNormalTextureSRV.pResource = slot.Normals.Get();
-    input.NormalData.FullResNormalTextureSRV.GpuHandle = slot.ShaderHeap->GetGPUHandle(1).ptr;
+    input.NormalData.FullResNormalTextureSRV.pResource = normals->GetResource()->D3DResource.Get();
+    input.NormalData.FullResNormalTextureSRV.GpuHandle = context.GetInputTexture("InNormalRoughness").GetSRV()->GPUHandle.ptr;
 
     GFSDK_SSAO_RenderTargetView_D3D12 target;
     target.pResource = output->GetResource()->D3DResource.Get();
     target.CpuHandle = output->GetRTV()->CPUHandle.ptr;
     GFSDK_SSAO_Output_D3D12 destination;
     destination.pRenderTargetView = &target;
-    cmd->SetDescriptorHeaps({slot.ShaderHeap.get()});
+    cmd->SetDescriptorHeaps({context.GetDeviceResources()->SRV_UAV_Heap.get()});
     Check(slot.Context->RenderAO(device->GetCommandQueue()->GetCommandQueue().Get(), cmd->GetCommandList().Get(),
         input, _parameters, destination), "render AO");
     cmd->EndPixEvent();
