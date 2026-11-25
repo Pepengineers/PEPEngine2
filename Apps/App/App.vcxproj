@@ -93,6 +93,9 @@
     <ClCompile Include="src\BistroApplication.cpp">
       <AdditionalOptions>/bigobj %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
+    <ClCompile Include="src\BistroBenchmark.cpp" />
+    <ClCompile Include="src\BistroBenchmarkPlacement.cpp" />
+    <ClCompile Include="src\BistroPlacementSearch.cpp" />
     <ClCompile Include="src\Graph\RenderGraphCompiler.cpp" />
     <ClCompile Include="src\Graph\RenderGraphExecutor.cpp" />
     <ClCompile Include="src\Graph\QueueSubmission.cpp" />

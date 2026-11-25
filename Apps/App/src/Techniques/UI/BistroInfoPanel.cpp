@@ -1,4 +1,5 @@
 #include "BistroInfoPanel.h"
+#include "App.Base/Window.h"
 #include "BistroBenchmark.h"
 #include "Engine.Core/BenchmarkEngine.h"
 #include "Engine.UI/UI_test.h"
