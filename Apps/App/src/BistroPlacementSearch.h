@@ -103,6 +103,10 @@ struct Config
             std::tie(rhs.Resolution, rhs.Provider, rhs.Preset, rhs.Levels, rhs.Owners, rhs.Sync, rhs.ProbeFrequency,
                 rhs.ProbeCapture, rhs.ProbeDelivery, rhs.RemoteAOFilter);
     }
+    bool operator==(const Config& rhs) const
+    {
+        return !(*this < rhs) && !(rhs < *this);
+    }
 };
 
 struct Result
@@ -172,7 +176,7 @@ public:
                         (directory / std::filesystem::u8path(result.SourceCsv)).lexically_normal();
                     result.SourceCsv = source.lexically_relative(output.parent_path()).generic_u8string();
                     if (_remote && completed[bool(result.Settings.Provider)]) _cachedMode[bool(result.Settings.Provider)] = true;
-                    _fullSettings.insert(result.Settings);
+                    if (!LowFirst()) _fullSettings.insert(result.Settings);
                     ObserveComposition(result);
                     _references.push_back(result);
                 }
@@ -214,6 +218,7 @@ public:
         _high.Owners.assign(_placements.size(), -1);
         _high.Sync.assign(_placements.size(), -1);
         _high.Levels.fill(High);
+        _minimum = _high;
         for (size_t i = 0; i < std::size(Techniques); ++i)
         {
             const auto& technique = Techniques[i];
@@ -221,15 +226,26 @@ public:
             const auto& variable = console.FindConsoleVariable(technique.Quality);
             auto& levels = _values[i];
             levels.fill(-1);
+            int firstActive = -1;
             for (int v = variable.GetEnumFirstValue(); v < variable.GetEnumFirstValue() + variable.GetEnumCount(); ++v)
             {
                 const auto name = variable.GetEnumValueName(v);
+                if (firstActive == -1 && name != "Off" && variable.IsValidString(std::to_string(v))) firstActive = v;
                 if (name == "Off") levels[Off] = v;
                 if (name == "Low") levels[Low] = v;
                 if (name == "Mid" || name == "Medium") levels[Medium] = v;
                 if (name == "High") levels[High] = v;
                 if (name == "Epic" || name == "Ultra") levels[Epic] = v;
             }
+            if (levels[Low] == -1 && firstActive >= 0 &&
+                std::find(levels.begin() + Low, levels.end(), firstActive) == levels.end())
+                levels[Low] = firstActive;
+            for (const auto level : {Low, Medium, High, Epic})
+                if (levels[level] >= 0)
+                {
+                    _minimum.Levels[i] = level;
+                    break;
+                }
             if (levels[High] == -1) levels[High] = variable.GetInt();
             if (levels[Medium] == -1) levels[Medium] = levels[High];
             if (levels[Epic] == -1) levels[Epic] = levels[High];
@@ -247,6 +263,10 @@ public:
         _values[WaterQuality][Epic] = _values[WaterQuality][High];
         if (fixedWaterSubsteps)
             _values[WaterQuality][Medium] = _values[WaterQuality][High];
+        _fixedQuality[SkinningQuality] = !usesSkinningPreset;
+        _fixedQuality[WaterQuality] = fixedWaterSubsteps;
+        _minimum.Levels[SunShadowQuality] = _minimum.Levels[LocalShadowQuality] = Low;
+        _minimum = Canonical(std::move(_minimum));
         if (_adapters.empty() && _remote)
             csv.Config("MultiGPU.Reason", "no secondary GPU available");
     }
@@ -296,8 +316,18 @@ public:
 
     ConsoleVariablePatch ControlledSettings() const { return Patch(_high); }
 
+    bool LowFirst() const { return _profile == Performance && !_remote; }
+
     Trial Calibration()
     {
+        if (LowFirst())
+        {
+            const auto* saved = SavedPerformance(false);
+            auto trial = Make(saved ? saved->Settings : _minimum, saved ?
+                "recheck saved Native preset and capture route checkpoints" : "Native lower anchor and route checkpoints", true);
+            _calibrationId = trial.Id;
+            return trial;
+        }
         auto settings = _high;
         if (const auto* reference = BestReference(false)) settings.Resolution = reference->Settings.Resolution;
         return Make(settings, "native route checkpoints", true);
@@ -322,6 +352,19 @@ public:
         _short.clear();
         _failedProbes.clear();
         if (!NeedsPhase(phase)) return false;
+        if (LowFirst())
+        {
+            _performance = {};
+            if (const auto* saved = SavedPerformance(Upscaled()))
+            {
+                _performance.Stage = PerformanceStage::Saved;
+                _performance.Full.emplace_back(saved->Settings, "recheck saved preset");
+                if (auto other = SavedCompetitor(*saved))
+                    _performance.Full.emplace_back(std::move(*other), "recheck nearest saved competitor");
+            }
+            else BeginPerformanceLower();
+            return true;
+        }
         if (RemotePhase())
         {
             if (const auto* reference = BestReference(Upscaled()))
@@ -349,26 +392,7 @@ public:
             if (!RemotePhase()) ScheduleReflectionVariants(seed, "native reflection settings");
             return true;
         }
-        using U = GDX12UpscalerProvider;
-        using P = GDX12UpscalerQuality;
-        std::vector<Config> modes;
-        const auto addMode = [&](int provider, int preset)
-        {
-            if (provider && preset != int(P::NativeAA) &&
-                (provider != int(U::NIS) || preset <= int(P::Performance)))
-            {
-                seed.Provider = provider;
-                seed.Preset = preset;
-                modes.push_back(seed);
-            }
-        };
-        addMode(_preferredProvider, _preferredPreset);
-        for (int provider = int(U::TAA); provider > 0; --provider)
-            addMode(provider, int(P::Balanced));
-        for (int preset : {int(P::Quality), int(P::Performance), int(P::UltraQuality),
-                           int(P::UltraPerformance), int(P::UltraQualityPlus), int(P::Default)})
-            for (int provider = int(U::TAA); provider > 0; --provider)
-                addMode(provider, preset);
+        const auto modes = UpscalerModes(seed);
         if (RemotePhase())
             for (const auto& mode : modes) Seed(mode, true);
         for (const auto& mode : modes) Seed(mode);
@@ -379,7 +403,11 @@ public:
     void EndPhase()
     {
         if (RemotePhase() || !HasReference(Upscaled())) return;
-        if (_confirmed.size() == _confirmedBeforePhase && (_short.empty() || Finalist())) return;
+        if (LowFirst())
+        {
+            if (BestReference(Upscaled())->Fps < Threshold[Performance]) return;
+        }
+        else if (_confirmed.size() == _confirmedBeforePhase && (_short.empty() || Finalist())) return;
         _completedMode[Upscaled()] = true;
         SaveReferences();
     }
@@ -406,6 +434,19 @@ public:
         return {};
     }
 
+    std::optional<Trial> PerformanceConfirmation(BistroBenchmarkData::Csv& csv)
+    {
+        if (!LowFirst()) return {};
+        for (;;)
+        {
+            if (_performance.Full.empty() && _pending.empty() && _priority.empty()) AdvancePerformance(csv);
+            if (_performance.Full.empty()) return {};
+            auto [settings, source] = std::move(_performance.Full.front());
+            _performance.Full.pop_front();
+            if (!_fullSettings.count(settings)) return Make(settings, std::move(source), true);
+        }
+    }
+
     const Result* Finalist() const
     {
         const auto* incumbent = RemotePhase() ? Best(Upscaled(), true) : BestReference(Upscaled());
@@ -415,31 +456,33 @@ public:
         {
             const auto& result = entry.second;
             if (_fullSettings.count(result.ConfirmationSettings)) continue;
-            if (result.Fps < Threshold[_profile] && (!detail || Better(result, *detail, true))) detail = &result;
+            if (ShortFps(result) < Threshold[_profile] && (!detail || Better(result, *detail, true, true))) detail = &result;
             const bool dominated = std::any_of(_short.begin(), _short.end(), [&](const auto& other)
                 { return !_fullSettings.count(other.second.ConfirmationSettings) && !_retryFull.count(other.second.ConfirmationSettings) &&
+                    (!LowFirst() || ShortFps(other.second) >= Threshold[Performance]) &&
                     Dominates(other.second, result); });
-            if (dominated && result.Fps >= Threshold[_profile]) continue;
-            if (!best || Better(result, *best)) best = &result;
+            if (dominated && ShortFps(result) >= Threshold[_profile]) continue;
+            if (!best || Better(result, *best, false, true)) best = &result;
         }
         if ((!incumbent || incumbent->Fps < Threshold[_profile]) && _triedClosest &&
-            (!best || best->Fps < Threshold[_profile]))
+            (!best || ShortFps(*best) < Threshold[_profile]))
         {
             if (detail) return detail;
         }
-        return best && (!incumbent || Better(*best, *incumbent) || best->Fps >= Threshold[_profile] * .96)
+        return best && (!incumbent || Better(*best, *incumbent) || ShortFps(*best) >= Threshold[_profile] * .96)
             ? best : nullptr;
     }
 
     Trial Confirm(const Result& result)
     {
-        if (result.Fps < Threshold[_profile]) _triedClosest = true;
+        if (ShortFps(result) < Threshold[_profile]) _triedClosest = true;
         const auto source = _retryFull.count(result.ConfirmationSettings) ? "retry finalist of trial " : "finalist of trial ";
         return Make(result.ConfirmationSettings, source + std::to_string(result.Id), true);
     }
 
     void ScheduleWithinVideoMemory(const Trial& trial, ConsoleModule& console, Size output)
     {
+        if (LowFirst()) return;
         auto next = trial.Settings;
         while (next.Resolution && (_sizes[next.Resolution].first > output.first || _sizes[next.Resolution].second > output.second))
             --next.Resolution;
@@ -471,6 +514,24 @@ public:
         const bool outputUnavailable = rejection == "requested output size unavailable";
         if (trial.Full)
         {
+            if (LowFirst() && _performance.ConfirmingHigh && trial.Settings == _performance.Quality)
+            {
+                _performance.ConfirmingHigh = false;
+                if (!result.Valid || result.Fps < Threshold[Performance])
+                    ReducePerformanceQuality(result.Valid ? &result : nullptr);
+            }
+            if (LowFirst() && trial.Id == _calibrationId)
+            {
+                if (result.Valid) _calibration = result;
+                _fullSettings.insert(trial.Settings);
+                if (result.Valid && trial.Settings.Owners == result.Settings.Owners)
+                {
+                    ObserveComposition(result);
+                    _confirmed.push_back(result);
+                    SaveReferences();
+                }
+                return;
+            }
             if (result.Valid)
             {
                 ObserveComposition(result);
@@ -499,13 +560,14 @@ public:
         ObserveCosts(trial, result, csv);
         if (!result.Valid)
         {
+            _failedProbes.insert(trial.Settings);
+            ++_rejected[Upscaled()];
+            if (LowFirst()) return;
             if (rejection == "reflection face deadline missed")
             {
                 ExpandPolicies(trial, result);
                 ScheduleReflectionVariants(trial.Settings, "different reflection workload after missed deadline", true);
             }
-            _failedProbes.insert(trial.Settings);
-            ++_rejected[Upscaled()];
             if (outputUnavailable && trial.Settings.Resolution)
             {
                 auto smaller = trial.Settings;
@@ -522,12 +584,18 @@ public:
         }
         if (!_short.emplace(trial.Settings, result).second) return;
         auto& probe = _nearest[Upscaled()];
-        if (!probe || Better(result, *probe)) probe = result;
+        if (!probe || Better(result, *probe, false, true)) probe = result;
         auto& detail = _detail[Upscaled()];
         if (result.Fps < Threshold[_profile] && (!detail || Better(result, *detail, true))) detail = result;
         auto& nearMiss = _nearMiss[Upscaled()];
         if (result.Fps < Threshold[_profile] && (!nearMiss || result.Fps > nearMiss->Fps)) nearMiss = result;
-        Expand(trial, result, csv);
+        if (!LowFirst()) Expand(trial, result, csv);
+        else if (_performance.Stage == PerformanceStage::RemovalResults && ShortFps(result) >= Threshold[Performance])
+        {
+            const auto& base = *PerformanceMeasure(_performance.Anchor, true);
+            if (std::count(result.Activity.begin(), result.Activity.end(), true) + 1 >=
+                std::count(base.Activity.begin(), base.Activity.end(), true)) _pending.clear();
+        }
     }
 
     std::array<Preset, 2> Report(BistroBenchmarkData::Csv& csv, std::string_view reason,
@@ -603,6 +671,402 @@ public:
     bool RemotePhase() const { return _phase >= 2; }
 
 private:
+    enum class PerformanceStage { Saved, Lower, Remove, RemovalResults, Raise, Refine, Neighbor, High, Reduce,
+        ReductionResults, NeighborHigh, Improve, Done };
+
+    struct PerformanceProgress
+    {
+        PerformanceStage Stage = PerformanceStage::Lower;
+        Config Anchor, Quality;
+        size_t NextMode = 0, RefineResolution = 0;
+        double RemainingDeficit = 0;
+        bool ConfirmingHigh = false;
+        bool DeepReduction = false;
+        std::vector<Config> Modes, Alternatives;
+        std::deque<std::pair<Config, std::string>> Full;
+    };
+
+    std::vector<Config> UpscalerModes(Config settings) const
+    {
+        using U = GDX12UpscalerProvider;
+        using P = GDX12UpscalerQuality;
+        std::vector<Config> modes;
+        const auto add = [&](int provider, int preset)
+        {
+            if (!provider || preset == int(P::NativeAA) ||
+                (provider == int(U::NIS) && preset > int(P::Performance))) return;
+            settings.Provider = provider;
+            settings.Preset = preset;
+            if (std::find(modes.begin(), modes.end(), settings) == modes.end()) modes.push_back(settings);
+        };
+        add(_preferredProvider, _preferredPreset);
+        if (LowFirst())
+        {
+            add(int(U::TAA), int(P::Balanced));
+            add(int(U::TAA), int(P::UltraPerformance));
+            for (int provider = int(U::TAA); provider > 0; --provider)
+                add(provider, int(P::Performance));
+            for (int provider = int(U::TAA) - 1; provider > 0; --provider)
+                add(provider, int(P::Balanced));
+            return modes;
+        }
+        for (int provider = int(U::TAA); provider > 0; --provider)
+            add(provider, int(P::Balanced));
+        for (const int preset : {int(P::Quality), int(P::Performance), int(P::UltraQuality), int(P::UltraPerformance),
+                                int(P::UltraQualityPlus), int(P::Default)})
+            for (int provider = int(U::TAA); provider > 0; --provider)
+                add(provider, preset);
+        return modes;
+    }
+
+    const Result* SavedPerformance(bool upscaled) const
+    {
+        const Result* best = nullptr;
+        for (const auto& result : _references)
+            if (bool(result.Settings.Provider) == upscaled && result.Fps >= Threshold[Performance] &&
+                (!best || Better(result, *best))) best = &result;
+        return best;
+    }
+
+    std::optional<Config> SavedCompetitor(const Result& saved) const
+    {
+        const auto& base = saved.Settings;
+        const Result* nearest = nullptr;
+        const auto distance = [&](const Result& result)
+        {
+            const auto& other = result.Settings;
+            const auto size = (std::max)(base.Resolution, other.Resolution) - (std::min)(base.Resolution, other.Resolution);
+            return std::pair{other.Provider != base.Provider || other.Preset != base.Preset, size};
+        };
+        for (const auto& result : _references)
+            if (bool(result.Settings.Provider) == bool(base.Provider) && !(result.Settings == base) &&
+                (!nearest || distance(result) < distance(*nearest) || (distance(result) == distance(*nearest) &&
+                    Better(result, *nearest)))) nearest = &result;
+        if (nearest) return nearest->Settings;
+        auto neighbor = base;
+        if (neighbor.Resolution) --neighbor.Resolution;
+        else if (_sizes.size() > 1) ++neighbor.Resolution;
+        else
+        {
+            for (size_t i = 0; i < neighbor.Levels.size(); ++i)
+                if (PerformanceScale(i) && neighbor.Levels[i] > _minimum.Levels[i])
+                {
+                    neighbor.Levels[i] = _minimum.Levels[i];
+                    return Canonical(std::move(neighbor));
+                }
+            for (size_t i = 0; i < neighbor.Levels.size(); ++i)
+                if (PerformanceScale(i) && neighbor.Levels[i] != Off && neighbor.Levels[i] < High)
+                {
+                    neighbor.Levels[i] = High;
+                    return Canonical(std::move(neighbor));
+                }
+            if (neighbor.Levels[ProbeQuality] != Off)
+            {
+                neighbor.ProbeCapture = 1 - neighbor.ProbeCapture;
+                return neighbor;
+            }
+            return {};
+        }
+        return neighbor;
+    }
+
+    void BeginPerformanceLower()
+    {
+        _performance.Stage = PerformanceStage::Lower;
+        _performance.Modes = Upscaled() ? UpscalerModes(_minimum) : std::vector<Config>{_minimum};
+    }
+
+    double ShortFps(const Result& result) const { return LowFirst() ? result.ThresholdFps : result.Fps; }
+
+    const Result* PerformanceMeasure(const Config& settings, bool reuseCalibration = false) const
+    {
+        if (const auto it = _short.find(settings); it != _short.end()) return &it->second;
+        if (reuseCalibration && _calibration && _calibration->Settings == settings) return &*_calibration;
+        return nullptr;
+    }
+
+    size_t LargerPerformanceResolution(size_t current) const
+    {
+        const uint64_t target = uint64_t(_sizes[current].second) * 2;
+        size_t best = current + 1;
+        const auto distance = [&](size_t index) -> uint64_t
+        {
+            const uint64_t height = _sizes[index].second;
+            return height > target ? height - target : target - height;
+        };
+        for (size_t i = best + 1; i < _sizes.size(); ++i)
+            if (distance(i) <= distance(best)) best = i;
+        return best;
+    }
+
+    Config PerformanceHigh(Config settings) const
+    {
+        const auto* measured = PerformanceMeasure(settings, true);
+        for (size_t i = 0; i < settings.Levels.size(); ++i)
+            if (settings.Levels[i] != Off && !_fixedQuality[i] && (_available[i] || (measured && measured->Activity[i])))
+                settings.Levels[i] = High;
+        return Canonical(std::move(settings));
+    }
+
+    void ReducePerformanceQuality(const Result* full)
+    {
+        _performance.Stage = PerformanceStage::Reduce;
+        _performance.RemainingDeficit = full ? 1000. / full->Fps - 1000. / Threshold[Performance] : 0;
+    }
+
+    void WriteRemovalEvidence(const Result& base, BistroBenchmarkData::Csv& csv) const
+    {
+        const auto key = "Trial." + std::to_string(base.Id) + ".Removal.";
+        csv.Config(key + "ImageMode", base.Settings.Provider ? "upscaled provider " +
+            std::to_string(base.Settings.Provider) + " preset " + std::to_string(base.Settings.Preset) : "Native");
+        csv.Config(key + "Output", std::to_string(base.Output.first) + "x" + std::to_string(base.Output.second));
+        csv.Config(key + "FPS", BistroBenchmarkData::Csv::Number(ShortFps(base)));
+        for (size_t i = 0; i < base.Activity.size(); ++i)
+            if (base.Activity[i])
+                csv.Config(key + "ActiveTechnique", std::string(Techniques[i].Pass) + "=" +
+                    (Techniques[i].Quality ? std::to_string(QualityValue(i, base.Settings.Levels[i])) : "On"));
+    }
+
+    void AdvancePerformance(BistroBenchmarkData::Csv& csv)
+    {
+        auto& progress = _performance;
+        const auto passes = [&](const Result* result) { return result && ShortFps(*result) >= Threshold[Performance]; };
+        const auto measure = [&](const Config& settings, const std::string& source)
+        {
+            if (!_short.count(settings) && !_failedProbes.count(settings)) Schedule(settings, source);
+            return !_pending.empty();
+        };
+        while (_pending.empty() && progress.Full.empty())
+        {
+            auto next = progress.Anchor;
+            switch (progress.Stage)
+            {
+            case PerformanceStage::Saved:
+                if (const auto* best = Best(Upscaled(), false); best && best->Fps >= Threshold[Performance])
+                    progress.Stage = PerformanceStage::Done;
+                else BeginPerformanceLower();
+                break;
+            case PerformanceStage::Lower:
+            {
+                if (progress.NextMode == progress.Modes.size())
+                {
+                    const Result* fastest = nullptr;
+                    for (const auto& mode : progress.Modes)
+                        if (const auto* result = PerformanceMeasure(mode, true); result &&
+                            (!fastest || ShortFps(*result) > ShortFps(*fastest))) fastest = result;
+                    if (!fastest) { progress.Stage = PerformanceStage::Done; break; }
+                    progress.Anchor = fastest->Settings;
+                    progress.Stage = PerformanceStage::Remove;
+                    break;
+                }
+                const auto& lower = progress.Modes[progress.NextMode];
+                const auto* result = PerformanceMeasure(lower, true);
+                if (!result && measure(lower, Upscaled() ? "upscaled lower anchor" : "Native lower anchor")) return;
+                ++progress.NextMode;
+                if (passes(result))
+                {
+                    progress.Anchor = lower;
+                    progress.Stage = PerformanceStage::Raise;
+                }
+                break;
+            }
+            case PerformanceStage::Remove:
+            {
+                const auto& base = *PerformanceMeasure(progress.Anchor, true);
+                WriteRemovalEvidence(base, csv);
+                progress.Alternatives.clear();
+                for (size_t i = 0; i < base.Activity.size(); ++i)
+                    if (base.Activity[i] && (Techniques[i].Enable || Techniques[i].ScaledOff))
+                    {
+                        next = progress.Anchor;
+                        next.Levels[i] = Off;
+                        next = Canonical(std::move(next));
+                        progress.Alternatives.push_back(next);
+                        Schedule(next, "remove " + std::string(Techniques[i].Pass) + " at lower anchor / trial " +
+                            std::to_string(base.Id));
+                    }
+                progress.Stage = PerformanceStage::RemovalResults;
+                break;
+            }
+            case PerformanceStage::RemovalResults:
+            {
+                const Result* best = nullptr;
+                for (const auto& candidate : progress.Alternatives)
+                    if (const auto* result = PerformanceMeasure(candidate); result &&
+                        (!best || Better(*result, *best, false, true))) best = result;
+                if (!best) { progress.Stage = PerformanceStage::Done; break; }
+                progress.Anchor = best->Settings;
+                progress.Stage = passes(best) ? PerformanceStage::Raise : PerformanceStage::Remove;
+                break;
+            }
+            case PerformanceStage::Raise:
+                if (next.Resolution + 1 == _sizes.size())
+                {
+                    progress.Stage = PerformanceStage::Neighbor;
+                    break;
+                }
+                next.Resolution = LargerPerformanceResolution(next.Resolution);
+                if (measure(next, "raise output at minimum active quality")) return;
+                if (passes(PerformanceMeasure(next))) progress.Anchor = next;
+                else
+                {
+                    progress.RefineResolution = next.Resolution - 1;
+                    progress.Stage = PerformanceStage::Refine;
+                }
+                break;
+            case PerformanceStage::Refine:
+                if (progress.RefineResolution <= next.Resolution)
+                {
+                    progress.Stage = PerformanceStage::Neighbor;
+                    break;
+                }
+                next.Resolution = progress.RefineResolution;
+                if (measure(next, "refine output between passing and failing sizes")) return;
+                if (passes(PerformanceMeasure(next))) progress.Anchor = next;
+                --progress.RefineResolution;
+                break;
+            case PerformanceStage::Neighbor:
+                if (next.Resolution)
+                {
+                    --next.Resolution;
+                    if (measure(next, "compare adjacent lower output at minimum quality")) return;
+                }
+                progress.Stage = PerformanceStage::High;
+                break;
+            case PerformanceStage::High:
+                next = PerformanceHigh(progress.Anchor);
+                if (measure(next, "raise all active techniques to High")) return;
+                progress.Quality = next;
+                if (const auto* result = PerformanceMeasure(next); passes(result))
+                {
+                    progress.Stage = PerformanceStage::NeighborHigh;
+                    if (!_fullSettings.count(next))
+                    {
+                        progress.Full.emplace_back(next, "confirm High / trial " + std::to_string(result->Id));
+                        progress.ConfirmingHigh = true;
+                    }
+                    else
+                    {
+                        const auto full = std::find_if(_confirmed.begin(), _confirmed.end(), [&](const Result& confirmed) {
+                            return confirmed.Settings == next;
+                        });
+                        if (full == _confirmed.end() || full->Fps < Threshold[Performance])
+                            ReducePerformanceQuality(full == _confirmed.end() ? nullptr : &*full);
+                    }
+                }
+                else
+                {
+                    progress.Stage = PerformanceMeasure(next) ? PerformanceStage::Reduce : PerformanceStage::NeighborHigh;
+                    if (progress.Stage == PerformanceStage::NeighborHigh) progress.Quality = progress.Anchor;
+                }
+                break;
+            case PerformanceStage::Reduce:
+            {
+                const auto& base = *PerformanceMeasure(progress.Quality);
+                progress.Alternatives.clear();
+                for (size_t i = 0; i < base.Activity.size(); ++i)
+                {
+                    if (!PerformanceScale(i) || (!base.Activity[i] && !_available[i])) continue;
+                    const int level = base.Settings.Levels[i];
+                    for (int lower = level - 1; lower >= _minimum.Levels[i]; --lower)
+                    {
+                        if (QualityValue(i, Level(lower)) < 0 ||
+                            QualityValue(i, Level(lower)) == QualityValue(i, Level(level))) continue;
+                        next = progress.Quality;
+                        next.Levels[i] = Level(lower);
+                        next = Canonical(std::move(next));
+                        progress.Alternatives.push_back(next);
+                        Schedule(next, "lower " + std::string(Techniques[i].Pass) + " / trial " +
+                            std::to_string(base.Id));
+                        if (!progress.DeepReduction) break;
+                    }
+                }
+                progress.Stage = PerformanceStage::ReductionResults;
+                break;
+            }
+            case PerformanceStage::ReductionResults:
+            {
+                const auto& base = *PerformanceMeasure(progress.Quality);
+                const double deficit = (std::max)(progress.RemainingDeficit, 1000. / ShortFps(base) - 1000. / Threshold[Performance]);
+                const Result* best = nullptr;
+                double bestSaving = 0;
+                bool covered = false;
+                for (const auto& candidate : progress.Alternatives)
+                    if (const auto* result = PerformanceMeasure(candidate))
+                    {
+                        const auto gain = 1000. / base.Fps - 1000. / result->Fps;
+                        const auto key = "Trial." + std::to_string(result->Id) + ".QualityTrade.";
+                        csv.Config(key + "ComparedTrial", std::to_string(base.Id));
+                        csv.Config(key + "DeficitMs", BistroBenchmarkData::Csv::Number(deficit));
+                        csv.Config(key + "SavedMeanMs", BistroBenchmarkData::Csv::Number(gain));
+                        const bool covers = passes(result) && gain >= progress.RemainingDeficit;
+                        if (covers ? (!covered || Better(*result, *best, false, true)) :
+                            (!covered && (!best || gain > bestSaving)))
+                        {
+                            best = result;
+                            bestSaving = gain;
+                            covered = covers;
+                        }
+                    }
+                if (best && !covered && !progress.DeepReduction)
+                {
+                    progress.DeepReduction = true;
+                    progress.Stage = PerformanceStage::Reduce;
+                }
+                else if (best && !covered)
+                {
+                    progress.Quality = best->Settings;
+                    progress.DeepReduction = false;
+                    if (progress.RemainingDeficit > 0)
+                        progress.RemainingDeficit = (std::max)(0., progress.RemainingDeficit - bestSaving);
+                    progress.Stage = PerformanceStage::Reduce;
+                }
+                else
+                {
+                    progress.Quality = best ? best->Settings : progress.Anchor;
+                    progress.Stage = PerformanceStage::NeighborHigh;
+                }
+                break;
+            }
+            case PerformanceStage::NeighborHigh:
+            {
+                const auto* quality = PerformanceMeasure(progress.Quality, true);
+                if (quality && progress.Quality.Resolution && !HighMajority(progress.Quality, quality->Activity, true))
+                {
+                    next = progress.Anchor;
+                    --next.Resolution;
+                    next = PerformanceHigh(next);
+                    if (measure(next, "compare adjacent lower output with all active techniques at High")) return;
+                    if (const auto* neighbor = PerformanceMeasure(next); passes(neighbor) && Better(*neighbor, *quality, false, true))
+                        progress.Quality = next;
+                }
+                progress.Stage = PerformanceStage::Improve;
+                break;
+            }
+            case PerformanceStage::Improve:
+                ImprovePerformance(progress.Quality);
+                progress.Stage = PerformanceStage::Done;
+                break;
+            case PerformanceStage::Done:
+                return;
+            }
+        }
+    }
+
+    void ImprovePerformance(const Config& settings)
+    {
+        const auto* measured = PerformanceMeasure(settings, true);
+        if (!measured || ShortFps(*measured) < Threshold[Performance]) return;
+        for (size_t i = 0; i < settings.Levels.size(); ++i)
+            if (measured->Activity[i] && settings.Levels[i] == High && QualityValue(i, Epic) != QualityValue(i, High))
+            {
+                auto next = settings;
+                next.Levels[i] = Epic;
+                Schedule(next, "raise " + std::string(Techniques[i].Pass) + " to Epic at chosen output");
+            }
+        ScheduleReflectionVariants(settings, "reflection options at chosen output", false, true);
+    }
+
     Config EffectiveSettings(Config config) const
     {
         for (size_t i = 0; i < config.Levels.size(); ++i)
@@ -763,8 +1227,9 @@ private:
     const Result* BestReference(bool upscaled) const
     {
         const Result* best = Best(upscaled, false);
+        if (LowFirst()) return best;
         for (const auto& r : _references)
-            if (bool(r.Settings.Provider) == upscaled && (!best || Better(r, *best))) best = &r;
+            if (bool(r.Settings.Provider) == upscaled && (!best || Better(r, *best, false, false, true))) best = &r;
         return best;
     }
 
@@ -806,16 +1271,19 @@ private:
         else _pending.push_back(std::move(trial));
     }
 
-    void ScheduleReflectionVariants(const Config& config, const std::string& source, bool priority = false)
+    void ScheduleReflectionVariants(const Config& config, const std::string& source, bool priority = false,
+        bool keepActive = false)
     {
         auto next = config;
         for (const auto quality : {Off, Low, Medium, High, Epic})
         {
+            if (keepActive && (quality == Off || config.Levels[SSRQuality] == Off)) continue;
             next.Levels[SSRQuality] = quality;
             Schedule(next, source, priority);
         }
         for (const auto quality : {Low, Medium, High, Epic, Off})
         {
+            if (keepActive && (quality == Off || config.Levels[ProbeQuality] == Off)) continue;
             next = config;
             next.Levels[ProbeQuality] = quality;
             if (config.Levels[ProbeQuality] == Off) next.ProbeFrequency = Frequency::Low;
@@ -1094,24 +1562,33 @@ private:
         return _values[i][Medium] != _values[i][High] || _values[i][High] != _values[i][Epic];
     }
 
-    bool HighMajority(const Config& config, const std::array<bool, std::size(Techniques)>& active) const
+    bool PerformanceScale(size_t i) const
+    {
+        return !_fixedQuality[i] && (HasQualityScale(i) || (_values[i][Low] >= 0 && _values[i][Low] != _values[i][High]));
+    }
+
+    bool HighMajority(const Config& config, const std::array<bool, std::size(Techniques)>& active,
+        bool countLow = false) const
     {
         size_t high = 0, medium = 0;
         for (size_t i = 0; i < active.size(); ++i)
-            if (i != LocalShadowQuality && active[i] && HasQualityScale(i))
+            if (i != LocalShadowQuality && active[i] && (countLow ? PerformanceScale(i) : HasQualityScale(i)))
             {
                 high += config.Levels[i] >= High;
-                medium += config.Levels[i] == Medium;
+                medium += config.Levels[i] == Medium || (countLow && config.Levels[i] == Low);
             }
         return high > medium;
     }
 
-    bool Better(const Result& a, const Result& b, bool preferDetail = false) const
+    bool Better(const Result& a, const Result& b, bool preferDetail = false, bool shortWindow = false,
+        bool compareReferences = false) const
     {
         const auto threshold = Threshold[_profile];
-        const bool meetsA = a.Fps >= threshold, meetsB = b.Fps >= threshold;
+        const bool lowFirst = LowFirst() || (_profile == Performance && compareReferences);
+        const double fpsA = shortWindow ? ShortFps(a) : a.Fps, fpsB = shortWindow ? ShortFps(b) : b.Fps;
+        const bool meetsA = fpsA >= threshold, meetsB = fpsB >= threshold;
         if (meetsA != meetsB) return meetsA;
-        if (!meetsA && !preferDetail && a.Fps != b.Fps) return a.Fps > b.Fps;
+        if (!meetsA && !preferDetail && fpsA != fpsB) return fpsA > fpsB;
         if (meetsA && a.Output == b.Output && a.Render == b.Render && a.Settings.Provider == b.Settings.Provider &&
             a.Settings.Preset == b.Settings.Preset && a.Settings.Levels[LocalShadowQuality] == b.Settings.Levels[LocalShadowQuality])
         {
@@ -1133,23 +1610,27 @@ private:
                 if (a.P95 != b.P95) return a.P95 < b.P95;
             }
         }
-        const auto count = [](const Result& r, Level level)
+        const auto count = [this, lowFirst](const Result& r, Level level)
         {
             size_t n = 0;
             for (size_t i = 0; i < r.Activity.size(); ++i)
-                n += r.Activity[i] && (i == LocalShadowQuality ? level == Medium : r.Settings.Levels[i] >= level);
+            {
+                if (lowFirst && level > Low && !PerformanceScale(i)) continue;
+                n += r.Activity[i] && (i == LocalShadowQuality ? level == (lowFirst ? Low : Medium) : r.Settings.Levels[i] >= level);
+            }
             return n;
         };
-        const auto activeA = count(a, Medium), activeB = count(b, Medium);
+        const auto activeA = count(a, lowFirst ? Low : Medium), activeB = count(b, lowFirst ? Low : Medium);
         if (activeA != activeB) return activeA > activeB;
         const auto rank = [&](const Result& r)
         {
             const auto high = count(r, High);
             const auto epic = count(r, Epic);
             const bool resolutionFirst = _profile == Performance && KeepsComposition(r.Settings) &&
-                HighMajority(r.Settings, r.Activity);
+                HighMajority(r.Settings, r.Activity, lowFirst);
             const auto pixels = uint64_t(r.Output.first) * r.Output.second;
-            return std::tuple{resolutionFirst, resolutionFirst ? pixels : 0, high, pixels, epic, r.ShadowTexels,
+            return std::tuple{resolutionFirst, resolutionFirst ? pixels : 0, high, lowFirst ? count(r, Medium) : 0,
+                pixels, epic, r.ShadowTexels,
                 uint64_t(r.Render.first) * r.Render.second, r.Fps, -r.P95};
         };
         return rank(a) > rank(b);
@@ -1233,12 +1714,16 @@ private:
     int _preferredProvider = 0, _preferredPreset = 0;
     std::string _windAlgorithm;
     std::mt19937 _random{20261122};
-    Config _high;
+    Config _high, _minimum;
+    PerformanceProgress _performance;
+    size_t _calibrationId = 0;
+    std::optional<Result> _calibration;
     std::vector<int> _adapters;
     std::vector<Placement> _placements;
     size_t _firstLocalShadow = 0;
     std::vector<Size> _sizes;
     std::array<std::array<int, Epic + 1>, std::size(Techniques)> _values{};
+    std::array<bool, std::size(Techniques)> _fixedQuality{};
     std::array<bool, std::size(Techniques)> _available{};
     std::deque<Trial> _pending, _priority;
     std::set<Config> _scheduled;
