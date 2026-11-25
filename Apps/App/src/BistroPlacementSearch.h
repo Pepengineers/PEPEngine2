@@ -35,7 +35,7 @@ inline constexpr Technique Techniques[]{
     {L"Render.Wind.Enabled", L"Render.Wind.Quality", "wind"},
     {L"Render.Particles.Enabled", L"Render.Particles.Quality", "particle"},
     {L"Render.Water.Enabled", L"Render.Water.Quality", "water"},
-    {L"Render.Sky.Clouds.Enabled", L"Render.Sky.Clouds.Quality", "cloud"},
+    {L"Render.Sky.Clouds.Enabled", L"Render.Sky.Clouds.Quality", "volumetric clouds"},
     {L"Render.ReflectionProbes.Enabled", L"Render.ReflectionProbes.Quality", "reflection probes"},
     {L"Render.SSR.Enabled", L"Render.SSR.Quality", "SSR"},
     {L"Render.DOF.Enabled", L"Render.DOF.Quality", "DoF"},
@@ -74,8 +74,9 @@ inline const Placement Placements[]{
     {L"Render.Post.Adapter", "PostAdapter"},
     {L"App.UI.GameHUD.Adapter", "GameHUDAdapter"},
     {L"Render.Shadows.Sun.Adapter", "SunShadowAdapter", L"Render.Shadows.Sun.CrossSync", {1, 3}},
+    {L"Render.Sky.Clouds.Adapter", "VolumetricCloudsAdapter"},
 };
-inline constexpr size_t AO = 0, Water = 3, Wind = 4, Post = 11, HUD = 12, SunShadow = 13;
+inline constexpr size_t AO = 0, Water = 3, Wind = 4, Post = 11, HUD = 12, SunShadow = 13, Clouds = 14;
 inline constexpr size_t FirstProbe = std::size(Placements);
 inline constexpr size_t WaterQuality = 4, ProbeQuality = 6, SSRQuality = 7, SkinningQuality = 12;
 inline constexpr size_t SunShadowQuality = std::size(Techniques) - 2, LocalShadowQuality = std::size(Techniques) - 1;
@@ -1404,7 +1405,7 @@ private:
     {
         config = EffectiveSettings(std::move(config));
         for (const auto [technique, owner] : {std::pair<size_t, size_t>{0, AO}, {2, Wind}, {3, 2},
-                {4, 3}, {10, 6}, {10, 7}, {13, HUD}, {16, 5}, {17, SunShadow}})
+                {4, 3}, {5, Clouds}, {10, 6}, {10, 7}, {13, HUD}, {16, 5}, {17, SunShadow}})
             if (config.Levels[technique] == Off) config.Owners[owner] = -1;
         if (config.Owners[AO] >= 0)
         {

@@ -4,6 +4,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12EnvironmentIBLPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12CloudComponent.h"
 #include <functional>
+#include <optional>
 
 namespace BistroRender
 {
@@ -15,10 +16,10 @@ class SceneEnvironment
   public:
     SceneEnvironment(GDX12DeviceResources&, RenderPipelineCommonData&);
     ~SceneEnvironment();
-    void Freeze(double simulationDelta, Executor&, uint64_t frame);
-    void SetClouds(const GDX12CloudParameters&);
+    void Freeze(double simulationDelta, std::optional<double> routeTime, Executor&, uint64_t frame);
     void ResetClouds();
-    bool LocalCloudsActive() const { return _environment._cloudActive; }
+    Id BenchmarkCloudsOwner() const;
+    D3D12_GPU_DESCRIPTOR_HANDLE AddCloudReads(Graph&, std::vector<ID3D12Resource*>&, std::vector<Access>&);
     void Resize()
     {
         _environment.Resize();
@@ -49,7 +50,8 @@ class SceneEnvironment
         auto* texture = _environment._luts[2].get();
         return texture->IsInitialized() ? texture : nullptr;
     }
-    GDX12UploadBuffer<XMFLOAT4>& SkyViewSampling() const
+    struct SkyViewConstants { XMFLOAT4 ObserverRadius; UINT CloudsEnabled; };
+    GDX12UploadBuffer<SkyViewConstants>& SkyViewSampling() const
     {
         return *_skyViewSampling.at(_resources.CurrFrameConstantsIndex);
     }
@@ -65,24 +67,23 @@ class SceneEnvironment
         WorkDomain Domain = WorkDomain::Cached;
     };
     struct RemoteAtmosphere;
-    void Build(Executor&, uint64_t frame);
+    struct VolumetricClouds;
+    void Build(Executor&, uint64_t frame, double cloudTime);
     bool PrepareAtmosphere(Executor&, uint64_t frame, bool atmosphere, uint64_t skyRevision, bool& localChanged,
                            const GDX12CameraConstants* camera = nullptr, bool invalidated = false);
     GDX12DeviceResources& _resources;
     RenderPipelineCommonData& _common;
     GDX12EnvironmentIBLPass _environment;
     std::unique_ptr<GDX12Texture> _captureSkyView;
-    GDX12CloudComponent _cloud;
-    GDX12CloudInputs _cloudInput;
+    std::unique_ptr<VolumetricClouds> _cloud;
     std::vector<Work> _work;
     std::vector<Id> _operations;
     std::vector<std::pair<uint64_t, std::vector<Work>>> _retained;
-    bool _cloudSelected = false;
     GDX12SkyConstants _mediumConstants{}, _multipleConstants{}, _captureConstants{}, _viewConstants{}, _aerialConstants{};
     Matrix _aerialViewProjection = Matrix::Identity;
     bool _atmosphereReady = false;
     std::unique_ptr<RemoteAtmosphere> _remoteSkyView, _remoteAerial;
-    std::vector<std::unique_ptr<GDX12UploadBuffer<XMFLOAT4>>> _skyViewSampling;
+    std::vector<std::unique_ptr<GDX12UploadBuffer<SkyViewConstants>>> _skyViewSampling;
     int _failedSkyViewAdapter = -1, _failedAerialAdapter = -1;
 };
 } // namespace BistroRender

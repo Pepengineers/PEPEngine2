@@ -1740,7 +1740,7 @@ void SceneLighting::AppendDeferred(Graph& graph, std::vector<ID3D12Resource*>& b
 	// reads; normalize identical physical reads, rejecting state disagreements.
 	auto* root = _deferred._root.get();
 	auto* pipeline = _deferred._pipeline.Get();
-	std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 18> inputs{};
+	std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 19> inputs{};
 	for (UINT i = 0; i < 12; ++i)
 	{
 		inputs[i < 11 ? i : 14] = _deferred._inputs[i]->GetTexture()->GetSRV()->GPUHandle;
@@ -1751,6 +1751,7 @@ void SceneLighting::AppendDeferred(Graph& graph, std::vector<ID3D12Resource*>& b
 	inputs[15] = _resources.SkyTransmittanceSRV.GPUHandle;
 	inputs[16] = _resources.SkyViewSRV.GPUHandle;
 	inputs[17] = masks->GetSRV()->GPUHandle;
+	inputs[18] = environment.AddCloudReads(graph, bindings, lighting);
 	const std::array<D3D12_GPU_VIRTUAL_ADDRESS, 6> cbvs{
 	    scene.Main, scene.Camera, constants.ShadowCB->GetElementAddress(0), constants.SkyCB->GetElementAddress(0),
 	    grid.Constants->GetElementAddress(0), skyViewSampling.GetElementAddress(0)};
@@ -1801,7 +1802,7 @@ void SceneLighting::AppendDeferred(Graph& graph, std::vector<ID3D12Resource*>& b
 		         {
 			         cmd->SetComputeRootConstantBufferView(root->GetBRootParamIndex(i), cbvs[i]);
 		         }
-		         for (UINT i = 0; i < 18; ++i)
+		         for (UINT i = 0; i < inputs.size(); ++i)
 		         {
 			         cmd->SetComputeRootDescriptorTable(root->GetTRootParamIndex(i), inputs[i]);
 		         }

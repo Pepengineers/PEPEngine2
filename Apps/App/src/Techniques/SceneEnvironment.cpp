@@ -30,6 +30,10 @@ AutoConsoleVariable<int> AerialCrossSync(L"Render.Sky.AerialPerspective.CrossSyn
     L"Remote aerial perspective: 1 imports the current camera's matching volume pair.",
     EConsoleVariableFlags::Default, [](int value) { return value == 1; });
 
+AutoConsoleVariable<int> CloudsAdapter(L"Render.Sky.Clouds.Adapter", -1,
+    L"Hardware GPU for the volumetric cloud trace. -1 keeps clouds on the primary GPU.",
+    EConsoleVariableFlags::Default, [](int value) { return value >= -1; });
+
 bool Different(const GDX12SkyConstants& a, const GDX12SkyConstants& b)
 {
 	return std::memcmp(&a, &b, sizeof(a)) != 0;
@@ -380,27 +384,269 @@ struct SceneEnvironment::RemoteAtmosphere
 		ImportOperation = AppendTransfer(graph, bindings, PrimaryWork, textures, Selected->Shared.Resources[0].Get(), true);
 	}
 };
+struct SceneEnvironment::VolumetricClouds
+{
+	struct Budget { UINT Numerator, Denominator, ViewSteps, LightSteps; };
+	static constexpr Budget Budgets[]{{}, {1, 4, 24, 2}, {1, 3, 36, 3}, {1, 2, 48, 4}, {2, 3, 64, 6}};
+	static constexpr DXGI_FORMAT Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+	static constexpr const char* TraceName = "camera environment / volumetric clouds trace";
+	static constexpr const char* ImportName = "GPU0 import volumetric clouds";
+	struct Constants
+	{
+		XMFLOAT4X4 InvViewProj;
+		XMFLOAT3 CameraCm;
+		UINT ViewSteps;
+		XMFLOAT3 SunDirection;
+		UINT LightSteps;
+		XMFLOAT3 SunIlluminance;
+		UINT Seed;
+		XMFLOAT2 WindMeters, Padding;
+	};
+	static_assert(sizeof(Constants) == 128);
+
+	struct Kernel
+	{
+		GDX12DeviceResources& Resources;
+		std::unique_ptr<GDX12RootSignature> Root;
+		ComPtr<ID3D12PipelineState> Pipeline;
+
+		explicit Kernel(GDX12DeviceResources& resources) : Resources(resources) {}
+
+		void Initialize()
+		{
+			if (Root) return;
+			GDX12RootSignatureDesc desc;
+			desc.Constants.push_back(sizeof(Constants) / sizeof(UINT));
+			desc.NumSingleUAVSlots = 1;
+			auto root = std::make_unique<GDX12RootSignature>(Resources.Device, desc);
+			Pipeline = GDX12RenderHelpers::CreateComputePipeline(Resources.Device, root.get(),
+			    SHADERS_FOLDER "VolumetricClouds.hlsl", "TraceCloudsCS");
+			Root = std::move(root);
+		}
+
+		void Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work,
+		            GDX12Texture& output, const Constants& constants, Queue queue)
+		{
+			Initialize();
+			auto* heap = Resources.SRV_UAV_Heap->GetHeap().Get();
+			auto* root = Root->GetRootSignature().Get();
+			auto* pipeline = Pipeline.Get();
+			const auto uav = output.GetUAV()->GPUHandle;
+			const UINT param = Root->GetURootParamIndex(0);
+			const UINT x = (output.GetWidth() + 7) / 8, y = (output.GetHeight() + 7) / 8;
+			const auto id = NativeWork::ResourceFor(graph, bindings, output.GetResource()->D3DResource.Get(),
+			    "volumetric clouds radiance and opacity");
+			work.Add(graph, TraceName, {{id, Mode::Write, UnorderedAccess}}, [=](auto* cmd) {
+				cmd->SetDescriptorHeaps(1, &heap);
+				cmd->SetComputeRootSignature(root);
+				cmd->SetPipelineState(pipeline);
+				cmd->SetComputeRoot32BitConstants(0, sizeof(Constants) / sizeof(UINT), &constants, 0);
+				cmd->SetComputeRootDescriptorTable(param, uav);
+				cmd->Dispatch(x, y, 1);
+			}, {}, queue);
+		}
+	};
+
+	struct Remote
+	{
+		std::shared_ptr<QueueSubmission> Submit;
+		Id Owner;
+		GDX12DeviceResources Resources;
+		Kernel Trace{Resources};
+		GDX12Texture Image;
+		std::vector<QueueSubmission::TransferBuffer> Transfers;
+		Executor Recorder;
+		D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{};
+		UINT64 Payload = 0;
+		CompletionToken Ready;
+
+		Remote(Executor& primary, Id owner, UINT slots, UINT width, UINT height)
+		    : Submit(primary.Submissions()), Owner(owner), Transfers(slots), Recorder(Submit, owner, slots, 1)
+		{
+			Resources.Device = &Submit->Device(owner);
+			Resources.SRV_UAV_Heap = std::make_shared<GDX12DescriptorHeap>(Resources.Device,
+			    D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, TextureResources_StartIndex + TextureResources_RangeLength,
+			    D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
+			Trace.Initialize();
+			GDX12RenderHelpers::InitializeComputeTexture(Image, Resources, width, height, Format, false);
+			const auto desc = Image.GetResource()->D3DResource->GetDesc();
+			D3D12_PLACED_SUBRESOURCE_FOOTPRINT primaryFootprint{};
+			UINT64 bytes = 0, primaryBytes = 0, rowBytes = 0;
+			UINT rows = 0;
+			Resources.Device->GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &Footprint, &rows, &rowBytes, &bytes);
+			Submit->Device(0).GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &primaryFootprint, nullptr, nullptr, &primaryBytes);
+			if (!bytes || bytes == UINT64_MAX || bytes != primaryBytes ||
+			    Footprint.Footprint.RowPitch != primaryFootprint.Footprint.RowPitch)
+				throw std::runtime_error("Cloud adapters need matching texture footprints");
+			Payload = rowBytes * rows;
+			for (auto& transfer : Transfers)
+				transfer = Submit->CreateTransferBuffer(Owner, UINT64(Footprint.Footprint.RowPitch) * rows);
+		}
+
+		Id Copy(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work,
+		        GDX12Texture& image, UINT slot, bool import) const
+		{
+			auto* buffer = Transfers.at(slot).Resources[import ? 0 : 1].Get();
+			auto* texture = image.GetResource()->D3DResource.Get();
+			const Id shared = NativeWork::ResourceFor(graph, bindings, buffer, "shared volumetric clouds");
+			const Id output = NativeWork::ResourceFor(graph, bindings, texture, "volumetric clouds radiance and opacity");
+			const CD3DX12_TEXTURE_COPY_LOCATION packed(buffer, Footprint), texel(texture, 0u);
+			const auto source = import ? packed : texel, dest = import ? texel : packed;
+			const Id operation = work.Add(graph, import ? ImportName : "volumetric clouds export",
+			    {{import ? shared : output, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE},
+			     {import ? output : shared, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
+			    [=](auto* cmd) { cmd->CopyTextureRegion(&dest, 0, 0, 0, &source, nullptr); }, {},
+			    import ? Queue::Copy : Queue::Compute);
+			graph.Operations[operation].TransferBytes = Payload;
+			return operation;
+		}
+
+		void Publish(UINT slot, const Constants& constants)
+		{
+			Recorder.Begin(slot);
+			Graph graph;
+			graph.Device = Owner;
+			graph.FrameBoundary = false;
+			graph.TerminalQueue = Queue::Compute;
+			std::vector<ID3D12Resource*> bindings;
+			NativeWork work;
+			Trace.Append(graph, bindings, work, Image, constants, Queue::Compute);
+			Copy(graph, bindings, work, Image, slot, false);
+			const auto schedule = Compile(graph);
+			Recorder.Reserve(schedule);
+			Recorder.Execute(schedule, bindings, [&](Id op, uint32_t, auto* cmd) { work.Record(op, cmd); });
+			Ready = Recorder.Completions().back();
+		}
+	};
+
+	GDX12DeviceResources& Resources;
+	Kernel Local{Resources};
+	std::unique_ptr<GDX12Texture> Image;
+	std::unique_ptr<Remote> Secondary;
+	NativeWork Work;
+	Constants Frame{};
+	double LiveTime = 0;
+	UINT Slot = 0, Quality = 0;
+	int FailedAdapter = -1;
+	Id Output = Invalid, Producer = Invalid, Consumer = Invalid, Owner = Invalid;
+	std::optional<Queue> ReportedQueue;
+
+	explicit VolumetricClouds(GDX12DeviceResources& resources) : Resources(resources) {}
+
+	void Prepare(Executor& primary, UINT quality, UINT width, UINT height, const GDX12CameraConstants& camera,
+	             const GDX12SkyConstants& sky, double time)
+	{
+		Work.Commands.clear();
+		Output = Producer = Consumer = Owner = Invalid;
+		const int requested = quality ? CloudsAdapter.GetValue() : -1;
+		if (FailedAdapter != requested) FailedAdapter = -1;
+		const auto& submit = primary.Submissions();
+		const Id device = requested != FailedAdapter ? submit->SelectAdapter(requested) : 0;
+		const auto budget = Budgets[quality];
+		if (quality)
+		{
+			width = (width * budget.Numerator + budget.Denominator - 1) / budget.Denominator;
+			height = (height * budget.Numerator + budget.Denominator - 1) / budget.Denominator;
+		}
+		const bool resized = Image && (Image->GetWidth() != width || Image->GetHeight() != height);
+		if (quality != Quality || resized || (Secondary ? Secondary->Owner : 0) != device)
+			ReportedQueue.reset();
+		if (Image && (!quality || resized || (Secondary ? Secondary->Owner : 0) != device))
+		{
+			// Retire GPU0 imports before freeing either side of the shared buffers.
+			primary.Drain();
+			if (Secondary) Secondary->Recorder.Drain();
+			Secondary.reset();
+			if (!quality || resized) Image.reset();
+		}
+		Quality = quality;
+		if (!Quality) return;
+		Slot = Resources.CurrFrameConstantsIndex;
+		if (!Image)
+		{
+			Image = std::make_unique<GDX12Texture>();
+			GDX12RenderHelpers::InitializeComputeTexture(*Image, Resources, width, height, Format, false);
+		}
+		Frame = {camera.InvViewProj, camera.CameraLocation, budget.ViewSteps,
+		    {sky.SunDirection.x, sky.SunDirection.y, sky.SunDirection.z}, budget.LightSteps,
+		    {sky.SunIlluminance.x, sky.SunIlluminance.y, sky.SunIlluminance.z}, 47,
+		    {float(time * 21.0), float(time * 8.0)}, {}};
+		if (device && !Secondary)
+		{
+			try
+			{
+				Secondary = std::make_unique<Remote>(primary, device, UINT(Resources.FrameConstants.size()), width, height);
+			}
+			catch (const std::exception& error)
+			{
+				submit->CheckHealth();
+				FailedAdapter = requested;
+				Log::Warning("RenderGraph", "Using local volumetric clouds: ", error.what());
+			}
+			catch (const DxException& error)
+			{
+				if (DeviceLost(error.ErrorCode)) throw;
+				submit->CheckHealth();
+				FailedAdapter = requested;
+				Log::Warning("RenderGraph", "Using local volumetric clouds: ", error.ToString());
+			}
+		}
+		// Primary.Begin(Slot) retired the prior import of this transfer slot.
+		if (Secondary) Secondary->Publish(Slot, Frame);
+	}
+
+	void Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, bool async)
+	{
+		if (!Image) return;
+		if (Secondary) Secondary->Copy(graph, bindings, Work, *Image, Slot, true);
+		else Local.Append(graph, bindings, Work, *Image, Frame, async ? Queue::Compute : Queue::Direct);
+	}
+
+	void AddWaits(const Schedule& schedule, std::vector<PacketWait>& waits)
+	{
+		if (!Image) return;
+		for (Id i = 0; i < schedule.Packets.size(); ++i)
+		{
+			const auto& packet = schedule.Packets[i];
+			if (packet.Name == TraceName || packet.Name == ImportName) Producer = i;
+			if (packet.Name == "clustered deferred lighting" &&
+			    std::any_of(packet.Accesses.begin(), packet.Accesses.end(), [this](const Access& access) {
+				    return access.Resource == Output && access.Usage == Mode::Read;
+			    })) Consumer = i;
+		}
+		if (Producer >= Consumer || Consumer >= schedule.Packets.size())
+			throw std::logic_error("Volumetric clouds must precede deferred sky composition");
+		if (Secondary) waits.push_back({Producer, Secondary->Ready});
+	}
+
+	void Submitted(uint64_t frame, const std::vector<CompletionToken>& completions)
+	{
+		if (Consumer >= completions.size() || !completions[Consumer] || !completions[Producer]) return;
+		Owner = Secondary ? Secondary->Owner : 0;
+		const auto production = Secondary ? Secondary->Ready : completions[Producer];
+		if (ReportedQueue == production.Target) return;
+		ReportedQueue = production.Target;
+		Log::Info("RenderGraph", "Volumetric clouds frame=", frame, " quality=", Quality,
+		    " size=", Image->GetWidth(), "x", Image->GetHeight(), " steps=", Frame.ViewSteps, "/", Frame.LightSteps,
+		    " device=", Owner, " queue=", production.Target == Queue::Compute ? "COMPUTE" : "DIRECT",
+		    " producerFence=", production.Value, " importFence=", Secondary ? completions[Producer].Value : 0,
+		    " bytes=", Secondary ? Secondary->Payload : 0,
+		    " firstConsumer=clustered deferred lighting consumerFence=", completions[Consumer].Value);
+	}
+};
 SceneEnvironment::SceneEnvironment(GDX12DeviceResources& r, RenderPipelineCommonData& c)
-    : _resources(r), _common(c), _skyViewSampling(r.FrameConstants.size())
+    : _resources(r), _common(c), _cloud(std::make_unique<VolumetricClouds>(r)), _skyViewSampling(r.FrameConstants.size())
 {
 	_environment.Setup(&r, &c);
 	_environment.Initialize();
-	_cloud.Setup(&r, &c);
-	// Resource creation remains an owner-only prerequisite.
 }
 SceneEnvironment::~SceneEnvironment()
 {
 	_environment.ClearDenendencies();
-	_cloud.ClearDenendencies();
-}
-void SceneEnvironment::SetClouds(const GDX12CloudParameters& p)
-{
-	_cloud.SetParameters(p);
-	_cloudSelected = p.Enabled;
 }
 void SceneEnvironment::ResetClouds()
 {
-	_cloud.Reset();
+	_cloud->LiveTime = 0;
 }
 
 void SceneEnvironment::Submitted(uint64_t fence)
@@ -414,16 +660,15 @@ void SceneEnvironment::Submitted(uint64_t fence)
 		_retained.emplace_back(fence, _work);
 	}
 }
-void SceneEnvironment::Freeze(double delta, Executor& primary, uint64_t frame)
+void SceneEnvironment::Freeze(double delta, std::optional<double> routeTime, Executor& primary, uint64_t frame)
 {
 	const auto completed = _resources.Device->GetCommandQueue()->GetFence()->GetCompletedValue();
 	_retained.erase(std::remove_if(_retained.begin(), _retained.end(),
 	                               [completed](const auto& entry) { return entry.first <= completed; }),
 	                _retained.end());
-	_cloud.Advance(_cloudSelected ? delta : 0);
-	_cloudInput = _cloud.CaptureInputs();
+	if (!routeTime) _cloud->LiveTime += delta;
 	_work.clear();
-	Build(primary, frame);
+	Build(primary, frame, routeTime.value_or(_cloud->LiveTime));
 	// The graph can register readers in append before registering environment work in prelude.
 	if (_remoteSkyView) _remoteSkyView->BeginDisplay();
 	if (_remoteAerial) _remoteAerial->BeginDisplay();
@@ -495,30 +740,12 @@ bool SceneEnvironment::PrepareAtmosphere(Executor& primary, uint64_t frame, bool
 	return true;
 }
 
-void SceneEnvironment::Build(Executor& primary, uint64_t frameNumber)
+void SceneEnvironment::Build(Executor& primary, uint64_t frameNumber, double cloudTime)
 {
 	auto& e = _environment;
 	auto& r = _resources;
-	auto state = r.Sky;
-	const bool clouds = _cloudSelected && _cloudInput.Enabled;
-	const bool cloudChanged =
-	    clouds != e._cloudActive || (clouds && e._cloudSourceRevision != _cloudInput.SourceRevision);
-	const bool lightingChanged = clouds && e._cloudLightingRevision != _cloudInput.LightingRevision;
-	e._cloudActive = clouds;
-	e._cloudSourceRevision = _cloudInput.SourceRevision;
-	e._cloudLightingRevision = _cloudInput.LightingRevision;
-	if (clouds && !_cloud._texture->IsInitialized())
-	{
-		_cloud.CreateResources();
-	}
-	if (clouds)
-	{
-		state.Source = SkySource::SkyBox;
-		state.Quality = _cloudInput.Quality;
-		state.Box.RadianceMultiplier = 1;
-		state.Box.RotationRadians = 0;
-	}
-	bool changed = e._invalidated || cloudChanged || e._revision != state.Revision || e._quality != state.Quality ||
+	const auto& state = r.Sky;
+	bool changed = e._invalidated || e._revision != state.Revision || e._quality != state.Quality ||
 	               e._source != state.Source;
 	const bool discontinuity = changed;
 	GDX12SkyConstants constants;
@@ -529,14 +756,13 @@ void SceneEnvironment::Build(Executor& primary, uint64_t frameNumber)
 	if (state.Source == SkySource::SkyBox)
 	{
 		ValidateSkySettings(state.Box);
-		ibl = clouds ? ResolveSkyIBLSettings(state.Box.IBL, state.Quality)
-		             : ResolveSkyBoxIBLSettings(state.Box.IBL, state.Quality);
+		ibl = ResolveSkyBoxIBLSettings(state.Box.IBL, state.Quality);
 		changed |= e._resolvedIBL.CubeResolution != ibl.CubeResolution ||
 		           e._resolvedIBL.FilterSamples != ibl.FilterSamples || e._resolvedIBL.Intensity != ibl.Intensity;
 		e._resolvedIBL = ibl;
 		constants.Box = {state.Box.RadianceMultiplier, std::sin(state.Box.RotationRadians),
 		                 std::cos(state.Box.RotationRadians), 0};
-		if (!clouds && (e._boxAsset != state.Box.Cubemap || !e._boxTexture->IsInitialized()))
+		if (e._boxAsset != state.Box.Cubemap || !e._boxTexture->IsInitialized())
 		{
 			e.RetireResources();
 			const auto path = state.Box.Cubemap.is_absolute()
@@ -714,15 +940,15 @@ void SceneEnvironment::Build(Executor& primary, uint64_t frameNumber)
 		_atmosphereReady = true;
 		e._resolvedIBL = ibl;
 	}
-	changed |= lightingChanged;
 	const bool atmosphereActive = state.Source == SkySource::SkyAtmosphere;
+	const auto cloudQuality = atmosphereActive ? GDX12CloudComponent::GetActiveQuality() : 0u;
 	const bool remoteSkyView = PrepareAtmosphere(primary, frameNumber, atmosphereActive,
 	    state.Revision, viewChanged);
 	const auto& visibleKey = _remoteSkyView && _remoteSkyView->Displayed ? _remoteSkyView->Displayed->Key : constants;
 	auto& sampling = _skyViewSampling.at(r.CurrFrameConstantsIndex);
-	if (!sampling) sampling = std::make_unique<GDX12UploadBuffer<XMFLOAT4>>(r.Device, 1);
-	sampling->CopyData(0, XMFLOAT4(visibleKey.CameraPosition.x, visibleKey.CameraPosition.y,
-	    visibleKey.CameraPosition.z, visibleKey.CenterRadius.w));
+	if (!sampling) sampling = std::make_unique<GDX12UploadBuffer<SkyViewConstants>>(r.Device, 1);
+	sampling->CopyData(0, {{visibleKey.CameraPosition.x, visibleKey.CameraPosition.y,
+	    visibleKey.CameraPosition.z, visibleKey.CenterRadius.w}, cloudQuality != 0});
 	auto& frame = *r.FrameConstants[r.CurrFrameConstantsIndex];
 	// This is the same jittered camera snapshot bound to b1 by the local AerialCS.
 	GDX12CameraConstants aerialCamera;
@@ -731,6 +957,9 @@ void SceneEnvironment::Build(Executor& primary, uint64_t frameNumber)
 	const bool remoteAerial = PrepareAtmosphere(primary, frameNumber, atmosphereActive, state.Revision,
 	    aerialChanged, &aerialCamera, discontinuity);
 	frame.SkyCB->CopyData(0, constants);
+	const auto camera = cloudQuality ? frame.CameraCB->GetCPUData()[_common.ActiveCameraCBufferIndex] :
+	    GDX12CameraConstants{};
+	_cloud->Prepare(primary, cloudQuality, _common.DownscaledWidth, _common.DownscaledHeight, camera, constants, cloudTime);
 	if (changed)
 	{
 		e.EnsureOutputs(state.Source != SkySource::Off, state.Source == SkySource::Off ? 1 : ibl.CubeResolution);
@@ -760,50 +989,6 @@ void SceneEnvironment::Build(Executor& primary, uint64_t frameNumber)
 	};
 	const auto access = [](GDX12Texture* t, Mode mode, State required)
 	{ return std::make_pair(static_cast<GDX12Resource*>(t->GetResource()), Access{Invalid, mode, required}); };
-	if (clouds && changed)
-	{
-		auto* texture = _cloud._texture.get();
-		const auto input = _cloudInput;
-		auto* root = _cloud._root.get();
-		auto* pso = _cloud._pipeline.Get();
-		const auto uav = texture->GetUAV()->GPUHandle;
-		add("local cloud source", {access(texture, Mode::Write, UnorderedAccess)},
-		    [input, root, pso, uav](auto* cmd)
-		    {
-			    struct Constants
-			    {
-				    UINT Size, Octaves, Implementation, Enabled;
-				    float Scale, Coverage, Softness, Padding;
-				    Vector3 Horizon;
-				    float PhaseX;
-				    Vector3 Zenith;
-				    float PhaseY;
-				    Vector3 Cloud;
-				    UINT Seed;
-			    };
-			    const auto& p = input.Parameters;
-			    const Constants c{256,
-			                      input.Octaves,
-			                      UINT(p.Implementation),
-			                      input.Enabled ? 1u : 0u,
-			                      p.Scale,
-			                      p.Coverage,
-			                      p.Softness,
-			                      0,
-			                      p.HorizonColor,
-			                      input.Phase.x,
-			                      p.ZenithColor,
-			                      input.Phase.y,
-			                      p.CloudColor,
-			                      p.Seed};
-			    static_assert(sizeof(c) == 80);
-			    cmd->SetComputeRootSignature(root->GetRootSignature().Get());
-			    cmd->SetPipelineState(pso);
-			    cmd->SetComputeRoot32BitConstants(0, 20, &c, 0);
-			    cmd->SetComputeRootDescriptorTable(root->GetURootParamIndex(0), uav);
-			    cmd->Dispatch(32, 32, 6);
-		    });
-	}
 	struct CubeMip
 	{
 		D3D12_GPU_DESCRIPTOR_HANDLE Output;
@@ -909,7 +1094,7 @@ void SceneEnvironment::Build(Executor& primary, uint64_t frameNumber)
 			}
 			else
 			{
-				inputs[3] = clouds ? _cloud._texture.get() : e._boxTexture.get();
+				inputs[3] = e._boxTexture.get();
 				accesses.push_back(access(inputs[3], Mode::Read, Read));
 			}
 			sky(4, state.Source == SkySource::SkyAtmosphere ? 1 : 0, std::move(accesses), 0, 0, 0, inputs, {},
@@ -1059,6 +1244,7 @@ void SceneEnvironment::Append(Graph& graph, std::vector<ID3D12Resource*>& bindin
 		throw std::logic_error("Environment binding mismatch");
 	}
 	_operations.clear();
+	_cloud->Append(graph, bindings, AsyncComputeEnabled());
 	if (_remoteSkyView)
 		_remoteSkyView->AppendImport(graph, bindings, {_environment._luts[2].get(), nullptr});
 	const bool async = AsyncComputeEnabled();
@@ -1089,6 +1275,7 @@ void SceneEnvironment::Append(Graph& graph, std::vector<ID3D12Resource*>& bindin
 }
 bool SceneEnvironment::Record(Id operation, ID3D12GraphicsCommandList* cmd) const
 {
+	if (_cloud->Work.Record(operation, cmd)) return true;
 	if (_remoteSkyView && _remoteSkyView->PrimaryWork.Record(operation, cmd)) return true;
 	if (_remoteAerial && _remoteAerial->PrimaryWork.Record(operation, cmd)) return true;
 	const auto found = std::lower_bound(_operations.begin(), _operations.end(), operation);
@@ -1102,6 +1289,7 @@ bool SceneEnvironment::Record(Id operation, ID3D12GraphicsCommandList* cmd) cons
 
 void SceneEnvironment::AddAtmosphereWaits(const Schedule& schedule, std::vector<PacketWait>& waits)
 {
+	_cloud->AddWaits(schedule, waits);
 	for (auto* remote : {_remoteSkyView.get(), _remoteAerial.get()})
 	{
 		if (!remote) continue;
@@ -1129,6 +1317,7 @@ void SceneEnvironment::AddAtmosphereWaits(const Schedule& schedule, std::vector<
 
 void SceneEnvironment::AtmosphereSubmitted(uint64_t frame, const std::vector<CompletionToken>& completions)
 {
+	_cloud->Submitted(frame, completions);
 	for (auto* active : {_remoteSkyView.get(), _remoteAerial.get()})
 	{
 		if (!active) continue;
@@ -1166,6 +1355,22 @@ void SceneEnvironment::AtmosphereSubmitted(uint64_t frame, const std::vector<Com
 		    " firstConsumer=clustered deferred lighting consumerFence=", completions[remote.Consumer].Value);
 	}
 }
+Id SceneEnvironment::BenchmarkCloudsOwner() const
+{
+	return _cloud->Owner;
+}
+
+D3D12_GPU_DESCRIPTOR_HANDLE SceneEnvironment::AddCloudReads(Graph& graph, std::vector<ID3D12Resource*>& bindings,
+                                                         std::vector<Access>& accesses)
+{
+	if (!_cloud->Image) return _environment._null2D.GPUHandle;
+	auto& image = *_cloud->Image;
+	_cloud->Output = NativeWork::ResourceFor(graph, bindings, image.GetResource()->D3DResource.Get(),
+	    "volumetric clouds radiance and opacity");
+	accesses.push_back({_cloud->Output, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE});
+	return image.GetSRV()->GPUHandle;
+}
+
 std::vector<Access> SceneEnvironment::Reads(Graph& graph, std::vector<ID3D12Resource*>& bindings) const
 {
 	std::vector<Access> accesses;

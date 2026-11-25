@@ -127,7 +127,8 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	const auto scenes = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
 	const auto* world = scenes->GetWorld();
 	const double delta = c.Common.GameTimer ? c.Common.GameTimer->DeltaTime() : 0;
-	_environment->Freeze(world && !world->IsPaused() ? delta * world->GetTimeScale() : 0, *_executor, _frameNumber);
+	_environment->Freeze(world && !world->IsPaused() ? delta * world->GetTimeScale() : 0,
+	    _benchmarkTime, *_executor, _frameNumber);
 	_lighting->UpdateLocalShadowProfile(*_executor);
 	_lighting->Freeze(*_geometry, slot, submissions, submissions->SelectAdapter(_aoAdapter));
 	const auto transparencyOwner = _transparencyOwner = _lighting->Transparency().Begin(submissions, slot, _frameNumber,
@@ -383,11 +384,13 @@ std::vector<std::pair<std::string, std::string>> BistroRenderPipeline::Benchmark
 {
 	const auto& devices = *_executor->Submissions();
 	const auto [skyView, aerial] = _environment->AtmosphereDevices();
+	const auto clouds = _environment->BenchmarkCloudsOwner();
 	std::vector<std::pair<std::string, std::string>> adapters{
 	    {"SceneAdapter", devices.AdapterLabel(0)},
 	    {"AOAdapter", devices.AdapterLabel(_lighting->AOExecutionDevice())},
 	    {"SkyViewAdapter", devices.AdapterLabel(skyView)},
 	    {"AerialPerspectiveAdapter", devices.AdapterLabel(aerial)},
+	    {"VolumetricCloudsAdapter", clouds == BistroRender::Invalid ? "inactive" : devices.AdapterLabel(clouds)},
 	    {"LightGridAdapter", devices.AdapterLabel(_lighting->LightGridDevice())},
 	    {"SunShadowAdapter", devices.AdapterLabel(_lighting->SunShadowDevice())},
 	    {"ParticleAdapter", devices.AdapterLabel(_lighting->Particles().ExecutionDevice())},
@@ -425,6 +428,7 @@ void BistroRenderPipeline::BenchmarkPlacement(const PacketRoles& passes, FramePl
 	const auto [skyView, aerial] = _environment->BenchmarkAtmosphereConsumers();
 	add("SkyViewAdapter", skyView);
 	add("AerialPerspectiveAdapter", aerial);
+	add("VolumetricCloudsAdapter", _environment->BenchmarkCloudsOwner());
 	add("TransparencyAdapter", _lighting->Transparency().BenchmarkExecutionDevice());
 	frame.PostPublication = _post->BenchmarkPublication();
 	const auto [post, hud] = frame.PostPublication;

@@ -19,6 +19,7 @@ namespace BistroPlacement
         if (has("water")) return "WaterAdapter";
         if (has("wind") || has("ProjectedGrid")) return "GrassWindAdapter";
         if (has("cloud picture") || has("CloudPicture")) return "CloudPictureAdapter";
+        if (has("volumetric clouds")) return "VolumetricCloudsAdapter";
         if (has("SkyView")) return "SkyViewAdapter";
         if (has("aerial pair") || has("Aerial Perspective")) return "AerialPerspectiveAdapter";
         if (has("Atrium") || has("NEON DISTRICT")) return "AtriumCanvasAdapter";

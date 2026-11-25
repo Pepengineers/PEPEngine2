@@ -24,7 +24,7 @@ public:
         GDX12RootSignatureDesc root;
         root.IndexedLocalShadows = true;
         root.NumSingleCBVSlots = _opaqueOnly ? 6 : 5;
-        root.NumSingleSRVSlots = 18;
+        root.NumSingleSRVSlots = _opaqueOnly ? 19 : 18;
         root.NumSingleUAVSlots = 1;
         root.StaticSamplers = GetStaticSamplers();
         root.StaticSamplers.emplace_back(7, D3D12_FILTER_MIN_MAG_MIP_LINEAR,

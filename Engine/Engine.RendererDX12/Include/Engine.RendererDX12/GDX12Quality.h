@@ -7,7 +7,7 @@ PEP_ENUM_METADATA(GDX12Quality,
     PEP_DISPLAY_NAME(Mid, "Medium")
 )
 
-// Atmosphere and clouds retain their original four choices.
+// Atmosphere retains its original four choices.
 enum class GDX12LegacyQuality : std::uint8_t { Off, Low, Mid, High, Count };
 PEP_ENUM_METADATA(GDX12LegacyQuality,
     PEP_DISPLAY_NAME(Mid, "Medium")

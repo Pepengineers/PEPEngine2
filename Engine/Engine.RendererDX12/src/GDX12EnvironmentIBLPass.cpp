@@ -77,7 +77,6 @@ void GDX12EnvironmentIBLPass::Invalidate()
 
 void GDX12EnvironmentIBLPass::Resize()
 {
-    if (_cloudActive) _invalidated = true;
 }
 
 void GDX12EnvironmentIBLPass::CreateTexture(GDX12Texture& texture, const UINT width, const UINT height, const UINT depth, const UINT mips, const bool cube)

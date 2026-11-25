@@ -5,9 +5,9 @@
 #include <stdexcept>
 
 static AutoConsoleVariable<bool> Enabled(L"Render.Sky.Clouds.Enabled", true,
-    L"Allow explicitly selected cloud sources. Default true.", EConsoleVariableFlags::Default);
-static AutoConsoleVariable<GDX12LegacyQuality> Quality(L"Render.Sky.Clouds.Quality", GDX12LegacyQuality::Mid,
-    L"0 Off, 1 Low (3 octaves), 2 Mid (5), 3 High (8).", EConsoleVariableFlags::Default);
+    L"Enable volumetric clouds in the Bistro sky.", EConsoleVariableFlags::Default);
+static AutoConsoleVariable<GDX12Quality> Quality(L"Render.Sky.Clouds.Quality", GDX12Quality::Mid,
+    L"0 Off, 1 Low, 2 Medium, 3 High, 4 Epic.", EConsoleVariableFlags::Default);
 
 GDX12CloudComponent::GDX12CloudComponent()
 {
@@ -47,6 +47,7 @@ void GDX12CloudComponent::SetParameters(const GDX12CloudParameters& parameters)
 }
 
 UINT GDX12CloudComponent::GetQuality() const { return static_cast<UINT>(Quality.GetInt()); }
+UINT GDX12CloudComponent::GetActiveQuality() { return Enabled.GetValue() ? UINT(Quality.GetInt()) : 0; }
 
 bool GDX12CloudComponent::IsActive() const
 {
@@ -118,7 +119,7 @@ GDX12CloudInputs GDX12CloudComponent::CaptureInputs()
         ++_sourceRevision;
         ++_lightingRevision;
     }
-    const UINT presets[] = { 0, 3, 5, 8 };
+    const UINT presets[] = { 0, 3, 5, 8, 8 };
     return { _parameters, Vector2(static_cast<float>(_phaseX), static_cast<float>(_phaseY)),
         _simulationSeconds, _sourceRevision, _lightingRevision, static_cast<UINT>(quality),
         _parameters.Octaves ? _parameters.Octaves : presets[quality], enabled };

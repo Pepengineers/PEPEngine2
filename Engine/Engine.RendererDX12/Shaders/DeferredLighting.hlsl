@@ -24,9 +24,11 @@ SamplerComparisonState samShadow : register(s6);
 #include "SkyRendering.hlsli"
 Texture2D<float4> VisibleSkyView : register(t16);
 #if DEFERRED_OPAQUE_ONLY
+Texture2D<float4> VolumetricCloudLayer : register(t18);
 cbuffer VisibleSkyViewSampling : register(b5)
 {
     float4 SkyViewObserverRadius;
+    uint CloudsEnabled;
 };
 #endif
 #define PBR_LIGHTING_ONLY
@@ -75,6 +77,13 @@ void CS(uint3 dispatch : SV_DispatchThreadID)
             SkyViewUV(ray, skyViewObserver.xyz, skyViewObserver.w), 0).rgb :
             SourceEnvironment.SampleLevel(samLinearClamp, ray, 0).rgb;
         sky += SkySunDisk(ray, CBCamera.CameraLocation);
+#if DEFERRED_OPAQUE_ONLY
+        if (CloudsEnabled)
+        {
+            float4 cloud = VolumetricCloudLayer.SampleLevel(samLinearClamp, (float2(pixel) + 0.5) / size, 0);
+            sky = sky * (1.0 - cloud.a) + cloud.rgb;
+        }
+#endif
         SceneColor[pixel] = float4(sky, 1);
         return;
     }

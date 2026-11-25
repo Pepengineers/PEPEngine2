@@ -82,7 +82,7 @@ class BistroRenderPipeline final : public IRenderPipeline
 	UINT BenchmarkSlot() const { return _executorSlot; }
 	const auto& BenchmarkSchedule() const { return _schedule; }
 	SkySource BenchmarkSkySource() const { return _benchmarkSky; }
-	bool BenchmarkLocalCloudsActive() const { return _environment->LocalCloudsActive(); }
+	bool BenchmarkCloudsActive() const { return _environment->BenchmarkCloudsOwner() != BistroRender::Invalid; }
 	const auto& BenchmarkProbeFrame() const { return _lighting->BenchmarkProbeFrame(); }
 	void ResetBenchmarkProbeCaptures() { _lighting->ResetBenchmarkProbeCaptures(); }
 	BistroRender::CompletionToken BenchmarkFrameFence() const { return _executor->Completions().back(); }

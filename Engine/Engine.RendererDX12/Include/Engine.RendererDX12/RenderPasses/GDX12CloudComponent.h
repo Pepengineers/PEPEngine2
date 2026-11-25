@@ -45,6 +45,7 @@ public:
     void Reset();
     bool IsActive() const;
     UINT GetQuality() const;
+    static UINT GetActiveQuality();
     uint64_t GetSourceRevision() const { return _sourceRevision; }
     uint64_t GetLightingRevision() const { return _lightingRevision; }
     GDX12CloudInputs CaptureInputs();

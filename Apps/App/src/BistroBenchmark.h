@@ -1116,7 +1116,7 @@ private:
         ++_trialSectionShadowSamples[section];
         const auto skySource = pipeline.BenchmarkSkySource();
         auto effectiveActivity = activity;
-        effectiveActivity[5] = pipeline.BenchmarkLocalCloudsActive();
+        effectiveActivity[5] = pipeline.BenchmarkCloudsActive();
         effectiveActivity[6] = _hasPublishedProbes;
         effectiveActivity[8] = dof;
         effectiveActivity[9] = blur;

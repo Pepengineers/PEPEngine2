@@ -49,8 +49,6 @@ private:
     SkySource _source = SkySource::Off;
     bool _invalidated = true;
     bool _brdfReady = false;
-    uint64_t _cloudSourceRevision = 0, _cloudLightingRevision = 0;
-    bool _cloudActive = false;
     SkyIBLSettings _resolvedIBL;
     std::function<void()> _retire;
 };
