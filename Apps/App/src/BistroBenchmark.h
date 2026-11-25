@@ -1148,6 +1148,8 @@ private:
                     if (_trialResult.Output != _placementSearch.Resolution(_trial.Settings) ||
                         _trialResult.Output != BistroPlacement::Size{width, height})
                         _trialReason = "requested output size unavailable";
+                    else if (pipeline.CloudPictureSizeUnavailable())
+                        _trialReason = "requested cloud picture texture unavailable";
                     else if (int(status.Effective) != _trial.Settings.Provider ||
                         (status.Effective == GDX12UpscalerProvider::Native) != (_trialResult.Render == _trialResult.Output) ||
                         (_trial.Settings.Provider &&

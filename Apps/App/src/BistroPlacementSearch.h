@@ -46,7 +46,7 @@ inline constexpr Technique Techniques[]{
     {L"App.UI.GameHUD.Enabled", L"App.UI.GameHUD.Quality", "HUD"},
     {nullptr, L"App.UI.WorldCanvas.Quality", "canvas"},
     {nullptr, L"Render.Tree.Quality", "Linden"},
-    {L"App.UI.CloudPicture.Enabled", nullptr, "cloud picture"},
+    {L"App.UI.CloudPicture.Enabled", L"App.UI.CloudPicture.Quality", "cloud picture"},
     {nullptr, L"Render.Shadows.Sun.Resolution", "sun shadow", true},
     {nullptr, L"Render.Shadows.Local.Resolution", "local shadow", true},
 };

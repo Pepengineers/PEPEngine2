@@ -13,6 +13,7 @@ public:
     void Prepare(UINT slot, double time);
     GDX12Texture* Image() const;
     bool IsRemote() const;
+    bool SizeUnavailable() const;
     void Append(Graph&, std::vector<ID3D12Resource*>&);
     bool Record(Id, ID3D12GraphicsCommandList*);
     std::vector<PacketWait> Waits(const Schedule&);

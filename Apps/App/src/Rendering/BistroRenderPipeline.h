@@ -66,6 +66,7 @@ class BistroRenderPipeline final : public IRenderPipeline
 	auto PresentCompletedAt() const { return _afterPresent; }
 	void WriteExecution(std::ostream& output) const override { _schedule->Write(output); }
 	const BistroRender::Schedule& LastSchedule() const { return *_schedule; }
+	bool CloudPictureSizeUnavailable() const { return _cloudPicture->SizeUnavailable(); }
 	bool HasRemoteCloudPicture() const { return _cloudPicture->IsRemote(); }
 	struct FrameLink { BistroRender::Id Export, Owner, Import; };
 	void CheckPanelPlacement() { _checkPanelPlacement = true; }

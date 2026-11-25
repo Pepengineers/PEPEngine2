@@ -1,5 +1,6 @@
 #include "BistroComparePanel.h"
 #include "BistroPlot.h"
+#include "Techniques/CloudPictureQuality.h"
 #include "Common/RuntimePaths.h"
 #include "Engine.Core/BenchmarkEngine.h"
 #include "Engine.Core/ConsoleModule.h"
@@ -117,6 +118,11 @@ std::string DisplayValue(const std::string& key, const std::string& value)
         BenchmarkEngine::GetLocator().GetModule<ConsoleModule>()->TryFindConsoleVariable(fs::u8path(name).wstring(), variable))
     {
         const auto label = variable->GetEnumValueName(id);
+        if (key == "App.UI.CloudPicture.Quality" && id >= 0 && size_t(id) < BistroRender::CloudPictureSizes.size())
+        {
+            const auto [width, height] = BistroRender::CloudPictureSizes[id];
+            return std::string(label) + " (" + std::to_string(width) + "x" + std::to_string(height) + ")";
+        }
         if (!label.empty()) return std::string(label);
     }
     return value;
@@ -132,6 +138,7 @@ void DrawSettings(const Settings& values, const Settings& before)
         ImGui::TextWrapped("%s%s  |  %s render -> %s output", provider.c_str(), quality.c_str(),
             display("RenderResolution").c_str(), display("OutputResolution").c_str());
     }
+    const auto custom = std::to_string(int(BistroRender::CloudPictureQuality::Custom));
     const auto table = [&](bool changes)
     {
         if (!ImGui::BeginTable(changes ? "Changes" : "Settings", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable)) return;
@@ -143,6 +150,9 @@ void DrawSettings(const Settings& values, const Settings& before)
         for (const auto& [key, value] : values)
         {
             if (key == "RouteSeconds" || key == "WarmupSeconds" || key == "PaintingHoldSeconds") continue;
+            if ((key == "App.UI.CloudPicture.Width" || key == "App.UI.CloudPicture.Height") &&
+                values.count("App.UI.CloudPicture.Quality") &&
+                Value(values, "App.UI.CloudPicture.Quality") != custom) continue;
             const auto& old = Value(before, key);
             if (changes)
             {
@@ -159,7 +169,8 @@ void DrawSettings(const Settings& values, const Settings& before)
             ImGui::TableNextColumn();
             auto selected = DisplayValue(key, value);
             const bool scale = key.find("Quality") != key.npos || key.find("Resolution") != key.npos;
-            if (changes && scale && key != "Render.Upscaler.Quality")
+            const bool customPicture = key == "App.UI.CloudPicture.Quality" && (old == custom || value == custom);
+            if (changes && scale && !customPicture && key != "Render.Upscaler.Quality")
             {
                 const auto from = Number(old.substr(0, old.find('x')));
                 const auto to = Number(value.substr(0, value.find('x')));

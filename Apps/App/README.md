@@ -87,7 +87,7 @@ Use `--read-texture=Scene.DepthNormals.Normals` or
 
 ### World-space billboards
 
-In F1, open **App → UI → CloudPicture** to configure the CLOUDS poster. Its material samples the generated texture directly. A remote producer transfers the selected image once to the primary GPU, where both the surface and reflections sample it. `Adapter` selects the producer (`-1` follows the primary GPU). `CrossSync` selects the publication as described below. `Width`, `Height`, `SpeedScale`, `Enabled` and `AsyncCompute` are in the same group. `AsyncCompute` controls local generation.
+In F1, open **App → UI → CloudPicture** to configure the CLOUDS poster. Its material samples the generated texture directly. A remote producer transfers the selected image once to the primary GPU, where both the surface and reflections sample it. `Adapter` selects the producer (`-1` follows the primary GPU). `CrossSync` selects the publication as described below. `Quality` selects the generated texture size: Low 512x254, Medium 1024x512 (startup), High 2048x1024, or Epic 4096x2048. Performance and Quality searches vary this setting. Custom uses `Width` and `Height`. `SpeedScale`, `Enabled` and `AsyncCompute` are in the same group. `AsyncCompute` controls local generation.
 
 NEON DISTRICT and ASTRA have their own UI rendering. Open `App.UI.WorldCanvas.Atrium` or `App.UI.WorldCanvas.Terrace` to set the corresponding poster’s `Adapter` and `CrossSync`. Remote mode `1` (default) shows the current frame. Mode `0` shows the previous frame after a current-frame bootstrap. Both use the current frame on the primary GPU.
 

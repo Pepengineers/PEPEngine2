@@ -1,4 +1,5 @@
 #include "SceneCloudPicture.h"
+#include "CloudPictureQuality.h"
 #include "Engine.Core/Logging/Logger.h"
 #include "Common/ConsoleVariables.h"
 #include <optional>
@@ -21,9 +22,12 @@ bool ParseValue(std::string_view text, BistroRender::CloudPictureMode& mode) {
 namespace BistroRender {
 namespace {
 AutoConsoleVariable<bool> Enabled(L"App.UI.CloudPicture.Enabled", true, L"Show the cloud picture in Bistro.");
-AutoConsoleVariable<int> Width(L"App.UI.CloudPicture.Width", 1024, L"Cloud picture texture width, independent of window/SR.",
+// Old configs that specify only Width/Height keep their explicit dimensions.
+AutoConsoleVariable<CloudPictureQuality> Quality(L"App.UI.CloudPicture.Quality", CloudPictureQuality::Custom,
+    L"Texture size: Low 512x254, Medium 1024x512, High 2048x1024, Epic 4096x2048, Custom uses Width/Height.");
+AutoConsoleVariable<int> Width(L"App.UI.CloudPicture.Width", 1024, L"Cloud picture custom texture width.",
     EConsoleVariableFlags::Default, [](int v) { return v > 0 && v <= D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION; });
-AutoConsoleVariable<int> Height(L"App.UI.CloudPicture.Height", 512, L"Cloud picture texture height, independent of window/SR.",
+AutoConsoleVariable<int> Height(L"App.UI.CloudPicture.Height", 512, L"Cloud picture custom texture height.",
     EConsoleVariableFlags::Default, [](int v) { return v > 0 && v <= D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION; });
 AutoConsoleVariable<int> Adapter(L"App.UI.CloudPicture.Adapter", -1,
     L"Cloud Picture GPU in the Render.PrimaryAdapter hardware list. -1 uses the primary GPU.");
@@ -45,6 +49,7 @@ struct SceneCloudPicture::Impl {
     std::unique_ptr<CloudPictureTexture> Texture;
     std::optional<Settings> Attempted;
     Id ExecutionDevice = 0;
+    bool SizeUnavailable = false;
     GDX12Texture* CurrentImage = nullptr;
 
     explicit Impl(RenderPipelineContext& c) : Resources(c.Primary) {}
@@ -56,7 +61,10 @@ void SceneCloudPicture::UpdateSettings(Executor& executor) {
     const auto& submit = executor.Submissions();
     const bool enabled = Enabled.GetValue();
     const Id device = enabled ? submit->SelectAdapter(Adapter.GetValue()) : 0;
-    const Settings next{enabled, Width.GetValue(), Height.GetValue(), device,
+    const auto quality = Quality.GetValue();
+    const auto [width, height] = quality == CloudPictureQuality::Custom ?
+        std::pair{Width.GetValue(), Height.GetValue()} : CloudPictureSizes.at(size_t(quality));
+    const Settings next{enabled, width, height, device,
         device ? CrossSync.GetValue() : CloudPictureMode::Local};
     if (p.Attempted && next == *p.Attempted) return;
     p.Attempted = next;
@@ -78,7 +86,8 @@ void SceneCloudPicture::UpdateSettings(Executor& executor) {
         replacement = createPicture(0, CloudPictureMode::Local);
         executionDevice = 0;
     }
-    if (next.Active && !replacement) return;
+    p.SizeUnavailable = next.Active && !replacement;
+    if (p.SizeUnavailable) return;
 
     if (p.Texture) {
         p.Texture->Stop();
@@ -95,6 +104,7 @@ void SceneCloudPicture::Prepare(UINT slot, double time) {
     p.CurrentImage = p.Texture ? p.Texture->Texture(slot) : nullptr;
 }
 GDX12Texture* SceneCloudPicture::Image() const { return _impl->CurrentImage; }
+bool SceneCloudPicture::SizeUnavailable() const { return _impl->SizeUnavailable; }
 bool SceneCloudPicture::IsRemote() const { return _impl->Texture && _impl->Texture->IsRemote(); }
 void SceneCloudPicture::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings) {
     if (_impl->CurrentImage) _impl->Texture->Append(graph, bindings);
