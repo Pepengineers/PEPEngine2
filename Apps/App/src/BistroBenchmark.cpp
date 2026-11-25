@@ -723,7 +723,6 @@ void BistroBenchmark::BeginLeg(World& world, BistroRenderPipeline& pipeline, Win
     _legConfigured = false;
     _placementInitialProbesReady = false;
     _placementPreparationFence = {};
-    _trialMeasurements.Freshness.BeginWindow();
     _legGroups = 0;
     _frames.clear();
     auto& ecs = world.GetECS();

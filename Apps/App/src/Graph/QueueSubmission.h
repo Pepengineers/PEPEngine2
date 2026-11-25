@@ -29,6 +29,7 @@ public:
     GDX12Device& Device(Id) const;
     Id SelectAdapter(int hardwareIndex);
     const std::string& AdapterLabel(Id) const;
+    LUID AdapterLuid(Id) const;
     void LogFirstImport(const char* technique, CompletionToken source, CompletionToken imported) const;
     struct BenchmarkWait { Id From, To; Queue SourceQueue, TargetQueue; uint64_t FirstFence, Count; };
     struct BenchmarkPacket
@@ -45,7 +46,7 @@ public:
     std::vector<BenchmarkWait> EndBenchmarkWaits();
     uint64_t BenchmarkEpoch() const { return _benchmarkEpoch.load(std::memory_order_relaxed); }
     std::vector<BenchmarkPacket> TakeBenchmarkPackets();
-    std::vector<int> BenchmarkAdapterIndices() const;
+    std::vector<int> BenchmarkAdapterIndices(bool includeUnavailable = false) const;
     uint64_t Incarnation() const { return _incarnation; }
     struct TransferBuffer {
         std::array<ComPtr<ID3D12Heap>, 2> Heaps;

@@ -516,7 +516,7 @@ void BistroComparePanel::Refresh(bool force)
     if (ec && ec != std::errc::no_such_file_or_directory) _notice = ec.message();
     std::sort(_runs.begin(), _runs.end(),
               [](const Run &a, const Run &b) { return a.Path.filename() > b.Path.filename(); });
-    // A winning MGPU reference can point to a trial measured in a different SingleGPU run.
+    // A saved reference can link to a trial that reused the full route of another profile.
     for (auto& run : _runs)
         for (auto& winner : run.Winners)
         {
@@ -528,18 +528,21 @@ void BistroComparePanel::Refresh(bool force)
             winner.Settings["Render.FrameGeneration.Provider"] = "0";
             const auto& source = Value(winner.Fields, "CSV");
             const auto path = source.empty() ? run.Path : (run.Path.parent_path() / fs::u8path(source)).lexically_normal();
+            const auto trialRun = std::find_if(_runs.begin(), _runs.end(), [&](const Run& candidate) { return candidate.Path == path; });
+            if (trialRun == _runs.end()) continue;
+            const auto& lastPass = Value(trialRun->TrialPasses, Value(winner.Fields, "Trial"));
+            if (lastPass.empty()) continue;
+            const auto pass = (path.parent_path() / fs::u8path(lastPass)).lexically_normal();
             for (int r = 0; r < int(_runs.size()); ++r)
             {
                 const auto& measured = _runs[r];
-                if (measured.Path != path) continue;
-                const auto pass = measured.Path.parent_path() / fs::u8path(Value(measured.TrialPasses, Value(winner.Fields, "Trial")));
                 for (int i = 0; i < int(measured.Passes.size()); ++i)
                     if (measured.Passes[i].Range.Section == "Full route" && measured.Passes[i].Path == pass)
                     {
                         winner.RunIndex = r;
                         winner.PassIndex = i;
                     }
-                break;
+                if (winner.RunIndex >= 0) break;
             }
         }
     _completed.clear();

@@ -121,6 +121,11 @@ const std::string& QueueSubmission::AdapterLabel(Id id) const
     return _adapterLabels.at(id == 0 ? _primaryIndex : id - 1);
 }
 
+LUID QueueSubmission::AdapterLuid(Id id) const
+{
+    return _adapters.at(id == 0 ? _primaryIndex : id - 1).AdapterLuid;
+}
+
 void QueueSubmission::BeginBenchmarkWaits()
 {
     std::lock_guard<std::mutex> lock(_mutex);
@@ -163,11 +168,12 @@ std::vector<QueueSubmission::BenchmarkPacket> QueueSubmission::TakeBenchmarkPack
     return std::exchange(_benchmarkPackets, {});
 }
 
-std::vector<int> QueueSubmission::BenchmarkAdapterIndices() const
+std::vector<int> QueueSubmission::BenchmarkAdapterIndices(bool includeUnavailable) const
 {
+    std::lock_guard lock(_mutex);
     std::vector<int> adapters;
     for (int i = 0; i < int(_adapters.size()); ++i)
-        if (i != _primaryIndex) adapters.push_back(i);
+        if (i != _primaryIndex && (includeUnavailable || !_unavailable[i + 1])) adapters.push_back(i);
     return adapters;
 }
 

@@ -13,7 +13,8 @@ namespace BistroPlacement
         if (has("reflection probe") || packet.compare(0, 6, "probe ") == 0) return "ReflectionProbes";
         if (has("local shadow") || has("shadow owner")) return "Local shadows";
         if (has("CSM") || has("sun atlas")) return "SunShadowAdapter";
-        if (has("XeGTAO") || has("CACAO") || has("HBAO") || has("SSAO")) return "AOAdapter";
+        if (has("XeGTAO") || has("CACAO") || has("HBAO") || has("SSAO") ||
+            has(" AO ") || packet.compare(0, 3, "AO ") == 0) return "AOAdapter";
         if (has("light grid") || has("LightGrid")) return "LightGridAdapter";
         if (has("particle") && !has("water")) return "ParticleAdapter";
         if (has("water")) return "WaterAdapter";
@@ -32,16 +33,28 @@ namespace BistroPlacement
 
     struct PlacementCost
     {
-        size_t TimedVersions = 0, SlowVersions = 0, ImportedVersions = 0, ReadyIntervals = 0;
+        size_t ComputeVersions = 0, TimedVersions = 0, SlowVersions = 0, ImportedVersions = 0, ReadyIntervals = 0;
         uint64_t SharedBufferBytes = 0, PrimaryTransferBytes = 0;
         double ComputeMs = 0, TransferMs = 0, PrimaryTransferMs = 0, PrimaryWaitMs = 0, ReadySpanMs = 0;
     };
 
     using PlacementCosts = std::map<std::pair<std::string, BistroRender::Id>, PlacementCost>;
 
+    // Per-version compute times exclude transfers and primary queue waits. Keep the
+    // distribution for each route window so a different scene phase cannot hide noise.
+    struct ProducerTiming
+    {
+        size_t Samples = 0;
+        double P20Ms = 0, MedianMs = 0, P80Ms = 0;
+        std::set<std::tuple<bool, BistroRender::Queue, std::string>> TransferPath;
+        std::set<std::string> OtherWork;
+    };
+    using ProducerTimings = std::map<std::pair<std::string, BistroRender::Id>, ProducerTiming>;
+
     inline void AccumulatePlacementCosts(
         const std::vector<BistroRender::QueueSubmission::BenchmarkPacket>& packets, double targetMs,
-        const std::map<std::string, std::set<BistroRender::Id>>& owners, PlacementCosts& costs)
+        const std::map<std::string, std::set<BistroRender::Id>>& owners, PlacementCosts& costs,
+        ProducerTimings* window = nullptr)
     {
         using namespace BistroRender;
         using TokenKey = std::tuple<Id, Queue, uint64_t>;
@@ -85,6 +98,7 @@ namespace BistroPlacement
         };
         std::map<std::pair<TokenKey, std::string>, Version> versions;
         std::set<std::pair<TokenKey, std::string_view>> imports;
+        std::map<Id, std::set<std::string_view>> residentWork;
         for (const auto& packet : packets)
         {
             const auto owner = packet.Token.Device;
@@ -93,10 +107,16 @@ namespace BistroPlacement
             {
                 const auto group = roles.find(key(packet.Terminal));
                 if (group != roles.end() && group->second.size() == 1) role = *group->second.begin();
+                if (window) residentWork[owner].insert(role.empty() ? std::string_view(packet.Name) : role);
+                if (window && !role.empty() && !packet.SharedBytes &&
+                    (!packet.Calibrated || !packet.BeginMs || packet.EndMs < packet.BeginMs))
+                    versions[{key(packet.Terminal), std::string(role)}].Uncalibrated = true;
                 if (role.empty() || packet.EndMs <= packet.BeginMs) continue;
                 auto& cost = costs[{std::string(role), owner}];
                 if (packet.SharedBytes)
                 {
+                    if (window)
+                        (*window)[{std::string(role), owner}].TransferPath.emplace(false, packet.Token.Target, packet.Name);
                     cost.TransferMs += packet.EndMs - packet.BeginMs;
                     cost.SharedBufferBytes += packet.SharedBytes;
                 }
@@ -121,6 +141,8 @@ namespace BistroPlacement
                             if (device) peers.insert(device);
                 if (peers.size() == 1)
                 {
+                    if (window)
+                        (*window)[{std::string(role), *peers.begin()}].TransferPath.emplace(true, packet.Token.Target, packet.Name);
                     auto& cost = costs[{std::string(role), *peers.begin()}];
                     cost.PrimaryTransferMs += packet.EndMs - packet.BeginMs;
                     cost.PrimaryTransferBytes += packet.SharedBytes;
@@ -143,6 +165,8 @@ namespace BistroPlacement
             for (const auto& source : packet.Dependencies)
             {
                 if (!source.Device) continue;
+                if (window)
+                    (*window)[{std::string(role), source.Device}].TransferPath.emplace(true, packet.Token.Target, packet.Name);
                 auto& cost = costs[{std::string(role), source.Device}];
                 if (imports.emplace(key(source), role).second) ++cost.ImportedVersions;
                 const auto it = completed.find(key(source));
@@ -157,6 +181,7 @@ namespace BistroPlacement
                     (std::max)(0., (std::min)(lastEnd, packet.BeginMs) - ownReady);
         }
         std::map<std::pair<std::string, Id>, std::vector<double>> readyTimes;
+        std::map<std::pair<std::string, Id>, std::vector<double>> consumedWork;
         for (auto& [source, version] : versions)
         {
             const auto role = std::pair{source.second, std::get<0>(source.first)};
@@ -167,14 +192,30 @@ namespace BistroPlacement
                 for (auto& queue : version.Work) work = (std::max)(work, coveredTime(queue));
             }
             else work = coveredTime(version.CalibratedWork);
+            if (work <= 0) continue;
+            ++cost.ComputeVersions;
             cost.ComputeMs += work;
             if (!version.Uncalibrated)
             {
+                if (window && imports.count({source.first, source.second}))
+                    consumedWork[role].push_back(work);
                 ++cost.TimedVersions;
                 cost.SlowVersions += work > targetMs;
                 if (const auto terminal = completed.find(source.first); terminal != completed.end())
                     readyTimes[role].push_back(terminal->second.second);
             }
+        }
+        for (auto& [role, samples] : consumedWork)
+        {
+            std::sort(samples.begin(), samples.end());
+            auto& timing = window->at(role);
+            timing.Samples = samples.size();
+            const auto last = samples.size() - 1;
+            timing.P20Ms = samples[last / 5];
+            timing.MedianMs = samples[last / 2];
+            timing.P80Ms = samples[last * 4 / 5];
+            for (const auto work : residentWork[role.second])
+                if (work != role.first) timing.OtherWork.emplace(work);
         }
         for (const auto& [role, ready] : readyTimes)
             if (ready.size() > 1)

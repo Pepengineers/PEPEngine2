@@ -10,7 +10,7 @@ namespace BistroPlacement
     class ProbeFreshness
     {
         using Time = std::chrono::steady_clock::time_point;
-        struct Deadline { uint64_t Version; Time Due; };
+        struct Deadline { uint64_t Version; Time Due; std::array<bool, 2> Missed{}; };
         struct Face { std::deque<Deadline> Pending, Overdue; };
         std::map<uint64_t, std::array<Face, 6>> _faces;
 
@@ -20,12 +20,13 @@ namespace BistroPlacement
         }
 
     public:
-        uint64_t Due = 0, Used = 0, Missed = 0, AgeSamples = 0;
+        // Both profiles judge the same observation, including versions superseded before first use.
+        static constexpr std::array<double, 2> ToleranceMs{2000. / 60, 1000. / 30};
+        uint64_t Due = 0, Used = 0, AgeSamples = 0;
+        std::array<uint64_t, 2> Missed{};
         double MaxLatenessMs = 0, MeanAgeSumMs = 0, MaxAgeMs = 0;
 
-        void BeginWindow() { _faces.clear(); }
-
-        void Observe(const BistroRender::ReflectionFrame& frame, Time now, double toleranceMs)
+        void Observe(const BistroRender::ReflectionFrame& frame, Time now)
         {
             for (const auto& probe : frame.Probes)
             {
@@ -50,23 +51,24 @@ namespace BistroPlacement
                     }
                     while (!pending.empty())
                     {
-                        const auto [version, due] = pending.front();
-                        const auto late = Milliseconds(due, now);
-                        if (used.Version == version)
+                        auto& deadline = pending.front();
+                        const auto late = Milliseconds(deadline.Due, now);
+                        for (size_t profile = 0; profile < Missed.size(); ++profile)
+                            if (!deadline.Missed[profile] && (used.Version > deadline.Version || late > ToleranceMs[profile]))
+                            {
+                                ++Missed[profile];
+                                deadline.Missed[profile] = true;
+                            }
+                        if (used.Version == deadline.Version)
                         {
                             ++Used;
-                            Missed += late > toleranceMs;
                             MaxLatenessMs = (std::max)(MaxLatenessMs, late);
                         }
-                        else if (used.Version > version)
-                            ++Missed;
-                        else if (late > toleranceMs)
+                        else if (used.Version < deadline.Version)
                         {
-                            ++Missed;
-                            overdue.push_back(pending.front());
+                            if (!deadline.Missed[0] || !deadline.Missed[1]) break;
+                            overdue.push_back(deadline);
                         }
-                        else
-                            break;
                         pending.pop_front();
                     }
                     if (used.Version)

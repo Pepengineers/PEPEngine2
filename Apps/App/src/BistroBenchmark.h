@@ -131,8 +131,10 @@ public:
     inline static AutoConsoleVariable<bool> SkipBenchmark{L"App.Benchmark.SkipBenchmark", false,
         L"Skip automatic Bistro queue tuning at Release startup."};
     inline static AutoConsoleVariable<float> PlacementBudgetSeconds{L"App.Benchmark.PlacementBudgetSeconds", 600.f,
-        L"Single-GPU profile search budget in seconds. Multi-GPU has twice this total, including its single-GPU search.",
+        L"Profile search budget in seconds per eligible physical GPU, including the scene GPU.",
         EConsoleVariableFlags::Default, [](float seconds) { return std::isfinite(seconds) && seconds > 0; }};
+
+    static double PlacementBudget(size_t peers) { return double(PlacementBudgetSeconds.GetValue()) * (1 + peers); }
 
     inline static AutoConsoleVariable<float> WarmupSeconds{L"App.Benchmark.WarmupSeconds", 3.f,
         L"Base warmup in seconds for each benchmark pass; captured when a run starts.",
@@ -237,8 +239,8 @@ private:
     void ReportPlacementEvidence(BistroRenderPipeline& pipeline);
     void CompletePlacementTrial(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline);
     void WritePlacementTrialReport(BistroRenderPipeline& pipeline, std::string_view status);
-    double PlacementFullCost() const { return _warmup + Duration() + 2; }
-    double PlacementProbeCost() const { return 8 * (_warmup + 1 + 2) + 5; }
+    double PlacementFullCost() const { return _warmup + Duration() + _placementSetupReserve; }
+    double PlacementProbeCost() const { return _placementPhysics.size() * (_warmup + 1 + 2) + 3 + _placementSetupReserve; }
 
     bool CheckPlacementDeadline(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline, Clock::time_point now);
     void BeginNextPlacementPhase(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline);
@@ -357,7 +359,8 @@ private:
     RECT _placementMonitor{};
     LONG_PTR _placementWindowStyle = 0;
     bool _placementBorderless = false;
-    Clock::time_point _trialStarted, _placementDeadline, _singleDeadline, _phaseDeadline;
+    Clock::time_point _trialStarted, _placementLegStarted, _placementDeadline, _singleDeadline, _phaseDeadline;
+    double _placementSetupReserve = 2;
     std::array<std::function<void()>, 8> _placementPhysics;
     std::function<void()> _replayScene;
     size_t _startupBodies = 0;
@@ -376,10 +379,9 @@ private:
             double SimulatedSeconds = 0;
         };
 
-        void Reset();
-
-        size_t Frames = 0;
+        size_t Frames = 0, PrimaryFrames = 0;
         double Seconds = 0, PrimarySeconds = 0;
+        double FullP95 = 0;
         std::vector<double> PrimaryIntervals;
         std::array<uint64_t, 4> TransferBytes{};
         std::array<uint64_t, 7> SectionShadowTexels{}, SectionShadowSamples{};
@@ -391,8 +393,21 @@ private:
         bool HasPublishedProbes = false;
         BistroPlacement::ProbeFreshness Freshness;
         std::map<std::tuple<std::string, BistroRender::Id, size_t>, SimulationStats> Simulations;
+        std::array<bool, std::size(BistroPlacement::Techniques)> Activity{};
+        BistroPlacement::PlacementCosts Costs;
     };
-    TrialMeasurements _trialMeasurements;
+    TrialMeasurements _trialMeasurements, _legMeasurements;
+    void AccumulatePlacementWindow(bool primary);
+    void OpenPlacementMeasurements(const std::string& conditions);
+    std::string PlacementMeasurementKey(const BistroRenderPipeline& pipeline) const;
+    bool RestorePlacementWindow();
+    bool CompatibleRemotePaths(const TrialMeasurements& saved) const;
+    void SavePlacementWindow() const;
+    struct WindowRecord { std::filesystem::path File; std::streampos Offset; };
+    std::map<std::string, WindowRecord> _measurementIndex;
+    std::map<std::wstring, std::string> _measurementDefaults;
+    std::filesystem::path _measurementFile;
+    std::string _measurementKey, _reusedPass;
     Config _trialConfig;
     std::string _trialFallback;
     std::optional<double> _preparationSeconds;

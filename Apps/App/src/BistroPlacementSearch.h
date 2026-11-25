@@ -118,8 +118,13 @@ struct Result
     std::optional<double> ShadowTexels;
     std::array<double, 7> SectionShadowTexels{{-1, -1, -1, -1, -1, -1, -1}};
     bool Valid = false, Remote = false, EquivalentInactiveOwners = true;
+    bool CommonPlacementsConsumed = false, CoveredExtraWindows = false;
+    PlacementCosts CommonCosts;
+    bool Reused = false;
     std::array<bool, std::size(Techniques)> Activity{};
     PlacementCosts Costs;
+    std::map<size_t, ProducerTimings> ProducerWindows;
+    int AOImplementation = -1, AOResolution = -1;
     std::string SourceCsv;
 };
 
@@ -129,6 +134,7 @@ struct Trial
     Config Settings;
     std::string Source;
     bool Full = false;
+    bool RequireLive = false;
 };
 
 class Search
@@ -159,6 +165,7 @@ public:
     void EndPhase();
 
     std::optional<Trial> NextProbe(BistroBenchmarkData::Csv& csv);
+    void RetryChangedEstimates();
     std::optional<Trial> PerformanceConfirmation(BistroBenchmarkData::Csv& csv);
     std::optional<Trial> NextQualityTrial(BistroBenchmarkData::Csv& csv, bool canProbe);
     const Result* Finalist() const;
@@ -239,9 +246,14 @@ private:
     void Schedule(Config config, const std::string& source, bool priority = false);
     void ScheduleReflectionVariants(const Config& config, const std::string& source, bool priority = false);
     void Seed(const Config& config, bool postOnly = false, bool priority = false);
-    Config Workload(Config config, size_t placement) const;
+    void SeedAdapters(const Result& reference);
+    enum class ProposalKind { Refinement, Mixed, CompareLight, CompareHeavy };
+    void ScheduleMeasured(Config config, std::string source, double cost, ProposalKind kind);
+    void CombinePlacements(const Result& result, double cost);
+    double PlacementRank(const Result& result) const;
 
     void ObserveCosts(const Trial& trial, const Result& result, BistroBenchmarkData::Csv& csv);
+    bool SkipEstimated(const Trial& trial, BistroBenchmarkData::Csv& csv);
     void ExpandPolicies(const Trial& trial, const Result& result);
     void Expand(const Trial& trial, const Result& result, BistroBenchmarkData::Csv& csv);
 
@@ -280,8 +292,22 @@ private:
     std::array<bool, std::size(Techniques)> _available{};
     std::array<std::array<bool, std::size(Techniques)>, 2> _qualityAvailable{};
     std::deque<Trial> _pending, _priority;
+    std::deque<std::pair<int, Config>> _initialPlacements;
+    struct PeerCoverage
+    {
+        size_t Attempt = 0, Completed = 0, Consumed = 0;
+    };
+    std::array<std::map<int, PeerCoverage>, 2> _peerCoverage;
+    struct MeasuredProposal
+    {
+        double Cost;
+        ProposalKind Kind;
+        std::string Source;
+    };
+    std::map<Config, MeasuredProposal> _proposals;
+    std::set<Config> _dispatched;
     std::set<Config> _scheduled;
-    std::set<Config> _slowWork;
+    std::set<Config> _estimated;
     std::map<Config, Result> _short;
     std::set<Config> _failedProbes;
     std::set<Config> _fullSettings, _retryFull;

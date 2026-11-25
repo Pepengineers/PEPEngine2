@@ -94,8 +94,11 @@ public:
                     field == "RenderResolution" || field == "LastPassCSV" ||
                     field == "Partial" || field == "CompletedPasses")
                     Write(_file, row);
-                if (field == "LastPassCSV")
-                    row[Value] = std::filesystem::u8path(value).filename().generic_u8string();
+                if (field == "LastPassCSV" || (field.size() >= 13 && field.substr(field.size() - 13) == "ReusedPassCSV"))
+                {
+                    const auto pass = _directory.parent_path() / std::filesystem::u8path(value);
+                    row[Value] = pass.lexically_normal().lexically_relative(_directory).generic_u8string();
+                }
                 Write(_trialRows, row);
                 if (field == "Status" || field == "EquivalentTrial" ||
                     field.find("RemovalEvidence") != field.npos) Flush();

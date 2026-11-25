@@ -95,7 +95,10 @@
     </ClCompile>
     <ClCompile Include="src\BistroBenchmark.cpp" />
     <ClCompile Include="src\BistroBenchmarkPlacement.cpp" />
-    <ClCompile Include="src\BistroPlacementSearch.cpp" />
+    <ClCompile Include="src\BistroBenchmarkMeasurements.cpp" />
+    <ClCompile Include="src\BistroPlacementSearch.cpp">
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
     <ClCompile Include="src\Graph\RenderGraphCompiler.cpp" />
     <ClCompile Include="src\Graph\RenderGraphExecutor.cpp" />
     <ClCompile Include="src\Graph\QueueSubmission.cpp" />

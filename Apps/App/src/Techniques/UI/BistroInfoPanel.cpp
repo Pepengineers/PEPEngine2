@@ -379,8 +379,8 @@ void BistroInfoPanel::Draw(RenderModule& render, BistroRenderPipeline& pipeline,
                     ImGui::Text("Scene GPU   %s", _primary.c_str());
                     for (const auto& peer : _peers) ImGui::Text("Peer GPU    %s", peer.c_str());
                     if (_peers.empty()) ImGui::TextDisabled("No peer GPU available.");
-                    const float singleMinutes = BistroBenchmark::PlacementBudgetSeconds.GetValue() / 60.f;
-                    ImGui::TextDisabled("Profile search   %g min total, up to %g min on the scene GPU", 2 * singleMinutes, singleMinutes);
+                    ImGui::TextDisabled("Profile search   %g min total, up to %g min on the scene GPU",
+                        BistroBenchmark::PlacementBudget(_peers.size()) / 60., BistroBenchmark::PlacementBudget(0) / 60.);
                     ImGui::BeginDisabled(!benchmark.CanStart() || _peers.empty());
                     ProfileButtons(benchmark, Action::MultiGPU);
                     ImGui::EndDisabled();

@@ -11,7 +11,7 @@ namespace BistroPlacement
 {
 void Search::LinkBaseline(const std::filesystem::path& output, std::string conditions)
 {
-    _conditions = std::move(conditions);
+    _conditions = std::string(ProfileName[_profile]) + ' ' + conditions;
     _baselineFile = output;
     _baselineFile.replace_extension(".baseline");
     for (const auto* folder : {"SingleGPU", "MultiGPU"})
@@ -204,8 +204,13 @@ bool Search::BeginPhase(unsigned phase)
 {
     _phase = phase;
     _triedClosest = false;
+    _estimated.clear();
     _pending.clear();
     _priority.clear();
+    _initialPlacements.clear();
+    _dispatched.clear();
+    _proposals.clear();
+    _probeIndex = 0;
     _scheduled.clear();
     _short.clear();
     _failedProbes.clear();
@@ -233,6 +238,7 @@ bool Search::BeginPhase(unsigned phase)
     }
     if (const auto* reference = BestReference(Upscaled()))
     {
+        SeedAdapters(*reference);
         Seed(reference->Settings, false, true);
         auto next = FullComposition(reference->Settings);
         if (next.Levels != reference->Settings.Levels) Seed(next, false, true);
@@ -270,22 +276,50 @@ void Search::EndPhase()
 
 std::optional<Trial> Search::NextProbe(BistroBenchmarkData::Csv& csv)
 {
-    while (!_priority.empty() || !_pending.empty())
+    while (!_initialPlacements.empty())
     {
-        auto& queue = !_priority.empty() && (_pending.empty() || (++_probeIndex % 3 != 0)) ? _priority : _pending;
-        auto trial = std::move(queue.front());
-        queue.pop_front();
-        if (_short.count(trial.Settings)) continue;
-        bool tooSlow = false;
-        for (size_t i = 0; i < _placements.size(); ++i)
+        auto [adapter, settings] = std::move(_initialPlacements.front());
+        _initialPlacements.pop_front();
+        if (!_peerCoverage[Upscaled()][adapter].Consumed && _dispatched.insert(settings).second)
         {
-            if (trial.Settings.Sync[i] != 1 || !_slowWork.count(Workload(trial.Settings, i))) continue;
-            csv.Config("Trial." + std::to_string(trial.Id) + ".Pruned", _placements[i].Owner +
-                ": measured producer work and publication cadence exceeded one target frame");
-            tooSlow = true;
-            break;
+            auto trial = Make(settings, "initial DXGI-order adapter probe", false);
+            trial.RequireLive = true;
+            return trial;
         }
-        if (!tooSlow) return trial;
+    }
+    while (!_priority.empty() || !_pending.empty() || !_proposals.empty())
+    {
+        ++_probeIndex;
+        Trial trial;
+        if (!_proposals.empty() && (_probeIndex % 3 != 0 || (_priority.empty() && _pending.empty())))
+        {
+            // Alternate combinations of consumed work and refinements of measured leaders.
+            const bool preferMix = _probeIndex % 3 == 1;
+            const auto order = [preferMix](const MeasuredProposal& proposal) {
+                return std::tuple{(proposal.Kind == ProposalKind::Mixed) != preferMix,
+                    proposal.Kind == ProposalKind::Refinement, proposal.Cost, proposal.Kind};
+            };
+            const auto best = std::min_element(_proposals.begin(), _proposals.end(), [&](const auto& a, const auto& b) {
+                return order(a.second) < order(b.second);
+            });
+            trial = Make(best->first, std::move(best->second.Source), false);
+            trial.RequireLive = best->second.Kind == ProposalKind::CompareLight;
+            _proposals.erase(best);
+        }
+        else
+        {
+            const bool preferPriority = RemotePhase() ? _probeIndex % 2 != 0 : _probeIndex % 3 != 0;
+            auto& queue = !_priority.empty() && (_pending.empty() || preferPriority) ? _priority : _pending;
+            trial = std::move(queue.front());
+            queue.pop_front();
+            const auto measured = _proposals.find(trial.Settings);
+            if (measured != _proposals.end() && measured->second.Kind >= ProposalKind::CompareLight) continue;
+            _proposals.erase(trial.Settings);
+        }
+        const auto previous = _short.find(trial.Settings);
+        const bool needsLiveTiming = trial.RequireLive && previous != _short.end() && previous->second.Reused;
+        if (!needsLiveTiming && (previous != _short.end() || (RemotePhase() && !_dispatched.insert(trial.Settings).second))) continue;
+        if (!RemotePhase() || trial.RequireLive || !SkipEstimated(trial, csv)) return trial;
     }
     return {};
 }
@@ -299,7 +333,12 @@ std::optional<Trial> Search::PerformanceConfirmation(BistroBenchmarkData::Csv& c
         if (_performance.Full.empty()) return {};
         auto [settings, source] = std::move(_performance.Full.front());
         _performance.Full.pop_front();
-        if (!_fullSettings.count(settings)) return Make(settings, std::move(source), true);
+        if (!_fullSettings.count(settings))
+        {
+            auto trial = Make(settings, std::move(source), true);
+            trial.RequireLive = _performance.Stage == PerformanceStage::Saved;
+            return trial;
+        }
     }
 }
 
@@ -321,10 +360,11 @@ const Result* Search::Finalist() const
     for (const auto& entry : _short)
     {
         const auto& result = entry.second;
-        if (_fullSettings.count(result.ConfirmationSettings)) continue;
+        if (_fullSettings.count(result.ConfirmationSettings) || (RemotePhase() && !result.Remote)) continue;
         if (ShortFps(result) < Threshold[_profile] && (!detail || Better(result, *detail, true, true))) detail = &result;
         const bool dominated = std::any_of(_short.begin(), _short.end(), [&](const auto& other)
-            { return !_fullSettings.count(other.second.ConfirmationSettings) && !_retryFull.count(other.second.ConfirmationSettings) &&
+            { return (!RemotePhase() || other.second.Remote) &&
+                !_fullSettings.count(other.second.ConfirmationSettings) && !_retryFull.count(other.second.ConfirmationSettings) &&
                 ShortFps(other.second) >= Threshold[_profile] &&
                 Dominates(other.second, result); });
         if (dominated && ShortFps(result) >= Threshold[_profile]) continue;
@@ -348,6 +388,17 @@ Trial Search::Confirm(const Result& result)
 
 void Search::Record(const Trial& trial, const Result& result, BistroBenchmarkData::Csv& csv, std::string_view rejection)
 {
+    if (RemotePhase())
+        for (size_t i = 0; i < trial.Settings.Owners.size(); ++i)
+        {
+            const int peer = trial.Settings.Owners[i];
+            if (peer < 0) continue;
+            auto& seen = _peerCoverage[Upscaled()][peer];
+            seen.Attempt = trial.Id;
+            if (!result.Valid) continue;
+            seen.Completed = trial.Id;
+            if (result.Settings.Owners[i] == peer) seen.Consumed = trial.Id;
+        }
     const bool outputUnavailable = rejection == "requested output size unavailable";
     if (trial.Full)
     {
@@ -413,7 +464,12 @@ void Search::Record(const Trial& trial, const Result& result, BistroBenchmarkDat
         }
         return;
     }
-    if (!_short.emplace(trial.Settings, result).second) return;
+    const auto [stored, inserted] = _short.emplace(trial.Settings, result);
+    if (!inserted)
+    {
+        if (!trial.RequireLive || !stored->second.Reused || result.Reused) return;
+        stored->second = result;
+    }
     auto& probe = _nearest[Upscaled()];
     if (!probe || Better(result, *probe, false, true)) probe = result;
     auto& detail = _detail[Upscaled()];
@@ -474,6 +530,19 @@ void Search::Report(BistroBenchmarkData::Csv& csv, std::string_view reason,
         }
         if (_remote)
         {
+            for (const int peer : _adapters)
+            {
+                const auto it = _peerCoverage[upscaled].find(peer);
+                const PeerCoverage seen = it == _peerCoverage[upscaled].end() ? PeerCoverage{} : it->second;
+                const auto key = prefix + "Peer." + std::to_string(peer) + ".";
+                if (seen.Consumed)
+                    csv.Config(key + "ConsumedTrial", std::to_string(seen.Consumed));
+                else if (seen.Completed)
+                    csv.Config(key + "NoConsumedWork", "placement fell back or no consumer observed / trial " + std::to_string(seen.Completed));
+                else
+                    csv.Config(key + "NoCompletedMeasurement", seen.Attempt ? "last unsuccessful trial " +
+                        std::to_string(seen.Attempt) : "no trial completed before search ended");
+            }
             ReportResult(csv, prefix + "SingleGPU.", reference);
             ReportResult(csv, prefix + "MultiGPU.", remote);
             if (reference && !remote && reference->Fps >= Threshold[_profile])
@@ -1507,25 +1576,118 @@ void Search::Seed(const Config& config, bool postOnly, bool priority)
     }
 }
 
-Config Search::Workload(Config config, size_t placement) const
+void Search::SeedAdapters(const Result& reference)
 {
-    const int owner = config.Owners[placement];
-    for (size_t i = 0; i < config.Owners.size(); ++i)
-        if (i != placement && config.Owners[i] != owner)
+    // The first round covers every physical peer before a failed placement gets a second try.
+    // Different active producers on the same image can immediately supply a measured combination.
+    std::vector<size_t> roles;
+    if (reference.Activity[AO]) roles.push_back(AO);
+    if (reference.Activity[ProbeQuality]) roles.push_back(FirstProbe);
+    roles.push_back(Post);
+    if (reference.Activity[WaterQuality]) roles.push_back(Water);
+    roles.push_back(1); // Light grid
+    for (size_t round = 0; round < 2; ++round)
+        for (size_t i = 0; i < _adapters.size(); ++i)
         {
-            config.Owners[i] = -1;
-            config.Sync[i] = -1;
+            for (size_t offset = 0; offset < roles.size(); ++offset)
+            {
+                const auto role = roles[(i + round + offset) % roles.size()];
+                auto settings = reference.Settings;
+                settings.Owners[role] = _adapters[i];
+                settings.RemoteAOFilter = role == AO;
+                settings = Canonical(std::move(settings));
+                if (settings.Owners[role] != _adapters[i]) continue;
+                if (std::any_of(_initialPlacements.begin(), _initialPlacements.end(),
+                    [&](const auto& probe) { return settings == probe.second; })) continue;
+                _initialPlacements.emplace_back(_adapters[i], std::move(settings));
+                break;
+            }
         }
-    return config;
+}
+
+void Search::ScheduleMeasured(Config config, std::string source, double cost, ProposalKind kind)
+{
+    config = Canonical(std::move(config));
+    const auto previous = _short.find(config);
+    const bool needsLiveTiming = kind == ProposalKind::CompareLight && previous != _short.end() && previous->second.Reused;
+    if ((!needsLiveTiming && (_dispatched.count(config) || previous != _short.end())) || _failedProbes.count(config) ||
+        std::none_of(config.Owners.begin(), config.Owners.end(), [](int owner) { return owner >= 0; })) return;
+    auto [it, inserted] = _proposals.try_emplace(config, MeasuredProposal{cost, kind, source});
+    if (!inserted && ((it->second.Kind == ProposalKind::Refinement && kind != ProposalKind::Refinement) ||
+        (it->second.Kind == ProposalKind::CompareHeavy && kind == ProposalKind::CompareLight) ||
+        (it->second.Kind == kind && cost < it->second.Cost)))
+        it->second = {cost, kind, std::move(source)};
+    _scheduled.insert(std::move(config));
+}
+
+double Search::PlacementRank(const Result& result) const
+{
+    // Rank follow-up probes using the common windows. Charge primary transfers and exposed waits,
+    // and penalize producers that need longer than a target frame even before the consumer can run.
+    double primaryMs = 0;
+    std::map<BistroRender::Id, double> producerMs;
+    for (const auto& [key, cost] : result.CommonCosts)
+    {
+        if (!cost.ImportedVersions) continue;
+        if (cost.ComputeVersions) producerMs[key.second] += cost.ComputeMs / cost.ComputeVersions;
+        producerMs[key.second] += cost.TransferMs / cost.ImportedVersions;
+        primaryMs += (cost.PrimaryTransferMs + cost.PrimaryWaitMs) / cost.ImportedVersions;
+    }
+    double longestProducer = 0;
+    for (const auto& entry : producerMs) longestProducer = (std::max)(longestProducer, entry.second);
+    return 1000. / result.Fps + primaryMs + (std::max)(0., longestProducer - 1000. / Threshold[_profile]);
+}
+
+void Search::CombinePlacements(const Result& result, double cost)
+{
+    if (_adapters.size() < 2) return;
+    const auto& settings = result.Settings;
+    const auto hasRemoteProbes = [&](const Config& c) {
+        return std::any_of(c.Owners.begin() + FirstProbe, c.Owners.begin() + _firstLocalShadow,
+            [](int peer) { return peer >= 0; });
+    };
+    for (const auto& [requested, sample] : _short)
+    {
+        const auto& other = sample.Settings;
+        const bool sameCoverage = (result.CommonPlacementsConsumed && sample.CommonPlacementsConsumed) ||
+            (result.CoveredExtraWindows && sample.CoveredExtraWindows);
+        if (sample.Id == result.Id || !sample.Remote || !sameCoverage || !(requested == other) ||
+            result.Output != sample.Output || result.Render != sample.Render ||
+            settings.Levels != other.Levels || settings.Provider != other.Provider || settings.Preset != other.Preset ||
+            settings.ProbeFrequency != other.ProbeFrequency || settings.ProbeCapture != other.ProbeCapture ||
+            (hasRemoteProbes(settings) && hasRemoteProbes(other) && settings.ProbeDelivery != other.ProbeDelivery)) continue;
+        // Both trials must have supplied different work to the frame from disjoint sets of GPUs.
+        auto combined = settings;
+        bool disjoint = true;
+        for (size_t i = 0; i < other.Owners.size(); ++i)
+        {
+            const int peer = other.Owners[i];
+            if (peer < 0) continue;
+            if (settings.Owners[i] >= 0 ||
+                std::find(settings.Owners.begin(), settings.Owners.end(), peer) != settings.Owners.end())
+            {
+                disjoint = false;
+                break;
+            }
+            combined.Owners[i] = peer;
+            combined.Sync[i] = other.Sync[i];
+        }
+        if (!disjoint) continue;
+        if (hasRemoteProbes(other)) combined.ProbeDelivery = other.ProbeDelivery;
+        combined.RemoteAOFilter |= other.RemoteAOFilter;
+        ScheduleMeasured(std::move(combined), "combine consumed placements / trials " +
+            std::to_string(sample.Id) + " and " + std::to_string(result.Id),
+            (std::max)(cost, PlacementRank(sample)), ProposalKind::Mixed);
+    }
 }
 
 void Search::ObserveCosts(const Trial& trial, const Result& result, BistroBenchmarkData::Csv& csv)
 {
-    const double targetMs = 1000. / (_profile == Performance ? 60 : 30);
-    for (size_t i = 0; i < FirstProbe; ++i)
+    if (result.Reused) return;
+    const double targetMs = 1000. / Threshold[_profile];
+    // These exact modes require a new version for each presented frame.
+    for (const auto [i, technique] : {std::pair{AO, size_t{0}}, {Water, WaterQuality}, {Wind, size_t{2}}})
     {
-        // These exact modes request a version per frame even when their inputs stay unchanged.
-        if (i != AO && i != Water && i != Wind) continue;
         const int owner = trial.Settings.Owners[i];
         if (owner < 0 || owner != result.Settings.Owners[i] || trial.Settings.Sync[i] != 1) continue;
         const auto found = result.Costs.find({_placements[i].Owner, BistroRender::Id(owner + 1)});
@@ -1534,9 +1696,159 @@ void Search::ObserveCosts(const Trial& trial, const Result& result, BistroBenchm
         if (cost.TimedVersions < 8 || cost.ImportedVersions < 4 || cost.ReadyIntervals < 7 ||
             cost.SlowVersions < .8 * cost.TimedVersions || cost.ReadySpanMs <= cost.ReadyIntervals * targetMs)
             continue;
-        _slowWork.insert(Workload(trial.Settings, i));
         csv.Config("Trial." + std::to_string(trial.Id) + ".OverBudgetProducer", _placements[i].Owner);
+        if (_adapters.size() < 2 || !result.Valid || !(result.Settings == trial.Settings)) continue;
+        // Obtain the matched lighter observations before spending another expensive
+        // probe. Keep all other work, owners and publication settings identical.
+        for (int level = int(trial.Settings.Levels[technique]) - 1; level >= Low; --level)
+        {
+            auto light = trial.Settings;
+            light.Levels[technique] = Level(level);
+            light = Canonical(std::move(light));
+            if (light.Levels[technique] >= trial.Settings.Levels[technique] || light.Owners[i] != owner) continue;
+            const auto rank = PlacementRank(result);
+            for (const auto adapter : _adapters)
+            {
+                if (std::find(trial.Settings.Owners.begin(), trial.Settings.Owners.end(), adapter) != trial.Settings.Owners.end())
+                    continue;
+                auto expensive = trial.Settings;
+                expensive.Owners[i] = adapter;
+                if (_short.count(expensive) || _dispatched.count(expensive)) continue;
+                auto lightB = light;
+                lightB.Owners[i] = adapter;
+                const auto source = "compare lighter producer / trial " + std::to_string(trial.Id);
+                ScheduleMeasured(light, source, rank, ProposalKind::CompareLight);
+                ScheduleMeasured(std::move(lightB), source, rank, ProposalKind::CompareLight);
+                ScheduleMeasured(expensive, "compare expensive producer / trial " + std::to_string(trial.Id),
+                    rank, ProposalKind::CompareHeavy);
+            }
+            break;
+        }
     }
+}
+
+namespace
+{
+using TimingKey = ProducerTimings::key_type;
+
+bool ComparableProducerWindows(const Result& highA, const Result& lowA, const Result& lowB,
+    const TimingKey& a, const TimingKey& b, double deadline)
+{
+    if (highA.ProducerWindows.empty() || highA.ProducerWindows.size() != lowA.ProducerWindows.size() ||
+        highA.ProducerWindows.size() != lowB.ProducerWindows.size()) return false;
+    bool active = false;
+    for (const auto& [index, window] : highA.ProducerWindows)
+    {
+        const auto aw = lowA.ProducerWindows.find(index), bw = lowB.ProducerWindows.find(index);
+        if (aw == lowA.ProducerWindows.end() || bw == lowB.ProducerWindows.end()) return false;
+        const auto high = window.find(a), first = aw->second.find(a), second = bw->second.find(b);
+        if (high == window.end() && first == aw->second.end() && second == bw->second.end()) continue;
+        if (high == window.end() || first == aw->second.end() || second == bw->second.end()) return false;
+        const auto& h = high->second;
+        const auto& x = first->second;
+        const auto& y = second->second;
+        // Require repeated *consumed* versions in every active common window.
+        // The middle 60% of the distributions must be separated beyond the noise margin.
+        if (h.Samples < 8 || x.Samples < 8 || y.Samples < 8 ||
+            h.TransferPath.empty() || h.TransferPath != x.TransferPath || x.TransferPath != y.TransferPath ||
+            h.OtherWork != x.OtherWork || x.OtherWork != y.OtherWork ||
+            h.P20Ms <= deadline || h.MedianMs <= x.MedianMs ||
+            y.P20Ms <= x.P80Ms + (std::max)(0.1, .05 * x.P80Ms)) return false;
+        active = true;
+    }
+    return active;
+}
+}
+
+bool Search::SkipEstimated(const Trial& trial, BistroBenchmarkData::Csv& csv)
+{
+    if (!RemotePhase() || _adapters.size() < 2) return false;
+    const auto& settings = trial.Settings;
+    const auto deadline = 1000. / Threshold[_profile];
+    const auto measured = [&](const Config& config, size_t placement) -> const Result*
+    {
+        const auto found = _short.find(config);
+        if (found == _short.end()) return nullptr;
+        const auto& r = found->second;
+        if (r.Reused || !r.Valid || r.ProducerWindows.empty() || !(r.Settings == config)) return nullptr;
+        if (placement == AO)
+        {
+            const auto ao = GetAmbientOcclusionSettings(QualityValue(AO, config.Levels[AO]));
+            if (r.AOImplementation != ao.Implementation || r.AOResolution != int(ao.Resolution)) return nullptr;
+        }
+        return &r;
+    };
+    for (const auto [i, technique] : {std::pair{AO, size_t{0}}, {Water, WaterQuality}, {Wind, size_t{2}}})
+    {
+        const int target = settings.Owners[i];
+        if (target < 0 || settings.Sync[i] != 1 || settings.Levels[technique] <= Low) continue;
+        // If B has another assignment, its high-level path and competition on B are unknown.
+        if (std::count(settings.Owners.begin(), settings.Owners.end(), target) != 1) continue;
+        const TimingKey b{_placements[i].Owner, BistroRender::Id(target + 1)};
+        for (const int peer : _adapters)
+        {
+            if (std::find(settings.Owners.begin(), settings.Owners.end(), peer) != settings.Owners.end()) continue;
+            auto high = settings;
+            high.Owners[i] = peer;
+            const auto* highA = measured(high, i);
+            if (!highA) continue;
+            const TimingKey a{_placements[i].Owner, BistroRender::Id(peer + 1)};
+            for (int level = int(settings.Levels[technique]) - 1; level >= Low; --level)
+            {
+                auto light = high;
+                light.Levels[technique] = Level(level);
+                const auto* lowA = measured(light, i);
+                light.Owners[i] = target;
+                const auto* lowB = measured(light, i);
+                if (!lowA || !lowB || lowA->Output != highA->Output || lowB->Output != highA->Output ||
+                    lowA->Render != highA->Render || lowB->Render != highA->Render ||
+                    (i == AO && (highA->AOImplementation != lowA->AOImplementation ||
+                        highA->AOResolution != lowA->AOResolution)) ||
+                    !ComparableProducerWindows(*highA, *lowA, *lowB, a, b, deadline)) continue;
+                const auto prefix = "Trial." + std::to_string(trial.Id) + ".";
+                csv.Config(prefix + "Source", trial.Source);
+                csv.Config(prefix + "Profile", ProfileName[_profile]);
+                csv.Config(prefix + "EstimatedProducer", _placements[i].Owner);
+                csv.Config(prefix + "EstimatedAdapter", std::to_string(target));
+                csv.Config(prefix + "EstimatedLevel", std::to_string(settings.Levels[technique]));
+                csv.Config(prefix + "RequiredPublicationIntervalMs", BistroBenchmarkData::Csv::Number(deadline));
+                const auto write = [&](const char* name, const Result& r, const TimingKey& key)
+                {
+                    const auto label = prefix + name + ".";
+                    csv.Config(label + "TrialCSV", "trial-" + std::to_string(r.Id) + ".csv");
+                    for (const auto& [index, window] : r.ProducerWindows)
+                        if (const auto it = window.find(key); it != window.end())
+                        {
+                            const auto field = label + "Window." + std::to_string(index) + ".";
+                            csv.Config(field + "ComputeP20Ms", BistroBenchmarkData::Csv::Number(it->second.P20Ms));
+                            csv.Config(field + "ComputeMedianMs", BistroBenchmarkData::Csv::Number(it->second.MedianMs));
+                            csv.Config(field + "ComputeP80Ms", BistroBenchmarkData::Csv::Number(it->second.P80Ms));
+                            csv.Config(field + "ConsumedTimedVersions", std::to_string(it->second.Samples));
+                        }
+                };
+                write("ExpensiveOnA", *highA, a);
+                write("LighterOnA", *lowA, a);
+                write("LighterOnB", *lowB, b);
+                csv.Config(prefix + "Status", u8"пропущен по оценке");
+                _estimated.insert(settings);
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+void Search::RetryChangedEstimates()
+{
+    // External changes between trials can alter the producer, its transfer path or contention.
+    // Previously observed timings no longer establish a bound in the changed environment.
+    for (auto& entry : _short) entry.second.ProducerWindows.clear();
+    for (const auto& settings : _estimated)
+    {
+        _dispatched.erase(settings);
+        ScheduleMeasured(settings, "recheck estimate after render settings changed", 0, ProposalKind::CompareHeavy);
+    }
+    _estimated.clear();
 }
 
 void Search::ExpandPolicies(const Trial& trial, const Result& result)
@@ -1570,9 +1882,14 @@ void Search::Expand(const Trial& trial, const Result& result, BistroBenchmarkDat
     const auto& config = trial.Settings;
     const auto source = std::to_string(trial.Id);
     const auto threshold = Threshold[_profile];
+    const bool consumed = result.Remote && result.Settings == config;
+    const double rank = consumed ? PlacementRank(result) : 0;
+    if (consumed) CombinePlacements(result, rank);
     const auto enqueue = [&](const Config& next, const char* reason, bool priority = false)
     {
-        Schedule(next, std::string(reason) + " / trial " + source, priority);
+        const auto origin = std::string(reason) + " / trial " + source;
+        if (consumed && priority) ScheduleMeasured(next, origin, rank, ProposalKind::Refinement);
+        else Schedule(next, origin, priority);
     };
     auto next = config;
     if (ShortFps(result) >= threshold * .75)
@@ -1613,7 +1930,7 @@ void Search::Expand(const Trial& trial, const Result& result, BistroBenchmarkDat
         {
             next = config;
             ++next.Resolution;
-            enqueue(next, "higher output");
+            enqueue(next, "higher output", consumed);
             if (_profile == Performance && KeepsComposition(config))
             {
                 if (next.Levels[SunShadowQuality] == High && next.Levels[LocalShadowQuality] == High)
