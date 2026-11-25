@@ -42,7 +42,12 @@ void GDX12DeferredLightingPass::Describe(PassDescription& s) const
     pointSpotMaps.Formats = {DXGI_FORMAT_D32_FLOAT};
     pointSpotMaps.Usages = ResourceUsage::NonPixelShaderRead;
 
-    s.RequireSameTextureSize({"InAlbedoMetallic", "InNormalRoughness", "InF0Baked", "InEmissive", "InDepthBuffer"});
+    auto& occlusion = s.AddInputTexture("InAmbientOcclusion");
+    occlusion.Formats = {DXGI_FORMAT_R32_FLOAT};
+    occlusion.Usages = ResourceUsage::NonPixelShaderRead;
+    occlusion.AllowShared = true;
+
+    s.RequireSameTextureSize({"InAlbedoMetallic", "InNormalRoughness", "InF0Baked", "InEmissive", "InDepthBuffer", "InAmbientOcclusion"});
     auto& output = s.AddOutputTexture("OutColorTexture");
     output.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
     output.Size = Extent::SameAs("InAlbedoMetallic");
@@ -57,7 +62,7 @@ void GDX12DeferredLightingPass::Initialize(PassInitContext& context)
     GDX12RootSignatureDesc desc;
     desc.Constants = {sizeof(GDX12LightGridConstants) / sizeof(UINT)};
     desc.NumSingleCBVSlots = 1;
-    desc.NumSingleSRVSlots = 13;
+    desc.NumSingleSRVSlots = 14;
     desc.NumSingleUAVSlots = 1;
     desc.StaticSamplers = GetStaticSamplers();
     CD3DX12_STATIC_SAMPLER_DESC shadowSampler(6, D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT);
@@ -98,6 +103,7 @@ void GDX12DeferredLightingPass::Execute(PassExecutionContext& context)
     cmd->SetComputeSRV(10, context.GetInputTexture("InDirectionalMaps").GetSRV()->GPUHandle);
     cmd->SetComputeSRV(11, context.GetInputTexture("InPointSpotMaps").GetSRV()->GPUHandle);
     cmd->SetComputeSRV(12, frame.ShadowViews->GetSRV()->GPUHandle);
+    cmd->SetComputeSRV(13, context.GetInputTexture("InAmbientOcclusion").GetSRV()->GPUHandle);
     cmd->SetComputeUAV(0, color.GetUAV()->GPUHandle);
     const auto size = color.GetDescription().GetSize();
     cmd->Dispatch((size.x + 7) / 8, (size.y + 7) / 8, 1);

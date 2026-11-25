@@ -17,6 +17,7 @@ StructuredBuffer<uint> ClusterLightMasks : register(t9);
 Texture2DArray<float> DirectionalShadowMaps : register(t10);
 Texture2DArray<float> PointSpotShadowMaps : register(t11);
 StructuredBuffer<ShadowView> ShadowViews : register(t12);
+Texture2D<float> AmbientOcclusion : register(t13);
 RWTexture2D<unorm float4> SceneColor : register(u0);
 SamplerState samLinearClamp : register(s3);
 SamplerComparisonState samShadow : register(s6);
@@ -36,7 +37,7 @@ float3 EvaluateBRDF(PBRSurface s, float3 v, float3 l)
     return result;
 }
 
-float3 EnvironmentLighting(PBRSurface s, float3 v)
+float3 EnvironmentLighting(PBRSurface s, float3 v, float ambientVisibility)
 {
     float nDotV = saturate(dot(s.Normal, v));
     float3 irradiance = IrradianceEnvironment.SampleLevel(samLinearClamp, s.Normal, 0).rgb;
@@ -46,7 +47,7 @@ float3 EnvironmentLighting(PBRSurface s, float3 v)
     float3 fresnel = s.F0 + (max(1 - s.Roughness, s.F0) - s.F0) * FresnelSchlickFactor(nDotV);
     float3 diffuseIBL = (1 - fresnel) * (1 - s.Metallic) * irradiance * s.Albedo / PBR_PI;
     float3 specularIBL = prefiltered * (s.F0 * brdf.x + brdf.y);
-    return diffuseIBL + specularIBL;
+    return diffuseIBL * ambientVisibility + specularIBL;
 }
 
 float3 ShadeLight(PBRSurface s, float3 position, float3 v, GDX12LightConstants light, float viewDepth)
@@ -81,7 +82,7 @@ float3 ShadeLight(PBRSurface s, float3 position, float3 v, GDX12LightConstants l
 float3 ShadeSurface(PBRSurface s, float3 emissive, float3 position, uint2 pixel, float3 cameraPosition, float viewDepth)
 {
     float3 v = SafeNormalize(cameraPosition - position);
-    float3 result = EnvironmentLighting(s, v) + emissive;
+    float3 result = EnvironmentLighting(s, v, AmbientOcclusion[pixel]) + emissive;
     if (Grid.MaskWordsPerCluster > 0)
     {
         uint slice = (uint)clamp(log2(viewDepth) * Grid.DepthSliceScale + Grid.DepthSliceBias, 0, (float)(Grid.DepthSlices - 1));
