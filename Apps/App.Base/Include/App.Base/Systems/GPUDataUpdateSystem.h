@@ -77,6 +77,9 @@ public:
                     if (isActiveCamera)
                     {
                         pipelineCommonData->CameraViewToClip = proj;
+                        pipelineCommonData->WorldToCameraView = view;
+                        pipelineCommonData->ActiveCameraJitterOffsetX = 0;
+                        pipelineCommonData->ActiveCameraJitterOffsetY = 0;
                         pipelineCommonData->ClipToCameraView = proj.Invert();
 
                         // Streamline uses row-major matrices.

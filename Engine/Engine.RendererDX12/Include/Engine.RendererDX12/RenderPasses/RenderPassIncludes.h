@@ -10,6 +10,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12DeferredLightingPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12SSAOPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12HBAOPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12HBAOPlusPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12SkyBoxPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12TemporalAntiAliasingPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12IBLPrecomputePass.h"
