@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!-- Build-time items compile normally without appearing in Solution Explorer. -->
+  <Target Name="AddCacaoSources" BeforeTargets="PrepareForBuild" Condition="'$(DesignTimeBuild)'!='true'">
+    <ItemGroup>
+      <ClCompile Include="$(PEPExternalRoot)cacao\src\ffx_cacao.cpp" />
+      <ClCompile Include="$(PEPExternalRoot)cacao\src\ffx_cacao_impl.cpp">
+        <PreprocessorDefinitions>FFX_CACAO_ENABLE_D3D12;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+        <AdditionalIncludeDirectories>$(IntDir)CacaoShaders;$(PEPExternalDirectX-HeadersInclude)\directx-headers\directx;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+        <ConformanceMode>false</ConformanceMode>
+      </ClCompile>
+    </ItemGroup>
+  </Target>
+</Project>
