@@ -1508,8 +1508,7 @@ static bool LoadMeshes(WorldLoadContext& context, ryml::NodeRef meshesNode)
             context.Render->SubmitMesh(cpuMesh, meshHandle);
         }
 
-        context.MeshesById.emplace(id, meshHandle);
-        context.CpuMeshesById.emplace(id, cpuMesh);
+        WorldLoadContext::MeshResource resource{meshHandle, cpuMesh, {}};
 
         if (importMaterials)
         {
@@ -1536,7 +1535,7 @@ static bool LoadMeshes(WorldLoadContext& context, ryml::NodeRef meshesNode)
                 return false;
             }
 
-            std::vector<GDX12Material*> importedMaterials = BuildObjMaterialSlots(
+            resource.ImportedMaterials = BuildObjMaterialSlots(
                 *context.Render,
                 *context.AssetManager,
                 *cpuMesh,
@@ -1545,14 +1544,13 @@ static bool LoadMeshes(WorldLoadContext& context, ryml::NodeRef meshesNode)
                 defaultTextures,
                 importedTexturesByPath);
 
-            if (importedMaterials.empty())
+            if (resource.ImportedMaterials.empty())
             {
                 Logger::Error("Imported mesh '{}' produced no material slots.", id);
                 return false;
             }
-
-            context.MeshMaterialsById.emplace(id, std::move(importedMaterials));
         }
+        context.MeshesById.emplace(std::move(id), std::move(resource));
     }
 
     return true;
@@ -1786,8 +1784,8 @@ static bool ParseStaticMeshRender(
     std::string meshId;
     node["Mesh"] >> meshId;
 
-    Engine::Core::MeshHandle meshHandle = context.ResolveMesh(meshId);
-    if (!meshHandle.IsValid())
+    const auto* mesh = context.ResolveMesh(meshId);
+    if (!mesh)
     {
         return false;
     }
@@ -1812,10 +1810,9 @@ static bool ParseStaticMeshRender(
             materials.push_back(material);
         }
     }
-    else if (const std::vector<GDX12Material*>* importedMaterials =
-        context.ResolveMeshMaterials(meshId))
+    else
     {
-        materials = *importedMaterials;
+        materials = mesh->ImportedMaterials;
     }
 
     if (materials.empty())
@@ -1823,25 +1820,17 @@ static bool ParseStaticMeshRender(
         return false;
     }
 
-    if (const Engine::Core::Mesh* cpuMesh = context.ResolveCpuMesh(meshId))
-    {
-        const size_t requiredMaterialCount = GetMaterialSlotCount(*cpuMesh);
-        if (materials.size() < requiredMaterialCount)
-        {
-            materials.resize(requiredMaterialCount, materials.back());
-        }
-    }
+    const size_t requiredMaterialCount = GetMaterialSlotCount(*mesh->Mesh);
+    if (materials.size() < requiredMaterialCount)
+        materials.resize(requiredMaterialCount, materials.back());
 
     auto& component = entity.AddComponent<StaticMeshRenderComponent>(
-        meshHandle,
-        materials
+        mesh->Handle,
+        std::move(materials)
     );
     if (node.has_child("CastsShadows")) node["CastsShadows"] >> component.CastsShadows;
 
-    if (const Engine::Core::Mesh* cpuMesh = context.ResolveCpuMesh(meshId))
-    {
-        component.Bounds = cpuMesh->GetBounds();
-    }
+    component.Bounds = mesh->Mesh->GetBounds();
 
     return true;
 }
@@ -2174,8 +2163,8 @@ static bool LoadEntityComponentsWithRefs(
     return true;
 }
 
-bool WorldLoader::SaveToFile(World& world, const std::filesystem::path& path)
+bool WorldLoader::SaveToFile(World&, const std::filesystem::path& path)
 {
-    // todo construct yaml and save
-    return true;
+    Logger::Error("Cannot save world '{}': world serialization is not implemented.", path.string());
+    return false;
 }
