@@ -499,9 +499,7 @@ void SceneGeometry::SubmitSkinning(UINT index, const Schedule& primary, std::vec
 {
 	auto& slot = _slots.at(index);
 	if (slot.SkinImport == Invalid) return;
-	const auto imported = std::find_if(primary.Packets.begin(), primary.Packets.end(),
-	    [&](const auto& packet) { return packet.Operation == slot.SkinImport; });
-	if (imported == primary.Packets.end()) throw std::logic_error("Missing Exact skinning import");
+	const Id imported = primary.PacketFor(slot.SkinImport);
 	for (auto& [owner, remote] : slot.RemoteSkin)
 	{
 		if (remote.Ranges.empty()) continue;
@@ -554,7 +552,7 @@ void SceneGeometry::SubmitSkinning(UINT index, const Schedule& primary, std::vec
 			else
 				cmd->CopyBufferRegion(transfer, 0, output, 0, bytes);
 		});
-		waits.push_back({Id(imported - primary.Packets.begin()), remote.GPU.Completions().back()});
+		waits.push_back({imported, remote.GPU.Completions().back()});
 	}
 }
 
@@ -1006,22 +1004,18 @@ std::shared_ptr<const Schedule> SceneGeometry::Plan(UINT index, const AppendTech
 		return s.CompiledSchedule;
 	auto compiled = std::make_shared<Schedule>(Compile(reordered, singleDirect));
 	auto& schedule = *compiled;
-	for (auto& packet : schedule.Packets)
+	// Record callbacks and feature waits use the original operation IDs, including gaps from culled work.
+	for (Id i = 0; i < order.size(); ++i)
 	{
-		if (packet.Operation != Invalid)
-		{
-			packet.Operation = order.at(packet.Operation);
-		}
+		const Id original = order[i];
+		const Id packet = schedule.PacketFor(i);
+		schedule.Packets[packet].Operation = original;
+		remap[original] = packet;
 	}
+	schedule.PacketByOperation = std::move(remap);
 	if (s.DepthNormals)
 	{
-		const auto find = [&](Id id) {
-			return std::find_if(schedule.Packets.begin(), schedule.Packets.end(),
-			    [id](const auto& packet) { return packet.Operation == id; });
-		};
-		const auto ready = find(s.DepthNormalsReady);
-		const auto gbuffer = find(sceneGBuffer);
-		if (s.DepthNormalsReady == Invalid || ready >= gbuffer || gbuffer == schedule.Packets.end())
+		if (schedule.PacketFor(s.DepthNormalsReady) >= schedule.PacketFor(sceneGBuffer))
 			throw std::logic_error("DepthNormals publication must precede the scene G-buffer");
 	}
 	s.CompiledGraph = std::move(reordered);

@@ -173,9 +173,15 @@ Schedule Compile(const Graph& g, bool singleDirect) {
             (!Legal(g.TerminalQueue,states[r]) || !Legal(g.TerminalQueue,g.Resources[r].Final)))
             throw std::invalid_argument("terminal queue cannot export resource state");
         if(states[r]!=g.Resources[r].Final) terminal.Before.push_back({r,states[r],g.Resources[r].Final,false});
-        states[r]=g.Resources[r].Final;
     }
-    out.Packets.push_back(std::move(terminal)); out.FinalStates=std::move(states); return out;
+    out.Packets.push_back(std::move(terminal));
+    out.PacketByOperation = std::move(remap);
+    return out;
+}
+Id Schedule::PacketFor(Id operation) const {
+    if (operation >= PacketByOperation.size() || PacketByOperation[operation] == Invalid)
+        throw std::logic_error("Operation is missing from the render schedule");
+    return PacketByOperation[operation];
 }
 void Schedule::Write(std::ostream& os) const {
     os<<"device "<<Device<<" frame-boundary="<<FrameBoundary<<" terminal="<<Name(TerminalQueue)<<'\n';

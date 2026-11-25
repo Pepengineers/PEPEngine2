@@ -96,12 +96,14 @@ struct Packet {
 };
 struct Schedule {
     std::vector<Packet> Packets;
-    std::vector<State> FinalStates;
+    std::vector<Id> PacketByOperation;
     std::vector<bool> Decays;
     std::vector<Heap> Memory;
     Id Device = 0;
     bool FrameBoundary = true;
     Queue TerminalQueue = Queue::Direct;
+    Id PacketFor(Id operation) const;
+    Id OptionalPacketFor(Id operation) const { return operation == Invalid ? Invalid : PacketFor(operation); }
     void Write(std::ostream&) const;
 };
 Schedule Compile(const Graph&, bool singleDirect = false);

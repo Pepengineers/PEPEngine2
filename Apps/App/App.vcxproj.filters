@@ -24,6 +24,7 @@
     <ClCompile Include="src\Techniques\SceneReflections.cpp" />
     <ClCompile Include="src\Techniques\SceneProbePreview.cpp" />
     <ClCompile Include="src\Techniques\SceneLighting.cpp" />
+    <ClCompile Include="src\Techniques\SceneRemoteShadows.cpp" />
     <ClCompile Include="src\Techniques\SceneTransparency.cpp" />
     <ClCompile Include="src\Techniques\SceneTransparencyRemote.cpp" />
     <ClCompile Include="src\Techniques\SceneParticles.cpp" />
@@ -80,6 +81,7 @@
     <ClInclude Include="src\Techniques\SceneReflections.h" />
     <ClInclude Include="src\Techniques\SceneProbePreview.h" />
     <ClInclude Include="src\Techniques\SceneLighting.h" />
+    <ClInclude Include="src\Techniques\SceneRemoteShadows.h" />
     <ClInclude Include="src\Techniques\SceneTransparency.h" />
     <ClInclude Include="src\Techniques\SceneParticles.h" />
     <ClInclude Include="src\Techniques\UI\ScenePostUI.h" />

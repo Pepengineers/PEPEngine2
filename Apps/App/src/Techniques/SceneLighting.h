@@ -94,6 +94,8 @@ class SceneLighting
   private:
 	void AppendCascadeOwners(std::vector<std::pair<std::string, Id>>&) const;
 	struct RemoteShadows;
+	struct RemoteShadowPlan;
+	static std::vector<Access> UniqueLightingAccesses(std::vector<Access> accesses);
 	struct ShadowPublication;
 	struct ShadowVertexBaseline;
 	struct LightGridKernel;
@@ -123,7 +125,7 @@ class SceneLighting
 		UINT CrossSlotShadows = 0;
 		CompletionToken ShadowConsumer;
 	};
-	void AppendRemoteLocalShadows(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&);
+	void AppendRemoteShadows(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&);
 	void AddShadowExchanges(const Schedule&, std::vector<Executor::PacketExchange>&);
 	void ShadowImportsSubmitted(const std::vector<CompletionToken>&);
 	void AppendShadows(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, SceneEnvironment&);
