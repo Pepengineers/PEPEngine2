@@ -24,7 +24,7 @@ inline bool Choice(const char* label, const char* first, const char* second, boo
     }
     ImGui::PushID(label);
     ImGui::BeginGroup();
-    ImGui::TextUnformatted(label);
+    if (*label) ImGui::TextUnformatted(label);
     const auto option = [&](const char* text, bool selected)
     {
         ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(selected ? ImGuiCol_ButtonActive : ImGuiCol_FrameBg));

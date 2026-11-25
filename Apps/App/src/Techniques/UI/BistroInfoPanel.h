@@ -36,6 +36,7 @@ private:
     struct Placement { std::string Technique, Adapter, Queue; };
     void RefreshPlacement(const BistroRenderPipeline&);
     void DrawPlacement(bool compact) const;
+    void DrawFull(RenderModule&, BistroBenchmark&);
     void DrawResult(const BistroBenchmark&, BistroBenchmarkData::RunMode tab);
     void DrawCurrentSettings(RenderModule&);
     void DrawLivePlot() const;
@@ -47,10 +48,8 @@ private:
     std::vector<std::string> _peers;
     std::pair<uint16_t, uint16_t> _pendingSize{};
     std::filesystem::path _pendingPreset;
-    BistroBenchmarkData::RunMode _selectedMode{};
     std::filesystem::path _latestResult;
-    std::optional<BistroBenchmarkData::RunMode> _resultTab;
-    bool _quality = false;
+    std::optional<bool> _queueResults, _singleQuality, _multiQuality;
     std::string _displayError;
     bool _plotFps = false;
     std::string _primary;

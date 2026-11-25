@@ -12,6 +12,22 @@
 namespace
 {
 constexpr ImVec4 Accent{.98f, .73f, .29f, 1.f};
+constexpr std::pair<ImGuiCol, ImVec4> FullPalette[] = {
+    {ImGuiCol_CheckMark, {.26f, .87f, .81f, 1.f}},
+    {ImGuiCol_Button, {.13f, .24f, .28f, 1.f}},
+    {ImGuiCol_ButtonHovered, {.17f, .34f, .38f, 1.f}},
+    {ImGuiCol_ButtonActive, {.13f, .43f, .44f, 1.f}},
+    {ImGuiCol_FrameBg, {.12f, .16f, .20f, 1.f}},
+    {ImGuiCol_Header, {.13f, .20f, .24f, 1.f}},
+    {ImGuiCol_HeaderHovered, {.16f, .30f, .34f, 1.f}},
+    {ImGuiCol_HeaderActive, {.14f, .36f, .38f, 1.f}},
+    {ImGuiCol_Tab, {.08f, .11f, .14f, 1.f}},
+    {ImGuiCol_TabHovered, {.15f, .28f, .31f, 1.f}},
+    {ImGuiCol_TabSelected, {.13f, .24f, .27f, 1.f}},
+    {ImGuiCol_TabSelectedOverline, {.26f, .87f, .81f, 1.f}},
+    {ImGuiCol_TableHeaderBg, {.15f, .19f, .23f, 1.f}},
+    {ImGuiCol_TextDisabled, {.67f, .72f, .76f, 1.f}},
+};
 using BistroBenchmarkData::RunMode;
 ImVec4 TraceColor(RunMode mode)
 {
@@ -27,6 +43,11 @@ ImVec4 TraceColor(RunMode mode)
 using Action = BistroBenchmark::Action;
 
 void Heading(const char* label) { ImGui::TextColored(Accent, "%s", label); }
+
+float ButtonWidth(const char* label)
+{
+    return ImGui::CalcTextSize(label).x + 2.f * ImGui::GetStyle().FramePadding.x;
+}
 
 void EnumSelector(const char* label, IConsoleVariable& setting, std::string& error)
 {
@@ -50,10 +71,9 @@ void EnumSelector(const char* label, IConsoleVariable& setting, std::string& err
 
 void ProfileButtons(BistroBenchmark& benchmark, Action action)
 {
-    const float width = std::min(9.f * ImGui::GetFontSize(), ImGui::GetContentRegionAvail().x);
-    if (ImGui::Button("Performance", {width, 0})) benchmark.Launch(action, BistroPlacement::Performance);
-    BistroPlot::ContinueRowIfFits(width);
-    if (ImGui::Button("Quality", {width, 0})) benchmark.Launch(action, BistroPlacement::Quality);
+    if (ImGui::Button("Find performance preset")) benchmark.Launch(action, BistroPlacement::Performance);
+    BistroPlot::ContinueRowIfFits(ButtonWidth("Find quality preset"));
+    if (ImGui::Button("Find quality preset")) benchmark.Launch(action, BistroPlacement::Quality);
 }
 }
 
@@ -61,7 +81,16 @@ void BistroInfoPanel::InitializeFont()
 {
     auto* atlas = ImGui::GetIO().Fonts;
     if (atlas->Fonts.empty()) atlas->AddFontDefault();
-    _fullFont = atlas->AddFontDefaultVector();
+    wchar_t windowsDir[MAX_PATH]{};
+    const auto length = GetWindowsDirectoryW(windowsDir, MAX_PATH);
+    if (length && length < MAX_PATH)
+    {
+        const auto path = std::filesystem::path(windowsDir) / L"Fonts" / L"segoeui.ttf";
+        ImFontConfig config;
+        config.Flags |= ImFontFlags_NoLoadError;
+        _fullFont = atlas->AddFontFromFileTTF(path.u8string().c_str(), 16.f, &config);
+    }
+    if (!_fullFont) _fullFont = atlas->AddFontDefaultVector();
 }
 
 void BistroInfoPanel::RefreshPlacement(const BistroRenderPipeline& pipeline)
@@ -139,9 +168,9 @@ void BistroInfoPanel::DrawPlacement(bool compact) const
     ImGui::TableHeadersRow();
     for (const auto& row : _placement)
     {
-        ImGui::TableNextColumn(); ImGui::TextUnformatted(row.Technique.c_str());
-        ImGui::TableNextColumn(); ImGui::TextUnformatted(row.Adapter.c_str());
-        ImGui::TableNextColumn(); ImGui::TextUnformatted(row.Queue.empty() ? "-" : row.Queue.c_str());
+        ImGui::TableNextColumn(); ImGui::TextWrapped("%s", row.Technique.c_str());
+        ImGui::TableNextColumn(); ImGui::TextWrapped("%s", row.Adapter.c_str());
+        ImGui::TableNextColumn(); ImGui::TextWrapped("%s", row.Queue.empty() ? "-" : row.Queue.c_str());
     }
     ImGui::EndTable();
 }
@@ -178,7 +207,7 @@ void BistroInfoPanel::DrawCurrentSettings(RenderModule& render)
     auto& quality = console->FindConsoleVariable(L"Render.Upscaler.Quality");
     const auto dimensions = [](unsigned w, unsigned h) { return std::to_string(w) + " x " + std::to_string(h); };
     const float width = std::min(ImGui::GetContentRegionAvail().x, 54.f * ImGui::GetFontSize());
-    if (ImGui::BeginTable("Output settings", 3, ImGuiTableFlags_SizingStretchSame, {width, 0}))
+    if (ImGui::BeginTable("Output settings", width < 25.f * ImGui::GetFontSize() ? 1 : 3, ImGuiTableFlags_SizingStretchSame, {width, 0}))
     {
         ImGui::TableNextColumn();
         ImGui::TextDisabled("Output resolution");
@@ -196,7 +225,7 @@ void BistroInfoPanel::DrawCurrentSettings(RenderModule& render)
             ImGui::EndCombo();
         }
         ImGui::TableNextColumn(); EnumSelector("Upscaler", provider, _displayError);
-        ImGui::TableNextColumn(); EnumSelector("Quality", quality, _displayError);
+        ImGui::TableNextColumn(); EnumSelector("Upscaler quality", quality, _displayError);
         ImGui::EndTable();
     }
     const auto& status = render.GetReconstructionStatus();
@@ -204,7 +233,6 @@ void BistroInfoPanel::DrawCurrentSettings(RenderModule& render)
     if (status.Requested.Provider != status.Effective)
         ImGui::TextWrapped("Effective: %s  %s", std::string(provider.GetEnumValueName(int(status.Effective))).c_str(),
             status.FallbackReason.c_str());
-    if (!_displayError.empty()) ImGui::TextUnformatted(_displayError.c_str());
 }
 
 void BistroInfoPanel::DrawLivePlot() const
@@ -221,52 +249,146 @@ void BistroInfoPanel::DrawResult(const BistroBenchmark& benchmark, RunMode tab)
     const auto latestSlot = benchmark.LatestResultSlot();
     const auto& latest = benchmark.LastPass(latestSlot);
     _compare.UpdateHistory(benchmark.ReportPath());
-    const bool changedTab = !_resultTab || *_resultTab != tab;
-    _resultTab = tab;
-    if (changedTab)
-    {
-        _selectedMode = tab == RunMode::SingleGPU && _compare.LatestSingleGpuIsAsync() ? RunMode::Async : tab;
-        _quality = _compare.LatestQuality(ModeName(tab));
-    }
     if (_latestResult != latest.Path)
     {
         _latestResult = latest.Path;
-        _selectedMode = latest.Mode;
+        if (latest.Mode == RunMode::SingleGPU || latest.Mode == RunMode::Async)
+            _queueResults = latest.Mode == RunMode::Async;
         if (latest.Mode == RunMode::SingleGPU || latest.Mode == RunMode::MultiGPU)
-            _quality = latestSlot == BistroBenchmark::ResultSlot(latest.Mode, BistroPlacement::Quality);
-    }
-    ImGui::SeparatorText("Benchmark results");
-    ImGui::PushID("result filters");
-    ImGui::BeginGroup();
-    ImGui::TextUnformatted("Run mode");
-    ImGui::SetNextItemWidth(std::min(10.f * ImGui::GetFontSize(), ImGui::GetContentRegionAvail().x));
-    constexpr std::array modes{RunMode::Manual, RunMode::Async, RunMode::SingleGPU, RunMode::MultiGPU};
-    if (ImGui::BeginCombo("##mode", ModeName(_selectedMode)))
-    {
-        for (auto mode : modes)
         {
-            const bool selected = mode == _selectedMode;
-            if (ImGui::Selectable(ModeName(mode), selected) && !selected)
-            {
-                _selectedMode = mode;
-                _quality = _compare.LatestQuality(ModeName(mode));
-            }
-            if (selected) ImGui::SetItemDefaultFocus();
+            auto& quality = latest.Mode == RunMode::SingleGPU ? _singleQuality : _multiQuality;
+            quality = latestSlot == BistroBenchmark::ResultSlot(latest.Mode, BistroPlacement::Quality);
         }
-        ImGui::EndCombo();
     }
-    ImGui::EndGroup();
-    const bool profiled = _selectedMode == RunMode::SingleGPU || _selectedMode == RunMode::MultiGPU;
-    if (profiled) _quality = BistroPlot::Choice("Profile", "Performance", "Quality", _quality, true);
-    _plotFps = BistroPlot::Choice("Chart units", "Frame interval (ms)", "FPS", _plotFps, true);
+    ImGui::SeparatorText(tab == RunMode::Manual ? "Last completed pass" : "Search results");
+    ImGui::PushID("result filters");
+    auto mode = tab;
+    if (tab == RunMode::SingleGPU)
+    {
+        if (!_queueResults.has_value()) _queueResults = _compare.LatestSingleGpuIsAsync();
+        _queueResults = BistroPlot::Choice("View results", "Presets", "Queue search", *_queueResults);
+        if (*_queueResults) mode = RunMode::Async;
+    }
+    const char* profile = "";
+    if (mode == RunMode::SingleGPU || mode == RunMode::MultiGPU)
+    {
+        auto& quality = mode == RunMode::SingleGPU ? _singleQuality : _multiQuality;
+        if (!quality.has_value()) quality = _compare.LatestQuality(ModeName(mode));
+        quality = BistroPlot::Choice("Saved profile", "Performance", "Quality", *quality, mode == RunMode::SingleGPU);
+        profile = BistroPlacement::ProfileName[*quality ? BistroPlacement::Quality : BistroPlacement::Performance];
+    }
     ImGui::PopID();
-    ImGui::Spacing();
-
-    const auto profile = _quality ? BistroPlacement::Quality : BistroPlacement::Performance;
-    _compare.DrawLatest(ModeName(_selectedMode), profiled ? BistroPlacement::ProfileName[profile] : "", _plotFps,
-        benchmark.CanStart(), _pendingPreset, _pendingSize);
+    _compare.DrawLatest(ModeName(mode), profile, _plotFps, benchmark.CanStart(), _pendingPreset, _pendingSize);
     if (!_displayError.empty()) ImGui::TextWrapped("%s", _displayError.c_str());
 }
+void BistroInfoPanel::DrawFull(RenderModule& render, BistroBenchmark& benchmark)
+{
+    const float em = ImGui::GetFontSize();
+    const float left = ImGui::GetCursorPosX();
+    const bool wideBar = ImGui::GetContentRegionAvail().x >= 52.f * em;
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Bistro benchmark");
+    if (wideBar) ImGui::SameLine(0.f, 1.2f * em);
+    else
+    {
+        BistroPlot::ContinueRowIfFits(ButtonWidth("Settings [F1]"));
+        if (ImGui::SmallButton("Settings [F1]")) Engine::UI::OpenSettings();
+        BistroPlot::ContinueRowIfFits(ButtonWidth("Compact [F6]"));
+        if (ImGui::SmallButton("Compact [F6]")) _compact = true;
+    }
+    struct Tab { const char* Label; std::optional<RunMode> Mode; };
+    constexpr Tab tabs[]{{"Current run", RunMode::Manual}, {"Single GPU", RunMode::SingleGPU},
+                         {"Multi-GPU", RunMode::MultiGPU}, {"Compare", std::nullopt}};
+    const Tab* active = nullptr;
+    if (ImGui::BeginTabBar("Benchmark modes", ImGuiTabBarFlags_DrawSelectedOverline | ImGuiTabBarFlags_FittingPolicyScroll))
+    {
+        for (const auto& tab : tabs)
+            if (ImGui::BeginTabItem(tab.Label))
+            {
+                active = &tab;
+                ImGui::EndTabItem();
+            }
+        if (wideBar)
+        {
+            if (ImGui::TabItemButton("Settings [F1]", ImGuiTabItemFlags_Trailing)) Engine::UI::OpenSettings();
+            if (ImGui::TabItemButton("Compact [F6]", ImGuiTabItemFlags_Trailing)) _compact = true;
+        }
+        ImGui::EndTabBar();
+    }
+    if (!active) return;
+
+    // Keep the navigation in view and remember the scroll position within each tab.
+    ImGui::SetCursorPosX(left);
+    if (ImGui::BeginChild(active->Label))
+    {
+        if (!benchmark.Message().empty()) ImGui::TextWrapped("%s", benchmark.Message().c_str());
+        if (active->Mode == RunMode::Manual)
+        {
+            ImGui::SeparatorText("Current configuration");
+            ImGui::TextWrapped("Scene GPU   %s", _primary.c_str());
+            ImGui::BeginDisabled(!benchmark.CanStart());
+            DrawCurrentSettings(render);
+            if (ImGui::Button("Run one pass")) benchmark.Launch(Action::PlacementRun);
+            ImGui::EndDisabled();
+            BistroPlot::ContinueRowIfFits(23.f * em);
+            ImGui::TextWrapped("Route %.0f s   /   Warmup %g s   /   At each painting %g s",
+                benchmark.FlightTime(), benchmark.BaseWarmup(), benchmark.PaintingHold());
+
+            if (ImGui::GetContentRegionAvail().x >= 82.f * em &&
+                ImGui::BeginTable("Current run overview", 2, ImGuiTableFlags_SizingStretchProp))
+            {
+                ImGui::TableSetupColumn("Live placement", ImGuiTableColumnFlags_WidthStretch, .33f);
+                ImGui::TableSetupColumn("Completed pass", ImGuiTableColumnFlags_WidthStretch, .67f);
+                ImGui::TableNextColumn();
+                ImGui::SeparatorText("Current technique placement");
+                DrawPlacement(false);
+                ImGui::TableNextColumn();
+                DrawResult(benchmark, RunMode::Manual);
+                ImGui::EndTable();
+            }
+            else
+            {
+                if (ImGui::CollapsingHeader("Current technique placement")) DrawPlacement(false);
+                DrawResult(benchmark, RunMode::Manual);
+            }
+        }
+        else if (active->Mode == RunMode::SingleGPU)
+        {
+            ImGui::TextWrapped("Scene GPU   %s", _primary.c_str());
+            ImGui::BeginDisabled(!benchmark.CanStart());
+            ImGui::BeginGroup();
+            ImGui::TextDisabled("Queue placement");
+            if (ImGui::Button("Run quick search")) benchmark.Launch(Action::Search);
+            BistroPlot::ContinueRowIfFits(ButtonWidth("Run full sweep"));
+            if (ImGui::Button("Run full sweep")) benchmark.Launch(Action::Exhaustive);
+            ImGui::EndGroup();
+            const float searchWidth = ButtonWidth("Find performance preset") + ButtonWidth("Find quality preset") + ImGui::GetStyle().ItemSpacing.x;
+            BistroPlot::ContinueRowIfFits(searchWidth, 2.f * em);
+            ImGui::BeginGroup();
+            ImGui::TextDisabled("Preset search   /   %g min", BistroBenchmark::PlacementBudgetSeconds.GetValue() / 60.f);
+            ProfileButtons(benchmark, Action::SingleGPU);
+            ImGui::EndGroup();
+            ImGui::EndDisabled();
+            DrawResult(benchmark, RunMode::SingleGPU);
+        }
+        else if (active->Mode == RunMode::MultiGPU)
+        {
+            ImGui::TextWrapped("Scene GPU   %s", _primary.c_str());
+            for (const auto& peer : _peers) ImGui::TextWrapped("Peer GPU    %s", peer.c_str());
+            if (_peers.empty()) ImGui::TextDisabled("No peer GPU available.");
+            ImGui::TextDisabled("Profile search   %g min total, up to %g min on the scene GPU",
+                BistroBenchmark::PlacementBudget(_peers.size()) / 60., BistroBenchmark::PlacementBudget(0) / 60.);
+            ImGui::BeginDisabled(!benchmark.CanStart() || _peers.empty());
+            ProfileButtons(benchmark, Action::MultiGPU);
+            ImGui::EndDisabled();
+            if (ImGui::CollapsingHeader("Current technique placement")) DrawPlacement(false);
+            DrawResult(benchmark, RunMode::MultiGPU);
+        }
+        else _compare.Draw(benchmark.ReportPath());
+    }
+    ImGui::EndChild();
+}
+
 void BistroInfoPanel::Draw(RenderModule& render, BistroRenderPipeline& pipeline,
     BistroBenchmark& benchmark, float frameSeconds)
 {
@@ -312,6 +434,9 @@ void BistroInfoPanel::Draw(RenderModule& render, BistroRenderPipeline& pipeline,
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, { .6f * em, .28f * em });
         ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, { .4f * em, .16f * em });
         ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarSize, .95f * em);
+        ImGui::PushStyleVar(ImGuiStyleVar_TabBarOverlineSize, std::max(2.f, .1f * em));
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, .16f * em);
+        for (const auto& [color, value] : FullPalette) ImGui::PushStyleColor(color, value);
         ImGui::SetNextWindowPos(vp->GetCenter(), ImGuiCond_Always, {.5f,.5f});
         ImGui::SetNextWindowSize({vp->Size.x * .9f, vp->Size.y * .9f}, ImGuiCond_Always);
     }
@@ -323,90 +448,27 @@ void BistroInfoPanel::Draw(RenderModule& render, BistroRenderPipeline& pipeline,
     if (ImGui::Begin("##BistroBenchmark", nullptr, ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoTitleBar |
         ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings))
     {
-        Heading("Bistro benchmark");
-        ImGui::SameLine();
-        if (ImGui::SmallButton(compact ? "Settings [F1]" : "Open settings [F1]")) Engine::UI::OpenSettings();
-        ImGui::SameLine();
-        if (ImGui::SmallButton(compact ? "Expand [F7]" : "Compact [F6]")) _compact = !compact;
-        ImGui::Separator();
         if (compact)
         {
+            Heading("Bistro benchmark");
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Settings [F1]")) Engine::UI::OpenSettings();
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Expand [F7]")) _compact = false;
+            ImGui::Separator();
             ImGui::TextDisabled("Route idle  /  %.0f s flight", benchmark.FlightTime());
             DrawPlacement(true);
             DrawLivePlot();
         }
-        else
-        {
-            bool comparing = false;
-            RunMode tab = RunMode::Manual;
-            if (ImGui::BeginTabBar("Benchmark modes"))
-            {
-                if (ImGui::BeginTabItem("Current run"))
-                {
-                    ImGui::BeginDisabled(!benchmark.CanStart());
-                    DrawCurrentSettings(render);
-                    if (ImGui::Button("Run one pass", {10.f * ImGui::GetFontSize(), 0})) benchmark.Launch(Action::PlacementRun);
-                    ImGui::EndDisabled();
-                    ImGui::SameLine();
-                    ImGui::TextDisabled("Route %.0f s   /   Warmup %g s   /   At each painting %g s", benchmark.FlightTime(), benchmark.BaseWarmup(), benchmark.PaintingHold());
-                    Heading("Technique placement");
-                    DrawPlacement(false);
-                    ImGui::EndTabItem();
-                }
-                if (ImGui::BeginTabItem("Single GPU"))
-                {
-                    tab = RunMode::SingleGPU;
-                    ImGui::Text("Scene GPU   %s", _primary.c_str());
-                    ImGui::BeginDisabled(!benchmark.CanStart());
-                    const float buttonWidth = std::min(9.f * ImGui::GetFontSize(), ImGui::GetContentRegionAvail().x);
-                    ImGui::BeginGroup();
-                    Heading("Search queue placement");
-                    if (ImGui::Button("Quick search", {buttonWidth, 0})) benchmark.Launch(Action::Search);
-                    BistroPlot::ContinueRowIfFits(buttonWidth);
-                    if (ImGui::Button("Full sweep", {buttonWidth, 0})) benchmark.Launch(Action::Exhaustive);
-                    ImGui::EndGroup();
-                    BistroPlot::ContinueRowIfFits(2.f * buttonWidth + ImGui::GetStyle().ItemSpacing.x);
-                    ImGui::BeginGroup();
-                    ImGui::TextColored(Accent, "Search presets (%g min)", BistroBenchmark::PlacementBudgetSeconds.GetValue() / 60.f);
-                    ProfileButtons(benchmark, Action::SingleGPU);
-                    ImGui::EndGroup();
-                    ImGui::EndDisabled();
-                    ImGui::EndTabItem();
-                }
-                if (ImGui::BeginTabItem("Multi-GPU"))
-                {
-                    tab = RunMode::MultiGPU;
-                    ImGui::Text("Scene GPU   %s", _primary.c_str());
-                    for (const auto& peer : _peers) ImGui::Text("Peer GPU    %s", peer.c_str());
-                    if (_peers.empty()) ImGui::TextDisabled("No peer GPU available.");
-                    ImGui::TextDisabled("Profile search   %g min total, up to %g min on the scene GPU",
-                        BistroBenchmark::PlacementBudget(_peers.size()) / 60., BistroBenchmark::PlacementBudget(0) / 60.);
-                    ImGui::BeginDisabled(!benchmark.CanStart() || _peers.empty());
-                    ProfileButtons(benchmark, Action::MultiGPU);
-                    ImGui::EndDisabled();
-                    Heading("Technique placement");
-                    DrawPlacement(false);
-                    ImGui::EndTabItem();
-                }
-                if (ImGui::BeginTabItem("Compare"))
-                {
-                    comparing = true;
-                    _compare.Draw(benchmark.ReportPath());
-                    ImGui::EndTabItem();
-                }
-                ImGui::EndTabBar();
-            }
-            ImGui::Separator();
-            if (!benchmark.Message().empty()) ImGui::TextWrapped("%s", benchmark.Message().c_str());
-            if (!comparing) DrawResult(benchmark, tab);
-        }
+        else DrawFull(render, benchmark);
     }
     ImGui::End();
     ImGui::PopStyleColor();
     ImGui::PopStyleVar(2);
     if (!compact)
     {
-        ImGui::PopStyleVar(4);
+        ImGui::PopStyleColor(int(std::size(FullPalette)));
+        ImGui::PopStyleVar(6);
         ImGui::PopFont();
     }
 }
