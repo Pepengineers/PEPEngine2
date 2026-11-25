@@ -488,24 +488,40 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 			lists.push_back(&slot.Lists[q][i]);
 		}
 	}
-	std::vector<std::vector<ID3D12CommandList*>> packets;
+	// Keep fence publication boundaries independent from native ExecuteCommandLists calls.
+	std::vector<std::vector<ID3D12CommandList*>> executions;
+	std::vector<size_t> executionForPacket;
 	std::vector<RecordingGroup> groups;
-	packets.reserve(schedule.Packets.size());
+	executions.reserve(schedule.Packets.size());
+	executionForPacket.reserve(schedule.Packets.size());
 	groups.reserve(schedule.Packets.size());
 	std::vector<std::vector<std::function<void()>>> ownerRecords(schedule.Packets.size());
 	std::vector<uint8_t> closed(lists.size(), 1);
 	std::array<size_t, 3> offsets{0, counts[0], counts[0] + counts[1]}, used{};
 	BeginTimings(slot, schedule, resources);
 	std::array<UINT, 3> queries{};
+	Id firstInExecution = 0;
+	Id firstInBatch = 0;
 	for (Id i = 0; i < schedule.Packets.size(); ++i)
 	{
 		const auto& p = schedule.Packets[i];
+		// Bound the recording work the GPU waits for before the next submission.
+		if (i + 1 == schedule.Packets.size() || schedule.Packets[i + 1].Target != p.Target || i - firstInBatch + 1 == 8)
+			endBatch[i] = true;
+		const bool newExecution = i == firstInBatch || p.EarliestSubmitStart > firstInExecution ||
+			schedule.Packets[i - 1].EarliestSubmitStart == Invalid ||
+			executions.back().size() > (std::numeric_limits<UINT>::max)() - p.Lists;
+		if (newExecution)
+		{
+			firstInExecution = i;
+			executions.emplace_back();
+		}
+		executionForPacket.push_back(executions.size() - 1);
+		if (endBatch[i]) firstInBatch = i + 1;
 		RecordingGroup group;
-		packets.emplace_back();
 		const auto q = QueueIndex(p.Target);
 		const auto* timing = slot.TimingEpoch && slot.Timings[q].Count ? &slot.Timings[q] : nullptr;
 		const UINT query = std::exchange(queries[q], queries[q] + 2);
-		packets.back().reserve(p.Lists);
 		for (uint32_t j = 0; j < p.Lists; ++j)
 		{
 			const auto index = offsets[q] + used[q]++;
@@ -514,9 +530,9 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 			{
 				throw std::logic_error("packet/list queue mismatch");
 			}
-			packets.back().push_back(cmd);
+			executions.back().push_back(cmd);
 			RecordingGroup leaf{{},
-			                    [&, i, j, cmd, index, timing, query]
+			                    [&, i, j, cmd, index, timing, query, firstInExecution]
 			                    {
 				                    const auto& packet = schedule.Packets[i];
 				                    try
@@ -535,6 +551,12 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 						                    native.reserve(bs.size());
 						                    for (auto b : bs)
 						                    {
+							                    if (b.PreviousBufferUse != Invalid && b.PreviousBufferUse >= firstInExecution)
+							                    {
+								                    b.Before = b.BeforeWithoutDecay;
+								                    b.Uav = b.Before == b.After && b.OrderUavWithoutDecay;
+								                    if (b.Before == b.After && !b.Uav) continue;
+							                    }
 							                    native.push_back(
 							                        b.Uav ? CD3DX12_RESOURCE_BARRIER::UAV(resources.at(b.Resource))
 							                              : CD3DX12_RESOURCE_BARRIER::Transition(
@@ -542,7 +564,8 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 							                                    static_cast<D3D12_RESOURCE_STATES>(b.Before),
 							                                    static_cast<D3D12_RESOURCE_STATES>(b.After)));
 						                    }
-						                    cmd->ResourceBarrier(static_cast<UINT>(native.size()), native.data());
+						                    if (!native.empty())
+							                    cmd->ResourceBarrier(static_cast<UINT>(native.size()), native.data());
 					                    };
 					                    if (j == 0 && !packet.Before.empty())
 					                        barriers(packet.Before, "before barriers");
@@ -593,7 +616,7 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 	std::vector<CompletionToken> dependencies;
 	try
 	{
-		for (Id i = 0; i < packets.size(); ++i)
+		for (Id i = 0; i < schedule.Packets.size(); ++i)
 		{
 			recorder.Wait(i);
 			for (auto& ownerRecord : ownerRecords[i])
@@ -653,9 +676,7 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 					if (!_exchangeCompletions[j]) throw std::logic_error("cross-device packet did not return a completion");
 					dependencies.push_back(_exchangeCompletions[j]);
 				}
-			// Cap recording latency before the first execute on long runs of ready work.
-			const auto count = i - batchBegin + 1;
-			if (!endBatch[i] && count < 8 && i + 1 < packets.size() && schedule.Packets[i + 1].Target == target)
+			if (!endBatch[i])
 				continue;
 			slot.Poisoned = true;
 			submitted = true;
@@ -667,7 +688,9 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 				first.SubmitMs = double(now.QuadPart) * QpcMilliseconds();
 				first.Dependencies = dependencies;
 			}
-			const auto token = _submissions->Submit(_deviceId, target, packets.data() + batchBegin, count, dependencies);
+			const auto firstExecution = executionForPacket[batchBegin];
+			const auto count = executionForPacket[i] - firstExecution + 1;
+			const auto token = _submissions->Submit(_deviceId, target, executions.data() + firstExecution, count, dependencies);
 			slot.Fences[QueueIndex(target)] = token.Value;
 			for (Id packet = batchBegin; packet <= i; ++packet)
 			{

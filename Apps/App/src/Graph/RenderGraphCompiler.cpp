@@ -82,6 +82,7 @@ Schedule Compile(const Graph& g, bool singleDirect) {
     }
     std::vector<Id> remap(n,Invalid),last(g.Resources.size(),Invalid);
     std::vector<State> states;
+    std::vector<State> lastRequired(g.Resources.size());
     std::vector<bool> lastWrite(g.Resources.size(),false),accessed(g.Resources.size(),false);
     for(const auto& r:g.Resources) states.push_back(r.Initial);
     Id firstPending = 0;
@@ -99,12 +100,20 @@ Schedule Compile(const Graph& g, bool singleDirect) {
         const auto& op=g.Operations[next];
         const auto queue=target(op);
         Packet p{next,{},op.Accesses,{},{},op.Lists,op.OwnerRecording,queue,op.Name,op.TransferBytes};
+        p.EarliestSubmitStart = 0;
+        for (Id dep : op.Dependencies)
+            p.EarliestSubmitStart = (std::max)(p.EarliestSubmitStart, remap[dep] + 1);
+        if (op.SideEffect || op.OwnerRecording || op.Accesses.empty()) p.EarliestSubmitStart = Invalid;
         p.Dependencies.reserve(offsets[next + 1] - offsets[next]);
         for (size_t edge = offsets[next]; edge < offsets[next + 1]; ++edge)
             p.Dependencies.push_back(remap[dependencies[edge]]);
         for(auto a:op.Accesses) {
             auto& state=states[a.Resource]; const auto& r=g.Resources[a.Resource]; const Id prev=last[a.Resource];
-            if(r.Memory!=Heap::Default) continue;
+            if(r.Memory!=Heap::Default) {
+                if (prev != Invalid && r.Memory == Heap::Readback)
+                    p.EarliestSubmitStart = (std::max)(p.EarliestSubmitStart, prev + 1);
+                continue;
+            }
             if(prev!=Invalid && out.Packets[prev].Target!=p.Target) {
                 Depend(p,prev);
                 if(state!=0) { out.Packets[prev].After.push_back({a.Resource,state,0,false}); state=0; }
@@ -117,10 +126,28 @@ Schedule Compile(const Graph& g, bool singleDirect) {
                 Depend(release,prev);
                 const Id token=Id(out.Packets.size()); out.Packets.push_back(std::move(release)); Depend(p,token); state=0;
             }
-            if(state!=a.Required) p.Before.push_back({a.Resource,state,a.Required,false});
+            const bool orderWrites = lastWrite[a.Resource] || a.Usage != Mode::Read;
+            const bool useUavBarrier = r.Unordered && a.Required == UnorderedAccess;
+            if (prev != Invalid && out.Packets[prev].Target == queue) {
+                const auto previous = lastRequired[a.Resource];
+                // Preserve ordering where a same-state write has no graph barrier, or a
+                // callback may implicitly promote a resource declared in COMMON.
+                if ((previous == a.Required && orderWrites && !useUavBarrier) ||
+                    previous == 0 || a.Required == 0)
+                    p.EarliestSubmitStart = (std::max)(p.EarliestSubmitStart, prev + 1);
+            }
+            if(state!=a.Required) {
+                Barrier transition{a.Resource,state,a.Required,false};
+                if (r.Decays && prev != Invalid && out.Packets[prev].Target == queue) {
+                    transition.PreviousBufferUse = prev;
+                    transition.BeforeWithoutDecay = lastRequired[a.Resource];
+                    transition.OrderUavWithoutDecay = useUavBarrier && orderWrites;
+                }
+                p.Before.push_back(transition);
+            }
             else if(r.Unordered && a.Required==UnorderedAccess && accessed[a.Resource] && (lastWrite[a.Resource] || a.Usage!=Mode::Read))
                 p.Before.push_back({a.Resource,state,state,true});
-            state=a.Required; lastWrite[a.Resource]=a.Usage!=Mode::Read; accessed[a.Resource]=true;
+            state=a.Required; lastRequired[a.Resource]=a.Required; lastWrite[a.Resource]=a.Usage!=Mode::Read; accessed[a.Resource]=true;
         }
         std::sort(p.Dependencies.begin(),p.Dependencies.end());
         remap[next]=Id(out.Packets.size()); out.Packets.push_back(std::move(p));
@@ -151,7 +178,7 @@ Schedule Compile(const Graph& g, bool singleDirect) {
 }
 void Schedule::Write(std::ostream& os) const {
     os<<"device "<<Device<<" frame-boundary="<<FrameBoundary<<" terminal="<<Name(TerminalQueue)<<'\n';
-    for(Id i=0;i<Decays.size();++i) if(Decays[i]) os<<"resource "<<i<<" decays to COMMON at each packet submission\n";
+    for(Id i=0;i<Decays.size();++i) if(Decays[i]) os<<"resource "<<i<<" decays to COMMON at each native submission\n";
     for(Id i=0;i<Packets.size();++i) {
         const auto& p=Packets[i];
         os<<"packet "<<i<<' '<<Name(p.Target)<<" op="<<p.Operation<<" lists="<<p.Lists<<" signal="<<i<<" deps=";

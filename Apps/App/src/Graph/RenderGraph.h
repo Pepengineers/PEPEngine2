@@ -69,7 +69,13 @@ struct Graph {
         return found == BindingIds.end() ? Invalid : found->second;
     }
 };
-struct Barrier { Id Resource; State Before, After; bool Uav = false; };
+struct Barrier {
+    Id Resource; State Before, After; bool Uav = false;
+    // A DEFAULT buffer keeps its previous state if both packets are in the same native execute.
+    Id PreviousBufferUse = Invalid;
+    State BeforeWithoutDecay = 0;
+    bool OrderUavWithoutDecay = false;
+};
 struct Packet {
     Id Operation;
     std::vector<Id> Dependencies; // packet indices (completion tokens)
@@ -80,6 +86,8 @@ struct Packet {
     Queue Target = Queue::Direct;
     std::string Name;
     uint64_t TransferBytes = 0;
+    // Earlier packets require a separate native execute. Synthetic/opaque packets run alone.
+    Id EarliestSubmitStart = Invalid;
 };
 struct Schedule {
     std::vector<Packet> Packets;

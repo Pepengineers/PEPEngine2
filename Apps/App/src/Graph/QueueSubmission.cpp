@@ -321,7 +321,7 @@ CompletionToken QueueSubmission::Submit(Id device,BistroRender::Queue target,
         uint64_t value=0;
         if(external) { t.Queue->ExecuteCommandList(external); value=external->FenceValue; }
         else {
-            // Separate execute calls preserve the resource decay boundary of each packet.
+            // The executor has already grouped lists that can share a native execution boundary.
             for (size_t i = 0; i < count; ++i) {
                 const auto& lists = packets[i];
                 t.Queue->GetCommandQueue()->ExecuteCommandLists(UINT(lists.size()),lists.data());
