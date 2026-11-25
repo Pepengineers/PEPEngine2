@@ -207,8 +207,8 @@ public:
         L"Run quick Bistro queue tuning at Release startup."};
     inline static AutoConsoleVariable<bool> SkipBenchmark{L"App.Benchmark.SkipBenchmark", false,
         L"Skip automatic Bistro queue tuning at Release startup."};
-    inline static AutoConsoleVariable<float> PlacementBudgetSeconds{L"App.Benchmark.PlacementBudgetSeconds", 3600.f,
-        L"Time budget for each independent Bistro profile search.",
+    inline static AutoConsoleVariable<float> PlacementBudgetSeconds{L"App.Benchmark.PlacementBudgetSeconds", 600.f,
+        L"Single-GPU profile search budget in seconds. Multi-GPU has twice this total, including its single-GPU search.",
         EConsoleVariableFlags::Default, [](float seconds) { return std::isfinite(seconds) && seconds > 0; }};
 
     inline static AutoConsoleVariable<float> WarmupSeconds{L"App.Benchmark.WarmupSeconds", 3.f,
@@ -415,11 +415,7 @@ public:
                 Finish(world, console, pipeline, "gain unconfirmed: deadline", 0);
                 return;
             }
-            if (!_legDone && _stage == Stage::Placement && !_manualPlacement && Clock::now() >= _placementDeadline)
-            {
-                Finish(world, console, pipeline, "placement budget exhausted");
-                return;
-            }
+            if (!_legDone && CheckPlacementDeadline(world, console, pipeline, Clock::now())) return;
             if (_legDone) CompleteLeg(world, console, render, pipeline);
             if (!_active) return;
 
@@ -470,11 +466,7 @@ public:
                 Finish(world, console, pipeline, "interrupted: frame not presented", {}, 0, Outcome::Failed);
                 return;
             }
-            if (_stage == Stage::Placement && !_manualPlacement && pipeline.PresentCompletedAt() > _placementDeadline)
-            {
-                Finish(world, console, pipeline, "placement budget exhausted");
-                return;
-            }
+            if (_stage == Stage::Placement && CheckPlacementDeadline(world, console, pipeline, pipeline.PresentCompletedAt())) return;
             if (_stage == Stage::Placement && !_placementInitialProbesReady)
             {
                 const auto [published, expected] = pipeline.GetWorldProbeReadiness();
@@ -878,7 +870,7 @@ private:
             if (!exeLength || exeLength == std::size(executable))
                 throw std::runtime_error("Cannot identify benchmark executable");
             std::ostringstream conditions;
-            conditions << (_placementProfile == BistroPlacement::Quality ? "bistro-baseline-v11 " : "bistro-baseline-v10 ") <<
+            conditions << "bistro-baseline-v12 " <<
                 std::setprecision(17) << Duration() << ' ' << _paintingHold << ' ' << _warmup << ' ' <<
                 std::filesystem::last_write_time(executable).time_since_epoch().count() << ' ' <<
                 pipeline.BenchmarkSubmissions().AdapterLabel(0) << ' ' <<
@@ -906,13 +898,16 @@ private:
                 if (existing == patch.end()) patch.emplace_back(name, value);
                 else existing->second = value;
             }
-            const double budget = PlacementBudgetSeconds.GetValue();
+            const double singleBudget = PlacementBudgetSeconds.GetValue();
+            const double budget = _multiGPU ? 2 * singleBudget : singleBudget;
             _placementDeadline = _started + std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(budget - FinishReserve));
+            _singleDeadline = _started + std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(singleBudget - FinishReserve));
             _csv.Config("BudgetSeconds", Csv::Number(budget));
+            _csv.Config("SingleGPUBudgetSeconds", Csv::Number(singleBudget));
             _csv.Config("PlacementSeed", "20261122");
             _csv.Config("SkinningOwnerRestriction", "Remote skinning selection is startup-only; search uses scene GPU");
             _csv.Config("SceneOwnerRestriction", "The scene adapter is fixed at application startup");
-            if (Seconds(Clock::now(), _placementDeadline) < _warmup + Duration())
+            if (Seconds(Clock::now(), _singleDeadline) < _warmup + Duration())
             {
                 Finish(world, console, pipeline, "full route does not fit in budget", {}, 0, Outcome::Failed);
                 return;
@@ -1176,7 +1171,7 @@ private:
                         _trialReason = "requested output size unavailable";
                     else if (int(status.Effective) != _trial.Settings.Provider ||
                         (status.Effective == GDX12UpscalerProvider::Native) != (_trialResult.Render == _trialResult.Output) ||
-                        ((_placementSearch.LowFirst() || _placementSearch.HighFirst()) && _trial.Settings.Provider &&
+                        (_trial.Settings.Provider &&
                          (_trialResult.Render.first >= _trialResult.Output.first || _trialResult.Render.second >= _trialResult.Output.second)))
                         _trialReason = "requested image mode unavailable";
                 }
@@ -1397,8 +1392,7 @@ private:
             _trialResult.P95 = *rank;
         }
         if (_trialReason.empty() && _trialResult.Fps <= 0) _trialReason = "no rendered samples";
-        if (_trialReason.empty() && !_manualPlacement &&
-            (!_calibrating || _placementSearch.LowFirst() || _placementSearch.HighFirst()) && _trialFreshness.Missed)
+        if (_trialReason.empty() && !_manualPlacement && _trialFreshness.Missed)
             _trialReason = "reflection face deadline missed";
         ReportPlacementEvidence(pipeline);
         _trialResult.Valid = _trialReason.empty();
@@ -1447,7 +1441,7 @@ private:
             if (_trialResult.Activity[i])
             {
                 _csv.Config(_trialPrefix + "ActiveTechnique", BistroPlacement::Techniques[i].Pass);
-                if (!_manualPlacement && (_placementSearch.LowFirst() || _placementSearch.HighFirst()))
+                if (!_manualPlacement)
                     _csv.Config(_trialPrefix + "ActiveTechniqueLevel", std::string(BistroPlacement::Techniques[i].Pass) + "=" +
                         (BistroPlacement::Techniques[i].Quality ?
                             std::to_string(_placementSearch.QualityValue(i, _trialResult.Settings.Levels[i])) : "On"));
@@ -1467,22 +1461,46 @@ private:
     double PlacementFullCost() const { return _warmup + Duration() + 2; }
     double PlacementProbeCost() const { return 8 * (_warmup + 1 + 2) + 5; }
 
+    bool CheckPlacementDeadline(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline, Clock::time_point now)
+    {
+        if (_stage != Stage::Placement || _manualPlacement) return false;
+        if (now >= _placementDeadline)
+        {
+            Finish(world, console, pipeline, "placement budget exhausted");
+            return true;
+        }
+        if (!_multiGPU || _placementPhase >= 2 || now < _singleDeadline) return false;
+        if (_calibrating)
+        {
+            Finish(world, console, pipeline, "single-GPU budget exhausted during checkpoint capture");
+            return true;
+        }
+        WritePlacementWaits(pipeline);
+        WriteLeg("single-GPU budget exhausted");
+        WritePlacementTrialReport("single-GPU budget exhausted");
+        _placementSearch.EndPhase();
+        _placementPhase = 2;
+        BeginNextPlacementPhase(world, console, pipeline);
+        return true;
+    }
+
     void BeginNextPlacementPhase(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline)
     {
         const double probeAndFull = PlacementProbeCost() + PlacementFullCost();
         for (; _placementPhase < 4 && Clock::now() < _placementDeadline; ++_placementPhase)
         {
-            if (!_placementSearch.LowFirst() && !_placementSearch.HighFirst() && _placementPhase == 0 &&
-                Seconds(Clock::now(), _placementDeadline) < 2 * probeAndFull &&
-                _placementSearch.HasReference(false) && !_placementSearch.HasReference(true))
-                continue;
+            const bool local = _placementPhase < 2;
+            const auto deadline = local ? _singleDeadline : _placementDeadline;
+            if (Clock::now() >= deadline) continue;
             if (!_placementSearch.BeginPhase(_placementPhase)) continue;
+            if (_placementPhase == 2 || (_placementPhase == 3 && !_placementSearch.HasReference(false)))
+                _csv.Config("MultiGPUStartSeconds", Csv::Number(SecondsSince(_started)));
             unsigned phases = 1;
-            for (unsigned next = _placementPhase + 1; next < 4; ++next)
+            for (unsigned next = _placementPhase + 1; next < (local ? 2u : 4u); ++next)
                 phases += _placementSearch.NeedsPhase(next);
             const auto now = Clock::now();
-            const double budget = std::max(Seconds(now, _placementDeadline) / phases, probeAndFull);
-            _phaseDeadline = std::min(_placementDeadline,
+            const double budget = std::max(Seconds(now, deadline) / phases, probeAndFull);
+            _phaseDeadline = std::min(deadline,
                 now + std::chrono::ceil<Clock::duration>(std::chrono::duration<double>(budget)));
             NextPlacementTrial(world, console, pipeline, now);
             return;
@@ -2603,7 +2621,7 @@ private:
     RECT _placementMonitor{};
     LONG_PTR _placementWindowStyle = 0;
     bool _placementBorderless = false;
-    Clock::time_point _trialStarted, _placementDeadline, _phaseDeadline;
+    Clock::time_point _trialStarted, _placementDeadline, _singleDeadline, _phaseDeadline;
     std::array<std::function<void()>, 8> _placementPhysics;
     std::function<void()> _replayScene;
     size_t _startupBodies = 0;

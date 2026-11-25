@@ -460,6 +460,7 @@ void BistroInfoPanel::Draw(RenderModule& render, BistroRenderPipeline& pipeline,
                         if (ImGui::Button("Quick search", {-1,30})) benchmark.Launch(Action::Search);
                         if (ImGui::Button("Full sweep", {-1,30})) benchmark.Launch(Action::Exhaustive);
                         ImGui::TableNextColumn();
+                        ImGui::TextDisabled("Profile search   %g min", BistroBenchmark::PlacementBudgetSeconds.GetValue() / 60.f);
                         ProfileButtons(benchmark, Action::SingleGPU);
                         ImGui::EndTable();
                     }
@@ -472,7 +473,8 @@ void BistroInfoPanel::Draw(RenderModule& render, BistroRenderPipeline& pipeline,
                     ImGui::Text("Scene GPU   %s", _primary.c_str());
                     for (const auto& peer : _peers) ImGui::Text("Peer GPU    %s", peer.c_str());
                     if (_peers.empty()) ImGui::TextDisabled("No peer GPU available.");
-                    ImGui::TextDisabled("Search budget   %g min", BistroBenchmark::PlacementBudgetSeconds.GetValue() / 60.f);
+                    const float singleMinutes = BistroBenchmark::PlacementBudgetSeconds.GetValue() / 60.f;
+                    ImGui::TextDisabled("Profile search   %g min total, up to %g min on the scene GPU", 2 * singleMinutes, singleMinutes);
                     ImGui::BeginDisabled(!benchmark.CanStart() || _peers.empty());
                     ProfileButtons(benchmark, Action::MultiGPU);
                     ImGui::EndDisabled();
