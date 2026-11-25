@@ -42,17 +42,17 @@ void GDX12DeviceResources::Initialize(GDX12Device* device)
     {
         FrameConstants.push_back(std::make_unique<GDX12FrameConstants>(device));
 
-        FrameConstants[i]->ShadowViews->CreateSRV(SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
-        FrameConstants[i]->ShadowCacheUpdateFlags->CreateSRV(SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
-        FrameConstants[i]->LightsCache->CreateSRV(SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
-        FrameConstants[i]->ClusterLightMaskBuffer->CreateSRV(SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
-        FrameConstants[i]->MaterialCache->CreateSRV(SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
-        FrameConstants[i]->TransformCache->CreateSRV(SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
-        FrameConstants[i]->InstanceCache->CreateSRV(SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
+        FrameConstants[i]->ShadowViews->CreateSRV(SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(RendererResources_StartIndex));
+        FrameConstants[i]->ShadowCacheUpdateFlags->CreateSRV(SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(RendererResources_StartIndex));
+        FrameConstants[i]->LightsCache->CreateSRV(SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(RendererResources_StartIndex));
+        FrameConstants[i]->ClusterLightMaskBuffer->CreateSRV(SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(RendererResources_StartIndex));
+        FrameConstants[i]->MaterialCache->CreateSRV(SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(RendererResources_StartIndex));
+        FrameConstants[i]->TransformCache->CreateSRV(SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(RendererResources_StartIndex));
+        FrameConstants[i]->InstanceCache->CreateSRV(SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(RendererResources_StartIndex));
     }
 
     IndirectCommandsCache = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(device, 0, EBufferType::Upload, false);
-    IndirectCommandsCache->CreateSRV(SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
+    IndirectCommandsCache->CreateSRV(SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(RendererResources_StartIndex));
 }
 
 void GDX12DeviceResources::SetMeshDrawCommands(const std::vector<UINT>& instances, const GPUMesh* mesh)

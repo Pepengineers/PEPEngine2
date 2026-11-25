@@ -91,7 +91,7 @@ void GDX12IBLPrecomputePass::Execute(PassExecutionContext& context)
             auto* texture = prefiltered.GetTexture();
             auto desc = texture->GetDescription().UAVDesc;
             desc.Texture2DArray.MipSlice = mip;
-            const UINT index = view->HeapIndex == UINT_MAX ? heap->GetAvailableIndex(TextureResources_StartIndex) : view->HeapIndex;
+            const UINT index = view->HeapIndex == UINT_MAX ? heap->GetAvailableIndex(RendererResources_StartIndex) : view->HeapIndex;
             view->InitAsUAV(texture->GetResource()->D3DResource.Get(), nullptr, &desc, heap, index);
         }
         cmd->SetComputeUAV(0, view->GPUHandle);

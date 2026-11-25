@@ -50,18 +50,15 @@ UINT GDX12DescriptorHeap::GetNumDescriptors()
 
 UINT GDX12DescriptorHeap::GetAvailableIndex(UINT startIndex, UINT maxRange)
 {
-    UINT k = 0;
-    while (true)
-    {
-        if (startIndex + k > _numDescriptors) { OutputDebugStringA("ERROR: GetAvailableIndex is out of heap capacity\n"); }
-        if (_occupanceRegistry[startIndex + k] == false)
-        {
-            _occupanceRegistry[startIndex + k] = true;
-            return startIndex + k;
-        }
-        if ((maxRange != 0) && k > maxRange) { OutputDebugStringA("ERROR: GetAvailableIndex is out of specified range\n"); }
-        k++;
-    }
+    if (startIndex >= _numDescriptors || maxRange > _numDescriptors - startIndex)
+    { throw std::invalid_argument("ERROR: Requested descriptor range is outside the heap."); }
+    const auto begin = _occupanceRegistry.begin() + startIndex;
+    const auto end = maxRange ? begin + maxRange : _occupanceRegistry.end();
+    const auto first = std::find(begin, end, false);
+    if (first == end)
+    { throw std::runtime_error("ERROR: No free descriptors in the requested heap range."); }
+    *first = true;
+    return static_cast<UINT>(first - _occupanceRegistry.begin());
 }
 
 UINT GDX12DescriptorHeap::AllocateRange(UINT count, UINT startIndex)
@@ -76,7 +73,11 @@ UINT GDX12DescriptorHeap::AllocateRange(UINT count, UINT startIndex)
 }
 
 void GDX12DescriptorHeap::ReleaseRange(UINT firstIndex, UINT count)
-{ std::fill_n(_occupanceRegistry.begin() + firstIndex, count, false); }
+{
+    if (firstIndex > _numDescriptors || count > _numDescriptors - firstIndex)
+    { throw std::out_of_range("ERROR: Released descriptor range is outside the heap."); }
+    std::fill_n(_occupanceRegistry.begin() + firstIndex, count, false);
+}
 
 D3D12_CPU_DESCRIPTOR_HANDLE GDX12DescriptorHeap::GetCPUHandle(UINT index) const
 {

@@ -76,7 +76,7 @@ GDX12HBAOPlusPass::ContextResources& GDX12HBAOPlusPass::GetContext(PassExecution
         auto resources = std::make_unique<ContextResources>();
         resources->DeviceResources = context.GetDeviceResources();
         resources->ShaderDescriptorsStart = resources->DeviceResources->SRV_UAV_Heap->AllocateRange(
-            GFSDK_SSAO_NUM_DESCRIPTORS_CBV_SRV_UAV_HEAP_D3D12, TextureResources_StartIndex);
+            GFSDK_SSAO_NUM_DESCRIPTORS_CBV_SRV_UAV_HEAP_D3D12, RendererResources_StartIndex);
         resources->RTVDescriptorsStart = resources->DeviceResources->RTVHeap->AllocateRange(GFSDK_SSAO_NUM_DESCRIPTORS_RTV_HEAP_D3D12);
         GFSDK_SSAO_DescriptorHeaps_D3D12 heaps;
         heaps.CBV_SRV_UAV.pDescHeap = resources->DeviceResources->SRV_UAV_Heap->GetHeap().Get();

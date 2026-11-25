@@ -20,14 +20,16 @@ public:
     D3D12_DESCRIPTOR_HEAP_FLAGS GetFlags();
     UINT GetNumDescriptors();
     
-    // Returns index of the first non-taken slot in the heap, starting from given index
-    // maxRange == 0 means no range
+    // Returns the first free slot in [startIndex, startIndex + maxRange).
+    // maxRange == 0 searches to the end of the heap. Throws if no slot is available
+    // or the requested range is outside the heap.
     UINT GetAvailableIndex(UINT startIndex = 0, UINT maxRange = 0);
 
     // Reserves contiguous slots for APIs that write a descriptor range themselves.
     // The caller owns the range and must release it before this heap is destroyed.
     UINT AllocateRange(UINT count, UINT startIndex = 0);
     // Releases a previously reserved range after its GPU users have completed.
+    // Throws if the range is outside the heap.
     void ReleaseRange(UINT firstIndex, UINT count);
 
     D3D12_CPU_DESCRIPTOR_HANDLE GetCPUHandle(UINT index = 0) const;
@@ -61,20 +63,18 @@ enum GDX12SRVHeapIndexAllocation
 
     TLAS = 10,
 
-    //this one will be really difficult to count
-    ConstantsResources = 11,
-
-    TextureResources_StartIndex = 100,
-    TextureResources_RangeLength = 399,
-
     ShadowMaps_StartIndex = 500,
     ShadowMaps_RangeLength = 999,
 
     Texture2D_StartIndex = 1000,
     Texture2D_RangeLength = 99000,
 
-    TextureCube_StartIndex = 100000,
+    TextureCube_StartIndex = Texture2D_StartIndex + Texture2D_RangeLength,
     TextureCube_RangeLength = 5000,
+
+    // Frame data, FrameGraph resources and pass/SDK descriptors use the remaining
+    // heap after the bindless texture tables
+    RendererResources_StartIndex = TextureCube_StartIndex + TextureCube_RangeLength,
 };
 
 // Might need to add DSV and RTV heap allocators later

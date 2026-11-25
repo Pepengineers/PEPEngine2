@@ -78,7 +78,7 @@ void GDX12FFXCACAOPass::Initialize(PassInitContext& context)
     settings.fadeOutTo = fadeEnd * 0.01f;
     settings.blurPassCount = static_cast<UINT>(blurPasses);
     _resources = context.GetDeviceResources();
-    _descriptorsStart = _resources->SRV_UAV_Heap->AllocateRange(FFX_CACAO_D3D12_DESCRIPTOR_COUNT, TextureResources_StartIndex);
+    _descriptorsStart = _resources->SRV_UAV_Heap->AllocateRange(FFX_CACAO_D3D12_DESCRIPTOR_COUNT, RendererResources_StartIndex);
     _contextMemory.resize(FFX_CACAO_D3D12GetContextSize());
     auto* sdk = reinterpret_cast<FFX_CACAO_D3D12Context*>(_contextMemory.data());
     Check(FFX_CACAO_D3D12InitContext(sdk, context.GetDevice()->GetDevice().Get(),

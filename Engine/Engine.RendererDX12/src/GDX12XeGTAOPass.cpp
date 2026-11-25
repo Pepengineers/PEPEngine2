@@ -102,8 +102,8 @@ void GDX12XeGTAOPass::CreateWorkingTextures(PassInitContext& context)
         desc.Format = format;
         desc.CreateUAV = true;
         desc.SRV_UAV_Heap = heap;
-        desc.SRVHeapIndex = heap->GetAvailableIndex(TextureResources_StartIndex);
-        desc.UAVHeapIndex = heap->GetAvailableIndex(TextureResources_StartIndex);
+        desc.SRVHeapIndex = heap->GetAvailableIndex(RendererResources_StartIndex);
+        desc.UAVHeapIndex = heap->GetAvailableIndex(RendererResources_StartIndex);
         texture = std::make_unique<GDX12Texture>();
         texture->Initialize(desc);
     };
@@ -114,7 +114,7 @@ void GDX12XeGTAOPass::CreateWorkingTextures(PassInitContext& context)
     for (UINT mip = 1; mip < XE_GTAO_DEPTH_MIP_LEVELS; ++mip)
     {
         auto& descriptor = _depthMipUAVs[mip - 1];
-        const auto index = descriptor.DescType == DESC_TYPE_NONE ? heap->GetAvailableIndex(TextureResources_StartIndex) : descriptor.HeapIndex;
+        const auto index = descriptor.DescType == DESC_TYPE_NONE ? heap->GetAvailableIndex(RendererResources_StartIndex) : descriptor.HeapIndex;
         D3D12_UNORDERED_ACCESS_VIEW_DESC view = {};
         view.Format = DXGI_FORMAT_R32_FLOAT;
         view.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;

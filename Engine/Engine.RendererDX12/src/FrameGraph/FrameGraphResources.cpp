@@ -70,7 +70,7 @@ namespace
         if (desc.CreateSRV || desc.CreateUAV) { desc.SRV_UAV_Heap = owner->SRV_UAV_Heap.get(); }
         if (desc.CreateSRV)
         {
-            desc.SRVHeapIndex = owner->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
+            desc.SRVHeapIndex = owner->SRV_UAV_Heap->GetAvailableIndex(RendererResources_StartIndex);
             desc.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
             desc.SRVDesc.Format = description.IsDepth() ? DXGI_FORMAT_R32_FLOAT : description.Format;
             if (description.Type == ResourceType::TextureCube)
@@ -108,7 +108,7 @@ namespace
         }
         if (desc.CreateUAV)
         {
-            desc.UAVHeapIndex = owner->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
+            desc.UAVHeapIndex = owner->SRV_UAV_Heap->GetAvailableIndex(RendererResources_StartIndex);
             desc.UAVDesc.Format = description.Format;
             desc.UAVDesc.ViewDimension = description.ArraySize == 1 ? D3D12_UAV_DIMENSION_TEXTURE2D : D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
             if (description.ArraySize > 1) { desc.UAVDesc.Texture2DArray.ArraySize = description.ArraySize; }
@@ -158,7 +158,7 @@ namespace
             desc.Buffer.Flags = raw ? D3D12_BUFFER_SRV_FLAG_RAW : D3D12_BUFFER_SRV_FLAG_NONE;
             buffer.SRV = std::make_unique<GDX12Descriptor>();
             buffer.SRV->InitAsSRV(buffer.Resource.D3DResource.Get(), &desc, owner->SRV_UAV_Heap.get(),
-                owner->SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
+                owner->SRV_UAV_Heap->GetAvailableIndex(RendererResources_StartIndex));
         }
         if (HasUsage(usages, ResourceUsage::UnorderedAccess))
         {
@@ -170,7 +170,7 @@ namespace
             desc.Buffer.Flags = raw ? D3D12_BUFFER_UAV_FLAG_RAW : D3D12_BUFFER_UAV_FLAG_NONE;
             buffer.UAV = std::make_unique<GDX12Descriptor>();
             buffer.UAV->InitAsUAV(buffer.Resource.D3DResource.Get(), nullptr, &desc, owner->SRV_UAV_Heap.get(),
-                owner->SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
+                owner->SRV_UAV_Heap->GetAvailableIndex(RendererResources_StartIndex));
         }
     }
 

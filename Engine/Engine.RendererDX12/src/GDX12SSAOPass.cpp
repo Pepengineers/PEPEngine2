@@ -82,8 +82,8 @@ void GDX12SSAOPass::CreateBlurTexture(PassInitContext& context)
         desc.Format = DXGI_FORMAT_R32_FLOAT;
         desc.CreateUAV = true;
         desc.SRV_UAV_Heap = resources->SRV_UAV_Heap.get();
-        desc.SRVHeapIndex = resources->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex);
-        desc.UAVHeapIndex = resources->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex);
+        desc.SRVHeapIndex = resources->SRV_UAV_Heap->GetAvailableIndex(RendererResources_StartIndex);
+        desc.UAVHeapIndex = resources->SRV_UAV_Heap->GetAvailableIndex(RendererResources_StartIndex);
         _blurred = std::make_unique<GDX12Texture>();
         _blurred->Initialize(desc);
     }

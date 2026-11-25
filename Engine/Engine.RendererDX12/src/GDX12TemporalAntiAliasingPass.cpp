@@ -79,11 +79,11 @@ void GDX12TemporalAntiAliasingPass::CreateHistory(PassInitContext& context)
         desc.SRV_UAV_Heap = resources->SRV_UAV_Heap.get();
         desc.RTVHeap = resources->RTVHeap.get();
         desc.CreateRTV = true;
-        desc.SRVHeapIndex = resources->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex);
+        desc.SRVHeapIndex = resources->SRV_UAV_Heap->GetAvailableIndex(RendererResources_StartIndex);
         desc.RTVHeapIndex = resources->RTVHeap->GetAvailableIndex();
         _history = std::make_unique<GDX12Texture>();
         _history->Initialize(desc);
-        desc.SRVHeapIndex = resources->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex);
+        desc.SRVHeapIndex = resources->SRV_UAV_Heap->GetAvailableIndex(RendererResources_StartIndex);
         desc.RTVHeapIndex = resources->RTVHeap->GetAvailableIndex();
         _nextHistory = std::make_unique<GDX12Texture>();
         _nextHistory->Initialize(desc);
