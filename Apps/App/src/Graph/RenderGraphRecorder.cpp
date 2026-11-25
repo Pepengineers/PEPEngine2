@@ -1,6 +1,5 @@
 #include "RenderGraphRecorder.h"
 #include "../../../../External/External.Libraries/enkiTS/TaskScheduler.h"
-#include <chrono>
 #include <condition_variable>
 #include <mutex>
 #include <stdexcept>
@@ -27,9 +26,15 @@ struct Recorder::Impl {
             }
         }
         void Complete() {
-            Done.store(true,std::memory_order_release);
-            if(Parent) Parent->ChildDone();
-            if(!Parent) Owner.Changed.notify_all();
+            if (Parent) {
+                Parent->ChildDone();
+                return;
+            }
+            {
+                std::lock_guard<std::mutex> lock(Owner.Mutex);
+                Done.store(true, std::memory_order_release);
+            }
+            Owner.Changed.notify_one(); // Only the owner waits for packet recording.
         }
     };
     JobSystem& Jobs; const std::atomic<bool>* Cancellation;
@@ -92,7 +97,7 @@ void Recorder::Wait(size_t group) {
         if(_impl->Jobs.GetThreadCount()==1) _impl->Jobs.WaitForTask();
         else {
             std::unique_lock<std::mutex> lock(_impl->Mutex);
-            _impl->Changed.wait_for(lock,std::chrono::milliseconds(1),[&] { return root->Done.load(std::memory_order_acquire); });
+            _impl->Changed.wait(lock,[&] { return root->Done.load(std::memory_order_acquire); });
         }
     }
     _impl->Check();

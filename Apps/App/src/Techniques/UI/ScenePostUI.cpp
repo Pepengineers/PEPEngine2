@@ -29,14 +29,6 @@ AutoConsoleVariable<int> HudAdapter(L"App.UI.GameHUD.Adapter", -1,
 
 constexpr char HudAtlasName[] = "BistroDemoHUD";
 
-Id HudPacket(const Schedule& schedule, Id operation)
-{
-	const auto it = std::find_if(schedule.Packets.begin(), schedule.Packets.end(),
-	    [operation](const auto& packet) { return packet.Operation == operation; });
-	if (it == schedule.Packets.end()) throw std::logic_error("Missing game HUD packet");
-	return Id(it - schedule.Packets.begin());
-}
-
 ComPtr<ID3D12PipelineState> CreateHealthBarPipeline(GDX12Device& device, GDX12RootSignature& root)
 {
 	auto& compiler = GDX12ShaderCompiler::GetInstance();
@@ -480,12 +472,12 @@ void ScenePostUI::SubmitHud(const Schedule& primary, std::vector<PacketWait>& wa
 	auto& owner = *screen.HudOwner;
 	auto& frame = owner.Frames.at(slot);
 	const auto schedule = Compile(frame.Plan);
-	const Id raster = HudPacket(schedule, frame.Raster);
+	const Id raster = schedule.PacketFor(frame.Raster);
 	const bool displayOnScene = screen.HudImport != Invalid;
 	if (displayOnScene)
 	{
-		screen.HudImport = HudPacket(primary, screen.HudImport);
-		screen.HudComposite = HudPacket(primary, screen.HudComposite);
+		screen.HudImport = primary.PacketFor(screen.HudImport);
+		screen.HudComposite = primary.PacketFor(screen.HudComposite);
 	}
 	owner.GPU.Reserve(schedule);
 	owner.GPU.Execute(schedule, frame.Bindings, [&](Id op, UINT, auto* cmd) {
@@ -1223,10 +1215,10 @@ void ScenePostUI::AddPostExchange(const Schedule& primary, std::vector<Executor:
 	auto& frame = owner.Frames.at(slot);
 	auto schedule = Compile(frame.Plan);
 	owner.GPU.Reserve(schedule);
-	const Id sceneImport = HudPacket(schedule, frame.SceneImport);
-	const Id hudImport = frame.HudImport == Invalid ? Invalid : HudPacket(schedule, frame.HudImport);
-	const Id inspectorImport = frame.InspectorImport == Invalid ? Invalid : HudPacket(schedule, frame.InspectorImport);
-	exchanges.push_back({HudPacket(primary, frame.Export), frame.Import == Invalid ? Invalid : HudPacket(primary, frame.Import),
+	const Id sceneImport = schedule.PacketFor(frame.SceneImport);
+	const Id hudImport = schedule.OptionalPacketFor(frame.HudImport);
+	const Id inspectorImport = schedule.OptionalPacketFor(frame.InspectorImport);
+	exchanges.push_back({primary.PacketFor(frame.Export), primary.OptionalPacketFor(frame.Import),
 	    [this, &owner, &frame, schedule = std::move(schedule), slot, sceneImport, hudImport, inspectorImport](CompletionToken ready)
 	    {
 		    auto& stack = *owner.Stack;

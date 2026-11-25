@@ -60,6 +60,32 @@ bool BarrierStateAllowed(Queue queue, State state)
 	                      D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE;
 	return queue == Queue::Direct || (state & ~(queue == Queue::Copy ? copy : compute)) == 0;
 }
+
+// A buffer keeps its previous state while packets share one native ExecuteCommandLists call.
+void RecordBarriers(ID3D12GraphicsCommandList* commands, const std::vector<Barrier>& barriers,
+                    const std::vector<ID3D12Resource*>& resources, Id firstInExecution,
+                    const char* packetName, const char* phase)
+{
+	if (barriers.empty()) return;
+	PIXScopedEvent(commands, PIX_COLOR(124, 143, 166), "%s / %s (%u)", packetName, phase, static_cast<UINT>(barriers.size()));
+	std::vector<D3D12_RESOURCE_BARRIER> native;
+	native.reserve(barriers.size());
+	for (auto barrier : barriers)
+	{
+		if (barrier.PreviousBufferUse != Invalid && barrier.PreviousBufferUse >= firstInExecution)
+		{
+			barrier.Before = barrier.BeforeWithoutDecay;
+			barrier.Uav = barrier.Before == barrier.After && barrier.OrderUavWithoutDecay;
+			if (barrier.Before == barrier.After && !barrier.Uav) continue;
+		}
+		auto* resource = resources.at(barrier.Resource);
+		native.push_back(barrier.Uav ? CD3DX12_RESOURCE_BARRIER::UAV(resource)
+		                            : CD3DX12_RESOURCE_BARRIER::Transition(resource,
+		                                  static_cast<D3D12_RESOURCE_STATES>(barrier.Before),
+		                                  static_cast<D3D12_RESOURCE_STATES>(barrier.After)));
+	}
+	if (!native.empty()) commands->ResourceBarrier(static_cast<UINT>(native.size()), native.data());
+}
 } // namespace
 Executor::Executor(std::shared_ptr<QueueSubmission> submissions, Id device, uint32_t slots, unsigned threads)
     : _submissions(std::move(submissions)), _deviceId(device),
@@ -336,6 +362,45 @@ void Executor::Reserve(const Schedule& schedule)
 		}
 	}
 }
+
+void Executor::List::RecordPacket(const Packet& packet, uint32_t listIndex, Id firstInExecution,
+                                  const std::vector<ID3D12Resource*>& resources, const Record& record,
+                                  const QueueSubmission::BenchmarkSlot::Timing* timing, UINT query)
+{
+	auto* commands = Commands.Get();
+	ThrowIfFailed(Allocator->Reset());
+	ThrowIfFailed(commands->Reset(Allocator.Get(), nullptr));
+	try
+	{
+		if (listIndex == 0)
+		{
+			if (timing) commands->EndQuery(timing->Heap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, query);
+			RecordBarriers(commands, packet.Before, resources, firstInExecution, packet.Name.c_str(), "before barriers");
+		}
+		if (packet.Operation != Invalid)
+		{
+			PIXScopedEvent(commands, PIX_COLOR(57, 158, 117), "%s", packet.Name.c_str());
+			record(packet.Operation, listIndex, commands);
+		}
+		if (listIndex + 1 == packet.Lists)
+		{
+			RecordBarriers(commands, packet.After, resources, firstInExecution, packet.Name.c_str(), "after barriers");
+			if (timing)
+			{
+				commands->EndQuery(timing->Heap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, query + 1);
+				commands->ResolveQueryData(timing->Heap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, query,
+				                           2, timing->Readback.Get(), uint64_t(query) * sizeof(uint64_t));
+			}
+		}
+	}
+	catch (...)
+	{
+		commands->Close();
+		throw;
+	}
+	ThrowIfFailed(commands->Close());
+}
+
 uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Resource*>& resources,
                            const Record& record, GDX12CommandList* prefix, GDX12CommandList* suffix,
                            const std::atomic<bool>* cancellation, const std::vector<PacketWait>& waits,
@@ -490,16 +555,6 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 			throw std::length_error("fixed command list capacity exceeded");
 		}
 	}
-	// Freeze list/allocator identity before any recording callback can run.
-	std::vector<List*> lists;
-	lists.reserve(counts[0] + counts[1] + counts[2]);
-	for (size_t q = 0; q < counts.size(); ++q)
-	{
-		for (size_t i = 0; i < counts[q]; ++i)
-		{
-			lists.push_back(&slot.Lists[q][i]);
-		}
-	}
 	// Keep fence publication boundaries independent from native ExecuteCommandLists calls.
 	std::vector<std::vector<ID3D12CommandList*>> executions;
 	std::vector<size_t> executionForPacket;
@@ -508,8 +563,7 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 	executionForPacket.reserve(schedule.Packets.size());
 	groups.reserve(schedule.Packets.size());
 	std::vector<std::vector<std::function<void()>>> ownerRecords(schedule.Packets.size());
-	std::vector<uint8_t> closed(lists.size(), 1);
-	std::array<size_t, 3> offsets{0, counts[0], counts[0] + counts[1]}, used{};
+	std::array<size_t, 3> used{};
 	QueueSubmission::BenchmarkSlot* capture = nullptr;
 	std::unique_lock<std::mutex> captureLock;
 	if (const auto epoch = _submissions->BenchmarkEpoch())
@@ -551,78 +605,15 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 		const UINT query = std::exchange(queries[q], queries[q] + 2);
 		for (uint32_t j = 0; j < p.Lists; ++j)
 		{
-			const auto index = offsets[q] + used[q]++;
-			auto* cmd = lists[index]->Commands.Get();
-			if (cmd->GetType() != ListType(p.Target))
-			{
+			// Reserve froze this slot's allocator/list storage before any callbacks were launched.
+			auto* list = &slot.Lists[q][used[q]++];
+			if (list->Commands->GetType() != ListType(p.Target))
 				throw std::logic_error("packet/list queue mismatch");
-			}
-			executions.back().push_back(cmd);
-			RecordingGroup leaf{{},
-			                    [&, i, j, cmd, index, timing, query, firstInExecution]
-			                    {
-				                    const auto& packet = schedule.Packets[i];
-				                    try
-				                    {
-					                    // Begin retired this slot; each task exclusively owns its allocator/list pair.
-					                    ThrowIfFailed(lists[index]->Allocator->Reset());
-					                    ThrowIfFailed(cmd->Reset(lists[index]->Allocator.Get(), nullptr));
-					                    closed[index] = 0;
-					                    if (timing && j == 0)
-						                    cmd->EndQuery(timing->Heap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, query);
-					                    const auto barriers = [&](const std::vector<Barrier>& bs, const char* phase)
-					                    {
-						                    PIXScopedEvent(cmd, PIX_COLOR(124, 143, 166), "%s / %s (%u)",
-						                                   packet.Name.c_str(), phase, static_cast<UINT>(bs.size()));
-						                    std::vector<D3D12_RESOURCE_BARRIER> native;
-						                    native.reserve(bs.size());
-						                    for (auto b : bs)
-						                    {
-							                    if (b.PreviousBufferUse != Invalid && b.PreviousBufferUse >= firstInExecution)
-							                    {
-								                    b.Before = b.BeforeWithoutDecay;
-								                    b.Uav = b.Before == b.After && b.OrderUavWithoutDecay;
-								                    if (b.Before == b.After && !b.Uav) continue;
-							                    }
-							                    native.push_back(
-							                        b.Uav ? CD3DX12_RESOURCE_BARRIER::UAV(resources.at(b.Resource))
-							                              : CD3DX12_RESOURCE_BARRIER::Transition(
-							                                    resources.at(b.Resource),
-							                                    static_cast<D3D12_RESOURCE_STATES>(b.Before),
-							                                    static_cast<D3D12_RESOURCE_STATES>(b.After)));
-						                    }
-						                    if (!native.empty())
-							                    cmd->ResourceBarrier(static_cast<UINT>(native.size()), native.data());
-					                    };
-					                    if (j == 0 && !packet.Before.empty())
-					                        barriers(packet.Before, "before barriers");
-					                    if (packet.Operation != Invalid)
-					                    {
-					                        PIXScopedEvent(cmd, PIX_COLOR(57, 158, 117), "%s", packet.Name.c_str());
-					                        record(packet.Operation, j, cmd);
-					                    }
-					                    if (j + 1 == packet.Lists && !packet.After.empty())
-					                        barriers(packet.After, "after barriers");
-					                    if (timing && j + 1 == packet.Lists)
-					                    {
-						                    cmd->EndQuery(timing->Heap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, query + 1);
-						                    cmd->ResolveQueryData(timing->Heap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, query,
-						                        2, timing->Readback.Get(), uint64_t(query) * sizeof(uint64_t));
-					                    }
-					                    const auto closeResult = cmd->Close();
-					                    closed[index] = 1;
-					                    ThrowIfFailed(closeResult);
-				                    }
-				                    catch (...)
-				                    {
-					                    if (!closed[index])
-					                    {
-						                    cmd->Close();
-						                    closed[index] = 1;
-					                    }
-					                    throw;
-				                    }
-			                    }};
+			executions.back().push_back(list->Commands.Get());
+			RecordingGroup leaf{{}, [&, i, j, list, timing, query, firstInExecution]
+			{
+				list->RecordPacket(schedule.Packets[i], j, firstInExecution, resources, record, timing, query);
+			}};
 			if (p.OwnerRecording)
 			{
 				ownerRecords[i].push_back(std::move(leaf.Continue));
@@ -754,13 +745,6 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 		if (submitted)
 		{
 			_aborted = true;
-		}
-		for (size_t i = 0; i < lists.size(); ++i)
-		{
-			if (!closed[i])
-			{
-				lists[i]->Commands->Close();
-			}
 		}
 		throw;
 	}

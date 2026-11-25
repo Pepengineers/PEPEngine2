@@ -507,15 +507,8 @@ std::vector<PacketWait> CloudPictureTexture::Waits(const Schedule& schedule)
 {
 	auto& p = *_impl;
 	if (p.ImportOperation == Invalid) return {};
-	for (Id id = 0; id < schedule.Packets.size(); ++id)
-	{
-		if (schedule.Packets[id].Operation == p.ImportOperation)
-		{
-			p.ImportPacket = id;
-			return {{id, p.Remote->Slots.at(p.Remote->Pinned).Export}};
-		}
-	}
-	throw std::logic_error("CloudPicture import missing from the primary schedule");
+	p.ImportPacket = schedule.PacketFor(p.ImportOperation);
+	return {{p.ImportPacket, p.Remote->Slots.at(p.Remote->Pinned).Export}};
 }
 
 bool CloudPictureTexture::IsRemote() const { return bool(_impl->Remote); }

@@ -1226,19 +1226,12 @@ void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction, 
 void SceneParticles::AddExchanges(const Schedule& schedule, std::vector<PacketWait>& waits,
                                   std::vector<Executor::PacketExchange>& exchanges)
 {
-	const auto findPacket = [&](Id operation) {
-		if (operation == Invalid) return Invalid;
-		const auto it = std::find_if(schedule.Packets.begin(), schedule.Packets.end(),
-		    [operation](const auto& packet) { return packet.Operation == operation; });
-		if (it == schedule.Packets.end()) throw std::logic_error("Particle transfer packet is missing");
-		return Id(it - schedule.Packets.begin());
-	};
 	for (auto& lane : _remote)
 	{
 		if (!lane.Solver) continue;
 		auto* remote = lane.Solver.get();
-		lane.ImportPacket = findPacket(lane.Import);
-		const auto producerPacket = findPacket(lane.Export);
+		lane.ImportPacket = schedule.OptionalPacketFor(lane.Import);
+		const auto producerPacket = schedule.OptionalPacketFor(lane.Export);
 		const auto waitPacket = remote->WaitForSelected ? lane.ImportPacket : Invalid;
 		const bool independent = remote->Mode == 2;
 		if (producerPacket != Invalid)

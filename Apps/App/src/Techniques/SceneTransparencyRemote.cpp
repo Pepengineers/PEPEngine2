@@ -72,12 +72,6 @@ std::pair<bool, bool> InspectTransparentMeshes(const GDX12DeviceResources& resou
 
 AutoConsoleVariable<int> WboitAdapter(L"Render.WBOIT.Adapter", -1, L"DXGI adapter for exact Bistro WBOIT accumulation; -1 uses GPU0.",
                                       EConsoleVariableFlags::Default, [](int index) { return index >= -1; });
-Id PacketFor(const Schedule& plan, Id operation)
-{
-	auto it = std::find_if(plan.Packets.begin(), plan.Packets.end(), [=](const auto& p){ return p.Operation == operation; });
-	if (it == plan.Packets.end()) throw std::logic_error("WBOIT packet is missing");
-	return Id(it - plan.Packets.begin());
-}
 } // namespace
 
 struct SceneTransparency::Shared
@@ -295,13 +289,13 @@ void SceneTransparency::AddExchange(const Schedule& primary, std::vector<Executo
 	if (!_remote || !_remoteWork) return;
 	auto& remote = *_remote;
 	auto schedule = Compile(remote.Plan);
-	const Id input = _remoteDepth ? PacketFor(schedule, 0) : Invalid;
-	const Id resolve = _remoteDraw ? PacketFor(schedule, remote.OwnerResolve) : Invalid;
-	const Id mesh = _remoteDraw ? PacketFor(schedule, remote.Mesh) : Invalid;
+	const Id input = _remoteDepth ? schedule.PacketFor(0) : Invalid;
+	const Id resolve = _remoteDraw ? schedule.PacketFor(remote.OwnerResolve) : Invalid;
+	const Id mesh = _remoteDraw ? schedule.PacketFor(remote.Mesh) : Invalid;
 	if (_remoteDraw)
 	{
-		remote.Apply = PacketFor(primary, remote.Apply);
-		remote.Import = PacketFor(primary, remote.Import);
+		remote.Apply = primary.PacketFor(remote.Apply);
+		remote.Import = primary.PacketFor(remote.Import);
 	}
 	remote.GPU.Reserve(schedule);
 	auto submit = [&remote, schedule = std::move(schedule), input, resolve, mesh](CompletionToken inputs)
@@ -319,7 +313,7 @@ void SceneTransparency::AddExchange(const Schedule& primary, std::vector<Executo
 	if (!_remoteDepth)
 		submit({});
 	else
-		exchanges.push_back({PacketFor(primary, remote.DepthExport), remote.Import, std::move(submit)});
+		exchanges.push_back({primary.PacketFor(remote.DepthExport), remote.Import, std::move(submit)});
 }
 void SceneTransparency::Submitted(const std::vector<CompletionToken>& completions)
 {

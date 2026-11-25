@@ -790,23 +790,16 @@ void SceneReflections::AppendRemote(Graph& primary, std::vector<ID3D12Resource*>
 void SceneReflections::AddExchanges(const Schedule& primary, std::vector<PacketWait>&,
                                    std::vector<Executor::PacketExchange>& exchanges)
 {
-    const auto packetFor = [](const Schedule& schedule, Id operation) {
-        if (operation == Invalid) return Invalid;
-        const auto packet = std::find_if(schedule.Packets.begin(), schedule.Packets.end(),
-                                         [=](const Packet& value) { return value.Operation == operation; });
-        if (packet == schedule.Packets.end()) throw std::logic_error("Missing reflection probe graph packet");
-        return Id(packet - schedule.Packets.begin());
-    };
     for (auto& [id, entry] : _remotes)
     {
         auto& remote = *entry;
         if (!remote.WorkPlanned) continue;
-        const Id dispatch = packetFor(primary, remote.PrimaryExport);
-        const Id firstImport = remote.PrimaryImports.empty() ? Invalid : packetFor(primary, remote.PrimaryImports.front());
+        const Id dispatch = primary.PacketFor(remote.PrimaryExport);
+        const Id firstImport = remote.PrimaryImports.empty() ? Invalid : primary.PacketFor(remote.PrimaryImports.front());
         for (auto& [index, generation] : remote.Probes)
-            generation.ImportOperation = packetFor(primary, generation.ImportOperation);
+            generation.ImportOperation = primary.OptionalPacketFor(generation.ImportOperation);
         auto schedule = Compile(remote.Plan);
-        const Id inputImport = packetFor(schedule, remote.RemoteImport);
+        const Id inputImport = schedule.OptionalPacketFor(remote.RemoteImport);
         remote.GPU.Begin(remote.Resources.CurrFrameConstantsIndex);
         remote.GPU.Reserve(schedule);
         exchanges.push_back({dispatch, firstImport, [&remote, schedule = std::move(schedule), inputImport](CompletionToken source) {

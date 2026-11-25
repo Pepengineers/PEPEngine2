@@ -1133,14 +1133,10 @@ GDX12Texture* SceneAO::AppendVisibility(Plan& plan, const PreparedInputs& inputs
 std::optional<Executor::PacketExchange> SceneAO::Exchange(const Schedule& schedule, History& history)
 {
     if (!_offload) return {};
-    Id exportPacket = Invalid;
-    for (Id i = 0; i < schedule.Packets.size(); ++i)
-    {
-        if (schedule.Packets[i].Operation == _depthExport) exportPacket = i;
-        if (schedule.Packets[i].Operation == _visibilityImport) _importPacket = i;
-        if (_reproject != Invalid && schedule.Packets[i].Operation == _reproject) _reprojectPacket = i;
-    }
-    if (_importPacket == Invalid || exportPacket >= _importPacket)
+    const Id exportPacket = schedule.PacketFor(_depthExport);
+    _importPacket = schedule.PacketFor(_visibilityImport);
+    _reprojectPacket = schedule.OptionalPacketFor(_reproject);
+    if (exportPacket >= _importPacket)
         throw std::logic_error("AO cross-adapter packets missing or out of order");
     return Executor::PacketExchange{exportPacket, _importPacket,
         [this, &history](CompletionToken depthReady) {

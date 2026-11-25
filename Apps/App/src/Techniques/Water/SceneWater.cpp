@@ -649,12 +649,9 @@ void SceneWater::AppendDraw(Graph& graph, std::vector<ID3D12Resource*>& bindings
 void SceneWater::AddWaits(const Schedule& schedule, std::vector<PacketWait>& waits)
 {
 	if (_import == Invalid) return;
-	for (Id i = 0; i < schedule.Packets.size(); ++i)
-	{
-		if (schedule.Packets[i].Operation == _import) _importPacket = i;
-		if (schedule.Packets[i].Operation == _draw) _drawPacket = i;
-	}
-	if (_importPacket == Invalid || _drawPacket <= _importPacket || _drawPacket >= schedule.Packets.size())
+	_importPacket = schedule.PacketFor(_import);
+	_drawPacket = schedule.PacketFor(_draw);
+	if (_drawPacket <= _importPacket)
 		throw std::logic_error("Water import must precede its draw");
 	if (_remote->WaitForSelected) waits.push_back({_importPacket, _remote->Selected->Ready});
 }

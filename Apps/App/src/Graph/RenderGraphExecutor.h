@@ -53,6 +53,9 @@ class Executor
 	{
 		ComPtr<ID3D12CommandAllocator> Allocator;
 		ComPtr<ID3D12GraphicsCommandList> Commands;
+		void RecordPacket(const Packet& packet, uint32_t listIndex, Id firstInExecution,
+		                  const std::vector<ID3D12Resource*>& resources, const Record& record,
+		                  const QueueSubmission::BenchmarkSlot::Timing* timing, UINT query);
 	};
 	struct Slot
 	{
