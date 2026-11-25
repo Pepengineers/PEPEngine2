@@ -21,6 +21,10 @@ public:
 	// resetting the native COPY list caused NVIDIA import failures in mixed buffer/texture transfers.
 	void Reset();
 
+	// Forgets cached bindings.
+	// Does not reset the allocator or record GPU commands.
+	void InvalidateCachedState();
+
 	UINT64 FenceValue;
 
 	// State Management

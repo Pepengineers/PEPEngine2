@@ -5,6 +5,7 @@
   <Import Project="$(MSBuildThisFileDirectory)PEPEngine.External.XeSS.props" Condition="Exists('$(MSBuildThisFileDirectory)PEPEngine.External.XeSS.props')" />
   <Import Project="$(MSBuildThisFileDirectory)PEPEngine.External.HBAOPlus.props" />
   <Import Project="$(MSBuildThisFileDirectory)PEPEngine.External.XeGTAO.props" />
+  <Import Project="$(MSBuildThisFileDirectory)PEPEngine.External.CACAO.props" />
   <ItemDefinitionGroup>
     <ClCompile>
       <AdditionalIncludeDirectories>$(PEPRepoRoot)Engine\Engine.RendererDX12\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>

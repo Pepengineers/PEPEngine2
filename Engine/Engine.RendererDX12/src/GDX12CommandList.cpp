@@ -63,7 +63,11 @@ void GDX12CommandList::Reset()
 	}
 	else { ThrowIfFailed(_commandList->Reset(_commandAllocator.Get(), nullptr)); }
 	FenceValue = (std::numeric_limits<UINT64>::max)();
+	InvalidateCachedState();
+}
 
+void GDX12CommandList::InvalidateCachedState()
+{
 	_currentRootSignature = nullptr;
 	_currentPSO = nullptr;
 	_currentTopology = D3D_PRIMITIVE_TOPOLOGY_UNDEFINED;

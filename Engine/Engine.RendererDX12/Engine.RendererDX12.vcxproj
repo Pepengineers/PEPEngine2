@@ -41,6 +41,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12SSAOPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12HBAOPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12XeGTAOPass.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12FFXCACAOPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12HBAOPlusPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12SkyBoxPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12TemporalAntiAliasingPass.h" />
@@ -104,6 +105,13 @@
     <ClCompile Include="src\GDX12SSAOPass.cpp" />
     <ClCompile Include="src\GDX12HBAOPass.cpp" />
     <ClCompile Include="src\GDX12XeGTAOPass.cpp" />
+    <ClCompile Include="src\GDX12FFXCACAOPass.cpp" />
+    <ClCompile Include="..\..\External\External.Libraries\cacao\src\ffx_cacao.cpp" />
+    <ClCompile Include="..\..\External\External.Libraries\cacao\src\ffx_cacao_impl.cpp">
+      <PreprocessorDefinitions>FFX_CACAO_ENABLE_D3D12;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(IntDir)CacaoShaders;$(PEPExternalDirectX-HeadersInclude)\directx-headers\directx;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ConformanceMode>false</ConformanceMode>
+    </ClCompile>
     <ClCompile Include="src\GDX12HBAOPlusPass.cpp" />
     <ClCompile Include="src\GDX12SkyBoxPass.cpp" />
     <ClCompile Include="src\GDX12TemporalAntiAliasingPass.cpp" />
@@ -275,6 +283,12 @@
     </Link>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <Target Name="BuildCacaoShaders" BeforeTargets="ClCompile" Condition="'$(Platform)'=='x64'"
+          Inputs="$(PEPRepoRoot)MSBuild\BuildCacaoShaders.ps1;$(PEPExternalRoot)cacao\src\ffx_cacao.hlsl;$(PEPExternalRoot)cacao\src\ffx_cacao_bindings.hlsl;$(PEPExternalRoot)cacao\src\ffx_cacao_defines.h;$(PEPExternalRoot)cacao\src\build_shaders_dxil.bat"
+          Outputs="$(IntDir)CacaoShaders\complete.stamp">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(PEPRepoRoot)MSBuild\BuildCacaoShaders.ps1&quot; -Dxc &quot;$(WindowsSDK_ExecutablePath_x64)&quot; -Source &quot;$(PEPExternalRoot)cacao\src&quot; -Output &quot;$(IntDir)CacaoShaders&quot;" />
+    <Touch Files="$(IntDir)CacaoShaders\complete.stamp" AlwaysCreate="true" />
+  </Target>
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
 </Project>

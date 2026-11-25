@@ -134,6 +134,9 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12XeGTAOPass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12FFXCACAOPass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12HBAOPlusPass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -233,6 +236,15 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\GDX12XeGTAOPass.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\GDX12FFXCACAOPass.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\External\External.Libraries\cacao\src\ffx_cacao.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\External\External.Libraries\cacao\src\ffx_cacao_impl.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\GDX12HBAOPlusPass.cpp">
