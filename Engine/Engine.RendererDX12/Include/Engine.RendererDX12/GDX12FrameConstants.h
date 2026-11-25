@@ -1,5 +1,4 @@
 #pragma once
-#include "Engine.RendererDX12/GDX12InstanceBatcher.h"
 
 #include "Engine.RendererDX12/D3DHelpers.h"
 
@@ -11,17 +10,6 @@
 
 class GDX12Device;
 class GDX12CommandList;
-
-// Used for collecting & using GPU culling results
-// This structured is used by any object that uses culling(cameras, shadowmaps)
-struct GDX12VisibilityBuffers
-{
-    std::unique_ptr<GDX12UploadBuffer<GDX12IndirectDrawArgs>> VisibleOpaqueCommandsCache;
-    std::unique_ptr<GDX12UploadBuffer<UINT>> OpaqueDrawCounter;
-    std::unique_ptr<GDX12UploadBuffer<GDX12IndirectDrawArgs>> VisibleTransparentCommandsCache;
-    std::unique_ptr<GDX12UploadBuffer<UINT>> TransparentDrawCounter;
-    std::unique_ptr<GDX12InstanceBatcher> OpaqueBatches, TransparentBatches;
-};
 
 class GDX12FrameConstants
 {
@@ -58,7 +46,6 @@ public:
     bool ShadowTemplatesDirty = false;
     std::unique_ptr<GDX12UploadBuffer<GDX12LightConstants>> LightCB;
     std::unique_ptr<GDX12UploadBuffer<GDX12CameraConstants>> CameraCB;
-    std::vector<GDX12VisibilityBuffers> CameraVisibilityCommands;
 
     std::unique_ptr<GDX12UploadBuffer<GDX12ReflectionProbeData>> ReflectionProbesUpload, ReflectionProbes;
     uint64_t ReflectionProbeRevision = 0;

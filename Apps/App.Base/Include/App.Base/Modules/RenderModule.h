@@ -110,6 +110,7 @@ public:
     
     struct WorldRenderSubscriptions
     {
+        std::unordered_map<Entity, TransformCompGPUData> Transforms;
         ListenerHandle TransformCreated = 0;
         ListenerHandle TransformDestroyed = 0;
         ListenerHandle TransformUpdated = 0;
@@ -125,7 +126,7 @@ public:
         ListenerHandle SkeletalUpdated = 0;
     };
 
-    TransformCompGPUData& GetTransformGPUData(Entity entity);
+    TransformCompGPUData& GetTransformGPUData(World& world, Entity entity);
 
     // this function adds listeners to new world
     void SubscribeToWorld(World& world);
@@ -277,7 +278,6 @@ private:
     ListenerHandle _worldCreatedListener = 0;
     ListenerHandle _worldDestroyedListener = 0;
     
-    std::unordered_map<Entity, TransformCompGPUData> _transformGPUData;
     std::unordered_map<World*, WorldRenderSubscriptions> _worldSubscriptions;
     struct GpuOwners
     {

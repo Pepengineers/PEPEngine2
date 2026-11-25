@@ -401,8 +401,7 @@ void RenderModule::UpdateSkeletalPose(World& world, Entity entity, SkeletalMeshR
     if (animate || state.ComponentRevision == 0) state.ComponentRevision = component._revision;
     const auto& transform = world.GetECS().Get<TransformComponent>(entity);
     const Matrix entityWorld = EntityWorld(transform);
-    const auto transformIt = _transformGPUData.find(entity);
-    if (transformIt == _transformGPUData.end()) throw std::logic_error("Missing skeletal transform registration");
+    const auto transformIndex = GetTransformGPUData(world, entity).CBufferIndex;
     for (auto& part : state.Parts)
     {
         for (size_t bone = 0; bone < part.BoneNodes.size(); ++bone)
@@ -437,7 +436,7 @@ void RenderModule::UpdateSkeletalPose(World& world, Entity entity, SkeletalMeshR
         part.ActiveMaterial = material;
         part.Material = material->_CBufferIndex;
         GDX12InstanceData instance = {};
-        instance.TransformIndex = transformIt->second.CBufferIndex;
+        instance.TransformIndex = transformIndex;
         instance.MaterialIndex = part.Material;
         instance.ReflectionDynamic = 1;
         instance.CastsShadows = component.GetCastsShadows() ? 1u : 0u;

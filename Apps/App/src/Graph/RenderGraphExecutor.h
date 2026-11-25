@@ -44,8 +44,6 @@ class Executor
 	                 FrameStart frameStart = FrameStart::Ordered);
 	void Drain();
 	const auto& ExchangeCompletions() const { return _exchangeCompletions; }
-	// Each value belongs to the queue selected by its packet, not one timeline.
-	const std::vector<uint64_t>& Tokens() const { return _tokens; }
 	const std::vector<CompletionToken>& Completions() const { return _completions; }
 	const std::shared_ptr<QueueSubmission>& Submissions() const { return _submissions; }
 	uint64_t Retirement(uint32_t slot) const { return _slots.at(slot).Fences[0]; }
@@ -72,7 +70,6 @@ class Executor
 	JobSystem _jobs;
 	std::thread::id _owner = std::this_thread::get_id();
 	std::vector<Slot> _slots;
-	std::vector<uint64_t> _tokens;
 	std::vector<CompletionToken> _completions, _exchangeCompletions;
 	uint64_t _previousCompletion = 0; // DIRECT terminal protects cross-frame persistent resources
 	uint64_t _lastOpaqueFrame = 0; // external lists may reference resources from any slot

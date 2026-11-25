@@ -1,6 +1,7 @@
 #pragma once
 #include "Graph/RenderGraphExecutor.h"
 #include "Engine.RendererDX12/GDX12DeviceResources.h"
+#include "Engine.RendererDX12/GDX12InstanceBatcher.h"
 #include "Engine.RendererDX12/GDX12Skinning.h"
 #include "Techniques/Grass/SceneGrass.h"
 #include "Linden/LindenDraw.h"

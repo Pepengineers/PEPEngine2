@@ -610,9 +610,9 @@ void RenderModule::SetActiveCamera(CameraComponent* camera)
     _RPcommonData.ActiveCameraFarPlane = camera->FarPlane;
 }
 
-TransformCompGPUData& RenderModule::GetTransformGPUData(Entity entity)
+TransformCompGPUData& RenderModule::GetTransformGPUData(World& world, Entity entity)
 {
-    return _transformGPUData.at(entity);
+    return _worldSubscriptions.at(&world).Transforms.at(entity);
 }
 
 void RenderModule::SubscribeToWorld(World& world)
@@ -698,7 +698,7 @@ void RenderModule::SubscribeToWorld(World& world)
         [this, &world](Entity entity, SkeletalMeshRenderComponent&) { ReleaseSkeletalState(world, entity); });
     subscriptions.SkeletalUpdated = skeletalPool.OnComponentUpdated.AddListener(
         [this, &world](Entity entity, SkeletalMeshRenderComponent&) { ReleaseSkeletalState(world, entity); });
-    _worldSubscriptions[&world] = subscriptions;
+    _worldSubscriptions.emplace(&world, std::move(subscriptions));
     ++_primaryResources.ReflectionWorldRevision;
 }
 
@@ -711,7 +711,7 @@ void RenderModule::UnsubscribeFromWorld(World& world)
         return;
     }
 
-    const WorldRenderSubscriptions subscriptions = it->second;
+    const auto& subscriptions = it->second;
     const bool lastWorld = _worldSubscriptions.size() == 1;
     if (lastWorld) DrainFrameWork();
     struct BatchRelease
@@ -747,10 +747,6 @@ void RenderModule::UnsubscribeFromWorld(World& world)
     ecs.ForEach<StaticMeshRenderComponent>([&](Entity entity, StaticMeshRenderComponent& component)
     {
         OnRenderComponentDestroyed(world, entity, component);
-    });
-    ecs.ForEach<TransformComponent>([&](Entity entity, TransformComponent&)
-    {
-        _transformGPUData.erase(entity);
     });
     if (lastWorld)
     {
@@ -824,17 +820,17 @@ void RenderModule::ReserveTransformCapacity(UINT additionalTransforms)
     if (PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES)) grow(_primaryResources);
 }
 
-void RenderModule::OnTransformComponentCreated(World&, Entity entity, TransformComponent&)
+void RenderModule::OnTransformComponentCreated(World& world, Entity entity, TransformComponent&)
 {
     ReserveTransformCapacity(1);
     TransformCompGPUData data;
     data.CBufferIndex = _transformCount++;
-    _transformGPUData[entity] = data;
+    _worldSubscriptions.at(&world).Transforms[entity] = data;
 }
 
 void RenderModule::OnTransformComponentDestroyed(World& world, Entity entity, TransformComponent& component)
 {
-    _transformGPUData.erase(entity);
+    _worldSubscriptions.at(&world).Transforms.erase(entity);
 }
 
 void RenderModule::OnTransformComponentUpdated(World& world, Entity entity, TransformComponent& component)
@@ -845,29 +841,8 @@ void RenderModule::OnCameraComponentCreated(World& world, Entity entity, CameraC
 {
     if (!PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_CAMERAS)) return;
     component._CBufferIndex = _cameraCount++;
-    if (PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_CAMERAS))
-    {
-        for (auto& constants : _primaryResources.FrameConstants)
-        {
-            if (component._CBufferIndex < constants->CameraVisibilityCommands.size()) continue;
-            constants->CameraCB->Resize(component._CBufferIndex + 1);
-
-            constants->CameraVisibilityCommands.push_back(GDX12VisibilityBuffers());
-
-            auto& buffers = constants->CameraVisibilityCommands[component._CBufferIndex];
-            buffers.VisibleOpaqueCommandsCache = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(_primaryDevice.get(), GetPrimaryIndirectCommandsCache()->GetElementCount(), EBufferType::Default, false);
-            buffers.OpaqueDrawCounter = std::make_unique<GDX12UploadBuffer<UINT>>(_primaryDevice.get(), 1, EBufferType::Default, false);
-            buffers.VisibleTransparentCommandsCache = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(_primaryDevice.get(), GetPrimaryIndirectCommandsCache()->GetElementCount(), EBufferType::Default, false);
-            buffers.TransparentDrawCounter = std::make_unique<GDX12UploadBuffer<UINT>>(_primaryDevice.get(), 1, EBufferType::Default, false);
-
-            buffers.VisibleOpaqueCommandsCache->CreateUAV(_primaryResources.SRV_UAV_Heap.get(), _primaryResources.SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
-            buffers.OpaqueDrawCounter->CreateUAV(_primaryResources.SRV_UAV_Heap.get(), _primaryResources.SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
-            buffers.VisibleTransparentCommandsCache->CreateUAV(_primaryResources.SRV_UAV_Heap.get(), _primaryResources.SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
-            buffers.TransparentDrawCounter->CreateUAV(_primaryResources.SRV_UAV_Heap.get(), _primaryResources.SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
-        }
-    }
-
-    
+    for (auto& frame : _primaryResources.FrameConstants)
+        frame->CameraCB->Resize(component._CBufferIndex + 1);
 }
 
 void RenderModule::OnCameraComponentDestroyed(World& world, Entity entity, CameraComponent& component)
@@ -892,14 +867,7 @@ void RenderModule::EnsureInstanceCapacity(UINT capacity)
         resources.Device->GetCommandQueue()->Flush();
         resources.IndirectCommandsCache->Resize(capacity);
         for (auto& frame : resources.FrameConstants)
-        {
             frame->InstanceCache->Resize(capacity);
-            for (auto& camera : frame->CameraVisibilityCommands)
-            {
-                camera.VisibleOpaqueCommandsCache->Resize(capacity);
-                camera.VisibleTransparentCommandsCache->Resize(capacity);
-            }
-        }
     };
     if (PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES)) grow(_primaryResources);
 }

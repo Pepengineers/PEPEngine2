@@ -670,8 +670,8 @@ void SceneLighting::Submitted(uint64_t fence)
 	_localShadows->Submitted(_slot);
 	_reflections->Submitted(fence);
 }
-void SceneLighting::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, SceneGeometry& geometry,
-                           SceneEnvironment& environment)
+GDX12Texture* SceneLighting::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, SceneGeometry& geometry,
+                                    SceneEnvironment& environment)
 {
 	_work.Commands.clear();
 	_frames.at(_slot).AO->AppendRemoteDepth(graph, bindings);
@@ -679,7 +679,8 @@ void SceneLighting::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings,
 	PrepareDeferred(geometry, environment);
 	AppendAO(graph, bindings);
 	AppendDeferred(graph, bindings, geometry, environment);
-	AppendComposition(graph, bindings, geometry, environment, AppendSSR(graph, bindings, geometry, environment));
+	auto* opaqueHDR = AppendSSR(graph, bindings, geometry, environment);
+	return AppendComposition(graph, bindings, geometry, environment, opaqueHDR);
 }
 void SceneLighting::AppendShadows(Graph& graph, std::vector<ID3D12Resource*>& bindings, SceneGeometry& geometry,
                                   SceneEnvironment& environment)
@@ -2005,14 +2006,10 @@ GDX12Texture* SceneLighting::AppendSSR(Graph& graph, std::vector<ID3D12Resource*
 
 	return &p._color;
 }
-void SceneLighting::AppendComposition(Graph& graph, std::vector<ID3D12Resource*>& bindings, SceneGeometry& geometry,
-                                      SceneEnvironment& environment, GDX12Texture* opaqueHDR)
+GDX12Texture* SceneLighting::AppendComposition(Graph& graph, std::vector<ID3D12Resource*>& bindings, SceneGeometry& geometry,
+                                               SceneEnvironment& environment, GDX12Texture* opaqueHDR)
 {
 	_initialized = true;
-	if (!_hdrContinuation)
-	{
-		throw std::logic_error("Opaque lighting requires a display continuation");
-	}
 	_transparency->SetOpaqueContinuation(
 	    [&](auto& g, auto& b, auto* hdr, auto* depth, auto* motion)
 	    {
@@ -2020,7 +2017,6 @@ void SceneLighting::AppendComposition(Graph& graph, std::vector<ID3D12Resource*>
 		    return _probePreview->HDR();
 	    },
 	    [this] { return _probePreview->Depth(); }, [this] { return _probePreview->Motion(); });
-	auto* hdr = _transparency->Append(graph, bindings, geometry, _slot, opaqueHDR, environment);
-	_hdrContinuation(graph, bindings, hdr);
+	return _transparency->Append(graph, bindings, geometry, _slot, opaqueHDR, environment);
 }
 } // namespace BistroRender

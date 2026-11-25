@@ -258,7 +258,6 @@ void Executor::Begin(uint32_t index)
 	}
 	_slot = index;
 	_begun = true;
-	_tokens.clear();
 	_completions.clear();
 }
 bool Executor::TryBegin(uint32_t index)
@@ -282,7 +281,6 @@ bool Executor::TryBegin(uint32_t index)
 	}
 	_slot = index;
 	_begun = true;
-	_tokens.clear();
 	_completions.clear();
 	return true;
 }
@@ -350,7 +348,6 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 	}
 	_begun = false;
 	auto& slot = _slots[_slot];
-	_tokens.assign(schedule.Packets.size(), 0);
 	_completions.assign(schedule.Packets.size(), {});
 	if (schedule.Device != _deviceId)
 	{
@@ -683,7 +680,7 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 			for (auto dep : schedule.Packets[i].Dependencies)
 			{
 				if (schedule.Packets[dep].Target == target) continue;
-				if (!_tokens[dep])
+				if (!_completions[dep])
 				{
 					throw std::logic_error("dependency has no submitted completion token");
 				}
@@ -723,7 +720,6 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 			slot.Fences[QueueIndex(target)] = token.Value;
 			for (Id packet = batchBegin; packet <= i; ++packet)
 			{
-				_tokens[packet] = token.Value;
 				_completions[packet] = token;
 				if (capture) capture->Samples[packet].Token = token;
 			}

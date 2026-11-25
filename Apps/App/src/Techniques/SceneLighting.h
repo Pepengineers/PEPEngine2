@@ -64,9 +64,7 @@ class SceneLighting
 	void SubmitLightGrid(const Schedule&, std::vector<PacketWait>&);
 	void LightGridPresented(uint64_t frame, const Schedule&, const std::vector<CompletionToken>&);
 	void AppendAO(Graph&, std::vector<ID3D12Resource*>&);
-	void Append(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, SceneEnvironment&);
-	using HDRContinuation = std::function<void(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture*)>;
-	void SetHDRContinuation(HDRContinuation continuation) { _hdrContinuation = std::move(continuation); }
+	GDX12Texture* Append(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, SceneEnvironment&);
 	bool Record(Id, ID3D12GraphicsCommandList*) const;
 	void Submitted(uint64_t fence);
 	void Reset();
@@ -131,9 +129,8 @@ class SceneLighting
 	void AppendShadows(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, SceneEnvironment&);
 	void AppendDeferred(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, SceneEnvironment&);
 	GDX12Texture* AppendSSR(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, SceneEnvironment&);
-	void AppendComposition(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, SceneEnvironment&, GDX12Texture*);
+	GDX12Texture* AppendComposition(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, SceneEnvironment&, GDX12Texture*);
 	void PrepareDeferred(SceneGeometry&, SceneEnvironment&);
-	HDRContinuation _hdrContinuation;
 	GDX12DeviceResources& _resources;
 	RenderPipelineCommonData& _common;
 	std::unique_ptr<SceneReflections> _reflections;

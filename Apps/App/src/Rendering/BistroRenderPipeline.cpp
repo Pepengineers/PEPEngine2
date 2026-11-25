@@ -191,22 +191,18 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 		if (_cloudPicture->IsRemote()) _cloudPicture->Append(graph, resources);
 		const auto posters = _post->AppendPosters(graph, resources);
 		_geometry->AppendWorldCanvases(graph, slot, posters);
-		_lighting->SetHDRContinuation(
-		    [&, inspect](auto& g, auto& bindings, auto* hdr)
-		    {
-			    if (inspect || textures.NeedsReadback())
-			    {
-				    textures.Name("Lighting.DeferredHDR", _lighting->DeferredHDR(), View::HDR);
-				    textures.Name("Lighting.SunShadowAtlas", _lighting->SunShadow(slot), View::Scalar);
-				    textures.Name("Environment.BRDF", _environment->Output(2)->GetTexture());
-				    textures.Name("Scene.HDR", hdr, View::HDR);
-				    textures.Name("Post.Depth", _lighting->PostDepth(), View::Depth);
-				    textures.Name("Post.Motion", _lighting->PostMotion(), View::Motion);
-			    }
-			    _post->Append(g, bindings, hdr, _lighting->PostDepth(), _lighting->PostMotion(),
-			                  _lighting->ParticleMotion(), target, finish);
-		    });
-		_lighting->Append(graph, resources, *_geometry, *_environment);
+		auto* hdr = _lighting->Append(graph, resources, *_geometry, *_environment);
+		if (inspect || textures.NeedsReadback())
+		{
+			textures.Name("Lighting.DeferredHDR", _lighting->DeferredHDR(), View::HDR);
+			textures.Name("Lighting.SunShadowAtlas", _lighting->SunShadow(slot), View::Scalar);
+			textures.Name("Environment.BRDF", _environment->Output(2)->GetTexture());
+			textures.Name("Scene.HDR", hdr, View::HDR);
+			textures.Name("Post.Depth", _lighting->PostDepth(), View::Depth);
+			textures.Name("Post.Motion", _lighting->PostMotion(), View::Motion);
+		}
+		_post->Append(graph, resources, hdr, _lighting->PostDepth(), _lighting->PostMotion(),
+		              _lighting->ParticleMotion(), target, finish);
 		_post->AppendTextureReadback(graph, resources, *target);
 		for (auto& op : graph.Operations)
 		{

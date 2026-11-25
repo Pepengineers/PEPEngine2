@@ -29,7 +29,7 @@ protected:
         ecs.ForEachRange<TransformComponent>(begin, end, [&](Entity entity, TransformComponent& transform)
         {
             UpdateCamera(ecs, entity, transform);
-            auto& gpu = _render->GetTransformGPUData(entity);
+            auto& gpu = _render->GetTransformGPUData(world, entity);
             const bool changed = transform.DirtyFlag;
             // One final cycle replaces the last moving slot with zero object motion.
             if (changed) gpu.NumFramesDirty = static_cast<UINT>(_numFrames) + 1;
