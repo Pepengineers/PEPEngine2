@@ -47,7 +47,10 @@ float3 EnvironmentLighting(PBRSurface s, float3 v, float ambientVisibility)
     float3 fresnel = s.F0 + (max(1 - s.Roughness, s.F0) - s.F0) * FresnelSchlickFactor(nDotV);
     float3 diffuseIBL = (1 - fresnel) * (1 - s.Metallic) * irradiance * s.Albedo / PBR_PI;
     float3 specularIBL = prefiltered * (s.F0 * brdf.x + brdf.y);
-    return diffuseIBL * ambientVisibility + specularIBL;
+    // Filament's Lagarde/de Rousiers specular occlusion.
+    float linearRoughness = s.Roughness * s.Roughness;
+    float specularVisibility = saturate(pow(nDotV + ambientVisibility, exp2(-16.0f * linearRoughness - 1.0f)) - 1.0f + ambientVisibility);
+    return diffuseIBL * ambientVisibility + specularIBL * specularVisibility;
 }
 
 float3 ShadeLight(PBRSurface s, float3 position, float3 v, GDX12LightConstants light, float viewDepth)
