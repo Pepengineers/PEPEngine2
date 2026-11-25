@@ -75,7 +75,10 @@ inline void MigrateBistroIniKey(std::wstring& key)
     for (const auto& [previous, current] : groups) {
         if (_wcsnicmp(key.c_str(), previous.data(), previous.size()) == 0) {
             key.replace(0, previous.size(), current);
-            return;
+            break;
         }
     }
+    for (const auto* retired : {L"Render.ReflectionProbes.ShowSpheres", L"Render.ReflectionProbes.Seed",
+                                L"Render.ReflectionProbes.Reset"})
+        if (_wcsicmp(key.c_str(), retired) == 0) { key.clear(); return; }
 }

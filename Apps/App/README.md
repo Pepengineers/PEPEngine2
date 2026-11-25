@@ -286,8 +286,12 @@ and XeFG remain available through the same presentation integration.
 Use WASD/QE to move, Shift to accelerate and right mouse drag to look. F1 toggles the
 settings UI. Scene bounds can be enabled with `App.Bounds.Show`.
 
-Default scene populations are four reflection probes, one grass patch, one water
-basin, ten NPCs and five foxes. Character counts apply at startup. The default
+At the default Medium reflection quality, two mirror spheres sit on the terrace
+tables. Low starts with one sphere, and each higher level adds a sphere on the
+next table. Off removes them all. Both preset searches use this layout.
+
+The scene also starts with one grass patch, one water basin, ten NPCs and five
+foxes. Character counts apply at startup. The default
 physics count scale is 1, preserving the original props without tableware copies.
 
 Independent allocator, physics, content and GPU-kernel checks remain standalone.

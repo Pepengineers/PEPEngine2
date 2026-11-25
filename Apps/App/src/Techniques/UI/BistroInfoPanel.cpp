@@ -1,4 +1,5 @@
 #include "BistroInfoPanel.h"
+#include "BistroIniMigration.h"
 #include "BistroPlot.h"
 #include "App.Base/Window.h"
 #include "BistroBenchmark.h"
@@ -181,7 +182,7 @@ void BistroInfoPanel::ApplyResolution(Window& window)
     {
         const auto path = std::exchange(_pendingPreset, {});
         ConsoleVariablePatch patch;
-        auto result = ConsoleModule::ReadPatchIni(path, patch);
+        auto result = ConsoleModule::ReadPatchIni(path, patch, MigrateBistroIniKey);
         if (result.Error.empty())
             result = BenchmarkEngine::GetLocator().GetModule<ConsoleModule>()->ApplyPatch(patch);
         if (!result.Error.empty())

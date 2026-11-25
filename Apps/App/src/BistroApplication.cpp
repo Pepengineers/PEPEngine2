@@ -369,7 +369,7 @@ class BistroApplication final : public App
 	BistroGrass::Scene _bistroGrass;
 	BistroCharacters::Scene _bistroCharacters{20261122};
 	BistroWater::Scene _bistroWater;
-	BistroReflections::Scene _bistroReflections{1, true};
+	BistroReflections::Scene _bistroReflections;
 	BistroBenchmark _benchmark;
 	BistroTaskbar _taskbar;
 	bool _autoBenchmarkPending = false;

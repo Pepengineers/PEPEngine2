@@ -1,6 +1,6 @@
 # Local reflection probes
 
-`ReflectionProbeComponent` plus `TransformComponent` enables a probe. Bistro table probes are opt-in through `App.ReflectionProbes.Count` (default 0). The renderer supports up to 32 enabled probes across all adapters. Exceeding this limit or supplying invalid author parameters throws before capture.
+`ReflectionProbeComponent` plus `TransformComponent` enables a probe. Bistro places a mirror sphere on each active terrace table in a fixed order. Reflection quality selects one to four tables from Low through Epic. Off removes all of them. In manual mode, `Render.ReflectionProbes.Count` can override the number of tables (1–11). Its default of 0 follows reflection quality. The renderer supports up to 32 enabled probes across all adapters. Exceeding this limit or supplying invalid author parameters throws before capture.
 
 ## Authoring
 

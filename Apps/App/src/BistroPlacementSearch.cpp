@@ -155,7 +155,6 @@ ConsoleVariablePatch Search::Patch(const Config& config) const
         {L"Render.ReflectionProbes.First.Implementation", "-1"},
         {L"Render.ReflectionProbes.Schedule.Enabled", "false"},
         {L"Render.ReflectionProbes.TransferMode", std::to_string(config.ProbeDelivery)},
-        {L"Render.ReflectionProbes.ShowSpheres", "false"},
     };
     for (size_t i = 0; i < std::size(Techniques); ++i)
     {
@@ -515,9 +514,8 @@ void Search::Report(BistroBenchmarkData::Csv& csv, std::string_view reason,
             auto path = output.parent_path() / (output.stem().wstring() + (upscaled ? L"-upscaled.ini" : L"-native.ini"));
             auto patch = Patch(best->Settings);
             const auto extraBegin = patch.size();
-            for (const auto* name : {L"Render.ReflectionProbes.Seed", L"Render.ReflectionProbes.Reset",
-                L"Render.Shadows.Local.AtlasCount"})
-                patch.emplace_back(name, console.FindConsoleVariable(name).GetString());
+            constexpr auto atlasCount = L"Render.Shadows.Local.AtlasCount";
+            patch.emplace_back(atlasCount, console.FindConsoleVariable(atlasCount).GetString());
             patch.emplace_back(L"Render.FrameGeneration.Provider", "0");
             const auto saved = console.SavePatchIni(path, patch);
             if (saved.Error.empty())
