@@ -1179,13 +1179,6 @@ GDX12GPUTimingTotals RenderModule::GetPrimaryGPUTimingTotals()
     return _primaryGPUTimer ? _primaryGPUTimer->GetSampleTotals() : GDX12GPUTimingTotals{};
 }
 
-uint64_t RenderModule::GetPrimaryGeometryBytes() const
-{
-    if (!_primaryResources.GeometryBuffer) return 0;
-    const auto geometry = _primaryResources.GeometryBuffer->FreezeRecordingBinding();
-    return uint64_t(geometry.Vertices.SizeInBytes) + geometry.Indices.SizeInBytes;
-}
-
 D3D12MA::Statistics RenderModule::GetMemoryStatistics() const
 {
     D3D12MA::TotalStatistics statistics = {};

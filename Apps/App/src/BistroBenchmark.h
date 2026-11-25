@@ -263,24 +263,6 @@ public:
         const double pass = duration > 0 ? std::clamp(_elapsed / duration, 0., 1.) : 0.;
         return int(100 * (_stage == Stage::Exhaustive ? (_mask + pass) / Cases : pass));
     }
-    bool RejectVideoMemoryTrial(ConsoleModule& console, ::Window& window)
-    {
-        if (!_active || _stage != Stage::Placement) return false;
-        _trialReason = "VRAM budget exceeded";
-        // Calibration also collects the route checkpoints needed by later trials.
-        if (!_calibrating)
-        {
-            if (!_manualPlacement)
-            {
-                uint16_t width, height;
-                window.GetWindowSize(width, height);
-                _placementSearch.ScheduleWithinVideoMemory(_trial, console, {width, height});
-            }
-            _legDone = true;
-        }
-        return true;
-    }
-
     bool Active() const { return _active; }
 
     static std::filesystem::path DefaultsPath()

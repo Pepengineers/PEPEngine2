@@ -2,7 +2,6 @@
 #include "LindenMesh.h"
 #include "LindenSimulation.h"
 #include "Techniques/NativeWork.h"
-#include "Techniques/ProbeInputMirror.h"
 #include "Techniques/ShadowGeometry.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.RendererDX12/GDX12ShaderCompiler.h"
@@ -109,11 +108,7 @@ void LindenDraw::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, Na
 		const UINT count = static_cast<UINT>(mesh->Indices.size()), vertices = static_cast<UINT>(mesh->Vertices.size());
 		const auto makeBuffers = [&](EBufferType type)
 		{
-			const auto flags = type == EBufferType::Upload ? D3D12_RESOURCE_FLAG_NONE : D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-			auto charge = remote ? remote->Inputs.ReserveShadowBuffers({UINT64(count) * sizeof(UINT), UINT64(vertices) * sizeof(Vector2)}, flags) : nullptr;
-			auto buffers = std::make_shared<Buffers>(_resources.Device, count, vertices, type);
-			buffers->Memory = std::move(charge);
-			return buffers;
+			return std::make_shared<Buffers>(_resources.Device, count, vertices, type);
 		};
 		auto upload = makeBuffers(EBufferType::Upload);
 		upload->Indices.CopyData(0, mesh->Indices.data(), count);

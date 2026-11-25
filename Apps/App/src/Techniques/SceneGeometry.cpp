@@ -1185,12 +1185,12 @@ void SceneGeometry::AppendVegetationView(Graph& primary, std::vector<ID3D12Resou
 		                                                                    D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
 	}
 	_grass->AppendProbeCapture(remote, remoteBindings, work, vegetation.Grass, slot, target, remoteMaterials,
-	                           mainAddress, localLights, mirror, inputs);
+	                           mainAddress, localLights, mirror);
 	if (scene.Linden)
 	{
 		if (!vegetation.Linden) vegetation.Linden = std::make_unique<LindenDraw>(owner, true);
 		const auto pose = mirror(scene.LindenPose.Current->GetResource(), sizeof(LindenPoseVertex));
-		const LindenDraw::CaptureInputs capture{pose.Resource, material, main, pose.Srv, localLights, mainAddress, inputs};
+		const LindenDraw::CaptureInputs capture{pose.Resource, material, main, pose.Srv, localLights, mainAddress};
 		vegetation.Linden->Append(remote, remoteBindings, work, slot, target, remoteMaterials, scene.Linden,
 		                          scene.LindenPose, &capture);
 	}

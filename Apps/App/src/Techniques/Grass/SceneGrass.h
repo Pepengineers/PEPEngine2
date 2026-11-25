@@ -9,8 +9,6 @@
 
 namespace BistroRender
 {
-namespace ShadowMemory { class Charge; }
-class ProbeInputMirror;
 class LindenSimulation;
 struct FragmentPose;
 struct LindenMesh;
@@ -54,19 +52,13 @@ class SceneGrass
 		GDX12GrassRenderer GPU;
 		std::unique_ptr<GDX12RootSignature> Root;
 		ComPtr<ID3D12PipelineState> Clear, Cull;
-		struct IndexBuffer
-		{
-			std::shared_ptr<ShadowMemory::Charge> Memory;
-			std::unique_ptr<GDX12UploadBuffer<UINT>> Buffer;
-		};
-		std::vector<IndexBuffer> Indices;
-		std::shared_ptr<ShadowMemory::Charge> ScratchMemory;
+		std::vector<std::unique_ptr<GDX12UploadBuffer<UINT>>> Indices;
 		std::unique_ptr<GDX12UploadBuffer<UINT>> Arguments;
 		std::unique_ptr<GDX12UploadBuffer<float>> HiZ;
 	};
 	void AppendProbeCapture(Graph&, std::vector<ID3D12Resource*>&, NativeWork&, ProbeCapture&, UINT slot,
 	                        const GeometryTarget&, const GDX12Descriptor& materials, D3D12_GPU_VIRTUAL_ADDRESS main,
-	                        D3D12_GPU_DESCRIPTOR_HANDLE localLights, const MirrorVegetationBuffer&, ProbeInputMirror&);
+	                        D3D12_GPU_DESCRIPTOR_HANDLE localLights, const MirrorVegetationBuffer&);
 
   private:
 	friend class SceneGeometry;

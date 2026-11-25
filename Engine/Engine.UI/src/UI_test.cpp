@@ -36,7 +36,6 @@ namespace Engine::UI
         bool ApplicationUIInput = false;
         bool DebugReconstructionStatusVisible = true;
         bool SettingsEditingEnabled = true;
-        std::map<std::wstring, std::vector<int>> AvailableLevels;
         std::function<std::string()> LocalShadowDistribution;
 #ifdef _DEBUG
         bool DebugEnabled = true;
@@ -196,8 +195,8 @@ namespace Engine::UI
                     bool enabled = Current == "true";
                     if (ImGui::Checkbox("Enabled", &enabled)) Apply(variable, enabled ? "true" : "false");
                 }
-                else if (const auto levels = AvailableLevels.find(Name);
-                         levels != AvailableLevels.end() || Name == L"Render.Shadows.Local.Resolution" || (variable.GetType() == EConsoleVariableType::Enumeration && variable.GetEnumCount() > 0))
+                else if (Name == L"Render.Shadows.Local.Resolution" || Name == L"Render.Shadows.Sun.Resolution" ||
+                         (variable.GetType() == EConsoleVariableType::Enumeration && variable.GetEnumCount() > 0))
                 {
                     const int activeValue = variable.GetInt();
                     const auto label = [&](int v)
@@ -213,8 +212,6 @@ namespace Engine::UI
                     {
                         if (LocalShadowDistribution) ImGui::TextWrapped("%s", LocalShadowDistribution().c_str());
                     }
-                    else if (levels != AvailableLevels.end() && !levels->second.empty())
-                        ImGui::Text("VRAM budget allows up to %s", label(levels->second.back()).c_str());
                     ImGui::SetNextItemWidth(-1);
                     if (ImGui::BeginCombo("##value", label(activeValue).c_str()))
                     {
@@ -228,8 +225,8 @@ namespace Engine::UI
                         };
                         if (Name == L"Render.Shadows.Local.Resolution")
                             for (const auto& profile : LocalShadowProfiles) option(profile.Face);
-                        else if (levels != AvailableLevels.end())
-                            for (int level : levels->second) option(level);
+                        else if (Name == L"Render.Shadows.Sun.Resolution")
+                            for (int side : {0, 512, 1024, 2048, 4096}) option(side);
                         else
                             for (int i = 0; i < variable.GetEnumCount(); ++i) option(variable.GetEnumFirstValue() + i);
                         ImGui::EndCombo();
@@ -944,7 +941,6 @@ namespace Engine::UI
 
     void ShutdownUI()
     {
-        AvailableLevels.clear();
         LocalShadowDistribution = {};
         ScreenAtlasCaptures.clear();
         ScreenAtlasGeneration = 0;
@@ -981,10 +977,6 @@ namespace Engine::UI
     void EnableApplicationUIInput() { ApplicationUIInput = true; }
     void SetLocalShadowDistribution(std::function<std::string()> layout) { LocalShadowDistribution = std::move(layout); }
     void SetDebugReconstructionStatusVisible(bool visible) { DebugReconstructionStatusVisible = visible; }
-    void SetAvailableSettingLevels(std::map<std::wstring, std::vector<int>> levels)
-    {
-        AvailableLevels = std::move(levels);
-    }
     void SetSettingsEditingEnabled(bool enabled) { SettingsEditingEnabled = enabled; }
     void HideSettings() { Visible = FocusSettings = false; }
     void OpenSettings() { Visible = FocusSettings = true; }

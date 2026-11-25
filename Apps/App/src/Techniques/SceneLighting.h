@@ -157,9 +157,6 @@ class SceneLighting
 	LocalShadowTileCopy& MainShadowTileCopy();
 	GDX12LocalShadowProfile _localShadowProfile = LocalShadowProfiles[0];
 	UINT _localShadowPages = 0;
-	std::vector<Id> _localShadowBudgetOwners;
-	std::string _localShadowLimit;
-	bool _localShadowTransferLimited = false;
 	bool _localShadowOwnerBusy = false;
 	GDX12DeferredLightingPass _deferred;
 	std::unique_ptr<GDX12SSSRPass> _ssr;

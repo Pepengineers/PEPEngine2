@@ -802,9 +802,26 @@ void SceneEnvironment::Build(Executor& primary, uint64_t frameNumber)
 			    cmd->Dispatch(32, 32, 6);
 		    });
 	}
+	struct CubeMip
+	{
+		D3D12_GPU_DESCRIPTOR_HANDLE Output;
+		UINT Size;
+	};
+	const auto cubeMips = [](const auto& uavs, size_t mipCount, UINT width)
+	{
+		std::vector<CubeMip> mips;
+		mips.reserve(mipCount);
+		for (size_t mip = 0; mip < mipCount; ++mip)
+		{
+			mips.push_back({uavs[mip]->GPUHandle, width});
+			width = (std::max)(1u, width >> 1);
+		}
+		return mips;
+	};
 	const auto sky = [&](UINT pipeline, UINT constantsIndex, std::vector<std::pair<GDX12Resource*, Access>> accesses,
 	                     UINT x, UINT y, UINT z, std::array<GDX12Texture*, 4> srvs,
-	                     std::array<GDX12Descriptor*, 4> uavs, WorkDomain domain = WorkDomain::Cached)
+	                     std::array<GDX12Descriptor*, 4> uavs, WorkDomain domain = WorkDomain::Cached,
+	                     std::vector<CubeMip> sourceMips = {})
 	{
 		auto* root = e._skyRoot.get();
 		auto* pso = e._skyPipelines[pipeline].Get();
@@ -824,7 +841,7 @@ void SceneEnvironment::Build(Executor& primary, uint64_t frameNumber)
 		if (camera)
 			accesses.push_back({&frame.CameraCB->GetResource(), {Invalid, Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ}});
 		add("atmosphere/source kernel " + std::to_string(pipeline), std::move(accesses),
-		    [root, pso, cb, camera, reads, writes, x, y, z](auto* cmd)
+		    [root, pso, cb, camera, reads, writes, x, y, z, sourceMips = std::move(sourceMips)](auto* cmd)
 		    {
 			    cmd->SetComputeRootSignature(root->GetRootSignature().Get());
 			    cmd->SetPipelineState(pso);
@@ -839,7 +856,16 @@ void SceneEnvironment::Build(Executor& primary, uint64_t frameNumber)
 					    cmd->SetComputeRootDescriptorTable(root->GetURootParamIndex(i), writes[i]);
 				    }
 			    }
-			    cmd->Dispatch(x, y, z);
+			    if (sourceMips.empty())
+				    cmd->Dispatch(x, y, z);
+			    else
+			    {
+				    for (const auto& mip : sourceMips)
+				    {
+					    cmd->SetComputeRootDescriptorTable(root->GetURootParamIndex(3), mip.Output);
+					    cmd->Dispatch((mip.Size + 7) / 8, (mip.Size + 7) / 8, 6);
+				    }
+			    }
 		    }, true, domain);
 	};
 	if (state.Source == SkySource::SkyAtmosphere)
@@ -866,7 +892,7 @@ void SceneEnvironment::Build(Executor& primary, uint64_t frameNumber)
 	}
 	if (changed && state.Source != SkySource::Off)
 	{
-		for (UINT mip = 0; mip < e._sourceUAVs.size(); ++mip)
+		if (!e._sourceUAVs.empty())
 		{
 			std::vector<std::pair<GDX12Resource*, Access>> accesses{
 			    access(e._textures[3].get(), Mode::Write, UnorderedAccess)};
@@ -884,42 +910,42 @@ void SceneEnvironment::Build(Executor& primary, uint64_t frameNumber)
 				inputs[3] = clouds ? _cloud._texture.get() : e._boxTexture.get();
 				accesses.push_back(access(inputs[3], Mode::Read, Read));
 			}
-			const UINT size = (std::max)(1u, e._textures[3]->GetWidth() >> mip);
-			sky(4, state.Source == SkySource::SkyAtmosphere ? 1 : 0, std::move(accesses), (size + 7) / 8,
-			    (size + 7) / 8, 6, inputs, {nullptr, nullptr, nullptr, e._sourceUAVs[mip].get()});
+			sky(4, state.Source == SkySource::SkyAtmosphere ? 1 : 0, std::move(accesses), 0, 0, 0, inputs, {},
+			    WorkDomain::Cached, cubeMips(e._sourceUAVs, e._sourceUAVs.size(), e._textures[3]->GetWidth()));
 		}
-		const auto filter = [&](UINT pipeline, UINT size, float roughness, GDX12Descriptor* uav, GDX12Texture* target)
+		const auto filter = [&](UINT pipeline, GDX12Texture* target, std::vector<CubeMip> mips)
 		{
 			auto* root = e._filterRoot.get();
 			auto* pso = e._filters[pipeline].Get();
-			const auto srv = e._textures[3]->GetSRV()->GPUHandle, output = uav->GPUHandle;
+			const auto srv = e._textures[3]->GetSRV()->GPUHandle;
 			const UINT samples = ibl.FilterSamples;
 			const float intensity = ibl.Intensity;
-			add("environment filter " + std::to_string(pipeline) + " roughness " + std::to_string(roughness),
+			add("environment filter " + std::to_string(pipeline),
 			    {access(e._textures[3].get(), Mode::Read, Read), access(target, Mode::Write, UnorderedAccess)},
-			    [root, pso, srv, output, size, roughness, samples, intensity](auto* cmd)
+			    [root, pso, srv, mips = std::move(mips), samples, intensity](auto* cmd)
 			    {
-				    const struct
-				    {
-					    UINT Size;
-					    float Roughness;
-					    UINT Samples;
-					    float Intensity;
-				    } c{size, roughness, samples, intensity};
 				    cmd->SetComputeRootSignature(root->GetRootSignature().Get());
 				    cmd->SetPipelineState(pso);
-				    cmd->SetComputeRoot32BitConstants(0, 4, &c, 0);
 				    cmd->SetComputeRootDescriptorTable(root->GetTRootParamIndex(0), srv);
-				    cmd->SetComputeRootDescriptorTable(root->GetURootParamIndex(0), output);
-				    cmd->Dispatch((size + 7) / 8, (size + 7) / 8, 6);
+				    for (UINT mip = 0; mip < mips.size(); ++mip)
+				    {
+					    const UINT size = mips[mip].Size;
+					    const struct
+					    {
+						    UINT Size;
+						    float Roughness;
+						    UINT Samples;
+						    float Intensity;
+					    } c{size, mip / 7.f, samples, intensity};
+					    cmd->SetComputeRoot32BitConstants(0, 4, &c, 0);
+					    cmd->SetComputeRootDescriptorTable(root->GetURootParamIndex(0), mips[mip].Output);
+					    cmd->Dispatch((size + 7) / 8, (size + 7) / 8, 6);
+				    }
 			    });
 		};
-		filter(0, e._textures[0]->GetWidth(), 0, e._textures[0]->GetUAV(), e._textures[0].get());
-		for (UINT mip = 0; mip < e._prefilterMips; ++mip)
-		{
-			filter(1, e._textures[1]->GetWidth() >> mip, e._prefilterMips > 1 ? mip / 7.f : 0,
-			       e._prefilterUAVs[mip].get(), e._textures[1].get());
-		}
+		filter(0, e._textures[0].get(), {{e._textures[0]->GetUAV()->GPUHandle, e._textures[0]->GetWidth()}});
+		if (e._prefilterMips)
+			filter(1, e._textures[1].get(), cubeMips(e._prefilterUAVs, e._prefilterMips, e._textures[1]->GetWidth()));
 	}
 	else if (changed)
 	{

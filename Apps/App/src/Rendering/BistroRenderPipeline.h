@@ -110,8 +110,6 @@ class BistroRenderPipeline final : public IRenderPipeline
 		_executor->Drain();
 		_lighting->RetireLocalShadows();
 	}
-	struct ProbeMemory { UINT64 Primary = 0, Owner = 0; };
-	ProbeMemory EstimateRemoteProbe(int hardwareIndex, UINT side, UINT count) const;
 	UINT64 LocalShadowTexels() const { return _lighting->LocalShadowTexels(); }
 	std::function<void()> CaptureBenchmarkPhysics(World&);
 	std::vector<std::pair<std::string, std::string>> BenchmarkAdapters() const;

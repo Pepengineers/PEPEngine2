@@ -1,4 +1,5 @@
 #include "SceneLocalShadows.h"
+#include "ShadowTexture.h"
 #include "ShadowGeometry.h"
 #include "Graph/QueueSubmission.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
@@ -1224,9 +1225,9 @@ std::unique_ptr<SceneLocalShadows::Atlas> SceneLocalShadows::CreateAtlas(UINT si
 	GDX12TextureDesc texture;
 	texture.Width = texture.Height = side;
 	texture.Format = DXGI_FORMAT_D32_FLOAT;
-	texture.SRVDesc = ShadowMemory::View(pages);
+	texture.SRVDesc = ShadowTexture::View(pages);
 	texture.SRV_UAV_Heap = _resources.SRV_UAV_Heap.get();
-	const auto desc = ShadowMemory::Depth(side, pages);
+	const auto desc = ShadowTexture::Depth(side, pages);
 	D3D12_CLEAR_VALUE clear{};
 	clear.Format = DXGI_FORMAT_D32_FLOAT;
 	clear.DepthStencil.Depth = 1;
@@ -1234,7 +1235,6 @@ std::unique_ptr<SceneLocalShadows::Atlas> SceneLocalShadows::CreateAtlas(UINT si
 	    _resources.Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc, D3D12_RESOURCE_STATE_COMMON, &clear);
 	texture.SRVHeapIndex = texture.SRV_UAV_Heap->GetAvailableIndex(SceneDescriptorStart);
 	atlas->Texture.Initialize(texture);
-	atlas->Memory.Set(*_resources.Device, ShadowMemory::Size(*_resources.Device, desc));
 	atlas->Side = side;
 	atlas->Pages = pages;
 	for (UINT page = 0; page < pages; ++page)
@@ -1273,7 +1273,7 @@ GDX12Texture* SceneLocalShadows::Output(UINT slot)
 		GDX12TextureDesc texture{};
 		texture.Width = texture.Height = 1;
 		texture.Format = DXGI_FORMAT_R32_FLOAT;
-		texture.SRVDesc = ShadowMemory::View(1);
+		texture.SRVDesc = ShadowTexture::View(1);
 		texture.SRV_UAV_Heap = _resources.SRV_UAV_Heap.get();
 		texture.SRVHeapIndex = texture.SRV_UAV_Heap->GetAvailableIndex(SceneDescriptorStart);
 		_fallback.Initialize(texture);

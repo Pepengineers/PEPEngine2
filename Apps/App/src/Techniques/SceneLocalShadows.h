@@ -1,7 +1,6 @@
 #pragma once
 #include "NativeWork.h"
 #include "GeometryTarget.h"
-#include "ShadowMemory.h"
 #include "Engine.Core/Jobs/JobSystem.h"
 #include "Engine.RendererDX12/GDX12DeviceResources.h"
 #include <optional>
@@ -102,7 +101,6 @@ class SceneLocalShadows
 	};
 	struct Atlas
 	{
-		ShadowMemory::Charge Memory;
 		GDX12Texture Texture;
 		std::vector<std::unique_ptr<GDX12Descriptor>> Dsvs;
 		UINT Side = 0, Pages = 0;

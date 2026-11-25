@@ -3,7 +3,6 @@
 #include "ProbeInputMirror.h"
 #include "ProbeTransfer.h"
 #include "ShadowGeometry.h"
-#include "ShadowMemory.h"
 #include "Engine.Core/Logging/Logger.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include <cstring>

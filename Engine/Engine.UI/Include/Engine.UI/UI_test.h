@@ -6,7 +6,6 @@
 #include <DirectXCollision.h>
 #include <cstddef>
 #include <vector>
-#include <map>
 #include <string>
 #include <string_view>
 #ifdef _DEBUG
@@ -37,7 +36,6 @@ namespace Engine::UI
     void EnableApplicationUIInput();
     void SetDebugReconstructionStatusVisible(bool visible);
     void SetSettingsEditingEnabled(bool enabled);
-    void SetAvailableSettingLevels(std::map<std::wstring, std::vector<int>> levels);
     void SetLocalShadowDistribution(std::function<std::string()> layout);
     void HideSettings();
     void OpenSettings();

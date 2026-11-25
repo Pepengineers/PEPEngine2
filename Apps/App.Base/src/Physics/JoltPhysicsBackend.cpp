@@ -477,6 +477,7 @@ void JoltPhysicsBackend::Step(float dt)
     }
 
     if (!std::isfinite(dt) || dt <= 0) return;
+    _jobSystem->PrepareRigidBodyStep(_physicsSystem->GetNumActiveBodies(JPH::EBodyType::RigidBody));
     const auto error = _physicsSystem->Update(dt, static_cast<int>(_settings.CollisionSteps), _tempAllocator.get(), _jobSystem.get());
     if (error != JPH::EPhysicsUpdateError::None) throw std::runtime_error("Jolt physics capacity exceeded during update");
 

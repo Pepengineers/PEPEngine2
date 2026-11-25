@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ShadowDepthTransfer.h"
+#include "ShadowTexture.h"
 #include "Engine.RendererDX12/GDX12LocalLights.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.RendererDX12/GDX12ShaderCompiler.h"
@@ -110,37 +111,14 @@ private:
 class LocalShadowTileTransfer
 {
 public:
-	struct Bytes
-	{
-		UINT64 Primary = 0, Owner = 0;
-		Bytes& operator+=(Bytes other)
-		{
-			Primary += (std::min)(other.Primary, UINT64_MAX - Primary);
-			Owner += (std::min)(other.Owner, UINT64_MAX - Owner);
-			return *this;
-		}
-	};
-
-	static Bytes Cost(GDX12Device& primary, GDX12Device& owner, UINT side, UINT count, bool fromPrimary)
-	{
-		const auto packed = ShadowMemory::Depth(side, count, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
-		const auto received = ShadowMemory::Depth(side, count, D3D12_RESOURCE_FLAG_NONE);
-		const auto shared = ShadowMemory::TransferBytes(primary, owner, side, count);
-		const auto withShared = [shared](UINT64 resource) { return resource > UINT64_MAX - shared ? UINT64_MAX : resource + shared; };
-		return {withShared(ShadowMemory::Size(primary, fromPrimary ? packed : received)),
-		        withShared(ShadowMemory::Size(owner, fromPrimary ? received : packed))};
-	}
-
 	LocalShadowTileTransfer(const QueueSubmission& submit, Id owner, UINT side, UINT count, bool fromPrimary)
 	    : _side(side), _count(count), _transfer(submit, owner, side, count),
 	      _sender(submit.Device(fromPrimary ? 0 : owner)), _receiver(submit.Device(fromPrimary ? owner : 0))
 	{
-		const auto packed = ShadowMemory::Depth(side, count, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
-		const auto received = ShadowMemory::Depth(side, count, D3D12_RESOURCE_FLAG_NONE);
+		const auto packed = ShadowTexture::Depth(side, count, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+		const auto received = ShadowTexture::Depth(side, count, D3D12_RESOURCE_FLAG_NONE);
 		_packed = _sender.CreateResource(D3D12_HEAP_TYPE_DEFAULT, packed, D3D12_RESOURCE_STATE_COMMON);
 		_received = _receiver.CreateResource(D3D12_HEAP_TYPE_DEFAULT, received, D3D12_RESOURCE_STATE_COMMON);
-		_packMemory.Set(_sender, ShadowMemory::Size(_sender, packed));
-		_receiveMemory.Set(_receiver, ShadowMemory::Size(_receiver, received));
 		_sendHeap = std::make_unique<GDX12DescriptorHeap>(&_sender, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
 		    2, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
 		_receiveHeap = std::make_unique<GDX12DescriptorHeap>(&_receiver, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
@@ -150,14 +128,14 @@ public:
 		uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
 		uav.Texture2DArray.ArraySize = count;
 		_sender.GetDevice()->CreateUnorderedAccessView(_packed.Get(), nullptr, &uav, _sendHeap->GetCPUHandle(1));
-		const auto srv = ShadowMemory::View(count);
+		const auto srv = ShadowTexture::View(count);
 		_receiver.GetDevice()->CreateShaderResourceView(_received.Get(), &srv, _receiveHeap->GetCPUHandle(0));
 	}
 
 	Id Export(Graph& graph, std::vector<ID3D12Resource*>& bindings, NativeWork& work, const LocalShadowTileCopy& copy,
 	          ID3D12Resource* atlas, std::vector<GDX12LocalShadowTile> tiles)
 	{
-		const auto srv = ShadowMemory::View(atlas->GetDesc().DepthOrArraySize);
+		const auto srv = ShadowTexture::View(atlas->GetDesc().DepthOrArraySize);
 		_sender.GetDevice()->CreateShaderResourceView(atlas, &srv, _sendHeap->GetCPUHandle(0));
 		copy.Pack(graph, bindings, work, atlas, _packed.Get(), *_sendHeap, std::move(tiles));
 		return _transfer.Append(graph, bindings, work, _packed.Get(), Slices(), true);
@@ -188,7 +166,6 @@ private:
 	ShadowDepthTransfer _transfer;
 	GDX12Device& _sender;
 	GDX12Device& _receiver;
-	ShadowMemory::Charge _packMemory, _receiveMemory;
 	GDX12ResourceHandle _packed, _received;
 	std::unique_ptr<GDX12DescriptorHeap> _sendHeap, _receiveHeap;
 };
@@ -197,14 +174,6 @@ private:
 class LocalShadowPageTransfer
 {
 public:
-	static LocalShadowTileTransfer::Bytes Cost(GDX12Device& primary, GDX12Device& owner, UINT side, bool allowPartial)
-	{
-		const auto shared = ShadowMemory::TransferBytes(primary, owner, side, 1);
-		LocalShadowTileTransfer::Bytes bytes{shared, shared};
-		if (allowPartial) bytes += {ShadowMemory::Size(primary, StagingShape(side)), 0};
-		return bytes;
-	}
-
 	LocalShadowPageTransfer(const QueueSubmission& submit, Id owner, UINT side, bool allowPartial)
 	    : _transfer(submit, owner, side, 1)
 	{
@@ -212,10 +181,9 @@ public:
 		auto& device = submit.Device(0);
 		const auto shape = StagingShape(side);
 		_staging = device.CreateResource(D3D12_HEAP_TYPE_DEFAULT, shape, D3D12_RESOURCE_STATE_COMMON);
-		_stagingMemory.Set(device, ShadowMemory::Size(device, shape));
 		_stagingHeap = std::make_unique<GDX12DescriptorHeap>(&device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
 		    1, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
-		const auto srv = ShadowMemory::View(1);
+		const auto srv = ShadowTexture::View(1);
 		device.GetDevice()->CreateShaderResourceView(_staging.Get(), &srv, _stagingHeap->GetCPUHandle(0));
 	}
 
@@ -251,11 +219,10 @@ public:
 private:
 	static CD3DX12_RESOURCE_DESC StagingShape(UINT side)
 	{
-		return ShadowMemory::Depth(side, 1, D3D12_RESOURCE_FLAG_NONE);
+		return ShadowTexture::Depth(side, 1, D3D12_RESOURCE_FLAG_NONE);
 	}
 
 	ShadowDepthTransfer _transfer;
-	ShadowMemory::Charge _stagingMemory;
 	GDX12ResourceHandle _staging;
 	std::unique_ptr<GDX12DescriptorHeap> _stagingHeap;
 };

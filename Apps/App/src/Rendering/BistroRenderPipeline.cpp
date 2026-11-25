@@ -49,42 +49,6 @@ void BistroRenderPipeline::Initialize(RenderPipelineContext& c, const std::vecto
 	Log::Info("Renderer", "Bistro packet renderer initialized; one rendering path");
 }
 
-BistroRenderPipeline::ProbeMemory BistroRenderPipeline::EstimateRemoteProbe(int hardwareIndex, UINT side, UINT count) const
-{
-	auto& submit = *_executor->Submissions();
-	const auto owner = submit.SelectAdapter(hardwareIndex);
-	if (!owner || !count) return {};
-	auto& remote = submit.Device(owner);
-	auto& primary = submit.Device(0);
-	const auto footprints = [&](const D3D12_RESOURCE_DESC& shape)
-	{
-		UINT64 bytes = 0;
-		primary.GetDevice()->GetCopyableFootprints(&shape, 0, UINT(shape.MipLevels) * shape.DepthOrArraySize,
-		                                         0, nullptr, nullptr, nullptr, &bytes);
-		return bytes;
-	};
-	ProbeMemory cost;
-	UINT64 inputBytes = 0;
-	for (auto* input : _geometry->LiveProbeCaptureInputs(*_environment, _executorSlot))
-	{
-		auto shape = input->GetDesc();
-		const UINT64 bytes = shape.Dimension == D3D12_RESOURCE_DIMENSION_BUFFER ? shape.Width : footprints(shape);
-		inputBytes += (bytes + D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT - 1) & ~UINT64(D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT - 1);
-		shape.Alignment = 0;
-		shape.Flags = D3D12_RESOURCE_FLAG_NONE;
-		cost.Owner += BistroRender::ShadowMemory::Size(remote, shape);
-	}
-	const auto cube = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R16G16B16A16_FLOAT, side, side, 6,
-	                                               UINT16(GDX12RenderHelpers::MipCount(side)));
-	const auto shared = BistroRender::ShadowMemory::TransferBytes(primary, remote, (std::max)(UINT64(1), inputBytes)) +
-	                    count * BistroRender::ShadowMemory::TransferBytes(primary, remote, footprints(cube));
-	cost.Primary = shared;
-	// Owner-local capture, convolution and baked textures, plus the shader-visible scene heap.
-	cost.Owner += shared + UINT64(side) * side * 6 * (32 + 32 * count) +
-	    UINT64(remote.GetDevice()->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)) * 1000000;
-	return cost;
-}
-
 void BistroRenderPipeline::UpdateFrameSettings(RenderPipelineContext& c)
 {
 	_lighting->UpdateLightGridOwner(*_executor);
