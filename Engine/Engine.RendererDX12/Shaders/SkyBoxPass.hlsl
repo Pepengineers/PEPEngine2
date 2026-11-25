@@ -22,7 +22,6 @@ PS_OUTPUT PS(VSOutput input)
     Depth.GetDimensions(width, height);
     float2 ndc = (float2(pixel) + 0.5f) / float2(width, height) * float2(2, -2) + float2(-1, 1);
     float4 world = mul(float4(ndc, 0, 1), Camera.InvViewProj);
-    // Bistro's sky reprojection uses a direction at infinity, excluding camera translation.
     float4 ray = float4(world.xyz - Camera.CameraLocation * world.w, 0);
     float4 current = mul(ray, Camera.ViewProjNoJitter);
     float4 previous = mul(ray, Camera.PrevViewProjNoJitter);
