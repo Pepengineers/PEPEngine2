@@ -44,7 +44,6 @@ public:
     void BeginBenchmarkWaits();
     std::vector<BenchmarkWait> EndBenchmarkWaits();
     uint64_t BenchmarkEpoch() const { return _benchmarkEpoch.load(std::memory_order_relaxed); }
-    void AppendBenchmarkPackets(uint64_t epoch, std::vector<BenchmarkPacket> packets);
     std::vector<BenchmarkPacket> TakeBenchmarkPackets();
     std::vector<int> BenchmarkAdapterIndices() const;
     uint64_t Incarnation() const { return _incarnation; }
@@ -61,6 +60,24 @@ public:
     GraphResourceInfo ValidateResource(Id, ID3D12Resource*) const;
 private:
     friend class Executor;
+    struct BenchmarkSlot
+    {
+        struct Timing
+        {
+            ComPtr<ID3D12QueryHeap> Heap;
+            GDX12ResourceHandle Readback;
+            uint64_t Frequency = 0, AnchorGpu = 0, AnchorCpu = 0;
+            UINT Capacity = 0, Count = 0;
+            bool Calibrated = false;
+        };
+        // Held while recording or resolving this slot. Independent GPU producers have separate slots.
+        std::mutex Mutex;
+        std::array<Timing, 3> Timings;
+        std::vector<BenchmarkPacket> Samples;
+        uint64_t Epoch = 0;
+    };
+    bool TrackBenchmarkSlot(const std::shared_ptr<BenchmarkSlot>& slot, uint64_t epoch);
+    void CollectBenchmarkSlot(BenchmarkSlot& slot, bool waitForGpu);
     struct Timeline {
         std::unique_ptr<GDX12CommandQueue> Owned;
         GDX12CommandQueue* Queue = nullptr;
@@ -80,7 +97,7 @@ private:
     const Timeline& Resolve(CompletionToken) const;
     ID3D12Fence* CompletionFence(CompletionToken) const;
     CompletionToken Submit(Id, BistroRender::Queue, const std::vector<ID3D12CommandList*>* packets, size_t count,
-        const std::vector<CompletionToken>&, GDX12CommandList* external = nullptr);
+        const std::vector<CompletionToken>&, GDX12CommandList* external = nullptr, uint64_t benchmarkEpoch = 0);
     const std::vector<DeviceDesc> _adapters;
     const int _primaryIndex;
     std::vector<std::string> _adapterLabels;
@@ -89,11 +106,11 @@ private:
     std::map<std::tuple<Id, Id, size_t>, ComPtr<ID3D12Fence>> _peerFences;
     uint64_t _incarnation;
     mutable std::mutex _mutex;
-    bool _benchmarking = false;
     uint64_t _nextBenchmarkEpoch = 0;
     std::atomic<uint64_t> _benchmarkEpoch{0};
     std::vector<BenchmarkWait> _benchmarkWaits;
     std::vector<BenchmarkPacket> _benchmarkPackets;
+    std::vector<std::shared_ptr<BenchmarkSlot>> _benchmarkSlots;
     mutable std::atomic<bool> _quarantined{false};
 };
 }

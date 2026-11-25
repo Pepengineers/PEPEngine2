@@ -9,7 +9,7 @@ namespace Engine::UI
     class SettingsCache
     {
     public:
-        struct Setting { std::string Name, Label, Description; size_t VariableIndex; };
+        struct Setting { std::wstring RegistryName; std::string Name, Label, Description; };
         struct Group
         {
             std::map<std::string, Group> Children;
@@ -17,14 +17,17 @@ namespace Engine::UI
         };
         const Group& Root() const { return _root; }
 
+        bool IsCurrent(uint64_t revision, const ImGuiTextFilter& filter, unsigned viewVersion = 0) const
+        {
+            return _revision == revision && _filter == filter.InputBuf && _viewVersion == viewVersion;
+        }
         bool Update(const std::vector<IConsoleVariable*>& variables, uint64_t revision, const ImGuiTextFilter& filter,
             unsigned viewVersion = 0)
         {
-            if (_revision == revision && _filter == filter.InputBuf && _viewVersion == viewVersion) return false;
+            if (IsCurrent(revision, filter, viewVersion)) return false;
             _root = {};
-            for (size_t index = 0; index < variables.size(); ++index)
+            for (const auto* variable : variables)
             {
-                const auto* variable = variables[index];
                 const auto name = std::filesystem::path(variable->GetName()).u8string();
                 const auto description = std::filesystem::path(variable->GetDescription()).u8string();
                 if (filter.IsActive() && !filter.PassFilter((name + " " + description).c_str())) continue;
@@ -38,7 +41,7 @@ namespace Engine::UI
                 if (!start) group = &_root.Children["General"];
                 const auto label = name == "Render.SSR.Quality" ? "SSR quality" :
                     name == "Render.ReflectionProbes.Quality" ? "Reflection probe quality" : name.substr(start);
-                group->Variables.push_back({ name, label, description, index });
+                group->Variables.push_back({ std::wstring(variable->GetName()), name, label, description });
             }
             _revision = revision;
             _filter = filter.InputBuf;

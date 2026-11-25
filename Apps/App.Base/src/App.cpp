@@ -42,33 +42,28 @@ namespace Private
 
 void App::CalculateFrameStats()
 {
-    // Code computes the average frames per second, and also the
-    // average time it takes to render one frame. These stats
-    // are appended to the window caption bar.
+    if (!_captionTimingEnabled) return;
+    ++_captionFrames;
+    const float now = Timer.TotalTime();
+    const float elapsed = now - _captionIntervalStart;
+    if (elapsed < 1.f) return;
 
-    static int FrameCount = 0;
-    static float TimeElapsed = 0.0f;
-
-    FrameCount++;
-
-    // Compute averages over one second period.
-    if ((Timer.TotalTime() - TimeElapsed) >= 1.0f)
-    {
-        const float elapsed = Timer.TotalTime() - TimeElapsed;
-        float Fps = static_cast<float>(FrameCount) / elapsed;
-        float MsPerFrame = 1000.0f / Fps;
-
-        wchar_t timing[64]{};
-        std::swprintf(timing, std::size(timing), L"%.1f FPS / %.1f ms", Fps, MsPerFrame);
-        _frameTimingCaption = timing;
-        RefreshWindowCaption();
-
-        // Reset for next average.
-        FrameCount = 0;
-        TimeElapsed = Timer.TotalTime();
-    }
+    const float fps = _captionFrames / elapsed;
+    wchar_t timing[64]{};
+    std::swprintf(timing, std::size(timing), L"%.1f FPS / %.1f ms", fps, 1000.f / fps);
+    _frameTimingCaption = timing;
+    RefreshWindowCaption();
+    _captionFrames = 0;
+    _captionIntervalStart = now;
 }
 
+void App::SetCaptionTimingEnabled(bool enabled)
+{
+    _captionTimingEnabled = enabled;
+    _captionFrames = 0;
+    _captionIntervalStart = Timer.TotalTime();
+    _frameTimingCaption.clear();
+}
 
 void App::RefreshWindowCaption() const
 {

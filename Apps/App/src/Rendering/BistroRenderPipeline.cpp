@@ -87,9 +87,10 @@ void BistroRenderPipeline::PrepareMaterialBindings(RenderPipelineContext& c)
 	_lighting->RetireShadowSkinInputs(slot);
 	_post->Textures().RetireReadback(0, slot);
 	_animationTime += (std::max)(0.0, double(c.Common.GameTimer->DeltaTime()));
-	const auto animationTime = _benchmarkTime.value_or(_animationTime);
+	const auto hudTime = _benchmarkTime.value_or(_animationTime);
+	const auto animationTime = hudTime + _benchmarkWarmup;
 	_cloudPicture->Prepare(slot, animationTime);
-	_post->PrepareMaterials(*_executor, _frameNumber, animationTime, _cloudPicture->Image());
+	_post->PrepareMaterials(*_executor, _frameNumber, animationTime, hudTime, _cloudPicture->Image());
 }
 
 void BistroRenderPipeline::RebuildExecution(RenderPipelineContext& c)
@@ -142,7 +143,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	_post->BeginPlan(*_executor, _frameNumber);
 	auto& textures = _post->Textures();
 	using View = BistroRender::SceneTextureInspector::View;
-	const bool inspect = BistroRender::SceneTextureInspector::Visible();
+	const bool inspect = textures.PreviewsVisible();
 	if ((inspect || textures.NeedsReadback()) && _geometry->PrepassNormals(slot))
 	{
 		textures.Name("Scene.Depth", depth, View::Depth);
@@ -276,30 +277,23 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 		_lighting->SubmitLightGrid(schedule, waits);
 		_post->SubmitHud(schedule, waits);
 		_geometry->SubmitSkinning(slot, schedule, waits);
-		// RenderModule's prefix only writes the DIRECT start timestamp. During
-		// benchmarking it must precede all queues included in the measured interval.
-		const auto frameStart = prefixContents == PrefixContents::TimestampOnly && !_benchmarkTime ?
+		const auto frameStart = prefixContents == PrefixContents::TimestampOnly ?
 		    BistroRender::Executor::FrameStart::TimestampOnly : BistroRender::Executor::FrameStart::Ordered;
 		completion = _executor->Execute(schedule, _geometry->PlannedResources(slot), record, prefix, nullptr, nullptr, waits,
 		                                exchanges, BistroRender::Invalid, frameStart);
-		if (_benchmarkTime)
+		if (_observePlacement)
 		{
 			_benchmarkSky = c.Primary.Sky.Source;
 			_benchmarkLinks.clear();
 			for (const auto& wait : waits)
 				if (wait.Token && wait.Token.Device != 0)
-					_benchmarkLinks.push_back({BistroRender::Invalid, wait.Token.Device, wait.Packet});
+					_benchmarkLinks.push_back({wait.Token.Device, wait.Packet});
 			for (size_t i = 0; i < exchanges.size(); ++i)
 			{
 				const auto token = _executor->ExchangeCompletions()[i];
 				if (token && token.Device != 0)
-					_benchmarkLinks.push_back({exchanges[i].Export, token.Device, exchanges[i].Import});
+					_benchmarkLinks.push_back({token.Device, exchanges[i].Import});
 			}
-		}
-		if (std::exchange(_checkPanelPlacement, false))
-		{
-			_panelOwners = PanelAdapters();
-			++_panelRevision; // Queue targets can change without changing GPU owners.
 		}
 		_post->Textures().ReadbackSubmitted(0, slot);
 	}
@@ -363,8 +357,10 @@ void BistroRenderPipeline::FramePresented()
 	_post->HudPresented();
 	_post->PostPresented();
 	_lighting->Transparency().Presented();
-	_lighting->Water().Presented(_frameNumber, _executor->Completions());
-	_lighting->Particles().Presented(_frameNumber);
+	auto* publications = _observePlacement ? &_benchmarkSimulations : nullptr;
+	if (publications) publications->clear();
+	_lighting->Water().Presented(_frameNumber, _executor->Completions(), publications);
+	_lighting->Particles().Presented(_frameNumber, publications);
 	_lighting->AOPresented(_frameNumber, _executor->Completions());
 	_lighting->LightGridPresented(_frameNumber, *_schedule, _executor->Completions());
 	if (_reportedDepthNormals || !_geometry->PrepassNormals(_executorSlot)) return;
@@ -405,44 +401,40 @@ std::vector<std::pair<std::string, std::string>> BistroRenderPipeline::Benchmark
 	return adapters;
 }
 
-std::vector<std::pair<std::string, BistroRender::Id>> BistroRenderPipeline::BenchmarkActiveOwners() const
+void BistroRenderPipeline::BenchmarkPlacement(const PacketRoles& passes, FramePlacement& frame) const
 {
 	using BistroRender::Invalid;
-	std::vector<std::pair<std::string, BistroRender::Id>> owners;
+	auto& owners = frame.ActiveOwners;
+	owners.clear();
 	const auto add = [&](const char* role, BistroRender::Id owner) {
 		if (owner != Invalid) owners.emplace_back(role, owner);
 	};
-	const auto has = [&](std::initializer_list<std::string_view> prefixes) {
-		return std::any_of(_schedule->Packets.begin(), _schedule->Packets.end(), [&](const auto& packet) {
-			return std::any_of(prefixes.begin(), prefixes.end(), [&](std::string_view prefix) {
-				return packet.Name.compare(0, prefix.size(), prefix) == 0;
-			});
-		});
-	};
-	if (has({"AO resolve", "SSAO/HBAO visibility", "CACAO dispatch", "XeGTAO GPU0 import terms", "XeGTAO denoise"}))
+	add("SceneAdapter", 0);
+	if (passes.AO)
 		add("AOAdapter", _lighting->AOExecutionDevice());
-	if (has({"GPU light grid masks", "GPU0 import Exact light grid masks"}))
+	if (passes.LightGrid)
 		add("LightGridAdapter", _lighting->LightGridDevice());
 	const auto particles = _lighting->Particles().ExecutionDevice();
-	if (particles || has({"particle simulation", "opaque particles G-buffer", "transparent particles cull"}))
+	if (particles || passes.Particles)
 		add("ParticleAdapter", particles);
 	const auto water = _lighting->Water().ExecutionDevice();
-	if (water || has({"water seed", "water draw"})) add("WaterAdapter", water);
+	if (water || passes.Water) add("WaterAdapter", water);
 	const auto wind = _geometry->Grass().WindExecutionDevice();
-	if (wind || has({"grass wind stage", "linden wind stage"})) add("GrassWindAdapter", wind);
+	if (wind || passes.Wind) add("GrassWindAdapter", wind);
 	if (_cloudPicture->Image()) add("CloudPictureAdapter", _cloudPicture->ExecutionDevice());
 	const auto [skyView, aerial] = _environment->BenchmarkAtmosphereConsumers();
 	add("SkyViewAdapter", skyView);
 	add("AerialPerspectiveAdapter", aerial);
 	add("TransparencyAdapter", _lighting->Transparency().BenchmarkExecutionDevice());
-	const auto [post, hud] = _post->BenchmarkPublication();
+	frame.PostPublication = _post->BenchmarkPublication();
+	const auto [post, hud] = frame.PostPublication;
 	add("PostAdapter", post == Invalid ? 0 : post);
 	for (const auto& [name, owner] : _post->ExecutionDevices())
-		if (owner != Invalid && name != "PostAdapter" && name != "PresentationAdapter")
+		if (owner != Invalid && name != "PostAdapter")
 			owners.emplace_back(name, name == "GameHUDAdapter" && hud != Invalid ? hud : owner);
-	_lighting->AppendBenchmarkShadowOwners(owners);
+	frame.ShadowTexels = _lighting->AppendBenchmarkShadowOwners(owners);
 	_lighting->AppendPublishedProbes(owners);
-	return owners;
+	_geometry->AppendSkinningOwners(_executorSlot, owners);
 }
 
 std::vector<std::pair<std::string, std::string>> BistroRenderPipeline::PanelAdapters() const

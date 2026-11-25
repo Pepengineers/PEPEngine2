@@ -1,6 +1,7 @@
 #include "Engine.RendererDX12/GDX12LocalLights.h"
 #include "Engine.UI/UI_test.h"
 #include "Engine.UI/OffscreenUI.h"
+#include "FontAtlasCache.h"
 #include "SettingsCache.h"
 #include "Engine.Core/ConsoleModule.h"
 #include "Common/RuntimePaths.h"
@@ -27,6 +28,22 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM,
 
 namespace Engine::UI
 {
+    struct AtlasSnapshot
+    {
+        UINT Width = 0;
+        UINT Height = 0;
+        std::vector<unsigned char> Pixels;
+    };
+
+    void FontAtlasCache::BeginFrame()
+    {
+        const int current = ImGui::GetFrameCount();
+        if (Frame == current) return;
+        Frame = current;
+        // Dynamic glyph writes clear TexIsBuilt, even while the texture is awaiting its first upload.
+        if (!ImGui::GetIO().Fonts->TexIsBuilt) Snapshot.reset();
+    }
+
     namespace
     {
         std::unique_ptr<GDX12DescriptorHeap> Heap;
@@ -60,8 +77,8 @@ namespace Engine::UI
             const bool effectiveCategorized = console.FindConsoleVariable(L"App.Physics.EffectiveCategorized").GetBool();
             const int next = console.FindConsoleVariable(L"App.Physics.SimulationEnabled").GetBool() ? requested : 0;
             if (categorized != effectiveCategorized || (categorized && next != effective))
-                ImGui::TextColored(ImVec4(1, .7f, .2f, 1), "Restart Bistro required");
-            ImGui::TextWrapped("Physics changes require restarting Bistro. Other techniques keep their settings.");
+                ImGui::TextColored(ImVec4(1, .7f, .2f, 1), "Physics is still using the startup settings.");
+            ImGui::TextWrapped("Set App.Physics.Quality and the physics options in Configs/Startup.ini, then restart Bistro.");
         }
 
         struct SettingEditor
@@ -78,6 +95,12 @@ namespace Engine::UI
 
             void Apply(IConsoleVariable& variable, std::string_view value)
             {
+                if (Name == L"Render.Debug.SceneTextures")
+                {
+                    Error = SetSceneTexturesVisible(value == "true");
+                    if (Error.empty()) Select(variable);
+                    return;
+                }
                 if (!variable.IsValidString(value))
                 {
                     Error = "Invalid value. Check the limits above.";
@@ -256,7 +279,7 @@ namespace Engine::UI
 
         void DrawSettings()
         {
-            if (!Visible) return;
+            if (!Visible || !SettingsEditingEnabled) return;
             if (FocusSettings) { ImGui::SetNextWindowFocus(); FocusSettings = false; }
             ImGui::SetNextWindowPos(ImVec2(16, 16), ImGuiCond_FirstUseEver);
             ImGui::SetNextWindowSize(ImVec2(720, 580), ImGuiCond_FirstUseEver);
@@ -268,10 +291,10 @@ namespace Engine::UI
                 if (console.TryFindConsoleVariable(L"Render.Debug.SceneTextures", inspector))
                 {
                     bool enabled = inspector->GetBool();
-                    ImGui::BeginDisabled(!SettingsEditingEnabled);
+                    static std::string visibilityError;
                     if (ImGui::Checkbox("Scene textures", &enabled))
-                        inspector->SetFromString(enabled ? "true" : "false");
-                    ImGui::EndDisabled();
+                        visibilityError = SetSceneTexturesVisible(enabled);
+                    if (!visibilityError.empty()) ImGui::TextWrapped("%s", visibilityError.c_str());
                 }
                 static ImGuiTextFilter filter;
                 filter.Draw("Search", -90);
@@ -284,21 +307,25 @@ namespace Engine::UI
                     const auto page = LocalShadowPageSettingsIndex(name);
                     return page && *page >= shadowPages;
                 };
-                uint64_t revision;
-                auto variables = console.GetConsoleVariables({}, &revision);
-                variables.erase(std::remove_if(variables.begin(), variables.end(), [&](const auto* variable)
-                { return inactiveShadowPage(variable->GetName()); }), variables.end());
-                settings.Update(variables, revision, filter, shadowPages);
+                auto revision = console.GetConsoleVariableRevision();
+                if (!settings.IsCurrent(revision, filter, shadowPages))
+                {
+                    auto variables = console.GetConsoleVariables({}, &revision);
+                    variables.erase(std::remove_if(variables.begin(), variables.end(), [&](const auto* variable)
+                    { return inactiveShadowPage(variable->GetName()); }), variables.end());
+                    settings.Update(variables, revision, filter, shadowPages);
+                }
 
                 const auto drawGroup = [&](auto&& self, const SettingsCache::Group& group) -> void
                 {
                     for (const auto& setting : group.Variables)
                     {
-                        if (console.GetConsoleVariableRevision() != revision) break;
-                        auto& variable = *variables.at(setting.VariableIndex);
                         ImGui::PushID(setting.Name.c_str());
-                        if (ImGui::Selectable(setting.Label.c_str(), variable.GetName() == editor.Name))
-                            editor.Select(variable);
+                        if (ImGui::Selectable(setting.Label.c_str(), setting.RegistryName == editor.Name))
+                        {
+                            IConsoleVariable* variable = nullptr;
+                            if (console.TryFindConsoleVariable(setting.RegistryName, variable)) editor.Select(*variable);
+                        }
                         if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", setting.Name.c_str());
                         ImGui::PopID();
                     }
@@ -329,9 +356,7 @@ namespace Engine::UI
                     if (!editor.Name.empty() && !inactiveShadowPage(editor.Name) &&
                         console.TryFindConsoleVariable(editor.Name, variable))
                     {
-                        ImGui::BeginDisabled(!SettingsEditingEnabled);
                         editor.Draw(*variable);
-                        ImGui::EndDisabled();
                         if (editor.Name == L"App.Physics.Quality") DrawPhysicsQuality(console);
                     }
                     else
@@ -388,27 +413,12 @@ namespace Engine::UI
             ImDrawData Data;
         };
 
-        struct AtlasSnapshot
-        {
-            UINT Width = 0;
-            UINT Height = 0;
-            std::vector<unsigned char> Pixels;
-        };
         struct DrawTexture
         {
             UITextureId Id = UITextureId::Invalid;
             std::shared_ptr<const AtlasSnapshot> Atlas;
         };
-        struct AtlasCapture
-        {
-            const ImTextureData* Identity;
-            int UniqueID;
-            uint64_t Generation;
-            std::shared_ptr<const AtlasSnapshot> Snapshot;
-        };
-        std::vector<AtlasCapture> ScreenAtlasCaptures;
-        uint64_t ScreenAtlasGeneration = 0;
-        int ScreenAtlasFrame = -1;
+        FontAtlasCache ScreenAtlas;
 
         struct AtlasUpload
         {
@@ -447,7 +457,7 @@ namespace Engine::UI
         std::vector<DrawTexture> Textures;
     };
 
-    static std::shared_ptr<const DrawData> CaptureData(const ImDrawData& source, bool reuseScreenAtlases)
+    static std::shared_ptr<const DrawData> CaptureData(const ImDrawData& source, FontAtlasCache* cache)
     {
         if (!source.Valid) throw std::invalid_argument("UI capture requires finalized ImGui draw data");
         if (!std::isfinite(source.DisplaySize.x) || !std::isfinite(source.DisplaySize.y) ||
@@ -456,7 +466,6 @@ namespace Engine::UI
         if (source.DisplaySize.x <= 0 || source.DisplaySize.y <= 0) return {};
 
         auto frame = std::make_shared<DrawData>(source);
-        std::vector<AtlasCapture> capturedAtlases;
         std::unordered_map<const ImTextureData*, ImTextureID> managed;
         std::unordered_map<ImTextureID, ImTextureID> external;
         for (auto* list : frame->Lists.Data.CmdLists)
@@ -484,16 +493,23 @@ namespace Engine::UI
                             tex->Width > D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION ||
                             tex->Height > D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION)
                             throw std::invalid_argument("UI capture requires live RGBA8 ImGui texture pixels");
-                        const auto cached = std::find_if(ScreenAtlasCaptures.begin(), ScreenAtlasCaptures.end(),
-                            [&](const auto& atlas) { return reuseScreenAtlases && atlas.Identity == tex &&
-                                atlas.UniqueID == tex->UniqueID && atlas.Generation == ScreenAtlasGeneration &&
-                                atlas.Snapshot->Width == tex->Width && atlas.Snapshot->Height == tex->Height; });
-                        const auto snapshot = cached != ScreenAtlasCaptures.end() ? cached->Snapshot :
-                            std::make_shared<const AtlasSnapshot>(AtlasSnapshot{static_cast<UINT>(tex->Width),
+                        const bool font = cache && tex == ImGui::GetIO().Fonts->TexData;
+                        std::shared_ptr<const AtlasSnapshot> snapshot;
+                        if (font && cache->Texture == tex && cache->UniqueId == tex->UniqueID &&
+                            cache->Snapshot && cache->Snapshot->Width == tex->Width && cache->Snapshot->Height == tex->Height)
+                            snapshot = cache->Snapshot;
+                        else
+                        {
+                            snapshot = std::make_shared<const AtlasSnapshot>(AtlasSnapshot{static_cast<UINT>(tex->Width),
                                 static_cast<UINT>(tex->Height), {tex->Pixels, tex->Pixels + tex->GetSizeInBytes()}});
-                        frame->Textures.push_back({UITextureId::Invalid, snapshot});
-                        if (reuseScreenAtlases)
-                            capturedAtlases.push_back({tex, tex->UniqueID, ScreenAtlasGeneration, snapshot});
+                            if (font)
+                            {
+                                cache->Texture = tex;
+                                cache->UniqueId = tex->UniqueID;
+                                cache->Snapshot = snapshot;
+                            }
+                        }
+                        frame->Textures.push_back({UITextureId::Invalid, std::move(snapshot)});
                     }
                     command.TexRef = ImTextureRef(entry->second);
                 }
@@ -507,13 +523,18 @@ namespace Engine::UI
                 }
             }
         }
-        if (reuseScreenAtlases) ScreenAtlasCaptures = std::move(capturedAtlases);
         return frame;
     }
 
     std::shared_ptr<const DrawData> CaptureDrawData(const ImDrawData& source)
     {
-        return CaptureData(source, false);
+        return CaptureData(source, nullptr);
+    }
+
+    std::shared_ptr<const DrawData> CaptureDrawData(const ImDrawData& source, FontAtlasCache& cache)
+    {
+        cache.BeginFrame();
+        return CaptureData(source, &cache);
     }
 
     struct OffscreenRenderer::Impl
@@ -895,11 +916,8 @@ namespace Engine::UI
     {
         const auto* data = FinalizeScreenFrame();
         if (!data) return {};
-        const int frame = ImGui::GetFrameCount();
-        // ImGui's dynamic atlas marks real pixel writes dirty, including pending WantCreate textures.
-        if (ScreenAtlasFrame != frame && !ImGui::GetIO().Fonts->TexIsBuilt) ++ScreenAtlasGeneration;
-        ScreenAtlasFrame = frame;
-        return data->TotalVtxCount ? CaptureData(*data, true) : nullptr;
+        ScreenAtlas.BeginFrame();
+        return data->TotalVtxCount ? CaptureData(*data, &ScreenAtlas) : nullptr;
     }
 
     std::shared_ptr<const DrawData> CaptureScreenOverlay(ImDrawList& overlay)
@@ -913,7 +931,7 @@ namespace Engine::UI
         data.FramebufferScale = frame->FramebufferScale;
         data.OwnerViewport = frame->OwnerViewport;
         data.AddDrawList(&overlay);
-        return CaptureData(data, true);
+        return CaptureDrawData(data, ScreenAtlas);
     }
 
     void DrawReconstructionStatus(const GDX12ReconstructionStatus& status, unsigned renderWidth, unsigned renderHeight,
@@ -942,9 +960,7 @@ namespace Engine::UI
     void ShutdownUI()
     {
         LocalShadowDistribution = {};
-        ScreenAtlasCaptures.clear();
-        ScreenAtlasGeneration = 0;
-        ScreenAtlasFrame = -1;
+        ScreenAtlas = {};
         if (!ImGui::GetCurrentContext()) return;
         if (ImGui::GetIO().BackendRendererUserData) ImGui_ImplDX12_Shutdown();
         if (ImGui::GetIO().BackendPlatformUserData) ImGui_ImplWin32_Shutdown();
@@ -978,6 +994,10 @@ namespace Engine::UI
     void SetLocalShadowDistribution(std::function<std::string()> layout) { LocalShadowDistribution = std::move(layout); }
     void SetDebugReconstructionStatusVisible(bool visible) { DebugReconstructionStatusVisible = visible; }
     void SetSettingsEditingEnabled(bool enabled) { SettingsEditingEnabled = enabled; }
+    std::string SetSceneTexturesVisible(bool visible)
+    {
+        return ConsoleModule{}.ApplyPatch({{L"Render.Debug.SceneTextures", visible ? "true" : "false"}}).Error;
+    }
     void HideSettings() { Visible = FocusSettings = false; }
     void OpenSettings() { Visible = FocusSettings = true; }
     void EnableDebugUI() { DebugEnabled = true; }

@@ -10,6 +10,7 @@
 #include "BistroUIPosters.h"
 #include "SceneTextureInspector.h"
 #include <array>
+#include <string_view>
 
 namespace BistroRender
 {
@@ -21,7 +22,8 @@ class ScenePostUI
 	GDX12ReconstructionPass& Reconstruction();
 	std::vector<GDX12RenderPass*> Passes();
 	bool UpdatePostOwner(RenderPipelineContext&, const std::shared_ptr<QueueSubmission>&, Id);
-	std::vector<std::pair<std::string, Id>> ExecutionDevices() const;
+	using Devices = std::array<std::pair<std::string_view, Id>, 5>;
+	Devices ExecutionDevices() const;
 	std::array<uint64_t, 4> BenchmarkTransferBytes() const;
 	std::pair<bool, bool> BenchmarkPostEffects() const;
 	std::pair<Id, Id> BenchmarkPublication() const;
@@ -49,7 +51,7 @@ class ScenePostUI
 		_publishedInputs = _pendingPublished;
 		if (!_remotePost) _reconstruction.Submitted();
 	}
-	void PrepareMaterials(Executor&, uint64_t frame, double animationSeconds, GDX12Texture* cloudImage);
+	void PrepareMaterials(Executor&, uint64_t frame, double animationSeconds, double hudSeconds, GDX12Texture* cloudImage);
 	void AddPosterWaits(const Schedule& schedule, std::vector<PacketWait>& waits) { _posters->AddWaits(schedule, waits); }
 	void PostersSubmitted(uint64_t frame, const std::vector<CompletionToken>& completions)
 	{
@@ -129,6 +131,7 @@ class ScenePostUI
 	std::shared_ptr<RemoteHud> _remoteHud;
 	std::shared_ptr<QueueSubmission> _hudSubmissions;
 	uint64_t _hudFrame = 0;
+	float _hudTime = 0;
 	GDX12DepthOfFieldPass _dof;
 	GDX12MotionBlurPass _blur;
 	GDX12ReconstructionPass _reconstruction;

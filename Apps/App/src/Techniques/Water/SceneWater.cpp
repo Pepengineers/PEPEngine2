@@ -668,15 +668,6 @@ bool SceneWater::BenchmarkReady() const
 	return _remote->DisplayIds.empty() || (_remote->Selected && _drawPacket != Invalid);
 }
 
-void SceneWater::AppendBenchmarkPublications(std::vector<SimulationPublication>& publications) const
-{
-	if (!_remote || _drawPacket == Invalid) return;
-	std::lock_guard lock(_remote->Mutex);
-	if (const auto* selected = _remote->Selected)
-		publications.push_back({"WaterAdapter", _remote->DeviceId, 0,
-		    selected->Generation, selected->Version, selected->SimulatedSeconds});
-}
-
 void SceneWater::Submitted(const std::vector<CompletionToken>& completions)
 {
 	if (_importPacket < completions.size() && completions[_importPacket])
@@ -688,11 +679,14 @@ void SceneWater::Submitted(const std::vector<CompletionToken>& completions)
 	}
 }
 
-void SceneWater::Presented(uint64_t frame, const std::vector<CompletionToken>& completions)
+void SceneWater::Presented(uint64_t frame, const std::vector<CompletionToken>& completions,
+                           std::vector<SimulationPublication>* publications)
 {
 	if (!_remote || !_remote->Selected) return;
 	std::lock_guard lock(_remote->Mutex);
 	const auto& snapshot = *_remote->Selected;
+	if (publications && _drawPacket != Invalid)
+		publications->push_back({"WaterAdapter", _remote->DeviceId, 0, snapshot.Generation, snapshot.Version, snapshot.SimulatedSeconds});
 	const auto draw = _drawPacket < completions.size() ? completions[_drawPacket] : CompletionToken{};
 	if (_remote->Mode == 2)
 	{

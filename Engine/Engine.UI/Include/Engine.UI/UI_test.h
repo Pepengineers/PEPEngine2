@@ -36,6 +36,7 @@ namespace Engine::UI
     void EnableApplicationUIInput();
     void SetDebugReconstructionStatusVisible(bool visible);
     void SetSettingsEditingEnabled(bool enabled);
+    std::string SetSceneTexturesVisible(bool visible);
     void SetLocalShadowDistribution(std::function<std::string()> layout);
     void HideSettings();
     void OpenSettings();

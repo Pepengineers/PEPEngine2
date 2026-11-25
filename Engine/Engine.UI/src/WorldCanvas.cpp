@@ -1,4 +1,5 @@
 #include "Engine.UI/WorldCanvas.h"
+#include "FontAtlasCache.h"
 #include "Common/ConsoleVariables.h"
 #include "Engine.RendererDX12/GDX12CommandList.h"
 #include "Engine.RendererDX12/GDX12DescriptorHeap.h"
@@ -96,6 +97,7 @@ namespace Engine::UI
         CanvasStyle Style;
         std::thread::id Owner;
         ImGuiContext* Context = nullptr;
+        FontAtlasCache Fonts;
         CanvasSize LastSize;
         CanvasQuality LastQuality = CanvasQuality::Low;
         std::uint64_t Revision = 0;
@@ -204,7 +206,8 @@ namespace Engine::UI
         draw->PopClipRect();
         ImGui::Render();
         auto frame = std::make_shared<const CanvasFrame>(
-            CanvasFrame{state.Id, logicalSize, timeSeconds, quality, revision, CaptureDrawData(*ImGui::GetDrawData()), state.Style});
+            CanvasFrame{state.Id, logicalSize, timeSeconds, quality, revision,
+                CaptureDrawData(*ImGui::GetDrawData(), state.Fonts), state.Style});
         state.LastSize = logicalSize;
         state.LastQuality = quality;
         state.Revision = revision;

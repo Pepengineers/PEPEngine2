@@ -19,12 +19,11 @@ public:
     void BeginSimulation(GDX12ParticleInteractionField, GDX12Texture* depth, Executor&, Id device, float worldRate, bool ownerDraw);
     Id ExecutionDevice() const;
     bool BenchmarkReady() const;
-    void AppendBenchmarkPublications(std::vector<SimulationPublication>&) const;
     void PreserveConsumedBursts(const GDX12ParticleSimulation&);
     void PauseIndependentClock();
     void AddExchanges(const Schedule&, std::vector<PacketWait>&, std::vector<Executor::PacketExchange>&);
     void Submitted(const std::vector<CompletionToken>&);
-    void Presented(uint64_t frame);
+    void Presented(uint64_t frame, std::vector<SimulationPublication>*);
     void AppendSimulation(Graph&, std::vector<ID3D12Resource*>&, Inputs, GDX12Texture* depth);
     void PrepareOpaque(const SceneGeometry&, UINT slot);
     void AppendEarlyOpaquePreparation(Graph&, std::vector<ID3D12Resource*>&);

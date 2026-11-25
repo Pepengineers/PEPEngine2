@@ -17,11 +17,10 @@ class SceneWater
 	void Prepare(float delta, Executor&, Id device);
 	Id ExecutionDevice() const;
 	bool BenchmarkReady() const;
-	void AppendBenchmarkPublications(std::vector<SimulationPublication>&) const;
 	void PauseIndependentClock();
 	void AddWaits(const Schedule&, std::vector<PacketWait>&);
 	void Submitted(const std::vector<CompletionToken>&);
-	void Presented(uint64_t frame, const std::vector<CompletionToken>&);
+	void Presented(uint64_t frame, const std::vector<CompletionToken>&, std::vector<SimulationPublication>*);
 	void AppendSimulation(Graph&, std::vector<ID3D12Resource*>&);
 	void SetSceneInputs(GDX12Texture* opaqueDepth, GDX12Texture* opaqueMotion);
 	bool DrawsDiagnosticParticles() const { return !_surface.DrawSources().empty(); }

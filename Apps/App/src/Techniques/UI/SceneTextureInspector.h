@@ -15,6 +15,7 @@ public:
 	explicit SceneTextureInspector(UINT slots);
 	static bool Visible();
 	static void SetVisible(bool visible);
+	bool PreviewsVisible() const { return Visible() && !_collapsed; }
 	bool NeedsReadback() const { return !_readbackName.empty(); }
 	bool NeedsReadback(std::string_view name) const { return _readbackName == name; }
 	bool RequestsTexture(std::string_view name) const;
@@ -65,6 +66,7 @@ private:
 	std::string _readbackName;
 	Readback _readback;
 	bool _loggedMissing = false;
+	bool _collapsed = false;
 	std::vector<Source> _named;
 	std::vector<std::string> _selected{"Scene.Depth", "Scene.AO"};
 	std::vector<Slot> _slots;

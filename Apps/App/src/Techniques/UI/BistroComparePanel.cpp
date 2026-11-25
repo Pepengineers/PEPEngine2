@@ -32,6 +32,8 @@ class CsvReader
         if (Next())
             for (size_t i = 0; i < _fields.size(); ++i) _columns.emplace(_fields[i], i);
     }
+    std::streamoff Position() { return _input.tellg(); }
+    void Seek(std::streamoff offset) { _input.seekg(offset); }
     bool Next()
     {
         _fields.clear();
@@ -92,10 +94,10 @@ std::optional<double> Number(const std::string &s)
 
 void ReadSetting(Settings &settings, const std::string &name, const std::string &value)
 {
-    static const std::array keys{
-        "OutputResolution",        "RenderResolution",    "EffectiveUpscaler", "Render.Upscaler.Provider",
-        "Render.Upscaler.Quality", "PaintingHoldSeconds", "RouteSeconds",      "WarmupSeconds"};
-    if (name.rfind("Render.", 0) == 0 || name.rfind("App.UI.", 0) == 0 || name == "EffectiveFrameGeneration" || std::find(keys.begin(), keys.end(), name) != keys.end()) settings[name] = value;
+    static const std::array keys{"OutputResolution", "RenderResolution", "EffectiveUpscaler", "EffectiveFrameGeneration",
+                                 "PaintingHoldSeconds", "RouteSeconds", "WarmupSeconds", "RouteVersion", "MeasurementVersion"};
+    if (name.rfind("Render.", 0) == 0 || name.rfind("App.", 0) == 0 || std::find(keys.begin(), keys.end(), name) != keys.end())
+        settings[name] = value;
 }
 const std::string& Value(const Settings& settings, const std::string& key)
 {
@@ -128,7 +130,7 @@ std::string DisplayValue(const std::string& key, const std::string& value)
     return value;
 }
 
-void DrawSettings(const Settings& values, const Settings& before)
+void DrawSettings(const Settings& values, const Settings& before, const char* title = "All settings")
 {
     const auto display = [&](const char* key) { return DisplayValue(key, Value(values, key)); };
     const auto provider = display("EffectiveUpscaler");
@@ -184,12 +186,12 @@ void DrawSettings(const Settings& values, const Settings& before)
     };
     if (before.empty()) ImGui::TextDisabled("Pre-run settings were not recorded.");
     else if (ImGui::CollapsingHeader("Changes from pre-run settings", ImGuiTreeNodeFlags_DefaultOpen)) table(true);
-    if (ImGui::CollapsingHeader("All settings")) table(false);
+    if (ImGui::CollapsingHeader(title)) table(false);
 }
 
 std::string RunMode(const std::string &mode)
 {
-    if (mode == "manual_placement") return "Manual";
+    if (mode == "manual_placement" || mode == "manual_run") return "Manual";
     if (mode == "multi_gpu_profiles") return "MGPU";
     if (mode == "single_gpu_profiles") return "Single GPU";
     if (mode.find("search") != mode.npos) return "Async";
@@ -205,14 +207,21 @@ ImU32 Color(const std::string &mode)
 }
 }
 
-void BistroComparePanel::Refresh()
+void BistroComparePanel::Refresh(bool force)
 {
-    std::array<fs::path, 2> previous;
+    std::array<std::pair<fs::path, std::streamoff>, 2> previous;
     for (size_t i = 0; i < previous.size(); ++i)
     {
         const auto &s = _selected[i];
-        if (s.PassIndex >= 0) previous[i] = _runs[s.RunIndex].Passes[s.PassIndex].Path;
+        if (s.PassIndex >= 0)
+        {
+            const auto& pass = _runs[s.RunIndex].Passes[s.PassIndex];
+            previous[i] = {pass.Path, pass.InlineOffset};
+        }
     }
+    std::map<fs::path, Run> cached;
+    if (!force)
+        for (auto& run : _runs) cached.try_emplace(run.Path, std::move(run));
     _runs.clear();
     _notice.clear();
     const auto root = Engine::Core::GetExecutableDirectory() / "BenchmarkResults";
@@ -229,9 +238,31 @@ void BistroComparePanel::Refresh()
             continue;
         }
         if (file.extension() != ".csv") continue;
+        std::error_code timeError;
+        const auto modified = it->last_write_time(timeError);
+        const auto old = cached.find(file);
+        if (!timeError && old != cached.end() && old->second.Modified == modified)
+        {
+            _runs.push_back(std::move(old->second));
+            continue;
+        }
         Run run;
         run.Path = file;
+        run.Modified = modified;
+        run.Settings.emplace("MeasurementVersion", "1");
         CsvReader csv(file);
+        std::streamoff inlineOffset = csv.Position();
+        bool inlineFrames = false;
+        const auto appendPass = [&](fs::path path, std::string label, std::streamoff offset)
+        {
+            Window range{Number(csv.Get("window_start")).value_or(-1), Number(csv.Get("window_end")).value_or(-1),
+                         csv.Get("section")};
+            // Earlier writers used the first frame's section even for a complete route.
+            if (range.Begin == 0 && range.End > 0 && Number(Value(run.Settings, "RouteSeconds")) == range.End)
+                range.Section = "Full route";
+            label += "  /  " + csv.Get("stage") + "  /  " + range.Section;
+            run.Passes.push_back({std::move(path), std::move(label), csv.Get("mask"), std::move(range), offset});
+        };
         while (csv.Next())
         {
             const auto &key = csv.Get("name");
@@ -239,9 +270,19 @@ void BistroComparePanel::Refresh()
             if (csv.Get("type") == "config")
             {
                 if (key == "Mode")
+                {
                     run.Mode = RunMode(value);
+                    run.AfterRender = run.Mode == "Async" || value == "manual_run";
+                }
                 else if (key == "Profile")
                     run.Profile = value;
+                else if (key == "StopReason") run.StopReason = value;
+                else if (key == "FastestMask")
+                {
+                    const auto mask = Number(value);
+                    if (mask && *mask >= 0 && *mask <= UINT32_MAX && *mask == std::floor(*mask))
+                        run.FinalMask = std::to_string(uint32_t(*mask));
+                }
                 else if (key.rfind("Before.", 0) == 0) run.Before[key.substr(7)] = value;
                 else if (key.rfind("MaskBit", 0) == 0) run.MaskBits[key.substr(7)] = value;
                 else if (key.rfind("Trial.", 0) == 0)
@@ -257,20 +298,43 @@ void BistroComparePanel::Refresh()
                     if (key.rfind(prefix, 0) != 0) continue;
                     const auto field = key.substr(prefix.size());
                     auto& winner = run.Winners[upscaled];
-                    if (field.rfind("Preset.", 0) == 0) winner.Settings[field.substr(7)] = value;
+                    if (field.rfind("SingleGPU.", 0) == 0 || field.rfind("MultiGPU.", 0) == 0)
+                    {
+                        auto& placement = winner.Placements[field.front() == 'M'];
+                        const auto key = field.substr(field.find('.') + 1);
+                        if (key == "Technique")
+                        {
+                            const auto split = value.find('=');
+                            if (split != value.npos) placement.Techniques[value.substr(0, split)] = value.substr(split + 1);
+                        }
+                        else if (const auto dot = key.rfind('.'); dot != key.npos &&
+                            (key.compare(dot, key.npos, ".EffectiveOwner") == 0 || key.compare(dot, key.npos, ".Effective") == 0))
+                            placement.GpuSettings[key.substr(0, dot)] = value;
+                        else if (key.find('.') == key.npos) placement.Fields[key] = value;
+                    }
+                    else if (field.rfind("Preset.", 0) == 0) winner.Settings[field.substr(7)] = value;
                     else if (field.find('.') == field.npos) winner.Fields[field] = value;
                 }
                 else ReadSetting(run.Settings, key, value);
             }
-            else if (csv.Get("type") == "result") run.SelectedMask = csv.Get("mask");
+            else if (csv.Get("type") == "result")
+            {
+                run.FinalMask = csv.Get("mask");
+                run.StopReason = csv.Get("status");
+            }
+            else if (csv.Get("type") == "frame") inlineFrames = true;
+            else if (csv.Get("type") == "summary")
+            {
+                if (inlineFrames && csv.Get("status") == "completed")
+                    appendPass(file, "Pass " + std::to_string(run.Passes.size() + 1), inlineOffset);
+                inlineFrames = false;
+                inlineOffset = csv.Position();
+            }
             else if (key == "PassCSV" && csv.Get("type") == "pass" && csv.Get("status") == "completed")
             {
                 const auto relative = fs::u8path(value);
                 if (relative.parent_path() != file.stem()) continue;
-                run.Passes.push_back(
-                    {file.parent_path() / relative,
-                     relative.stem().string() + "  /  " + csv.Get("stage") + "  /  " + csv.Get("section"),
-                     csv.Get("mask"), csv.Get("section") == "Full route"});
+                appendPass(file.parent_path() / relative, relative.stem().string(), -1);
             }
         }
         if (run.Passes.empty() && run.Winners[0].Fields.empty() && run.Winners[1].Fields.empty()) continue;
@@ -297,6 +361,7 @@ void BistroComparePanel::Refresh()
     for (auto& run : _runs)
         for (auto& winner : run.Winners)
         {
+            winner.RunIndex = winner.PassIndex = -1;
             if (Value(winner.Fields, "Trial").empty()) continue;
             winner.Settings["OutputResolution"] = Value(winner.Fields, "Output");
             winner.Settings["RenderResolution"] = Value(winner.Fields, "Render");
@@ -310,7 +375,7 @@ void BistroComparePanel::Refresh()
                 if (measured.Path != path) continue;
                 const auto pass = measured.Path.parent_path() / fs::u8path(Value(measured.TrialPasses, Value(winner.Fields, "Trial")));
                 for (int i = 0; i < int(measured.Passes.size()); ++i)
-                    if (measured.Passes[i].FullRoute && measured.Passes[i].Path == pass)
+                    if (measured.Passes[i].Range.Section == "Full route" && measured.Passes[i].Path == pass)
                     {
                         winner.RunIndex = r;
                         winner.PassIndex = i;
@@ -324,20 +389,10 @@ void BistroComparePanel::Refresh()
     for (int r = 0; r < int(_runs.size()); ++r)
     {
         const auto& run = _runs[r];
-        auto& entries = _completed[{run.Mode, (run.Mode == "Single GPU" || run.Mode == "MGPU") ? run.Profile : ""}];
-        for (int p = 0; p < int(run.Passes.size()); ++p)
-        {
-            std::error_code timeError;
-            auto time = fs::last_write_time(run.Passes[p].Path, timeError);
-            if (!timeError) entries.push_back({time, r, p});
-        }
+        if (run.Passes.empty()) continue;
+        auto [it, added] = _completed.try_emplace({run.Mode, run.Profile}, run.Modified);
+        if (!added) it->second = std::max(it->second, run.Modified);
     }
-    for (auto& [filter, entries] : _completed)
-        std::sort(entries.begin(), entries.end(), [](const Entry& a, const Entry& b) {
-            if (a.Completed != b.Completed) return a.Completed > b.Completed;
-            if (a.RunIndex != b.RunIndex) return a.RunIndex < b.RunIndex;
-            return a.PassIndex > b.PassIndex;
-        });
     _loadComparison = true;
     for (int i = 0; i < 2; ++i)
     {
@@ -346,7 +401,7 @@ void BistroComparePanel::Refresh()
         if (i && r == 0 && p > 0) --p;
         for (int j = 0; j < int(_runs.size()); ++j)
             for (int k = 0; k < int(_runs[j].Passes.size()); ++k)
-                if (_runs[j].Passes[k].Path == previous[i])
+                if (_runs[j].Passes[k].Path == previous[i].first && _runs[j].Passes[k].InlineOffset == previous[i].second)
                 {
                     r = j;
                     p = k;
@@ -366,8 +421,12 @@ void BistroComparePanel::Select(Selection &s, int run, int pass)
     const auto &r = _runs[run];
     s.Settings = r.Settings;
     s.Mode = r.Mode;
-    const auto &path = r.Passes[pass].Path;
+    const auto& measured = r.Passes[pass];
+    s.Range = measured.Range;
+    s.AfterRender = r.AfterRender;
+    const auto& path = measured.Path;
     CsvReader csv(path);
+    if (measured.InlineOffset >= 0) csv.Seek(measured.InlineOffset);
     std::string trial;
     bool complete = false;
     std::vector<double> intervals;
@@ -396,6 +455,16 @@ void BistroComparePanel::Select(Selection &s, int run, int pass)
             s.Mode = csv.Get("value");
         else if (csv.Get("name") == "TrialCSV")
             trial = csv.Get("value");
+        else if (csv.Get("type") == "summary" && !s.Samples.empty())
+        {
+            s.ScopeMeanMs = Number(csv.Get("mean_ms")).value_or(-1);
+            s.ScopeP95Ms = Number(csv.Get("p95_ms")).value_or(-1);
+            if (measured.InlineOffset >= 0)
+            {
+                complete = csv.Get("status") == "completed";
+                break;
+            }
+        }
         else if (csv.Get("type") == "pass" && csv.Get("status") == "completed")
             complete = true;
     }
@@ -479,6 +548,9 @@ void BistroComparePanel::DrawSelection(Selection &s, const char *label)
             ImGui::EndCombo();
         }
         if (s.PassIndex >= 0 && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", passes[s.PassIndex].Path.u8string().c_str());
+        if (!s.Samples.empty() && s.Error.empty())
+            ImGui::TextDisabled("%.3f - %.3f s  |  %s", s.Range.Begin, s.Range.End,
+                s.AfterRender ? "after Render / Present" : "before Present");
     }
     if (!s.Error.empty()) ImGui::TextWrapped("%s", s.Error.c_str());
     ImGui::PopID();
@@ -590,9 +662,23 @@ void BistroComparePanel::DrawPlot(const Selection* series, size_t count, bool fp
         ImGui::EndTooltip();
     }
     ImGui::Dummy({0, 20});
-    if (count == 2 && ImGui::BeginTable("Compare metrics", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH))
+    if (count != 2) return;
+    const auto version = Value(a.Settings, "RouteVersion");
+    const bool sameRoute = !version.empty() && version == Value(b.Settings, "RouteVersion") &&
+        Number(Value(a.Settings, "RouteSeconds")).value_or(-1) > 0 &&
+        Number(Value(a.Settings, "RouteSeconds")) == Number(Value(b.Settings, "RouteSeconds")) &&
+        Value(a.Settings, "PaintingHoldSeconds") == Value(b.Settings, "PaintingHoldSeconds");
+    const bool sameWindow = !a.Range.Section.empty() && a.Range.Section == b.Range.Section &&
+        a.Range.Begin >= 0 && a.Range.End > a.Range.Begin && a.Range.Begin == b.Range.Begin && a.Range.End == b.Range.End;
+    const bool comparable = sameRoute && sameWindow && a.AfterRender == b.AfterRender &&
+        Value(a.Settings, "MeasurementVersion") == Value(b.Settings, "MeasurementVersion") &&
+        a.Mode != "Unknown" && b.Mode != "Unknown";
+    if (!comparable)
+        ImGui::TextWrapped("A/B deltas require matching routes, measured windows, timing boundaries and measurement versions.");
+    if (ImGui::BeginTable("Compare metrics", comparable ? 4 : 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH))
     {
-        for (auto title : {"Metric", "A", "B", "B vs A"}) ImGui::TableSetupColumn(title);
+        for (auto title : {"Metric", "A", "B"}) ImGui::TableSetupColumn(title);
+        if (comparable) ImGui::TableSetupColumn("B vs A");
         ImGui::TableHeadersRow();
         const auto metric = [&](const char *label, double av, double bv, const std::string &delta) {
             ImGui::TableNextColumn();
@@ -601,11 +687,18 @@ void BistroComparePanel::DrawPlot(const Selection* series, size_t count, bool fp
             ImGui::Text("%.2f", av);
             ImGui::TableNextColumn();
             ImGui::Text("%.2f", bv);
-            ImGui::TableNextColumn();
-            ImGui::TextUnformatted(delta.c_str());
+            if (comparable)
+            {
+                ImGui::TableNextColumn();
+                ImGui::TextUnformatted(delta.c_str());
+            }
         };
-        metric("Average FPS", a.Fps, b.Fps, format(100 * (b.Fps / a.Fps - 1), "%+.1f%%"));
-        metric("P95 (ms)", a.P95, b.P95, format(b.P95 - a.P95, "%+.2f ms"));
+        metric("Application FPS", a.Fps, b.Fps, format(100 * (b.Fps / a.Fps - 1), "%+.1f%%"));
+        metric("Frame interval P95 (ms)", a.P95, b.P95, format(b.P95 - a.P95, "%+.2f ms"));
+        if (a.ScopeMeanMs > 0 && b.ScopeMeanMs > 0)
+            metric("Timed CPU scope mean (ms)", a.ScopeMeanMs, b.ScopeMeanMs, format(b.ScopeMeanMs - a.ScopeMeanMs, "%+.2f ms"));
+        if (a.ScopeP95Ms > 0 && b.ScopeP95Ms > 0)
+            metric("Timed CPU scope P95 (ms)", a.ScopeP95Ms, b.ScopeP95Ms, format(b.ScopeP95Ms - a.ScopeP95Ms, "%+.2f ms"));
         ImGui::EndTable();
     }
 }
@@ -614,7 +707,7 @@ void BistroComparePanel::UpdateHistory(const fs::path& latestCompleted, bool for
 {
     if (force || !_indexed || latestCompleted != _latestCompleted)
     {
-        Refresh();
+        Refresh(force);
         _indexed = true;
         _latestCompleted = latestCompleted;
     }
@@ -623,7 +716,7 @@ void BistroComparePanel::UpdateHistory(const fs::path& latestCompleted, bool for
 fs::file_time_type BistroComparePanel::LatestTime(const Filter& filter) const
 {
     const auto it = _completed.find(filter);
-    return it != _completed.end() && !it->second.empty() ? it->second.front().Completed : fs::file_time_type::min();
+    return it != _completed.end() ? it->second : fs::file_time_type::min();
 }
 
 bool BistroComparePanel::LatestQuality(const char* mode) const
@@ -634,6 +727,48 @@ bool BistroComparePanel::LatestQuality(const char* mode) const
 bool BistroComparePanel::LatestSingleGpuIsAsync() const
 {
     return LatestTime({"Async", ""}) > std::max(LatestTime({"Single GPU", "Performance"}), LatestTime({"Single GPU", "Quality"}));
+}
+
+void BistroComparePanel::DrawPlacementComparison(const Winner& winner)
+{
+    const auto& single = winner.Placements[0];
+    const auto& multi = winner.Placements[1];
+    if (single.Fields.empty() && multi.Fields.empty()) return;
+    ImGui::SeparatorText("Full-route placements");
+    if (ImGui::BeginTable("Placement results", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH))
+    {
+        for (auto title : {"Metric", "Single GPU reference", "Multi-GPU candidate"}) ImGui::TableSetupColumn(title);
+        ImGui::TableHeadersRow();
+        const auto row = [&](const char* label, const std::string& a, const std::string& b) {
+            ImGui::TableNextColumn(); ImGui::TextUnformatted(label);
+            ImGui::TableNextColumn(); ImGui::TextWrapped("%s", a.empty() ? "--" : a.c_str());
+            ImGui::TableNextColumn(); ImGui::TextWrapped("%s", b.empty() ? "--" : b.c_str());
+        };
+        for (const auto& [label, field] : std::initializer_list<std::pair<const char*, const char*>>{
+                 {"Status", "Status"}, {"Output", "Output"}, {"Internal render", "Render"},
+                 {"Application FPS", "FPS"}, {"Frame interval P95 (ms)", "P95ms"}})
+            row(label, Value(single.Fields, field), Value(multi.Fields, field));
+        row("Upscaler", DisplayValue("EffectiveUpscaler", Value(single.Fields, "Provider")),
+                        DisplayValue("EffectiveUpscaler", Value(multi.Fields, "Provider")));
+        ImGui::TableNextColumn();
+        const bool show = ImGui::TreeNodeEx("Techniques and GPU settings", ImGuiTreeNodeFlags_NoTreePushOnOpen);
+        if (show)
+        {
+            const auto details = [&](const Values& a, const Values& b) {
+                for (const auto& [key, value] : a) row(key.c_str(), value, Value(b, key));
+                for (const auto& [key, value] : b) if (!a.count(key)) row(key.c_str(), {}, value);
+            };
+            ImGui::TableNextColumn();
+            ImGui::TableNextColumn();
+            details(single.Techniques, multi.Techniques);
+            details(single.GpuSettings, multi.GpuSettings);
+        }
+        ImGui::EndTable();
+    }
+    if (const auto gain = Number(Value(winner.Fields, "SameImageFpsGainPct")))
+        ImGui::Text("Same-image FPS change  %+.1f%%", *gain);
+    if (const auto& explanation = Value(winner.Fields, "Comparison"); !explanation.empty())
+        ImGui::TextWrapped("%s", explanation.c_str());
 }
 
 void BistroComparePanel::DrawLatest(const char* mode, const char* profile, bool fps, bool canApply,
@@ -655,7 +790,11 @@ void BistroComparePanel::DrawLatest(const char* mode, const char* profile, bool 
     const auto confirmed = [](const Winner& candidate) {
         return Value(candidate.Fields, "Status").rfind("confirmed", 0) == 0;
     };
-    const bool native = confirmed(run.Winners[0]), upscaled = confirmed(run.Winners[1]);
+    const auto available = [&](const Winner& result) {
+        return confirmed(result) || !result.Placements[0].Fields.empty() || !result.Placements[1].Fields.empty();
+    };
+    const bool native = available(run.Winners[0]), upscaled = available(run.Winners[1]);
+    const Winner* placement = nullptr;
     if (native || upscaled)
     {
         bool useUpscaled = !native || (upscaled && _upscaled);
@@ -665,37 +804,60 @@ void BistroComparePanel::DrawLatest(const char* mode, const char* profile, bool 
             ImGui::SameLine();
             if (ImGui::RadioButton("Upscaled##winner", useUpscaled)) _upscaled = useUpscaled = true;
         }
-        winner = &run.Winners[useUpscaled];
-        measuredRun = winner->RunIndex;
-        pass = winner->PassIndex;
+        placement = &run.Winners[useUpscaled];
+        if (confirmed(*placement))
+        {
+            winner = placement;
+            measuredRun = winner->RunIndex;
+            pass = winner->PassIndex;
+        }
+        else
+        {
+            pass = -1;
+            ImGui::TextDisabled("No confirmed preset for this image mode.");
+        }
     }
-    else if (!run.SelectedMask.empty())
+    else if (!run.FinalMask.empty())
     {
-        pass = -1;
-        for (int i = 0; i < int(run.Passes.size()); ++i)
-            if (run.Passes[i].FullRoute && run.Passes[i].Mask == run.SelectedMask) pass = i;
-        ImGui::TextWrapped("Selected async queue mask: %s", run.SelectedMask.c_str());
+        int matching = -1;
+        if (run.StopReason != "cancelled" && run.StopReason != "error")
+            for (int i = 0; i < int(run.Passes.size()); ++i)
+                if (run.Passes[i].Range.Section == "Full route" && run.Passes[i].Mask == run.FinalMask) matching = i;
+        if (matching >= 0) pass = matching;
+        else if (pass >= 0) ImGui::TextDisabled("Showing the last completed pass.");
+        ImGui::TextWrapped("Final async queue mask: %s  |  Ranked by timed CPU scope (mean and P95)", run.FinalMask.c_str());
     }
     else if (*profile) ImGui::TextDisabled("No confirmed preset. Showing the last measured pass.");
 
     auto [it, inserted] = _lastPass.try_emplace(key);
     auto& selection = it->second;
     if (inserted || selection.RunIndex != measuredRun || selection.PassIndex != pass)
+    {
         Select(selection, measuredRun, pass);
+        if (winner && !selection.Samples.empty() && selection.Error.empty())
+            for (const auto& [name, value] : winner->Settings) selection.Settings[name] = value;
+    }
 
     ImGui::TextWrapped("%s", run.Label.c_str());
+    if (!run.StopReason.empty()) ImGui::TextWrapped("Run outcome: %s", run.StopReason.c_str());
     if (!selection.Samples.empty() && selection.Error.empty())
     {
         const auto& measured = _runs[measuredRun].Passes[pass];
-        ImGui::TextWrapped("%s  |  %.1f FPS avg  |  %.1f ms P95", measured.Label.c_str(), selection.Fps, selection.P95);
+        ImGui::TextWrapped("%s  |  %.1f application FPS  |  %.1f ms frame interval P95",
+            measured.Label.c_str(), selection.Fps, selection.P95);
+        ImGui::TextDisabled("Interval measured %s", selection.AfterRender ? "after Render / Present" : "before Present");
+        if (selection.Mode == "Async" && selection.ScopeMeanMs > 0 && selection.ScopeP95Ms > 0)
+            ImGui::Text("Timed CPU scope  %.2f ms mean  |  %.2f ms P95", selection.ScopeMeanMs, selection.ScopeP95Ms);
         if (ImGui::SmallButton("Open CSV"))
             _openError = reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", measured.Path.c_str(), nullptr, nullptr, SW_SHOWNORMAL)) <= 32
                 ? "Could not open the pass CSV." : "";
         if (!_openError.empty()) ImGui::TextUnformatted(_openError.c_str());
         DrawPlot(&selection, 1, fps, winner ? (run.Profile == "Performance" ? 60 : 30) : 0);
     }
-    else ImGui::TextWrapped("%s", selection.Error.empty() ? "Full-route frame trace unavailable." : selection.Error.c_str());
+    else if (!placement || winner)
+        ImGui::TextWrapped("%s", selection.Error.empty() ? "Full-route frame trace unavailable." : selection.Error.c_str());
 
+    if (placement) DrawPlacementComparison(*placement);
     if (winner)
     {
         ImGui::Separator();
@@ -717,21 +879,22 @@ void BistroComparePanel::DrawLatest(const char* mode, const char* profile, bool 
             }
             ImGui::EndDisabled();
         }
-        ImGui::TextWrapped("Confirmed route: %.1f FPS avg  |  %.1f ms P95  |  %s  |  %s",
+        ImGui::TextWrapped("Confirmed route: %.1f application FPS  |  %.1f ms frame interval P95  |  %s  |  %s",
             Number(Value(winner->Fields, "FPS")).value_or(0), Number(Value(winner->Fields, "P95ms")).value_or(0),
             Value(winner->Fields, "Status").c_str(), run.Profile == "Performance" ? "60 FPS target" : "30 FPS target");
-        DrawSettings(winner->Settings, run.Before);
+        if (!selection.Samples.empty() && selection.Error.empty()) DrawSettings(selection.Settings, run.Before);
+        else DrawSettings(winner->Settings, run.Before, "Preset settings");
     }
     else if (pass >= 0 && selection.Error.empty()) DrawSettings(selection.Settings, run.Before);
-    else if (!run.SelectedMask.empty())
+    else if (!run.FinalMask.empty())
     {
         Settings queues;
         unsigned mask{};
-        if (std::from_chars(run.SelectedMask.data(), run.SelectedMask.data() + run.SelectedMask.size(), mask).ec == std::errc{})
+        if (std::from_chars(run.FinalMask.data(), run.FinalMask.data() + run.FinalMask.size(), mask).ec == std::errc{})
             for (unsigned bit = 0; bit < 32; ++bit)
                 if (const auto& name = Value(run.MaskBits, std::to_string(bit)); !name.empty())
                     queues[name] = mask & (1u << bit) ? "true" : "false";
-        DrawSettings(queues, run.Before);
+        DrawSettings(queues, run.Before, "Final queue settings");
     }
 }
 
@@ -779,7 +942,7 @@ void BistroComparePanel::Draw(const fs::path& latestCompleted)
             ImGui::TextWrapped("%s   A: %s   B: %s", label, a.c_str(), b.c_str());
     }
     ImGui::TableNextColumn();
-    if (ImGui::RadioButton("Frame time (ms)", !_fps)) _fps = false;
+    if (ImGui::RadioButton("Frame interval (ms)", !_fps)) _fps = false;
     ImGui::SameLine();
     if (ImGui::RadioButton("FPS", _fps)) _fps = true;
     DrawPlot(_selected.data(), _selected.size(), _fps);

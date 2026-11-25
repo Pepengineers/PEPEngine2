@@ -48,5 +48,6 @@ private:
     double _timeMS;
     GDX12GPUTimingTotals _sampleTotals;
     UINT _activeFrameIndex;
+    bool _recording = false;
     std::array<UINT64, BufferedFrameCount> _frameFenceValues;
 };

@@ -82,10 +82,14 @@ public:
     std::pair<size_t, size_t> GetWorldProbeReadiness() const { return _pipeline->GetWorldProbeReadiness(); }
     const GDX12ShadowQuality& GetShadowQuality() const { return _primaryResources.ShadowQuality; }
     D3D12MA::Statistics GetMemoryStatistics() const;
-    // DIRECT start/end timestamp interval. Independent frame-slot work may start on another queue earlier.
+    // Reading these diagnostics enables sampling from the next frame. The GPU interval is on DIRECT.
     double GetPrimaryGPUTimeMS();
     GDX12GPUTimingTotals GetPrimaryGPUTimingTotals();
-    double GetSkeletalPreparationTimeMS() const { return _skeletalPreparationTimeMS; }
+    double GetSkeletalPreparationTimeMS() const
+    {
+        _measureSkeletalPreparation = true;
+        return _skeletalPreparationTimeMS;
+    }
     double GetGPUFrameTimeMS() const; // Same DIRECT interval as GetPrimaryGPUTimeMS.
     void WriteRenderGraph(std::ostream& output) const;
     void BeginTextureUploadBatch(std::uint64_t budgetBytes);
@@ -307,7 +311,9 @@ private:
     std::uint64_t _frameSubmission = 0;
     bool _uiInitialized = false;
     bool _renderingSuspended = false;
-    double _skeletalPreparationTimeMS = 0;
+    GDX12GPUTimer* PrimaryTimer() const;
+    mutable bool _measureSkeletalPreparation = false;
+    double _skeletalPreparationTimeMS = -1;
 
     // Flags that are accumulated from every active RenderPass on the device
     // Defines which resources should be uploaded onto respective GPU

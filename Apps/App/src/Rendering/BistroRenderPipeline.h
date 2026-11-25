@@ -68,16 +68,21 @@ class BistroRenderPipeline final : public IRenderPipeline
 	const BistroRender::Schedule& LastSchedule() const { return *_schedule; }
 	bool CloudPictureSizeUnavailable() const { return _cloudPicture->SizeUnavailable(); }
 	bool HasRemoteCloudPicture() const { return _cloudPicture->IsRemote(); }
-	struct FrameLink { BistroRender::Id Export, Owner, Import; };
-	void CheckPanelPlacement() { _checkPanelPlacement = true; }
-	const auto& PanelOwners() const { return _panelOwners; }
-	uint64_t PanelRevision() const { return _panelRevision; }
+	struct FrameLink { BistroRender::Id Owner, Import; };
 	const auto& BenchmarkLinks() const { return _benchmarkLinks; }
-	std::vector<std::pair<std::string, BistroRender::Id>> BenchmarkActiveOwners() const;
+	struct PacketRoles { bool AO = false, LightGrid = false, Particles = false, Water = false, Wind = false; };
+	using Owners = std::vector<std::pair<std::string, BistroRender::Id>>;
+	struct FramePlacement
+	{
+		Owners ActiveOwners;
+		std::pair<BistroRender::Id, BistroRender::Id> PostPublication;
+		UINT64 ShadowTexels = 0;
+	};
+	void BenchmarkPlacement(const PacketRoles&, FramePlacement&) const;
+	UINT BenchmarkSlot() const { return _executorSlot; }
 	const auto& BenchmarkSchedule() const { return _schedule; }
 	SkySource BenchmarkSkySource() const { return _benchmarkSky; }
 	bool BenchmarkLocalCloudsActive() const { return _environment->LocalCloudsActive(); }
-	auto BenchmarkPostPublication() const { return _post->BenchmarkPublication(); }
 	const auto& BenchmarkProbeFrame() const { return _lighting->BenchmarkProbeFrame(); }
 	void ResetBenchmarkProbeCaptures() { _lighting->ResetBenchmarkProbeCaptures(); }
 	BistroRender::CompletionToken BenchmarkFrameFence() const { return _executor->Completions().back(); }
@@ -85,24 +90,16 @@ class BistroRenderPipeline final : public IRenderPipeline
 	{
 		return _lighting->Water().BenchmarkReady() && _lighting->Particles().BenchmarkReady() && _environment->BenchmarkReady();
 	}
-	std::vector<BistroRender::SimulationPublication> BenchmarkSimulations() const
-	{
-		std::vector<BistroRender::SimulationPublication> publications;
-		_lighting->Water().AppendBenchmarkPublications(publications);
-		_lighting->Particles().AppendBenchmarkPublications(publications);
-		return publications;
-	}
+	const auto& BenchmarkSimulations() const { return _benchmarkSimulations; }
 	const auto& BenchmarkNISFailure() const { return _post->BenchmarkNISFailure(); }
-	void AppendBenchmarkProbes(std::vector<std::pair<std::string, BistroRender::Id>>& owners) const
-	{
-		_lighting->AppendPublishedProbes(owners);
-	}
 	std::vector<std::pair<std::string, std::string>> PanelAdapters() const;
 	uint64_t PresentedFrames() const { return _presentedFrames; }
-	void SetBenchmarkTime(std::optional<double> seconds, bool localSkinning = true)
+	void SetBenchmarkTime(std::optional<double> routeTime, double warmup = 0, bool localSkinning = true, bool observePlacement = false)
 	{
-		_benchmarkTime = seconds;
-		_benchmarkLocalSkinning = seconds.has_value() && localSkinning;
+		_benchmarkTime = routeTime;
+		_benchmarkWarmup = warmup;
+		_observePlacement = observePlacement;
+		_benchmarkLocalSkinning = routeTime.has_value() && localSkinning;
 	}
 	void ResetBenchmarkClouds() { _environment->ResetClouds(); }
 	void RetireLocalShadows()
@@ -111,7 +108,6 @@ class BistroRenderPipeline final : public IRenderPipeline
 		_executor->Drain();
 		_lighting->RetireLocalShadows();
 	}
-	UINT64 LocalShadowTexels() const { return _lighting->LocalShadowTexels(); }
 	std::function<void()> CaptureBenchmarkPhysics(World&);
 	std::vector<std::pair<std::string, std::string>> BenchmarkAdapters() const;
 	const auto& BenchmarkSubmissions() const { return *_executor->Submissions(); }
@@ -121,10 +117,9 @@ class BistroRenderPipeline final : public IRenderPipeline
 	void PauseIndependentClocks();
 
   private:
-	bool _checkPanelPlacement = false;
-	uint64_t _panelRevision = 0;
-	std::vector<std::pair<std::string, std::string>> _panelOwners;
+	bool _observePlacement = false;
 	std::vector<FrameLink> _benchmarkLinks;
+	std::vector<BistroRender::SimulationPublication> _benchmarkSimulations;
 	SkySource _benchmarkSky = SkySource::Off;
 	RenderPipelineBindings _bindings;
 	std::unique_ptr<BistroRender::SceneGeometry> _geometry;
@@ -137,6 +132,7 @@ class BistroRenderPipeline final : public IRenderPipeline
 	std::shared_ptr<const BistroRender::Schedule> _schedule = std::make_shared<BistroRender::Schedule>();
 	double _animationTime = 0;
 	std::optional<double> _benchmarkTime;
+	double _benchmarkWarmup = 0;
 	bool _benchmarkLocalSkinning = false;
 	std::shared_ptr<BistroWaves::Controller> _waves;
 	uint64_t _presentedFrames = 0;

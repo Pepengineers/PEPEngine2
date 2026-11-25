@@ -1307,19 +1307,6 @@ std::string SceneLocalShadows::Distribution(UINT slot) const
 	return result;
 }
 
-UINT64 SceneLocalShadows::ShadowTexels(UINT slot) const
-{
-	UINT64 pixels = 0;
-	const auto& frame = _slots.at(slot);
-	for (UINT i = 0; i < frame.Lights.size(); ++i)
-	{
-		const auto& cache = frame.Cache[i];
-		const UINT faces = __popcnt(cache.ReadyFaces);
-		pixels += UINT64(cache.Resolution) * cache.Resolution * faces;
-	}
-	return pixels;
-}
-
 void SceneLocalShadows::ResetLayout()
 {
 	_layout = {};

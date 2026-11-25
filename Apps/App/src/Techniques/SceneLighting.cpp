@@ -746,27 +746,36 @@ void SceneLighting::AppendShadows(Graph& graph, std::vector<ID3D12Resource*>& bi
 	_reflections->Append(graph, bindings, geometry, environment, _slot);
 }
 
-void SceneLighting::AppendPanelOwners(std::vector<std::pair<std::string, Id>>& owners) const
+void SceneLighting::AppendCascadeOwners(std::vector<std::pair<std::string, Id>>& owners) const
 {
 	if (_resources.Lighting.SunShadowFlags & ShadowEnabled)
 		for (UINT i = 0; i < _resources.ShadowSettings.CascadeCount; ++i)
 			owners.emplace_back("CSM " + std::to_string(i), (_sunRemoteMask & (1u << i)) ? _sunOwner : 0);
+}
+
+void SceneLighting::AppendPanelOwners(std::vector<std::pair<std::string, Id>>& owners) const
+{
+	AppendCascadeOwners(owners);
 	for (UINT page = 0; page < _effectiveLocalPageOwners.size(); ++page)
 		owners.emplace_back("Local shadow page " + std::to_string(page), _effectiveLocalPageOwners[page]);
 	const auto& probes = _reflections->Owners();
 	for (size_t i = 0; i < probes.size(); ++i) owners.emplace_back("Probe " + std::to_string(i), probes[i]);
 }
 
-void SceneLighting::AppendBenchmarkShadowOwners(std::vector<std::pair<std::string, Id>>& owners) const
+UINT64 SceneLighting::AppendBenchmarkShadowOwners(std::vector<std::pair<std::string, Id>>& owners) const
 {
 	if ((_resources.Lighting.SunShadowFlags & ShadowEnabled) && _resources.ShadowSettings.CascadeCount)
 		owners.emplace_back("SunShadowAdapter", _sunRemoteMask ? _sunOwner : 0);
+	AppendCascadeOwners(owners);
 
-	std::vector<UINT> pageSources(_localPageOwners.size());
+	UINT64 texels = 0;
+	std::array<uint8_t, MaxLocalShadowAtlasCount> pageSources;
+	std::fill_n(pageSources.begin(), _localPageOwners.size(), uint8_t(0));
 	const auto& local = _localShadows->_slots.at(_slot);
 	for (UINT i = 0; i < local.Lights.size(); ++i)
 	{
 		const auto& cache = local.Cache[i];
+		texels += UINT64(cache.Resolution) * cache.Resolution * __popcnt(cache.ReadyFaces);
 		for (UINT face = 0; face < LocalShadowFaceCount(local.Lights[i]); ++face)
 		{
 			const UINT bit = 1u << face;
@@ -774,12 +783,13 @@ void SceneLighting::AppendBenchmarkShadowOwners(std::vector<std::pair<std::strin
 			pageSources[cache.Tiles[face].Page] |= cache.RemoteFaces & bit ? 2u : 1u;
 		}
 	}
-	for (UINT page = 0; page < pageSources.size(); ++page)
+	for (UINT page = 0; page < _localPageOwners.size(); ++page)
 	{
 		const auto role = "Local shadow page " + std::to_string(page);
 		if (pageSources[page] & 1u) owners.emplace_back(role, 0);
 		if (pageSources[page] & 2u) owners.emplace_back(role, _localPageOwners[page]);
 	}
+	return texels;
 }
 
 void SceneLighting::AppendRemoteLocalShadows(Graph& primary, std::vector<ID3D12Resource*>& primaryBindings,

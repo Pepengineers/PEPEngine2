@@ -126,24 +126,35 @@ void QueueSubmission::BeginBenchmarkWaits()
     std::lock_guard<std::mutex> lock(_mutex);
     _benchmarkWaits.clear();
     _benchmarkPackets.clear();
-    _benchmarking = true;
+    _benchmarkSlots.clear();
     _benchmarkEpoch.store(++_nextBenchmarkEpoch, std::memory_order_relaxed);
 }
 
 std::vector<QueueSubmission::BenchmarkWait> QueueSubmission::EndBenchmarkWaits()
 {
-    std::lock_guard<std::mutex> lock(_mutex);
-    _benchmarking = false;
-    _benchmarkEpoch.store(0, std::memory_order_relaxed);
+    std::vector<std::shared_ptr<BenchmarkSlot>> slots;
+    {
+        std::lock_guard lock(_mutex);
+        _benchmarkEpoch.store(0, std::memory_order_relaxed);
+        slots.swap(_benchmarkSlots);
+    }
+    // The measurement window is closed. Finish only the captured submissions, including
+    // secondary producers that can retire their normal frame slots on a different thread.
+    for (const auto& slot : slots)
+    {
+        std::lock_guard lock(slot->Mutex);
+        CollectBenchmarkSlot(*slot, true);
+    }
+    std::lock_guard lock(_mutex);
     return std::exchange(_benchmarkWaits, {});
 }
 
-void QueueSubmission::AppendBenchmarkPackets(uint64_t epoch, std::vector<BenchmarkPacket> packets)
+bool QueueSubmission::TrackBenchmarkSlot(const std::shared_ptr<BenchmarkSlot>& slot, uint64_t epoch)
 {
-    std::lock_guard<std::mutex> lock(_mutex);
-    if (!_benchmarking || epoch != _nextBenchmarkEpoch) return;
-    _benchmarkPackets.insert(_benchmarkPackets.end(), std::make_move_iterator(packets.begin()),
-        std::make_move_iterator(packets.end()));
+    std::lock_guard lock(_mutex);
+    if (epoch != BenchmarkEpoch()) return false;
+    if (slot->Epoch != epoch) _benchmarkSlots.push_back(slot);
+    return true;
 }
 
 std::vector<QueueSubmission::BenchmarkPacket> QueueSubmission::TakeBenchmarkPackets()
@@ -278,7 +289,8 @@ GraphResourceInfo QueueSubmission::ValidateResource(Id id, ID3D12Resource* resou
     return info;
 }
 CompletionToken QueueSubmission::Submit(Id device,BistroRender::Queue target,
-    const std::vector<ID3D12CommandList*>* packets,size_t count,const std::vector<CompletionToken>& waits,GDX12CommandList* external) {
+    const std::vector<ID3D12CommandList*>* packets,size_t count,const std::vector<CompletionToken>& waits,
+    GDX12CommandList* external, uint64_t benchmarkEpoch) {
     std::lock_guard<std::mutex> lock(_mutex); Check();
     Device(device); auto& t=_devices[device]->Queues[Index(target)];
     if (!count && !external)
@@ -312,7 +324,7 @@ CompletionToken QueueSubmission::Submit(Id device,BistroRender::Queue target,
                 _peerFences.at({token.Device, device, Index(token.Target)}).Get();
             if(!fence) throw std::invalid_argument("missing cross-device fence handle");
             ThrowIfFailed(t.Queue->GetCommandQueue()->Wait(fence,token.Value));
-            if (_benchmarking && token.Device != device)
+            if (benchmarkEpoch && benchmarkEpoch == _nextBenchmarkEpoch && token.Device != device)
             {
                 const auto wait = std::find_if(_benchmarkWaits.begin(), _benchmarkWaits.end(), [&](const auto& w)
                 {

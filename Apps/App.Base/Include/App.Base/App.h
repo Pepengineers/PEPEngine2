@@ -73,7 +73,7 @@ protected:
     virtual bool OnKeyReleased(WPARAM) { return false; }
     virtual std::wstring StatusCaption() const { return {}; }
     void RefreshWindowCaption() const;
-    std::wstring _frameTimingCaption;
+    void SetCaptionTimingEnabled(bool enabled);
     virtual void OnResize();
     virtual void OnPauseChanged(bool) {}
 
@@ -118,6 +118,10 @@ protected:
 private:
     void UpdatePauseState();
 
+    bool _captionTimingEnabled = true;
+    unsigned _captionFrames = 0;
+    float _captionIntervalStart = 0;
+    std::wstring _frameTimingCaption;
     std::unique_ptr<Window> _window;
     bool _initializing = true;
     std::atomic<bool> _loadingCancelled{false};

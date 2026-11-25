@@ -13,6 +13,8 @@
 
 namespace BistroBenchmarkData
 {
+inline constexpr char MeasurementVersion[] = "2";
+
 enum class RunMode { Manual, Async, SingleGPU, MultiGPU };
 inline const char* ModeName(RunMode mode)
 {
@@ -70,7 +72,7 @@ public:
         _file.clear();
         _file.open(path);
         Check();
-        _file << Header;
+        WriteHeader(_file);
     }
 
     void Config(std::string_view name, std::string_view value)
@@ -112,7 +114,7 @@ public:
         auto pending = path;
         pending += ".tmp";
         std::ofstream output(pending);
-        output << Header;
+        WriteHeader(output);
         auto execution = Row("config", stage, mask);
         execution[Name] = "RunMode";
         execution[Value] = ModeName(mode);
@@ -127,7 +129,7 @@ public:
         const auto intervalEnd = [&] { return std::floor(interval) + 1; };
         const auto emit = [&]
         {
-            if (!count || total <= 0) return;
+            if (!count || total <= 0 || interval >= end) return;
             const double mspf = total / count;
             const double fps = 1000 / mspf;
             minFps = minFps == 0 ? fps : std::min(minFps, fps);
@@ -138,7 +140,7 @@ public:
             if (round) row[Round] = std::to_string(round);
             row[Section] = section;
             row[Begin] = Number(interval);
-            row[End] = Number(intervalEnd());
+            row[End] = Number(std::min(intervalEnd(), end));
             row[Count] = std::to_string(count);
             row[Fps] = Number(fps);
             row[Mspf] = Number(mspf);
@@ -172,7 +174,7 @@ public:
             row[Interval] = Number(frame.IntervalMs);
             Write(output, row);
         }
-        if (end >= intervalEnd()) emit();
+        emit();
         const char* summarySection = frames.empty() ? "" : fullFlight ? "Full route" : sectionName(frames.front().Section);
         Summary(output, stage, mask, summarySection, begin, end,
             elapsed, Measure(frames, begin, end), status, round);
@@ -287,6 +289,15 @@ private:
         return row;
     }
 
+    static void WriteHeader(std::ostream& output)
+    {
+        output << Header;
+        auto version = Row("config");
+        version[Name] = "MeasurementVersion";
+        version[Value] = MeasurementVersion;
+        Write(output, version);
+    }
+
     static void Write(std::ostream& output, const Fields& row)
     {
         for (size_t i = 0; i < row.size(); ++i)
@@ -360,7 +371,7 @@ private:
         _trialFile.open(path, std::ios::app);
         if (!_trialFile) throw std::runtime_error("Cannot open Bistro benchmark trial");
         if (existing) return;
-        _trialFile << Header;
+        WriteHeader(_trialFile);
         auto entry = Row("trial");
         entry[Round] = _trialId;
         entry[Name] = "TrialCSV";

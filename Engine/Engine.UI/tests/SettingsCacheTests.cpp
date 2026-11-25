@@ -1,5 +1,6 @@
 #include "../src/SettingsCache.h"
 #include "Common/ConsoleVariables.h"
+#include <cstdio>
 #include <iostream>
 #include <stdexcept>
 
@@ -15,6 +16,11 @@ int main()
         ConsoleModule console;
         Engine::UI::SettingsCache cache;
         ImGuiTextFilter filter;
+        const auto setFilter = [&](const char* text)
+        {
+            std::snprintf(filter.InputBuf, sizeof(filter.InputBuf), "%s", text);
+            filter.Build();
+        };
         AutoConsoleVariable<int> hidden(L"Alpha.Hidden", 1);
         const auto update = [&]
         {
@@ -29,18 +35,17 @@ int main()
             Require(console.GetConsoleVariableRevision() != revision && update(),
                 "Registration did not rebuild the tree");
             const auto& setting = cache.Root().Children.at("Test").Children.at("Settings").Variables.at(0);
-            const auto snapshot = console.GetConsoleVariables();
-            Require(setting.VariableIndex > 0 && snapshot.at(setting.VariableIndex)->GetName() == L"Test.Settings.Count",
-                "Filtered tree index disagreed with the complete sorted snapshot");
+            Require(&console.FindConsoleVariable(setting.RegistryName) == &value,
+                "Cached setting name did not resolve to the live variable");
             Require(setting.Label == "Count" && setting.Description == "Live count", "Cached labels changed");
             revision = console.GetConsoleVariableRevision();
             Require(console.RegisterConsoleVariable(&value) && console.GetConsoleVariableRevision() == revision,
                 "Idempotent registration invalidated structure");
             Require(value.SetFromString("9") && !update() &&
-                snapshot.at(setting.VariableIndex)->GetInt() == 9, "Value edits rebuilt the tree or went stale");
-            filter = ImGuiTextFilter("Missing");
+                console.FindConsoleVariable(setting.RegistryName).GetInt() == 9, "Value edits rebuilt the tree or went stale");
+            setFilter("Missing");
             Require(update() && cache.Root().Children.empty(), "Search retained unmatched groups");
-            filter = ImGuiTextFilter("Settings,-Missing");
+            setFilter("Settings,-Missing");
             Require(update() && cache.Root().Children.count("Test"), "Search lost matching groups");
         }
         Require(console.GetConsoleVariableRevision() != revision && update() &&
@@ -50,7 +55,7 @@ int main()
             Require(update() && cache.Root().Children.at("Test").Children.at("Settings")
                 .Variables.at(0).Description == "Replacement", "Reused name retained the previous owner");
         }
-        filter = ImGuiTextFilter();
+        filter.Clear();
         AutoConsoleVariable<bool> general(L"Standalone", true);
         Require(update() && cache.Root().Children.at("General").Variables.at(0).Label == "Standalone",
             "Unqualified setting lost its General group");

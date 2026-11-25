@@ -20,10 +20,11 @@
 #include "Common/RuntimePaths.h"
 #include "Engine.Core/ConsoleModule.h"
 #include "Engine.Core/Logging/Logger.h"
-#include <imgui/imgui.h>
 #include <array>
 #include <cassert>
 #include <chrono>
+#include <ctime>
+#include <cwchar>
 #include <cstdio>
 #include <filesystem>
 #include <bitset>
@@ -224,7 +225,6 @@ public:
         std::filesystem::path Path;
         BistroBenchmarkData::RunMode Mode;
     };
-    BistroBenchmarkData::RunMode CurrentMode() const { return _runMode; }
     static size_t ResultSlot(BistroBenchmarkData::RunMode mode, BistroPlacement::Profile profile)
     {
         using BistroBenchmarkData::RunMode;
@@ -323,62 +323,38 @@ public:
 
     uint64_t LegNumber() const { return _legNumber; }
     void RequestCancel() { if (_active) _action = Action::Cancel; }
-    std::wstring RunTimeLeft() const
+    std::wstring Caption() const
     {
-        const double pass = LegWarmup() + _window.End - _preroll;
-        const double passLeft = std::max(0., pass - _elapsed);
-        double runLeft = passLeft;
-        bool budgetEstimate = false;
+        const std::string_view stage = StageName();
+        auto caption = L"Benchmark: " + std::wstring(stage.begin(), stage.end());
+        if (_stage != Stage::Placement) caption += L" | mask " + std::to_wstring(_mask);
+        else if (!_manualPlacement)
+        {
+            caption += L" | trial " + std::to_wstring(_trial.Id);
+            if (!_trial.Full) caption += L" | window " + std::to_wstring(_placementWindowIndex + 1);
+        }
+        double remaining = LegWarmup() + _window.End - _preroll - _elapsed;
+        bool budget = false;
         if (_stage == Stage::Exhaustive)
-            runLeft += (Cases - _mask - 1) * (_warmup + Duration());
+            remaining += (Cases - _mask - 1) * (_warmup + Duration());
         else if (_stage == Stage::Placement && !_manualPlacement)
         {
-            runLeft = Seconds(Clock::now(), _placementDeadline);
-            budgetEstimate = true;
+            remaining = Seconds(Clock::now(), _placementDeadline);
+            budget = true;
         }
         else if (TimedSearch())
         {
-            runLeft = Remaining() - FinishReserve;
-            if (_stage == Stage::Final) runLeft = std::min(runLeft, passLeft);
-            else budgetEstimate = true;
+            const double limit = Remaining() - FinishReserve;
+            if (_stage == Stage::Final) remaining = std::min(remaining, limit);
+            else { remaining = limit; budget = true; }
         }
-        const auto seconds = static_cast<uint64_t>(std::ceil(std::max(0., runLeft)));
-        const auto eta = std::to_wstring(seconds / 60) + (seconds % 60 < 10 ? L":0" : L":") + std::to_wstring(seconds % 60);
-        return (budgetEstimate ? L"up to " : L"~") + eta;
-    }
-    std::wstring Caption() const
-    {
-        const double pass = LegWarmup() + _window.End - _preroll;
-        const double passLeft = std::max(0., pass - _elapsed);
-        const auto widen = [](std::string_view s) { return std::wstring(s.begin(), s.end()); };
-        return L"Benchmark: " + RunTimeLeft() + L" left | " +
-            widen(StageName()) + L" | " + widen(Measuring() ? SectionName(Section(_routeTime)) : "Warmup") +
-            L" | " + std::to_wstring(int(std::clamp(_elapsed / pass, 0., 1.) * 100)) + L"% | " +
-            std::to_wstring(int(std::ceil(passLeft))) +
-            L"s left in pass";
-    }
-
-    void DrawRouteStatus(bool detailed) const
-    {
-        if (!_active)
-        {
-            ImGui::TextDisabled("Route idle  /  %.0f s flight", FlightSeconds.GetValue());
-            return;
-        }
-        const double pass = LegWarmup() + _window.End - _preroll;
-        const int left = int(std::ceil(std::max(0., pass - _elapsed)));
-        ImGui::TextWrapped("%s  /  %s  /  %d:%02d left in pass", StageName(),
-            Measuring() ? SectionName(Section(_routeTime)) : "Warmup", left / 60, left % 60);
-        const auto eta = RunTimeLeft();
-        ImGui::Text("Benchmark: %ls left", eta.c_str());
-        ImGui::ProgressBar(float(std::clamp(_elapsed / pass, 0., 1.)), {-1, 4}, "");
-        if (detailed && _stage == Stage::Exhaustive) ImGui::Text("Layout %u of %u", _mask + 1, Cases);
-        if (detailed && _stage == Stage::Placement && !_manualPlacement)
-            ImGui::Text("Trial %u  /  %s  /  %s", unsigned(_trial.Id),
-                BistroPlacement::ProfileName[_placementProfile], _trial.Source.c_str());
-        if (detailed && !_frames.empty())
-            ImGui::Text("Pass samples: %zu    Last measured frame: %.1f ms    Present interval: %.1f ms",
-                _frames.size(), _frames.back().Milliseconds, _frames.back().IntervalMs);
+        const auto estimate = std::chrono::system_clock::now() + std::chrono::seconds(int64_t(std::ceil(std::max(0., remaining))));
+        const auto time = std::chrono::system_clock::to_time_t(estimate);
+        std::tm local{};
+        wchar_t clock[6];
+        if (localtime_s(&local, &time) == 0 && std::wcsftime(clock, std::size(clock), L"%H:%M", &local))
+            caption += std::wstring(budget ? L" | budget ends " : L" | ETA ") + clock;
+        return caption;
     }
 
     void Update(World& world, ConsoleModule& console, RenderModule& render, BistroRenderPipeline& pipeline, ::Window& window)
@@ -406,14 +382,14 @@ public:
                 CaptureCheckpoint(world, pipeline);
             }
             if (_stage == Stage::Placement && _calibrating) CapturePlacementWindows(world, pipeline);
-            if (_stage == Stage::Placement && _placementInitialProbesReady &&
-                !_placementMeasuringWaits && Measuring() && _routeTime < _window.End)
+            if (_stage == Stage::Placement && !_trial.Full && _placementSearch.RemotePhase() &&
+                _placementInitialProbesReady && !_placementWaitsOpen && Measuring() && _routeTime < _window.End)
             {
                 pipeline.BenchmarkSubmissions().BeginBenchmarkWaits();
-                _placementMeasuringWaits = true;
+                _placementWaitsOpen = true;
             }
-            if (_search || _stage == Stage::Placement)
-                pipeline.SetBenchmarkTime(_warmup + _routeTime, _stage != Stage::Placement || !_manualPlacement);
+            pipeline.SetBenchmarkTime(_routeTime, _warmup, _stage != Stage::Placement || !_manualPlacement,
+                _stage == Stage::Placement && !_manualPlacement && _placementInitialProbesReady && Measuring() && _routeTime < _window.End);
             const auto pose = Flight(float(_routeTime));
             auto& ecs = world.GetECS();
             auto& camera = ecs.Get<TransformComponent>(_camera);
@@ -475,10 +451,12 @@ public:
                 if (!_legConfigured)
                 {
                     const auto config = EffectiveConfig(render);
-                    if (!_configured)
-                        WriteConfig(console, pipeline, config);
-                    if (_stage == Stage::Baseline || (_stage == Stage::Exhaustive && _mask == 0))
+                    if (_effective.empty())
+                    {
                         _effective = config;
+                        _pendingAdapters = pipeline.BenchmarkAdapters();
+                        _frameConfigPending = true;
+                    }
                     if (_search && config != _effective)
                         throw std::runtime_error("Bistro benchmark display or reconstruction changed");
                     _legConfigured = true;
@@ -486,9 +464,7 @@ public:
                 unsigned groups = 0;
                 if (_stage == Stage::Baseline || _stage == Stage::Control || _roundNeedsControl)
                 {
-                    for (const auto& packet : pipeline.LastSchedule().Packets)
-                        if (const int group = QueueGroup(packet.Name); group >= 0)
-                            groups |= 1u << group;
+                    groups = ObserveSchedule(pipeline).Groups;
                     _legGroups |= groups;
                     if (_stage == Stage::Baseline)
                     {
@@ -761,12 +737,10 @@ private:
         return config;
     }
 
-    void WriteConfig(ConsoleModule& console, const BistroRenderPipeline& pipeline, const Config& effective)
+    void WriteRequestedConfig(ConsoleModule& console)
     {
         for (const auto& [name, value] : RenderConfig(console))
             if (name != L"Render.Shadows.Local.AtlasCount") _csv.Config(std::filesystem::path(name).u8string(), value);
-        for (const auto& [name, value] : effective) _csv.Config(name, value);
-        for (const auto& [name, value] : pipeline.BenchmarkAdapters()) _csv.Config(name, value);
         _configured = true;
     }
 
@@ -849,7 +823,7 @@ private:
             if (!exeLength || exeLength == std::size(executable))
                 throw std::runtime_error("Cannot identify benchmark executable");
             std::ostringstream conditions;
-            conditions << "bistro-baseline-v12 " <<
+            conditions << "bistro-baseline-v12 measurement-" << BistroBenchmarkData::MeasurementVersion << ' ' <<
                 std::setprecision(17) << Duration() << ' ' << _paintingHold << ' ' << _warmup << ' ' <<
                 std::filesystem::last_write_time(executable).time_since_epoch().count() << ' ' <<
                 pipeline.BenchmarkSubmissions().AdapterLabel(0) << ' ' <<
@@ -910,13 +884,16 @@ private:
         _trialResult.Valid = true;
         _placementWindowIndex = 0;
         _placementPasses.clear();
+        _scheduleEvidence.clear();
         _trialFrames = 0;
         _trialSeconds = 0;
         _trialPrimaryFrames = 0;
         _trialPrimarySeconds = 0;
         _trialIntervals.clear();
         _trialTransferBytes = {};
-        _trialOwners.clear();
+        _previousOwners.clear();
+        _postPublication = {BistroRender::Invalid, BistroRender::Invalid};
+        _hasPublishedProbes = false;
         _trialActiveOwners.clear();
         _trialUsefulOwners.clear();
         _trialFreshness = {};
@@ -928,6 +905,8 @@ private:
         if (_calibrating) _placementSeenOnRoute = {};
         _trialWindowCount = _windows.size();
         _trialConfig.clear();
+        _trialFallback.clear();
+        _preparationSeconds.reset();
         _trialReason.clear();
         _trialLastPass.clear();
         _trialCompletedPasses = 0;
@@ -935,6 +914,7 @@ private:
         _trialPrefix = "Trial." + std::to_string(_trial.Id) + ".";
         _csv.Config(_trialPrefix + "Source", _trial.Source);
         _csv.Config(_trialPrefix + "Scope", _trial.Full ? "full route" : "common windows");
+        _csv.Config(_trialPrefix + "PacketTimingRequested", !_trial.Full && _placementSearch.RemotePhase() ? "true" : "false");
         const auto shadowCeiling = _manualPlacement ? console.FindConsoleVariable(L"Render.Shadows.Local.Resolution").GetInt() :
             _placementSearch.QualityValue(BistroPlacement::LocalShadowQuality, _trial.Settings.Levels[BistroPlacement::LocalShadowQuality]);
         _csv.Config(_trialPrefix + "RequestedLocalShadowCeiling", std::to_string(shadowCeiling));
@@ -993,79 +973,38 @@ private:
 
     void BeginPlacementLeg(World& world, BistroRenderPipeline& pipeline)
     {
-        _observedSchedule.reset();
         BeginLeg(world, pipeline, _trial.Full ? Window{0, Duration(), 0} : PlacementWindow(_placementWindowIndex));
     }
 
-    void ObservePlacement(BistroRenderPipeline& pipeline)
+    struct ScheduleEvidence
     {
-        using BistroRender::Invalid;
-        using BistroRender::Mode;
-        const auto& packets = pipeline.LastSchedule().Packets;
-        const auto& submissions = pipeline.BenchmarkSubmissions();
-        for (const auto& [role, owner] : pipeline.BenchmarkActiveOwners())
-        {
-            _trialActiveOwners[role].insert(owner);
-            _trialOwners.emplace(role, submissions.AdapterLabel(owner));
-            if (role == "PostAdapter" || role == "GameHUDAdapter" || role == "TransparencyAdapter" || role == "SkyViewAdapter" ||
-                role == "AerialPerspectiveAdapter" || role == "SunShadowAdapter" ||
-                role.compare(0, 18, "Local shadow page ") == 0 || role.compare(0, 6, "Probe ") == 0)
-                _trialUsefulOwners[role].insert(owner);
-        }
-        const auto observe = [&](std::string_view role, BistroRender::Id owner, std::string_view consumer)
-        {
-            if (owner == 0 || owner == Invalid) return;
-            const auto& label = submissions.AdapterLabel(owner);
-            _trialPublications.emplace(role, label, consumer);
-        };
-        for (const auto& link : pipeline.BenchmarkLinks())
-        {
-            if (link.Import >= packets.size()) continue;
-            const auto& source = packets[link.Import];
-            if (source.Name == "GPU0 import texture inspector atlas" || source.Name == "GPU0 publish remote reflection probe faces")
-                continue;
-            for (size_t i = link.Import + 1; i < packets.size(); ++i)
-            {
-                const auto& consumer = packets[i];
-                const bool reads = std::any_of(consumer.Accesses.begin(), consumer.Accesses.end(), [&](const auto& read)
-                {
-                    return read.Usage != Mode::Write && std::any_of(source.Accesses.begin(), source.Accesses.end(),
-                        [&](const auto& write) { return write.Usage != Mode::Read && read.Resource == write.Resource; });
-                });
-                if (!reads) continue;
-                observe(source.Name, link.Owner, consumer.Name);
-                const auto role = BistroPlacement::PublicationRole(source.Name);
-                if (!role.empty()) _trialUsefulOwners[std::string(role)].insert(link.Owner);
-                break;
-            }
-        }
-        const auto [post, hud] = pipeline.BenchmarkPostPublication();
-        observe("PostAdapter", post, "presented post stack");
-        observe("GameHUDAdapter", hud, "presented HUD composite");
+        std::shared_ptr<const BistroRender::Schedule> Plan;
+        std::array<bool, std::size(BistroPlacement::Techniques)> Activity{};
+        BistroRenderPipeline::PacketRoles Roles;
+        std::set<std::pair<BistroRender::Id, BistroRender::Id>> Links;
+        unsigned Groups = 0;
+    };
 
-        std::vector<std::pair<std::string, BistroRender::Id>> probes;
-        pipeline.AppendBenchmarkProbes(probes);
-        for (const auto& [role, owner] : probes)
-            observe(role, owner, "clustered deferred lighting");
-        for (const auto& snapshot : pipeline.BenchmarkSimulations())
-        {
-            if (!snapshot.Version) continue;
-            _trialUsefulOwners[std::string(snapshot.Role)].insert(snapshot.Owner);
-            const auto label = submissions.AdapterLabel(snapshot.Owner);
-            auto& stats = _trialSimulation[{std::string(snapshot.Role), label, snapshot.Lane}];
-            ++stats.Frames;
-            if (stats.Generation != snapshot.Generation || stats.LastVersion != snapshot.Version)
-                ++stats.UsedVersions;
-            stats.Generation = snapshot.Generation;
-            stats.LastVersion = snapshot.Version;
-            stats.SimulatedSeconds = snapshot.SimulatedSeconds;
-        }
-
-        const auto [dof, blur] = pipeline.BenchmarkPostEffects();
-        auto& activity = _packetActivity;
+    ScheduleEvidence& ObserveSchedule(const BistroRenderPipeline& pipeline)
+    {
+        const auto slot = pipeline.BenchmarkSlot();
+        if (_scheduleEvidence.size() <= slot) _scheduleEvidence.resize(slot + 1);
+        auto& cached = _scheduleEvidence[slot];
+        const auto& plan = pipeline.BenchmarkSchedule();
+        if (cached.Plan == plan) return cached;
+        cached = {};
+        cached.Plan = plan;
+        auto& activity = cached.Activity;
         const auto match = [&](std::string_view name)
         {
             const auto starts = [name](std::string_view prefix) { return name.substr(0, prefix.size()) == prefix; };
+            auto& roles = cached.Roles;
+            roles.AO |= starts("AO resolve") || starts("SSAO/HBAO visibility") || starts("CACAO dispatch") ||
+                starts("XeGTAO GPU0 import terms") || starts("XeGTAO denoise");
+            roles.LightGrid |= starts("GPU light grid masks") || starts("GPU0 import Exact light grid masks");
+            roles.Particles |= starts("particle simulation") || starts("opaque particles G-buffer") || starts("transparent particles cull");
+            roles.Water |= starts("water seed") || starts("water draw");
+            roles.Wind |= starts("grass wind stage") || starts("linden wind stage");
             activity[0] |= name == "AO resolve" || name == "SSAO/HBAO visibility" || starts("CACAO dispatch") ||
                 name == "XeGTAO GPU0 import terms" || name == "XeGTAO denoise";
             activity[1] |= name == "grass opaque depth HiZ" || starts("grass G-buffer");
@@ -1084,27 +1023,101 @@ private:
             activity[17] |= starts("sun atlas ") || name == "publish dirty remote CSM tiles on GPU0";
             activity[18] |= name == "local shadow CPU lists ExecuteIndirect" || name == "publish local shadow tiles";
         };
-        const auto shadowTexels = pipeline.LocalShadowTexels();
+        for (const auto& packet : plan->Packets)
+        {
+            if (_stage == Stage::Placement)
+            {
+                _placementPasses.insert(packet.Name);
+                match(packet.Name);
+            }
+            else if (const int group = QueueGroup(packet.Name); group >= 0)
+                cached.Groups |= 1u << group;
+        }
+        return cached;
+    }
+
+    void ObservePlacement(BistroRenderPipeline& pipeline)
+    {
+        using BistroRender::Invalid;
+        using BistroRender::Mode;
+        auto& schedule = ObserveSchedule(pipeline);
+        const auto& activity = schedule.Activity;
+        const auto& packets = schedule.Plan->Packets;
+        const auto observe = [&](std::string_view role, BistroRender::Id owner, std::string_view consumer)
+        {
+            if (owner && owner != Invalid) _trialPublications.emplace(role, owner, consumer);
+        };
+        pipeline.BenchmarkPlacement(schedule.Roles, _framePlacement);
+        auto& owners = _framePlacement.ActiveOwners;
+        if (owners != _previousOwners)
+        {
+            _hasPublishedProbes = false;
+            for (const auto& [role, owner] : owners)
+            {
+                const bool probe = role.compare(0, 6, "Probe ") == 0;
+                _hasPublishedProbes |= probe;
+                if (!_trialActiveOwners[role].insert(owner).second) continue;
+                if (role == "PostAdapter" || role == "GameHUDAdapter" || role == "TransparencyAdapter" || role == "SkyViewAdapter" ||
+                    role == "AerialPerspectiveAdapter" || role == "SunShadowAdapter" || role.compare(0, 18, "Local shadow page ") == 0 || probe)
+                    _trialUsefulOwners[role].insert(owner);
+                if (probe) observe(role, owner, "clustered deferred lighting");
+            }
+            _previousOwners.swap(owners);
+        }
+        for (const auto& link : pipeline.BenchmarkLinks())
+        {
+            if (link.Import >= packets.size() || !schedule.Links.insert({link.Import, link.Owner}).second) continue;
+            const auto& source = packets[link.Import];
+            if (source.Name == "GPU0 import texture inspector atlas" || source.Name == "GPU0 publish remote reflection probe faces")
+                continue;
+            for (size_t i = link.Import + 1; i < packets.size(); ++i)
+            {
+                const auto& consumer = packets[i];
+                const bool reads = std::any_of(consumer.Accesses.begin(), consumer.Accesses.end(), [&](const auto& read)
+                {
+                    return read.Usage != Mode::Write && std::any_of(source.Accesses.begin(), source.Accesses.end(),
+                        [&](const auto& write) { return write.Usage != Mode::Read && read.Resource == write.Resource; });
+                });
+                if (!reads) continue;
+                observe(source.Name, link.Owner, consumer.Name);
+                const auto role = BistroPlacement::PublicationRole(source.Name);
+                if (!role.empty()) _trialUsefulOwners[std::string(role)].insert(link.Owner);
+                break;
+            }
+        }
+        const auto [post, hud] = _framePlacement.PostPublication;
+        if (_postPublication != std::make_pair(post, hud))
+        {
+            _postPublication = {post, hud};
+            observe("PostAdapter", post, "presented post stack");
+            observe("GameHUDAdapter", hud, "presented HUD composite");
+        }
+        for (const auto& snapshot : pipeline.BenchmarkSimulations())
+        {
+            if (!snapshot.Version) continue;
+            const auto key = std::make_tuple(std::string(snapshot.Role), snapshot.Owner, snapshot.Lane);
+            auto [it, first] = _trialSimulation.try_emplace(key);
+            if (first) _trialUsefulOwners[std::string(snapshot.Role)].insert(snapshot.Owner);
+            auto& stats = it->second;
+            ++stats.Frames;
+            if (stats.Generation != snapshot.Generation || stats.LastVersion != snapshot.Version)
+                ++stats.UsedVersions;
+            stats.Generation = snapshot.Generation;
+            stats.LastVersion = snapshot.Version;
+            stats.SimulatedSeconds = snapshot.SimulatedSeconds;
+        }
+
+        const auto [dof, blur] = pipeline.BenchmarkPostEffects();
+        const auto shadowTexels = _framePlacement.ShadowTexels;
         _trialShadowTexels += shadowTexels;
         ++_trialShadowSamples;
         const auto section = Section(_routeTime);
         _trialSectionShadowTexels[section] += shadowTexels;
         ++_trialSectionShadowSamples[section];
-        const auto& schedule = pipeline.BenchmarkSchedule();
-        if (_observedSchedule != schedule)
-        {
-            _observedSchedule = schedule;
-            activity = {};
-            for (const auto& packet : packets)
-            {
-                _placementPasses.insert(packet.Name);
-                match(packet.Name);
-            }
-        }
         const auto skySource = pipeline.BenchmarkSkySource();
         auto effectiveActivity = activity;
         effectiveActivity[5] = pipeline.BenchmarkLocalCloudsActive();
-        effectiveActivity[6] = !probes.empty();
+        effectiveActivity[6] = _hasPublishedProbes;
         effectiveActivity[8] = dof;
         effectiveActivity[9] = blur;
         effectiveActivity[10] |= skySource == SkySource::SkyAtmosphere;
@@ -1113,13 +1126,9 @@ private:
         effectiveActivity[BistroPlacement::LocalShadowQuality] = shadowTexels != 0;
         for (size_t i = 0; i < activity.size(); ++i)
         {
-            _trialResult.Activity[i] |= effectiveActivity[i] && (_manualPlacement || _trial.Settings.Levels[i] != BistroPlacement::Off);
+            _trialResult.Activity[i] |= effectiveActivity[i] && _trial.Settings.Levels[i] != BistroPlacement::Off;
             if (_calibrating) _placementSeenOnRoute[i] |= _trialResult.Activity[i];
         }
-        for (const auto& owner : pipeline.PanelAdapters())
-            if (owner.first == "SceneAdapter" || owner.first == "PresentationAdapter" ||
-                owner.first.compare(0, 4, "CSM ") == 0 || owner.first.compare(0, 9, "Skinning ") == 0)
-                _trialOwners.insert(owner);
     }
 
     void RecordPlacementFrame(RenderModule& render, BistroRenderPipeline& pipeline, Clock::time_point now)
@@ -1132,15 +1141,14 @@ private:
             if (_trialConfig.empty())
             {
                 _trialConfig = effective;
-                for (const auto& [name, value] : effective) _csv.Config(_trialPrefix + name, value);
+                _frameConfigPending = true;
                 const auto& common = *render.GetRenderPipelineCommonData();
                 _trialResult.Output = {common.WindowWidth, common.WindowHeight};
                 _trialResult.Render = {common.DownscaledWidth, common.DownscaledHeight};
                 const auto& status = render.GetReconstructionStatus();
                 _trialProvider = status.Effective;
                 _trialFrameGeneration = render.GetFrameGenerationStatus().Effective;
-                if (!status.FallbackReason.empty())
-                    _csv.Config(_trialPrefix + "ReconstructionFallback", status.FallbackReason);
+                _trialFallback = status.FallbackReason;
                 if (!_manualPlacement)
                 {
                     uint16_t width, height;
@@ -1176,7 +1184,7 @@ private:
             _trialReason = "effective display, reconstruction or frame generation changed";
         if (const auto& failure = pipeline.BenchmarkNISFailure(); !failure.empty())
         {
-            _csv.Config(_trialPrefix + "ReconstructionFallback", failure);
+            _trialFallback = failure;
             _trialReason = "NIS reconstruction failed";
         }
         if (!_trialReason.empty() && !_calibrating)
@@ -1184,24 +1192,16 @@ private:
             _legDone = true;
             return;
         }
-        ObservePlacement(pipeline);
-        if (_placementSearch.HighFirst() && !_manualPlacement && _placementWindowIndex == 0 && _frames.empty())
+        if (!_manualPlacement)
         {
-            _csv.Config(_trialPrefix + "PreparationAndWarmupSeconds", Csv::Number(Seconds(_trialStarted, now)));
-            if (_calibrating)
-            {
-                const auto [published, expected] = pipeline.GetWorldProbeReadiness();
-                Log::Info("BistroBenchmark", "SingleGPU Quality trial ", _trial.Id,
-                    "; measuring after preparation and warmup; probes=", published, "/", expected,
-                    "; effective output=", _trialResult.Output.first, "x", _trialResult.Output.second,
-                    "; render=", _trialResult.Render.first, "x", _trialResult.Render.second,
-                    "; warmup seconds=", LegWarmup());
-            }
+            ObservePlacement(pipeline);
+            if (_placementSearch.HighFirst() && _placementWindowIndex == 0 && _frames.empty())
+                _preparationSeconds = Seconds(_trialStarted, now);
+            const double toleranceMs = _placementProfile == BistroPlacement::Performance ? 2000. / 60 : 1000. / 30;
+            _trialFreshness.Observe(pipeline.BenchmarkProbeFrame(), now, toleranceMs);
+            const auto bytes = pipeline.BenchmarkTransferBytes();
+            for (size_t i = 0; i < bytes.size(); ++i) _trialTransferBytes[i] += bytes[i];
         }
-        const double toleranceMs = _placementProfile == BistroPlacement::Performance ? 2000. / 60 : 1000. / 30;
-        _trialFreshness.Observe(pipeline.BenchmarkProbeFrame(), now, toleranceMs);
-        const auto bytes = pipeline.BenchmarkTransferBytes();
-        for (size_t i = 0; i < bytes.size(); ++i) _trialTransferBytes[i] += bytes[i];
         _frames.push_back({_routeTime, Seconds(_frameStart, now) * 1000,
             Seconds(_lastPresent, now) * 1000, Section(_routeTime)});
     }
@@ -1256,7 +1256,6 @@ private:
         const auto& submissions = pipeline.BenchmarkSubmissions();
         const auto waits = pipeline.BenchmarkSubmissions().EndBenchmarkWaits();
         auto packets = pipeline.BenchmarkSubmissions().TakeBenchmarkPackets();
-        if (!std::exchange(_placementMeasuringWaits, false)) return;
         for (const auto& wait : waits)
         {
             const auto queues = std::array{"DIRECT", "COMPUTE", "COPY"};
@@ -1300,7 +1299,7 @@ private:
         for (const auto& [source, sim] : _trialSimulation)
         {
             const auto& [role, adapter, lane] = source;
-            const auto prefix = _trialPrefix + "Simulation." + role + "." + adapter + "." + std::to_string(lane) + ".";
+            const auto prefix = _trialPrefix + "Simulation." + role + "." + pipeline.BenchmarkSubmissions().AdapterLabel(adapter) + "." + std::to_string(lane) + ".";
             _csv.Config(prefix + "ConsumedFrames", std::to_string(sim.Frames));
             _csv.Config(prefix + "ConsumedVersions", std::to_string(sim.UsedVersions));
             _csv.Config(prefix + "LastSnapshotSimulationSeconds", Csv::Number(sim.SimulatedSeconds));
@@ -1375,14 +1374,14 @@ private:
         if (_trialReason.empty() && _trialResult.Fps <= 0) _trialReason = "no rendered samples";
         if (_trialReason.empty() && !_manualPlacement && _trialFreshness.Missed)
             _trialReason = "reflection face deadline missed";
-        ReportPlacementEvidence(pipeline);
+        if (!_manualPlacement) ReportPlacementEvidence(pipeline);
         _trialResult.Valid = _trialReason.empty();
         _csv.Config(_trialPrefix + "FPS", Csv::Number(_trialResult.Fps));
         if (_trialWindowCount > _windows.size())
             _csv.Config(_trialPrefix + "FPSWithThresholdRecheck", Csv::Number(_trialResult.ThresholdFps));
         _csv.Config(_trialPrefix + "P95ms", Csv::Number(_trialResult.P95));
         _csv.Config(_trialPrefix + "WallSeconds", Csv::Number(SecondsSince(_trialStarted)));
-        WritePlacementTrialReport(_trialResult.Valid ? "measured" : _trialReason);
+        WritePlacementTrialReport(pipeline, _trialResult.Valid ? "measured" : _trialReason);
         if (!_manualPlacement && (_placementSearch.LowFirst() || _placementSearch.HighFirst()))
             Log::Info("BistroBenchmark", "SingleGPU ", BistroPlacement::ProfileName[_placementProfile], " trial ", _trial.Id,
                 "; effective output=", _trialResult.Output.first, "x", _trialResult.Output.second,
@@ -1409,15 +1408,23 @@ private:
         NextPlacementTrial(world, console, pipeline);
     }
 
-    void WritePlacementTrialReport(std::string_view status)
+    void WritePlacementTrialReport(BistroRenderPipeline& pipeline, std::string_view status)
     {
-        for (const auto& [name, adapter] : _trialOwners)
-            _csv.Config(_trialPrefix + name, adapter);
+        const auto& submissions = pipeline.BenchmarkSubmissions();
+        if (_manualPlacement && _trialCompletedPasses)
+        {
+            pipeline.BenchmarkPlacement(ObserveSchedule(pipeline).Roles, _framePlacement);
+            for (const auto& [role, owner] : _framePlacement.ActiveOwners) _trialActiveOwners[role].insert(owner);
+            _csv.Config(_trialPrefix + "PlacementEvidenceScope", "last presented frame");
+        }
+        for (const auto& [name, owners] : _trialActiveOwners)
+            for (const auto owner : owners) _csv.Config(_trialPrefix + name, submissions.AdapterLabel(owner));
         if (_trialResult.ShadowTexels)
             _csv.Config(_trialPrefix + "MeanLocalShadowTexels", Csv::Number(*_trialResult.ShadowTexels));
         constexpr std::array transferNames{"PostSceneInputBytes", "PostHUDBytes", "PostInspectorBytes", "PostReturnBytes"};
-        for (size_t i = 0; i < transferNames.size(); ++i)
-            _csv.Config(_trialPrefix + transferNames[i], std::to_string(_trialTransferBytes[i]));
+        if (!_manualPlacement)
+            for (size_t i = 0; i < transferNames.size(); ++i)
+                _csv.Config(_trialPrefix + transferNames[i], std::to_string(_trialTransferBytes[i]));
         for (size_t i = 0; i < _trialResult.Activity.size(); ++i)
             if (_trialResult.Activity[i])
             {
@@ -1430,7 +1437,7 @@ private:
         for (const auto& pass : _placementPasses)
             _csv.Config(_trialPrefix + "ActivePass", pass);
         for (const auto& [role, adapter, consumer] : _trialPublications)
-            _csv.Config(_trialPrefix + "ConsumedRemotePublication", role + " @ " + adapter + " -> " + consumer);
+            _csv.Config(_trialPrefix + "ConsumedRemotePublication", role + " @ " + submissions.AdapterLabel(adapter) + " -> " + consumer);
         if (!_trialLastPass.empty()) _csv.Config(_trialPrefix + "LastPassCSV", _trialLastPass);
         _csv.Config(_trialPrefix + "CompletedPasses", std::to_string(_trialCompletedPasses));
         const auto requiredPasses = _trial.Full ? 1u : _trialWindowCount;
@@ -1458,7 +1465,7 @@ private:
         }
         WritePlacementWaits(pipeline);
         WriteLeg("single-GPU budget exhausted");
-        WritePlacementTrialReport("single-GPU budget exhausted");
+        WritePlacementTrialReport(pipeline, "single-GPU budget exhausted");
         _placementSearch.EndPhase();
         _placementPhase = 2;
         BeginNextPlacementPhase(world, console, pipeline);
@@ -1547,7 +1554,10 @@ private:
         _sweepBestMask = 0;
         _message.clear();
         _savedPath.clear();
-        _configured = false;
+        _configured = _frameConfigPending = false;
+        _effective.clear();
+        _pendingAdapters.clear();
+        _scheduleEvidence.clear();
         _frames.clear();
         _activity = {};
         _seen = {};
@@ -1589,8 +1599,7 @@ private:
         _csv.Open(_path);
         _csv.Config("RunId", id);
         for (const auto& [name, value] : RenderConfig(console))
-            if (name.rfind(L"Render.", 0) == 0 || name.rfind(L"App.UI.", 0) == 0)
-                _csv.Config("Before." + std::filesystem::path(name).u8string(), value);
+            _csv.Config("Before." + std::filesystem::path(name).u8string(), value);
         for (const auto& [name, value] : EffectiveConfig(render))
             _csv.Config("Before." + name, value);
 #if defined(_DEBUG) || defined(DEBUG)
@@ -1632,6 +1641,7 @@ private:
             if (const auto result = console.ApplyPatch(patch, &_previous); !result.Error.empty())
                 throw std::runtime_error(result.Error);
             _searchConfig = SearchConfig(console);
+            WriteRequestedConfig(console);
             if (TimedSearch() && Remaining() < _warmup + Duration() + FinishReserve)
             {
                 Finish(world, console, pipeline, "baseline does not fit", 0, 0, Outcome::Failed);
@@ -1657,12 +1667,6 @@ private:
         _placementInitialProbesReady = false;
         _placementPreparationFence = {};
         _trialFreshness.BeginWindow();
-        if (_stage == Stage::Placement)
-        {
-            pipeline.BenchmarkSubmissions().BeginBenchmarkWaits();
-            _placementWaitsOpen = true;
-            _placementMeasuringWaits = false;
-        }
         _legGroups = 0;
         _frames.clear();
         auto& ecs = world.GetECS();
@@ -1719,7 +1723,9 @@ private:
     void CaptureCheckpoint(World& world, BistroRenderPipeline& pipeline)
     {
         const double time = _elapsed - _warmup;
-        if (time - _checkpoints.back().Time < .5) return;
+        // Once all six activity windows have their replay snapshot, no later checkpoint can be used.
+        if (std::all_of(_activityProbes.begin(), _activityProbes.end(), [](const auto& probe) { return bool(probe.Restore); }) ||
+            time - _checkpoints.back().Time < .5) return;
         _checkpoints.push_back({time, CaptureScene(world, pipeline)});
         while (_checkpoints.size() > 1 && _checkpoints[1].Time <= time - _warmup - 3.)
             _checkpoints.pop_front();
@@ -1744,6 +1750,31 @@ private:
     {
         if (!_legOpen) return;
         _legOpen = false;
+        if (_frameConfigPending)
+        {
+            if (_stage == Stage::Placement)
+                for (const auto& [name, value] : _trialConfig) _csv.Config(_trialPrefix + name, value);
+            else
+            {
+                for (const auto& [name, value] : _effective) _csv.Config(name, value);
+                for (const auto& [name, value] : _pendingAdapters) _csv.Config(name, value);
+                _pendingAdapters.clear();
+            }
+            _frameConfigPending = false;
+        }
+        if (_stage == Stage::Placement)
+        {
+            if (!_trialFallback.empty())
+            {
+                _csv.Config(_trialPrefix + "ReconstructionFallback", _trialFallback);
+                _trialFallback.clear();
+            }
+            if (_preparationSeconds)
+            {
+                _csv.Config(_trialPrefix + "PreparationAndWarmupSeconds", Csv::Number(*_preparationSeconds));
+                _preparationSeconds.reset();
+            }
+        }
         const double end = std::clamp(_preroll + _elapsed - LegWarmup(), _window.Begin, _window.End);
         Stats timing;
         auto pass = _csv.Leg(StageName(), _mask, _frames, _window.Begin, end, _elapsed, status, SectionName,
@@ -2359,7 +2390,7 @@ private:
             {
                 WritePlacementWaits(pipeline);
                 WriteLeg(status);
-                if (_trialPending) WritePlacementTrialReport(status);
+                if (_trialPending) WritePlacementTrialReport(pipeline, status);
                 if (!_manualPlacement)
                     _placementSearch.Report(_csv, status, console, _path);
                 _csv.Config("StopReason", status);
@@ -2367,9 +2398,7 @@ private:
             }
             else
             {
-                if (!_configured)
-                    for (const auto& [name, value] : RenderConfig(console))
-                        if (name != L"Render.Shadows.Local.AtlasCount") _csv.Config(std::filesystem::path(name).u8string(), value);
+                if (!_configured) WriteRequestedConfig(console);
                 WriteLeg(status);
             }
             if (TimedSearch())
@@ -2382,6 +2411,7 @@ private:
         }
         catch (const std::exception& failure) { error = failure.what(); }
         _active = false;
+        _scheduleEvidence.clear();
         BistroRender::SceneTextureInspector::SetVisible(_inspectorWasVisible);
         pipeline.SetBenchmarkTime({});
         auto& ecs = world.GetECS();
@@ -2541,7 +2571,8 @@ private:
     Pose _previousPose{};
     BistroInteractionSource _previousInfluence{};
     ConsoleVariablePatch _previous, _searchConfig;
-    Config _effective;
+    Config _effective, _pendingAdapters;
+    bool _frameConfigPending = false;
     std::function<void()> _initialScene;
     PhysicsStates _windowPhysics, _extraPhysics;
     BistroCharacters::Scene* _characters = nullptr;
@@ -2594,7 +2625,6 @@ private:
     bool _inspectorWasVisible = false;
     bool _manualPlacement = false, _calibrating = false, _placementWaitsOpen = false;
     bool _placementInitialProbesReady = false;
-    bool _placementMeasuringWaits = false;
     BistroRender::CompletionToken _placementPreparationFence;
     unsigned _placementPhase = 0;
     size_t _placementWindowIndex = 0, _trialWindowCount = 0, _trialFrames = 0;
@@ -2614,11 +2644,13 @@ private:
     BistroPlacement::Trial _trial;
     BistroPlacement::Result _trialResult;
     std::set<std::string> _placementPasses;
-    std::set<std::tuple<std::string, std::string, std::string>> _trialPublications;
+    std::set<std::tuple<std::string, BistroRender::Id, std::string>> _trialPublications;
     std::array<bool, std::size(BistroPlacement::Techniques)> _placementSeenOnRoute{};
-    std::array<bool, std::size(BistroPlacement::Techniques)> _packetActivity{};
-    std::shared_ptr<const BistroRender::Schedule> _observedSchedule;
-    std::set<std::pair<std::string, std::string>> _trialOwners;
+    std::vector<ScheduleEvidence> _scheduleEvidence;
+    BistroRenderPipeline::FramePlacement _framePlacement;
+    BistroRenderPipeline::Owners _previousOwners;
+    std::pair<BistroRender::Id, BistroRender::Id> _postPublication;
+    bool _hasPublishedProbes = false;
     std::map<std::string, std::set<BistroRender::Id>> _trialActiveOwners;
     std::map<std::string, std::set<BistroRender::Id>> _trialUsefulOwners;
     BistroPlacement::ProbeFreshness _trialFreshness;
@@ -2627,12 +2659,14 @@ private:
         uint64_t Generation = 0, LastVersion = 0, Frames = 0, UsedVersions = 0;
         double SimulatedSeconds = 0;
     };
-    std::map<std::tuple<std::string, std::string, size_t>, SimulationStats> _trialSimulation;
+    std::map<std::tuple<std::string, BistroRender::Id, size_t>, SimulationStats> _trialSimulation;
     uint64_t _trialShadowTexels = 0, _trialShadowSamples = 0;
     std::array<uint64_t, 7> _trialSectionShadowTexels{}, _trialSectionShadowSamples{};
     std::vector<double> _trialIntervals;
     std::array<uint64_t, 4> _trialTransferBytes{};
     Config _trialConfig;
+    std::string _trialFallback;
+    std::optional<double> _preparationSeconds;
     ConsoleVariablePatch _trialRequested;
     GDX12UpscalerProvider _trialProvider{};
     GDX12FrameGenerationProvider _trialFrameGeneration{};

@@ -38,7 +38,6 @@ class SceneLocalShadows
 	uint64_t ContentVersion(UINT slot, UINT light, UINT face) const
 	{ return _slots.at(slot).Cache.at(light).ContentVersions.at(face); }
 	std::string Distribution(UINT slot) const;
-	UINT64 ShadowTexels(UINT slot) const;
 
   private:
 	friend class SceneLighting;

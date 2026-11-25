@@ -89,7 +89,7 @@ void BistroInfoPanel::RefreshPlacement(const BistroRenderPipeline& pipeline)
         if (!list.empty()) list += ", ";
         list += name;
     };
-    for (auto [name, adapter] : pipeline.PanelOwners())
+    for (auto [name, adapter] : pipeline.PanelAdapters())
     {
         constexpr std::string_view suffix = "Adapter";
         if (name.size() >= suffix.size() && name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0)
@@ -196,14 +196,12 @@ void BistroInfoPanel::DrawCurrentSettings(RenderModule& render)
     if (!_displayError.empty()) ImGui::TextUnformatted(_displayError.c_str());
 }
 
-void BistroInfoPanel::DrawLivePlot(float height, RunMode mode) const
+void BistroInfoPanel::DrawLivePlot() const
 {
-    ImGui::Text("%.1f FPS    %.1f ms", _displayFps, _displayFps > 0 ? 1000.f / _displayFps : 0.f);
-    ImGui::SameLine();
-    ImGui::TextColored(TraceColor(mode), "%s", ModeName(mode));
-    ImGui::PushStyleColor(ImGuiCol_PlotLines, TraceColor(mode));
+    ImGui::Text("Live   %.1f FPS    %.1f ms", _displayFps, _displayFps > 0 ? 1000.f / _displayFps : 0.f);
+    ImGui::PushStyleColor(ImGuiCol_PlotLines, TraceColor(RunMode::Manual));
     ImGui::PlotLines("##live", _frameMs.data(), int(_count), _count == _frameMs.size() ? int(_next) : 0,
-        nullptr, 0.f, FLT_MAX, {-1, height});
+        nullptr, 0.f, FLT_MAX, {-1, 32});
     ImGui::PopStyleColor();
 }
 
@@ -211,7 +209,7 @@ void BistroInfoPanel::DrawResult(const BistroBenchmark& benchmark, RunMode tab)
 {
     const auto latestSlot = benchmark.LatestResultSlot();
     const auto& latest = benchmark.LastPass(latestSlot);
-    _compare.UpdateHistory(benchmark.Active() ? latest.Path : benchmark.ReportPath());
+    _compare.UpdateHistory(benchmark.ReportPath());
     const bool changedTab = !_resultTab || *_resultTab != tab;
     _resultTab = tab;
     if (changedTab)
@@ -246,7 +244,7 @@ void BistroInfoPanel::DrawResult(const BistroBenchmark& benchmark, RunMode tab)
         if (ImGui::RadioButton("Quality##results", _quality)) _quality = true;
         ImGui::SameLine();
     }
-    if (ImGui::RadioButton("Frame time (ms)", !_plotFps)) _plotFps = false;
+    if (ImGui::RadioButton("Frame interval (ms)", !_plotFps)) _plotFps = false;
     ImGui::SameLine();
     if (ImGui::RadioButton("FPS", _plotFps)) _plotFps = true;
 
@@ -260,13 +258,6 @@ void BistroInfoPanel::Draw(RenderModule& render, BistroRenderPipeline& pipeline,
     BistroBenchmark& benchmark, float frameSeconds)
 {
     if (_hidden || !ImGui::GetCurrentContext()) return;
-    const auto settings = IConsoleVariable::ValueRevision();
-    if (_checkPlacement || settings != _settingsRevision)
-    {
-        pipeline.CheckPanelPlacement();
-        _checkPlacement = false;
-        _settingsRevision = settings;
-    }
     if (std::isfinite(frameSeconds) && frameSeconds > 0)
     {
         _frameMs[_next] = frameSeconds * 1000.f;
@@ -277,14 +268,15 @@ void BistroInfoPanel::Draw(RenderModule& render, BistroRenderPipeline& pipeline,
         if (_elapsed >= .25f)
         {
             _displayFps = _frames / _elapsed;
+            _checkPlacement = true;
             _elapsed = 0;
             _frames = 0;
         }
     }
 
-    if (_snapshotRevision != pipeline.PanelRevision())
+    if (_checkPlacement && pipeline.PresentedFrames())
     {
-        _snapshotRevision = pipeline.PanelRevision();
+        _checkPlacement = false;
         RefreshPlacement(pipeline);
     }
     const bool compact = _compact;
@@ -317,9 +309,9 @@ void BistroInfoPanel::Draw(RenderModule& render, BistroRenderPipeline& pipeline,
         ImGui::Separator();
         if (compact)
         {
-            benchmark.DrawRouteStatus(false);
+            ImGui::TextDisabled("Route idle  /  %.0f s flight", benchmark.FlightTime());
             DrawPlacement(true);
-            DrawLivePlot(32, benchmark.Active() ? benchmark.CurrentMode() : RunMode::Manual);
+            DrawLivePlot();
         }
         else
         {
@@ -376,19 +368,13 @@ void BistroInfoPanel::Draw(RenderModule& render, BistroRenderPipeline& pipeline,
                 if (ImGui::BeginTabItem("Compare"))
                 {
                     comparing = true;
-                    _compare.Draw(benchmark.Active() ? benchmark.LastPass(benchmark.LatestResultSlot()).Path : benchmark.ReportPath());
+                    _compare.Draw(benchmark.ReportPath());
                     ImGui::EndTabItem();
                 }
                 ImGui::EndTabBar();
             }
             ImGui::Separator();
-            if (benchmark.Active())
-            {
-                benchmark.DrawRouteStatus(true);
-                if (ImGui::Button("Cancel run [Esc]")) benchmark.RequestCancel();
-                DrawLivePlot(36, benchmark.CurrentMode());
-            }
-            else if (!benchmark.Message().empty()) ImGui::TextWrapped("%s", benchmark.Message().c_str());
+            if (!benchmark.Message().empty()) ImGui::TextWrapped("%s", benchmark.Message().c_str());
             if (!comparing) DrawResult(benchmark, tab);
         }
     }

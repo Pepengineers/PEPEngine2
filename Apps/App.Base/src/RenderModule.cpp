@@ -143,7 +143,6 @@ void RenderModule::Initialize()
     _primaryDevice = std::make_unique<GDX12Device>();
     ThrowIfFailed(_primaryDevice->Initialize(adapters[primaryAdapter].Adapter));
     _primaryResources.Initialize(_primaryDevice.get());
-    _primaryGPUTimer = std::make_unique<GDX12GPUTimer>(_primaryDevice.get());
 
     Log::Info("Renderer", "Creating back buffers");
     BuildBackBuffer();
@@ -987,22 +986,24 @@ void RenderModule::OnRender()
     _primaryResources.BeginMeshPrimitiveUpdate();
     auto context = PipelineContext();
     _pipeline->PrepareMaterialBindings(context);
-    const auto skeletalStarted = std::chrono::steady_clock::now();
+    using Clock = std::chrono::steady_clock;
+    const auto skeletalStarted = _measureSkeletalPreparation ? Clock::now() : Clock::time_point{};
     PrepareSkeletalMeshes();
-    _skeletalPreparationTimeMS = std::chrono::duration<double, std::milli>(
-        std::chrono::steady_clock::now() - skeletalStarted).count();
+    if (_measureSkeletalPreparation)
+        _skeletalPreparationTimeMS = std::chrono::duration<double, std::milli>(Clock::now() - skeletalStarted).count();
     if (PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_MATERIALS))
         _primaryResources.UpdateMaterialCB(_materials);
     CollectParticleEmitters();
-    auto* commands = _primaryDevice->GetCommandQueue()->GetCommandList();
-    _primaryGPUTimer->Start(commands);
+    auto* timer = _primaryGPUTimer.get();
+    auto* commands = timer ? _primaryDevice->GetCommandQueue()->GetCommandList() : nullptr;
+    if (timer) timer->Start(commands);
     _pipeline->PrepareFrame(context);
     RefreshPipelineFlags();
     const auto completion = _pipeline->ExecuteFrame(context, commands,
-        [&](GDX12CommandList* list) { _primaryGPUTimer->Stop(list); }, IRenderPipeline::PrefixContents::TimestampOnly);
+        [timer](GDX12CommandList* list) { if (timer) timer->Stop(list); }, IRenderPipeline::PrefixContents::TimestampOnly);
     ++_frameSubmission;
     GetCurrentPrimaryFrameConstants()->FenceValue = completion;
-    _primaryGPUTimer->OnCommandListExecuted(completion);
+    if (timer) timer->OnCommandListExecuted(completion);
     _backBuffer->GetFrameGeneration().EndRendering();
     _pipeline->BeforePresent();
     if (_backBuffer->Present()) _pipeline->FramePresented();
@@ -1169,14 +1170,22 @@ const GDX12FrameGenerationStatus& RenderModule::GetFrameGenerationStatus() const
     return _backBuffer->GetFrameGeneration().GetStatus();
 }
 
+GDX12GPUTimer* RenderModule::PrimaryTimer() const
+{
+    if (!_gpu || !_primaryDevice) return nullptr;
+    if (!_primaryGPUTimer) _primaryGPUTimer = std::make_unique<GDX12GPUTimer>(_primaryDevice.get());
+    return _primaryGPUTimer.get();
+}
+
 double RenderModule::GetPrimaryGPUTimeMS()
 {
-    return _primaryGPUTimer ? _primaryGPUTimer->GetTimeMS() : -1.0;
+    return GetGPUFrameTimeMS();
 }
 
 GDX12GPUTimingTotals RenderModule::GetPrimaryGPUTimingTotals()
 {
-    return _primaryGPUTimer ? _primaryGPUTimer->GetSampleTotals() : GDX12GPUTimingTotals{};
+    auto* timer = PrimaryTimer();
+    return timer ? timer->GetSampleTotals() : GDX12GPUTimingTotals{};
 }
 
 D3D12MA::Statistics RenderModule::GetMemoryStatistics() const
@@ -1199,7 +1208,8 @@ void RenderModule::RebuildRenderGraph()
 
 double RenderModule::GetGPUFrameTimeMS() const
 {
-    return _primaryGPUTimer->GetTimeMS();
+    auto* timer = PrimaryTimer();
+    return timer ? timer->GetTimeMS() : -1.0;
 }
 
 void RenderModule::WriteRenderGraph(std::ostream& output) const

@@ -247,20 +247,22 @@ class BistroApplication final : public App
 				App::OnResize();
 			}
 		}
-		UpdateTaskbar();
-		if (_benchmark.Active() && (!_runActive || _legNumber != _benchmark.LegNumber()))
+		const bool active = _benchmark.Active();
+		if (active != _runActive) SetCaptionTimingEnabled(!active);
+		if (active && (!_runActive || _legNumber != _benchmark.LegNumber()))
 		{
 			_info.Hide();
 			Engine::UI::HideSettings();
 			_legNumber = _benchmark.LegNumber();
 			RefreshWindowCaption();
 		}
-		if (!_benchmark.Active() && _runActive)
+		if (!active && _runActive)
 		{
-			_info.ShowFull();
+			_info.Show(std::exchange(_compactAfterRun, false));
+			if (std::exchange(_settingsAfterRun, false)) Engine::UI::OpenSettings();
 			RefreshWindowCaption();
 		}
-		_runActive = _benchmark.Active();
+		_runActive = active;
 		Engine::UI::SetSettingsEditingEnabled(!_runActive);
 		_bistroReflections.Update(world, timer.DeltaTime());
 		const float sceneDelta = world.IsPaused() ? 0.f : timer.DeltaTime() * world.GetTimeScale();
@@ -282,8 +284,8 @@ class BistroApplication final : public App
 		{
 			_benchmark.FrameRendered(*Locator.GetModule<SceneManagerModule>()->GetWorld(), *Locator.GetModule<ConsoleModule>(),
 			    *Locator.GetModule<RenderModule>(), *_bistroPipeline, _bistroPipeline->PresentedFrames() != presented);
-			UpdateTaskbar();
 		}
+		UpdateTaskbar();
 	}
 	int Run()
 	{
@@ -323,14 +325,19 @@ class BistroApplication final : public App
 
 	std::wstring StatusCaption() const override
 	{
-		std::wstring status;
-		if (_benchmark.Active()) status = _benchmark.Caption() + L" | Esc: cancel | ";
-		return status + L"F1: CVars | F6: compact | F7: full | F8: textures";
+		if (_benchmark.Active()) return _benchmark.Caption() + L" | Esc: cancel";
+		return L"F1: CVars | F6: compact | F7: full | F8: textures";
 	}
 	bool OnKeyReleased(WPARAM key) override
 	{
 		if (key == VK_ESCAPE && _benchmark.Active()) { _benchmark.RequestCancel(); return true; }
-		if (key == VK_F6 || key == VK_F7) { _info.Toggle(key == VK_F6); return true; }
+		if (_benchmark.Active() && key == VK_F1) { _settingsAfterRun = true; return true; }
+		if (key == VK_F6 || key == VK_F7)
+		{
+			if (_benchmark.Active()) _compactAfterRun = key == VK_F6;
+			else _info.Toggle(key == VK_F6);
+			return true;
+		}
 		if (key == VK_F8)
 		{
 			using BistroRender::SceneTextureInspector;
@@ -340,6 +347,7 @@ class BistroApplication final : public App
 		return false;
 	}
 	bool _runActive = false;
+	bool _compactAfterRun = false, _settingsAfterRun = false;
 	uint64_t _legNumber = 0;
 	void StopBenchmark(const char* status = "cancelled")
 	{

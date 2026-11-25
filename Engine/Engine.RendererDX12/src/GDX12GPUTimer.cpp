@@ -62,30 +62,23 @@ void GDX12GPUTimer::Reset()
     _sampleTotals = {};
     _activeFrameIndex = 0;
     _frameFenceValues.fill(0);
+    _recording = false;
 }
 
 void GDX12GPUTimer::Start(GDX12CommandList* commandList)
 {
-    if (!commandList) { return; }
-
+    _recording = false;
+    if (!commandList || !_queryHeap) return;
     UpdateResolvedFrames();
+    if (_frameFenceValues[_activeFrameIndex]) return;
 
-    if (!_queryHeap) { return; }
-
-    if (_frameFenceValues[_activeFrameIndex] != 0 && _commandQueue && _commandQueue->GetFence()->GetCompletedValue() < _frameFenceValues[_activeFrameIndex])
-    {
-        _commandQueue->CPUWaitForFenceValue(_frameFenceValues[_activeFrameIndex]);
-        UpdateResolvedFrames();
-    }
-
+    _recording = true;
     commandList->GetCommandList()->EndQuery(_queryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, GetStartQueryIndex(_activeFrameIndex));
 }
 
 void GDX12GPUTimer::Stop(GDX12CommandList* commandList)
 {
-    if (!commandList) { return; }
-
-    if (!_queryHeap || !_readbackBuffer) { return; }
+    if (!_recording || !commandList) return;
 
     commandList->GetCommandList()->EndQuery(_queryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, GetEndQueryIndex(_activeFrameIndex));
     commandList->GetCommandList()->ResolveQueryData(
@@ -96,6 +89,8 @@ void GDX12GPUTimer::Stop(GDX12CommandList* commandList)
 
 void GDX12GPUTimer::OnCommandListExecuted(const UINT64 fenceValue)
 {
+    if (!_recording) return;
+    _recording = false;
     _frameFenceValues[_activeFrameIndex] = fenceValue;
     _activeFrameIndex = (_activeFrameIndex + 1) % BufferedFrameCount;
 }

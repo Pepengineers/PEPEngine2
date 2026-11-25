@@ -116,10 +116,11 @@ double QpcMilliseconds()
 }
 }
 
-void Executor::CollectTimings(Slot& slot)
+void QueueSubmission::CollectBenchmarkSlot(BenchmarkSlot& slot, bool waitForGpu)
 {
-	if (!slot.TimingEpoch || slot.Samples.empty()) return;
-	if (slot.TimingEpoch == _submissions->BenchmarkEpoch())
+	auto samples = std::exchange(slot.Samples, {});
+	if (samples.empty() || !samples.back().Terminal) return;
+	if (waitForGpu) Wait(samples.back().Terminal);
 	{
 		std::array<const uint64_t*, 3> ticks{};
 		std::array<UINT, 3> index{};
@@ -131,12 +132,12 @@ void Executor::CollectTimings(Slot& slot)
 			void* mapped = nullptr;
 			if (FAILED(timing.Readback->Map(0, &read, &mapped)))
 			{
-				_submissions->CheckHealth();
+				CheckHealth();
 				continue;
 			}
 			ticks[q] = static_cast<const uint64_t*>(mapped);
 		}
-		for (auto& sample : slot.Samples)
+		for (auto& sample : samples)
 		{
 			const auto q = QueueIndex(sample.Token.Target);
 			const auto& timing = slot.Timings[q];
@@ -152,16 +153,15 @@ void Executor::CollectTimings(Slot& slot)
 		const D3D12_RANGE noWrites{0, 0};
 		for (size_t q = 0; q < ticks.size(); ++q)
 			if (ticks[q]) slot.Timings[q].Readback->Unmap(0, &noWrites);
-		_submissions->AppendBenchmarkPackets(slot.TimingEpoch, std::move(slot.Samples));
 	}
-	slot.Samples.clear();
-	slot.TimingEpoch = 0;
+	std::lock_guard lock(_mutex);
+	if (slot.Epoch == _nextBenchmarkEpoch)
+		_benchmarkPackets.insert(_benchmarkPackets.end(),
+		    std::make_move_iterator(samples.begin()), std::make_move_iterator(samples.end()));
 }
 
-void Executor::BeginTimings(Slot& slot, const Schedule& schedule, const std::vector<ID3D12Resource*>& resources)
+void Executor::BeginTimings(QueueSubmission::BenchmarkSlot& slot, const Schedule& schedule, const std::vector<ID3D12Resource*>& resources)
 {
-	slot.TimingEpoch = _submissions->BenchmarkEpoch();
-	if (!slot.TimingEpoch) return;
 	for (auto& timing : slot.Timings) timing.Count = 0;
 	for (const auto& packet : schedule.Packets) slot.Timings[QueueIndex(packet.Target)].Count += 2;
 	for (const auto queue : {Queue::Direct, Queue::Compute, Queue::Copy})
@@ -256,7 +256,6 @@ void Executor::Begin(uint32_t index)
 			_submissions->Wait(Token(queue, value));
 		}
 	}
-	CollectTimings(slot);
 	_slot = index;
 	_begun = true;
 	_tokens.clear();
@@ -281,7 +280,6 @@ bool Executor::TryBegin(uint32_t index)
 			}
 		}
 	}
-	CollectTimings(slot);
 	_slot = index;
 	_begun = true;
 	_tokens.clear();
@@ -301,7 +299,6 @@ void Executor::Drain()
 				_submissions->Wait(Token(queue, value));
 			}
 		}
-		CollectTimings(slot);
 	}
 	for (auto& slot : _slots)
 	{
@@ -423,8 +420,7 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 	}
 	std::vector<bool> endBatch(schedule.Packets.size(), false);
 	if (_lastOpaqueFrame <= slot.Fences[0]) _lastOpaqueFrame = 0; // Begin retired this slot.
-	const bool allowSlotOverlap = schedule.FrameBoundary && frameStart == FrameStart::TimestampOnly &&
-	    !_submissions->BenchmarkEpoch();
+	const bool allowSlotOverlap = schedule.FrameBoundary && frameStart == FrameStart::TimestampOnly;
 	std::vector<bool> waitForFrameStart(schedule.Packets.size(), false);
 	std::array<bool, 3> ordered{};
 	for (Id i = 0; i < schedule.Packets.size(); ++i)
@@ -517,7 +513,22 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 	std::vector<std::vector<std::function<void()>>> ownerRecords(schedule.Packets.size());
 	std::vector<uint8_t> closed(lists.size(), 1);
 	std::array<size_t, 3> offsets{0, counts[0], counts[0] + counts[1]}, used{};
-	BeginTimings(slot, schedule, resources);
+	QueueSubmission::BenchmarkSlot* capture = nullptr;
+	std::unique_lock<std::mutex> captureLock;
+	if (const auto epoch = _submissions->BenchmarkEpoch())
+	{
+		if (!slot.Benchmark) slot.Benchmark = std::make_shared<QueueSubmission::BenchmarkSlot>();
+		captureLock = std::unique_lock(slot.Benchmark->Mutex);
+		if (_submissions->TrackBenchmarkSlot(slot.Benchmark, epoch))
+		{
+			capture = slot.Benchmark.get();
+			// Begin/TryBegin has retired the previous submission for this executor slot.
+			_submissions->CollectBenchmarkSlot(*capture, false);
+			capture->Epoch = epoch;
+			BeginTimings(*capture, schedule, resources);
+		}
+		else captureLock.unlock();
+	}
 	std::array<UINT, 3> queries{};
 	Id firstInExecution = 0;
 	Id firstInBatch = 0;
@@ -539,7 +550,7 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 		if (endBatch[i]) firstInBatch = i + 1;
 		RecordingGroup group;
 		const auto q = QueueIndex(p.Target);
-		const auto* timing = slot.TimingEpoch && slot.Timings[q].Count ? &slot.Timings[q] : nullptr;
+		const auto* timing = capture && capture->Timings[q].Count ? &capture->Timings[q] : nullptr;
 		const UINT query = std::exchange(queries[q], queries[q] + 2);
 		for (uint32_t j = 0; j < p.Lists; ++j)
 		{
@@ -697,9 +708,9 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 				continue;
 			slot.Poisoned = true;
 			submitted = true;
-			if (slot.TimingEpoch)
+			if (capture)
 			{
-				auto& first = slot.Samples[batchBegin];
+				auto& first = capture->Samples[batchBegin];
 				LARGE_INTEGER now;
 				QueryPerformanceCounter(&now);
 				first.SubmitMs = double(now.QuadPart) * QpcMilliseconds();
@@ -707,13 +718,14 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 			}
 			const auto firstExecution = executionForPacket[batchBegin];
 			const auto count = executionForPacket[i] - firstExecution + 1;
-			const auto token = _submissions->Submit(_deviceId, target, executions.data() + firstExecution, count, dependencies);
+			const auto token = _submissions->Submit(_deviceId, target, executions.data() + firstExecution, count,
+			    dependencies, nullptr, capture ? capture->Epoch : 0);
 			slot.Fences[QueueIndex(target)] = token.Value;
 			for (Id packet = batchBegin; packet <= i; ++packet)
 			{
 				_tokens[packet] = token.Value;
 				_completions[packet] = token;
-				if (slot.TimingEpoch) slot.Samples[packet].Token = token;
+				if (capture) capture->Samples[packet].Token = token;
 			}
 			batchBegin = i + 1;
 			dependencies.clear();
@@ -735,14 +747,13 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 			_previousCompletion = slot.Fences[0];
 			if (suffix || (prefix && frameStart == FrameStart::Ordered)) _lastOpaqueFrame = _previousCompletion;
 		}
-		if (slot.TimingEpoch)
-			for (auto& sample : slot.Samples) sample.Terminal = _completions.back();
+		if (capture)
+			for (auto& sample : capture->Samples) sample.Terminal = _completions.back();
 		return slot.Fences[QueueIndex(schedule.TerminalQueue)];
 	}
 	catch (...)
 	{
-		slot.TimingEpoch = 0;
-		slot.Samples.clear();
+		if (capture) capture->Samples.clear();
 		recorder.Finish();
 		if (submitted)
 		{

@@ -19,7 +19,7 @@ inline void DrawFrameDetails(size_t number, double time, const char* section, do
 {
     ImGui::Text("Frame #%zu   |   %.3f s", number, time);
     if (*section) ImGui::TextUnformatted(section);
-    if (frameMs >= 0) ImGui::Text("Measured frame   %.3f ms", frameMs);
-    if (intervalMs > 0) ImGui::Text("Present interval   %.3f ms   (%.1f FPS)", intervalMs, 1000 / intervalMs);
+    if (frameMs >= 0) ImGui::Text("Timed CPU scope   %.3f ms", frameMs);
+    if (intervalMs > 0) ImGui::Text("Application frame interval   %.3f ms   (%.1f FPS)", intervalMs, 1000 / intervalMs);
 }
 }

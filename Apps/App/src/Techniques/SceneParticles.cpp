@@ -1266,19 +1266,6 @@ bool SceneParticles::BenchmarkReady() const
 	return true;
 }
 
-void SceneParticles::AppendBenchmarkPublications(std::vector<SimulationPublication>& publications) const
-{
-	for (size_t i = 0; i < _remote.size(); ++i)
-	{
-		const auto& lane = _remote[i];
-		if (!lane.Solver || !lane.Consumed) continue;
-		std::lock_guard lock(lane.Solver->Mutex);
-		if (const auto* selected = lane.Solver->Selected)
-			publications.push_back({"ParticleAdapter", lane.Solver->DeviceId, i,
-			    selected->Generation, selected->Version, selected->SimulatedSeconds});
-	}
-}
-
 void SceneParticles::Submitted(const std::vector<CompletionToken>& completions)
 {
 	for (auto& lane : _remote)
@@ -1293,7 +1280,7 @@ void SceneParticles::Submitted(const std::vector<CompletionToken>& completions)
 		}
 }
 
-void SceneParticles::Presented(uint64_t frame)
+void SceneParticles::Presented(uint64_t frame, std::vector<SimulationPublication>* publications)
 {
 	for (auto& sample : _visibilitySamples.at(_resources.CurrFrameConstantsIndex))
 		if (sample.Written) sample.Frame = frame;
@@ -1304,6 +1291,9 @@ void SceneParticles::Presented(uint64_t frame)
 		auto& remote = *lane.Solver;
 		std::lock_guard lock(remote.Mutex);
 		const auto* selected = remote.Selected;
+		if (publications && lane.Consumed && selected)
+			publications->push_back({"ParticleAdapter", remote.DeviceId, i, selected->Generation,
+			    selected->Version, selected->SimulatedSeconds});
 		const auto previous = remote.PresentedVersion;
 		remote.PresentedVersion = selected ? selected->Version : 0;
 		if (selected) remote.PresentedSnapshot = selected->Snapshot;

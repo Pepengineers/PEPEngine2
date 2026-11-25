@@ -21,13 +21,11 @@ class BistroInfoPanel
 {
 public:
     void Hide() { _hidden = true; _count = _next = 0; _frames = 0; _elapsed = _displayFps = 0; }
-    void ShowFull() { _hidden = _compact = false; _checkPlacement = true; }
+    void Show(bool compact = false) { _hidden = false; _compact = compact; _checkPlacement = true; }
     void Toggle(bool compact)
     {
         if (!_hidden && _compact == compact) { Hide(); return; }
-        _hidden = false;
-        _compact = compact;
-        _checkPlacement = true;
+        Show(compact);
     }
     void ApplyResolution(Window&);
     void Draw(RenderModule&, BistroRenderPipeline&, BistroBenchmark&, float frameSeconds);
@@ -38,7 +36,7 @@ private:
     void DrawPlacement(bool compact) const;
     void DrawResult(const BistroBenchmark&, BistroBenchmarkData::RunMode tab);
     void DrawCurrentSettings(RenderModule&);
-    void DrawLivePlot(float height, BistroBenchmarkData::RunMode mode) const;
+    void DrawLivePlot() const;
 
     BistroComparePanel _compare;
     std::vector<Placement> _placement;
@@ -54,8 +52,6 @@ private:
     bool _plotFps = false;
     std::string _primary;
     bool _compact = false, _hidden = false, _checkPlacement = true;
-    uint64_t _settingsRevision = 0;
-    uint64_t _snapshotRevision = 0;
     std::array<float, 180> _frameMs{};
     size_t _next = 0, _count = 0;
     float _elapsed = 0, _displayFps = 0;

@@ -67,8 +67,9 @@ bool SceneTextureInspector::Visible() { return Enabled.GetValue(); }
 
 void SceneTextureInspector::SetVisible(bool visible)
 {
-	if (Visible() != visible)
-		ConsoleModule{}.ApplyPatch({{std::wstring(Enabled.GetName()), visible ? "true" : "false"}});
+	if (Visible() == visible) return;
+	const auto error = Engine::UI::SetSceneTexturesVisible(visible);
+	if (!error.empty()) Log::Warning("RenderGraph", "Cannot change scene texture inspector visibility: ", error);
 }
 
 SceneTextureInspector::SceneTextureInspector(UINT slots) : _slots(slots)
@@ -102,7 +103,7 @@ void SceneTextureInspector::Name(const char* name, GDX12Texture* texture, View v
 bool SceneTextureInspector::RequestsTexture(std::string_view name) const
 {
 	return (NeedsReadback(name) && !_readback.Buffer.Get()) ||
-	    (Visible() && ImGui::GetCurrentContext() && std::find(_selected.begin(), _selected.end(), name) != _selected.end());
+	    (PreviewsVisible() && ImGui::GetCurrentContext() && std::find(_selected.begin(), _selected.end(), name) != _selected.end());
 }
 
 std::vector<SceneTextureInspector::Source> SceneTextureInspector::Collect(Graph& graph,
@@ -270,26 +271,26 @@ SceneTextureInspector::Atlases SceneTextureInspector::Append(const Input& scene,
 {
 	if (!Visible() || !ImGui::GetCurrentContext())
 		return {};
-	auto catalog = Collect(scene.Plan, scene.Bindings, scene.BackBuffer);
-	if (post)
-	{
-		auto postCatalog = post->Inspector.Collect(post->Plan, post->Bindings, post->BackBuffer);
-		for (auto& source : postCatalog)
-		{
-			if (std::none_of(catalog.begin(), catalog.end(), [&](const auto& item) { return item.Name == source.Name; }))
-			{
-				source.Atlas = 1;
-				catalog.push_back(std::move(source));
-			}
-		}
-	}
 	bool open = true;
 	std::array<std::vector<Source>, 2> previews;
 	const auto* viewport = ImGui::GetMainViewport();
 	ImGui::SetNextWindowSize({viewport->WorkSize.x * .88f, viewport->WorkSize.y * .85f}, ImGuiCond_FirstUseEver);
 	ImGui::SetNextWindowPos(viewport->GetWorkCenter(), ImGuiCond_FirstUseEver, {.5f, .5f});
-	if (ImGui::Begin("Scene Textures", &open))
+	_collapsed = !ImGui::Begin("Scene Textures", &open);
+	if (!_collapsed && open)
 	{
+		auto catalog = Collect(scene.Plan, scene.Bindings, scene.BackBuffer);
+		if (post)
+		{
+			std::unordered_set<std::string> names;
+			for (const auto& source : catalog) names.insert(source.Name);
+			for (auto& source : post->Inspector.Collect(post->Plan, post->Bindings, post->BackBuffer))
+			{
+				if (!names.insert(source.Name).second) continue;
+				source.Atlas = 1;
+				catalog.push_back(std::move(source));
+			}
+		}
 		std::unordered_set<ID3D12Resource*> listed;
 		catalog.erase(std::remove_if(catalog.begin(), catalog.end(),
 		    [&](const Source& source) { return !listed.insert(source.Resource).second; }), catalog.end());

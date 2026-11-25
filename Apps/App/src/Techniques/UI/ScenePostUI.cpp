@@ -16,7 +16,6 @@
 #include "Engine.RendererDX12/GDX12MotionBlurSettings.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12NISUpscalePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12TAAPass.h"
-#include "Common/GameTimer.h"
 #include <filesystem>
 #include <unordered_set>
 
@@ -332,7 +331,7 @@ const std::string& ScenePostUI::BenchmarkNISFailure() const
 	return _remotePost ? _remotePost->Stack->_nisFrameFailure : _nisFrameFailure;
 }
 
-std::vector<std::pair<std::string, Id>> ScenePostUI::ExecutionDevices() const
+ScenePostUI::Devices ScenePostUI::ExecutionDevices() const
 {
 	const auto slot = _resources.CurrFrameConstantsIndex;
 	const auto& screen = _slots.at(slot);
@@ -341,8 +340,8 @@ std::vector<std::pair<std::string, Id>> ScenePostUI::ExecutionDevices() const
 	const Id hud = _remotePost ? _remotePost->Frames.at(slot).HudOwner :
 	    screen.Game.Draw ? (screen.HudOwner ? screen.HudOwner->Owner : 0) : Invalid;
 	const auto posters = _posters->ExecutionDevices();
-	return {{"PostAdapter", post}, {"PresentationAdapter", presentation}, {"GameHUDAdapter", hud},
-	    {"AtriumCanvasAdapter", posters[0]}, {"TerraceCanvasAdapter", posters[1]}};
+	return {{{"PostAdapter", post}, {"PresentationAdapter", presentation}, {"GameHUDAdapter", hud},
+	    {"AtriumCanvasAdapter", posters[0]}, {"TerraceCanvasAdapter", posters[1]}}};
 }
 
 std::array<uint64_t, 4> ScenePostUI::BenchmarkTransferBytes() const
@@ -570,8 +569,9 @@ bool ScenePostUI::NeedsResize() const
 {
 	return _remotePost ? _remotePost->Stack->NeedsResize() : _blur.NeedsTileResize();
 }
-void ScenePostUI::PrepareMaterials(Executor& executor, uint64_t frame, double animationSeconds, GDX12Texture* cloudImage)
+void ScenePostUI::PrepareMaterials(Executor& executor, uint64_t frame, double animationSeconds, double hudSeconds, GDX12Texture* cloudImage)
 {
+	_hudTime = float(hudSeconds);
 	_posters->PrepareFrame(_resources, executor, frame, animationSeconds, cloudImage);
 }
 void ScenePostUI::Reset()
@@ -784,7 +784,7 @@ ScenePostUI::CapturedScreen ScenePostUI::CaptureScreen(Graph& graph, std::vector
 	{
 		if (!_gameOverlay)
 			_gameOverlay = std::make_unique<ImDrawList>(ImGui::GetDrawListSharedData());
-		bar = GameHUD::Draw(*_gameOverlay, _common.GameTimer ? _common.GameTimer->TotalTime() : 0.f);
+		bar = GameHUD::Draw(*_gameOverlay, _hudTime);
 	}
 	const auto previews = _inspector.Append({_inspector, graph, bindings, _work, *_resources.Device, backBuffer},
 	    post, _resources.CurrFrameConstantsIndex, _common.ActiveCameraNearPlane, _common.ActiveCameraFarPlane);
@@ -1090,7 +1090,7 @@ void ScenePostUI::AppendRemotePost(Graph& scene, std::vector<ID3D12Resource*>& s
 			view->Initialize(desc);
 		}
 		inputs[i] = view.get();
-		if (SceneTextureInspector::Visible() || _inspector.NeedsReadback(names[i]))
+		if (_inspector.PreviewsVisible() || _inspector.NeedsReadback(names[i]))
 			stack._inspector.Name(names[i], view.get(), views[i]);
 	}
 	frame.BundleBytes = frame.Inputs->TransferBytes();

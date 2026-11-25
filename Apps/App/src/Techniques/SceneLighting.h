@@ -51,7 +51,7 @@ class SceneLighting
 	void UpdateLightGridOwner(Executor& primary);
 	Id LightGridDevice() const;
 	void AppendPanelOwners(std::vector<std::pair<std::string, Id>>&) const;
-	void AppendBenchmarkShadowOwners(std::vector<std::pair<std::string, Id>>&) const;
+	UINT64 AppendBenchmarkShadowOwners(std::vector<std::pair<std::string, Id>>&) const;
 	Id SunShadowDevice() const { return _sunOwner; }
 	void AppendPublishedProbes(std::vector<std::pair<std::string, Id>>& owners) const
 	{
@@ -73,7 +73,6 @@ class SceneLighting
 	void RetireLocalShadows();
 	void UpdateLocalShadowProfile(Executor& primary);
 	std::string LocalShadowDistribution() const;
-	UINT64 LocalShadowTexels() const { return _localShadows->ShadowTexels(_slot); }
 	SceneTransparency& Transparency() { return *_transparency; }
 	SceneParticles& Particles() { return _transparency->Particles(); }
 	SceneWater& Water() { return _transparency->Water(); }
@@ -95,6 +94,7 @@ class SceneLighting
 	}
 
   private:
+	void AppendCascadeOwners(std::vector<std::pair<std::string, Id>>&) const;
 	struct RemoteShadows;
 	struct ShadowPublication;
 	struct ShadowVertexBaseline;
