@@ -24,15 +24,24 @@ void GDX12DeferredLightingPass::Describe(PassDescription& s) const
     emissive.Formats = {DXGI_FORMAT_R16G16B16A16_FLOAT};
     emissive.Usages = ResourceUsage::NonPixelShaderRead;
     emissive.AllowShared = true;
+    emissive.IsOptionalInput = true;
 
     auto& depth = s.AddInputTexture("InDepthBuffer");
     depth.Formats = {DXGI_FORMAT_D32_FLOAT};
     depth.Usages = ResourceUsage::NonPixelShaderRead;
     depth.AllowShared = false;
 
-    s.AddInputTexture("InIrradiance", ResourceType::TextureCube).Usages = ResourceUsage::NonPixelShaderRead;
-    s.AddInputTexture("InPrefilteredEnvironment", ResourceType::TextureCube).Usages = ResourceUsage::NonPixelShaderRead;
-    s.AddInputTexture("InBRDFLut", ResourceType::Texture2D).Usages = ResourceUsage::NonPixelShaderRead;
+    auto& irradiance = s.AddInputTexture("InIrradiance", ResourceType::TextureCube);
+    irradiance.Usages = ResourceUsage::NonPixelShaderRead;
+    irradiance.IsOptionalInput = true;
+
+    auto& prefiltered = s.AddInputTexture("InPrefilteredEnvironment", ResourceType::TextureCube);
+    prefiltered.Usages = ResourceUsage::NonPixelShaderRead;
+    prefiltered.IsOptionalInput = true;
+
+    auto& brdfLut = s.AddInputTexture("InBRDFLut");
+    brdfLut.Usages = ResourceUsage::NonPixelShaderRead;
+    brdfLut.IsOptionalInput = true;
 
     auto& directionalMaps = s.AddInputTexture("InDirectionalMaps", ResourceType::Texture2DArray);
     directionalMaps.Formats = {DXGI_FORMAT_D32_FLOAT};
@@ -87,9 +96,13 @@ void GDX12DeferredLightingPass::Execute(PassExecutionContext& context)
     auto* resources = context.GetDeviceResources();
     auto& frame = *resources->FrameConstants[context.GetFrameSlotResourcesIndex()];
     const auto& color = context.GetOutputTexture("OutColorTexture");
-    const auto* directionalMaps = context.TryGetInputTexture("InDirectionalMaps");
-    const auto* pointSpotMaps = context.TryGetInputTexture("InPointSpotMaps");
-    const auto* occlusion = context.TryGetInputTexture("InAmbientOcclusion");
+    const auto* emissive = context.GetInputTexture("InEmissive");
+    const auto* irradiance = context.GetInputTexture("InIrradiance");
+    const auto* prefiltered = context.GetInputTexture("InPrefilteredEnvironment");
+    const auto* brdfLut = context.GetInputTexture("InBRDFLut");
+    const auto* directionalMaps = context.GetInputTexture("InDirectionalMaps");
+    const auto* pointSpotMaps = context.GetInputTexture("InPointSpotMaps");
+    const auto* occlusion = context.GetInputTexture("InAmbientOcclusion");
     const struct { UINT HasDirectionalShadows, HasPointSpotShadows, HasAmbientOcclusion; } optionalInputs = {
         directionalMaps ? 1u : 0u, pointSpotMaps ? 1u : 0u, occlusion ? 1u : 0u};
     cmd->BeginPixEvent("Deferred Lighting", Colors::Gold);
@@ -97,16 +110,16 @@ void GDX12DeferredLightingPass::Execute(PassExecutionContext& context)
     cmd->SetPipelineState(_pipeline);
     cmd->SetDescriptorHeaps({resources->SRV_UAV_Heap.get()});
     cmd->SetComputeRootConstantBufferView(2, frame.CameraCB->GetElementAddress(context.GetFrameData()->ActiveCameraCBufferIndex));
-    cmd->GetCommandList()->SetComputeRoot32BitConstants(0, sizeof(frame.ClusteredLightingConstants) / sizeof(UINT), &frame.ClusteredLightingConstants, 0);
-    cmd->GetCommandList()->SetComputeRoot32BitConstants(1, 3, &optionalInputs, 0);
-    cmd->SetComputeSRV(0, context.GetInputTexture("InAlbedoMetallic").GetSRV()->GPUHandle);
-    cmd->SetComputeSRV(1, context.GetInputTexture("InNormalRoughness").GetSRV()->GPUHandle);
-    cmd->SetComputeSRV(2, context.GetInputTexture("InF0Baked").GetSRV()->GPUHandle);
-    cmd->SetComputeSRV(3, context.GetInputTexture("InEmissive").GetSRV()->GPUHandle);
-    cmd->SetComputeSRV(4, context.GetInputTexture("InDepthBuffer").GetSRV()->GPUHandle);
-    cmd->SetComputeSRV(5, context.GetInputTexture("InIrradiance").GetSRV()->GPUHandle);
-    cmd->SetComputeSRV(6, context.GetInputTexture("InPrefilteredEnvironment").GetSRV()->GPUHandle);
-    cmd->SetComputeSRV(7, context.GetInputTexture("InBRDFLut").GetSRV()->GPUHandle);
+    cmd->SetComputeRootConstants(0, frame.ClusteredLightingConstants);
+    cmd->SetComputeRootConstants(1, optionalInputs);
+    cmd->SetComputeSRV(0, context.GetInputTexture("InAlbedoMetallic")->GetSRV()->GPUHandle);
+    cmd->SetComputeSRV(1, context.GetInputTexture("InNormalRoughness")->GetSRV()->GPUHandle);
+    cmd->SetComputeSRV(2, context.GetInputTexture("InF0Baked")->GetSRV()->GPUHandle);
+    cmd->SetComputeSRV(3, emissive ? emissive->GetSRV()->GPUHandle : resources->NullViews.Texture2DSRV.GPUHandle);
+    cmd->SetComputeSRV(4, context.GetInputTexture("InDepthBuffer")->GetSRV()->GPUHandle);
+    cmd->SetComputeSRV(5, irradiance ? irradiance->GetSRV()->GPUHandle : resources->NullViews.TextureCubeSRV.GPUHandle);
+    cmd->SetComputeSRV(6, prefiltered ? prefiltered->GetSRV()->GPUHandle : resources->NullViews.TextureCubeSRV.GPUHandle);
+    cmd->SetComputeSRV(7, brdfLut ? brdfLut->GetSRV()->GPUHandle : resources->NullViews.Texture2DSRV.GPUHandle);
     cmd->SetComputeSRV(8, frame.LightsCache->GetSRV()->GPUHandle);
     cmd->SetComputeSRV(9, frame.ClusterLightMaskBuffer->GetSRV()->GPUHandle);
     cmd->SetComputeSRV(10, directionalMaps ? directionalMaps->GetSRV()->GPUHandle : resources->NullViews.Texture2DArraySRV.GPUHandle);

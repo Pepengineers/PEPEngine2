@@ -21,8 +21,8 @@ void GDX12TextureClearPass::Describe(PassDescription& s) const
 void GDX12TextureClearPass::Execute(PassExecutionContext& context)
 {
 	auto* cmdList = context.GetCommandList();
-	auto* target = context.GetInputTexture(InTexture).GetTexture();
-	auto* depth = context.GetInputTexture(InDepthBuffer).GetTexture();
+	auto* target = context.GetInputTexture(InTexture)->GetTexture();
+	auto* depth = context.GetInputTexture(InDepthBuffer)->GetTexture();
 	cmdList->BeginPixEvent("Texture Clear", Colors::SlateGray);
 	cmdList->SetRenderTargets({target}, depth);
 	cmdList->ClearRenderTargetView(target);

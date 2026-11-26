@@ -111,56 +111,50 @@ public:
     GDX12CommandList* GetCommandList() const { return _commands; }
     uint64_t GetFrameId() const { return _frameId; }
     uint32_t GetFrameSlotResourcesIndex() const { return _frameSlotIndex; }
-    const TextureBinding& GetInputTexture(const PinId& id) const
+    // Returns nullptr only for a disconnected optional input. Missing required bindings,
+    // undeclared inputs and non-texture inputs throw.
+    const TextureBinding* GetInputTexture(const PinId& id) const
     {
-        ValidateTexturePort(id, _node.Description.GetInputDescription(id));
-        return GetBinding(id).Texture;
+        const auto& port = _node.Description.GetInputDescription(id);
+        ValidateTexturePort(id, port);
+        if (!port.IsOptionalInput) { return &GetBinding(id).Texture; }
+        const auto* binding = FindBinding(id);
+        return binding ? &binding->Texture : nullptr;
     }
     const TextureBinding& GetOutputTexture(const PinId& id) const
     {
         ValidateTexturePort(id, _node.Description.GetOutputDescription(id));
         return GetBinding(id).Texture;
     }
-    const BufferBinding& GetInputBuffer(const PinId& id) const
+    // Returns nullptr only for a disconnected optional input. Missing required bindings,
+    // undeclared inputs and non-buffer inputs throw.
+    const BufferBinding* GetInputBuffer(const PinId& id) const
     {
-        ValidateBufferPort(id, _node.Description.GetInputDescription(id));
-        return GetBinding(id).Buffer;
+        const auto& port = _node.Description.GetInputDescription(id);
+        ValidateBufferPort(id, port);
+        if (!port.IsOptionalInput) { return &GetBinding(id).Buffer; }
+        const auto* binding = FindBinding(id);
+        return binding ? &binding->Buffer : nullptr;
     }
     const BufferBinding& GetOutputBuffer(const PinId& id) const
     {
         ValidateBufferPort(id, _node.Description.GetOutputDescription(id));
         return GetBinding(id).Buffer;
     }
-    const DrawStreamBinding& GetInputDrawStream(const PinId& id) const
+    // Returns nullptr only for a disconnected optional input. Missing required bindings,
+    // undeclared inputs and inputs of another resource type throw.
+    const DrawStreamBinding* GetInputDrawStream(const PinId& id) const
     {
-        ValidateDrawStreamPort(id, _node.Description.GetInputDescription(id));
-        return GetBinding(id).Draws;
+        const auto& port = _node.Description.GetInputDescription(id);
+        ValidateDrawStreamPort(id, port);
+        if (!port.IsOptionalInput) { return &GetBinding(id).Draws; }
+        const auto* binding = FindBinding(id);
+        return binding ? &binding->Draws : nullptr;
     }
     const DrawStreamBinding& GetOutputDrawStream(const PinId& id) const
     {
         ValidateDrawStreamPort(id, _node.Description.GetOutputDescription(id));
         return GetBinding(id).Draws;
-    }
-    // Return nullptr for an unconnected optional input; undeclared/wrong-type pins still fail.
-    const TextureBinding* TryGetInputTexture(const PinId& id) const
-    {
-        ValidateTexturePort(id, _node.Description.GetInputDescription(id));
-        auto* binding = FindBinding(id);
-        return binding ? &binding->Texture : nullptr;
-    }
-    // Return nullptr for an unconnected optional input; undeclared/wrong-type pins still fail.
-    const BufferBinding* TryGetInputBuffer(const PinId& id) const
-    {
-        ValidateBufferPort(id, _node.Description.GetInputDescription(id));
-        auto* binding = FindBinding(id);
-        return binding ? &binding->Buffer : nullptr;
-    }
-    // Return nullptr for an unconnected optional input; undeclared/wrong-type pins still fail.
-    const DrawStreamBinding* TryGetInputDrawStream(const PinId& id) const
-    {
-        ValidateDrawStreamPort(id, _node.Description.GetInputDescription(id));
-        auto* binding = FindBinding(id);
-        return binding ? &binding->Draws : nullptr;
     }
     GDX12Descriptor* GetOutputRTV(const PinId& id, uint32_t layer = 0) const { return GetOutputTexture(id).GetRTV(layer); }
     // Reports modified elements of a Texture2DArray or faces of a TextureCube output in this frame slot.
@@ -203,12 +197,18 @@ class PassResourceRequirementsContext
 {
 public:
     PassResourceRequirementsContext(GDX12DeviceResources* resources, const RenderPipelineCommonData* common,
-        NodeDefinition& node, FrameGraphCompileData& data)
-        : _resources(resources), _common(common), _node(node), _compileData(data) {}
+        NodeDefinition& node, FrameGraphCompileData& data, const std::map<PinAddress, PinAddress>& sources)
+        : _resources(resources), _common(common), _node(node), _compileData(data), _sources(sources) {}
     GDX12Device* GetDevice() const { return _resources->Device; }
     GDX12DeviceResources* GetDeviceResources() const { return _resources; }
     const RenderPipelineCommonData* GetFrameData() const { return _common; }
     UInt2 GetDisplaySize() const { return _compileData.DisplaySize; }
+    // Queries a declared input before allocation, so SDK options can follow its connection.
+    bool IsInputConnected(const PinId& id) const
+    {
+        _node.Description.GetInputDescription(id);
+        return _sources.count({_node.Id, id}) != 0;
+    }
     template<class T> T GetParameter(const std::string& name) const { return _node.Description.GetParameter<T>(name); }
     void RequireTextureSize(const PinId& id, UInt2 size)
     { _node.Description.GetPortDescription(id); _compileData.Ports.at({_node.Id, id}).RequiredTextureSize = size; }
@@ -227,4 +227,5 @@ private:
     const RenderPipelineCommonData* _common;
     NodeDefinition& _node;
     FrameGraphCompileData& _compileData;
+    const std::map<PinAddress, PinAddress>& _sources;
 };

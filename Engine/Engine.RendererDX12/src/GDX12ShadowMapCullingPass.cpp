@@ -103,7 +103,7 @@ void GDX12ShadowMapCullingPass::Execute(PassExecutionContext& context)
                     pointSpotStatic.Arguments->GetUAVBarrier(), pointSpotStatic.Count->GetUAVBarrier(),
                     pointSpotDynamic.Arguments->GetUAVBarrier(), pointSpotDynamic.Count->GetUAVBarrier()});
             const UINT offsets[] = {static_cast<UINT>(drawOffset), static_cast<UINT>(viewOffset), forcedUpdates};
-            commands->GetCommandList()->SetComputeRoot32BitConstants(0, 3, offsets, 0);
+            commands->SetComputeRootConstants(0, offsets);
             commands->Dispatch(static_cast<UINT>(((std::min)(drawCount - drawOffset, uint64_t(drawsPerBatch)) + 63) / 64),
                 static_cast<UINT>((std::min)(viewCount - viewOffset, uint64_t(maxGroups))), 1);
         }

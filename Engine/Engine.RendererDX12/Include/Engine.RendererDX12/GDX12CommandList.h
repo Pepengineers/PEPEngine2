@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine.RendererDX12\D3DHelpers.h"
+#include <type_traits>
 
 class GDX12Device;
 class GDX12RootSignature;
@@ -51,6 +52,28 @@ public:
 		ID3D12Resource* resource, const UINT values[4]);
 
     // Root Parameter Management
+    // Writes a value, struct or fixed-size array to a root parameter. The data must
+    // match the HLSL layout; offset is measured in 32-bit values, not bytes.
+    template<class T>
+    void SetGraphicsRootConstants(UINT rootIndex, const T& data, UINT offset = 0)
+    {
+        static_assert(std::is_trivially_copyable_v<T> && !std::is_pointer_v<T>,
+            "Root constants require trivially copyable data, not a pointer.");
+        static_assert(sizeof(T) % sizeof(UINT) == 0, "Root constants must contain whole 32-bit values.");
+        _commandList->SetGraphicsRoot32BitConstants(rootIndex, static_cast<UINT>(sizeof(T) / sizeof(UINT)), &data, offset);
+    }
+
+    // Writes a value, struct or fixed-size array to a root parameter. The data must
+    // match the HLSL layout; offset is measured in 32-bit values, not bytes.
+    template<class T>
+    void SetComputeRootConstants(UINT rootIndex, const T& data, UINT offset = 0)
+    {
+        static_assert(std::is_trivially_copyable_v<T> && !std::is_pointer_v<T>,
+            "Root constants require trivially copyable data, not a pointer.");
+        static_assert(sizeof(T) % sizeof(UINT) == 0, "Root constants must contain whole 32-bit values.");
+        _commandList->SetComputeRoot32BitConstants(rootIndex, static_cast<UINT>(sizeof(T) / sizeof(UINT)), &data, offset);
+    }
+
     void SetGraphicsRootConstantBufferView(UINT CregisterIndex, D3D12_GPU_VIRTUAL_ADDRESS bufferLocation);
     void SetGraphicsRootShaderResourceView(UINT TregisterIndex, D3D12_GPU_VIRTUAL_ADDRESS bufferLocation);
     void SetGraphicsRootUnorderedAccessView(UINT UregisterIndex, D3D12_GPU_VIRTUAL_ADDRESS bufferLocation);

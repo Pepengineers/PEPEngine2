@@ -80,7 +80,7 @@ void GDX12NISUpscalePass::Execute(PassExecutionContext& context)
 	Check(sdk.GetNewFrameToken(frame, &frameIndex), "get frame token");
 	if (!frame) { throw std::runtime_error("ERROR: NIS returned a null frame token. Verify Streamline initialization and primary-device registration "
 		"before requesting a frame token."); }
-	auto* source = context.GetInputTexture(InColorTexture).GetTexture();
+	auto* source = context.GetInputTexture(InColorTexture)->GetTexture();
 	auto* output = context.GetOutputTexture(OutColorTexture).GetTexture();
 	sl::Resource sourceResource{sl::ResourceType::eTex2d, source->GetResource()->D3DResource.Get(),
 		nullptr, nullptr, static_cast<uint32_t>(source->GetResource()->GetCurrentState())};

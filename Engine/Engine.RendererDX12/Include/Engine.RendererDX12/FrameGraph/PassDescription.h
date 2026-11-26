@@ -77,8 +77,7 @@ struct PortDescription
     // Applies to original outputs. FrameGraph orders reuse through GPU fences.
     bool ReuseAcrossFrames = false;
     // Inputs are mandatory by default. Optional inputs can remain disconnected;
-    // the pass handles their absence through
-    // TryGetInputTexture/Buffer/DrawStream and supplies the effect's default behavior.
+    // the pass supplies the effect's default behavior when their binding is absent.
     bool IsOptionalInput = false;
     bool AllowLocal = true;
     bool AllowShared = false;

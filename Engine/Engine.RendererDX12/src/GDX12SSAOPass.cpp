@@ -113,10 +113,10 @@ void GDX12SSAOPass::Execute(PassExecutionContext& context)
     cmd->BeginPixEvent("SSAO", Colors::DarkSlateBlue);
     cmd->SetComputeRootSignature(_root.get());
     cmd->SetDescriptorHeaps({resources->SRV_UAV_Heap.get()});
-    cmd->GetCommandList()->SetComputeRoot32BitConstants(0, 8, &parameters, 0);
+    cmd->SetComputeRootConstants(0, parameters);
     cmd->SetComputeRootConstantBufferView(1, frame.CameraCB->GetElementAddress(context.GetFrameData()->ActiveCameraCBufferIndex));
-    cmd->SetComputeSRV(0, context.GetInputTexture("InDepthBuffer").GetSRV()->GPUHandle);
-    cmd->SetComputeSRV(1, context.GetInputTexture("InNormalRoughness").GetSRV()->GPUHandle);
+    cmd->SetComputeSRV(0, context.GetInputTexture("InDepthBuffer")->GetSRV()->GPUHandle);
+    cmd->SetComputeSRV(1, context.GetInputTexture("InNormalRoughness")->GetSRV()->GPUHandle);
     cmd->SetComputeUAV(0, output->GetUAV()->GPUHandle);
     cmd->SetPipelineState(_occlusionPipeline);
     cmd->Dispatch((size.x + 7) / 8, (size.y + 7) / 8, 1);
@@ -128,7 +128,7 @@ void GDX12SSAOPass::Execute(PassExecutionContext& context)
     cmd->Dispatch((size.x + 7) / 8, (size.y + 7) / 8, 1);
 
     cmd->ResourceBarrier({_blurred->GetResource()->GetNonPixelShaderResourceBarrier(), output->GetResource()->GetUnorderedAccessBarrier()});
-    cmd->GetCommandList()->SetComputeRoot32BitConstant(0, 1, 5);
+    cmd->SetComputeRootConstants(0, 1u, 5);
     cmd->SetComputeSRV(2, _blurred->GetSRV()->GPUHandle);
     cmd->SetComputeUAV(0, output->GetUAV()->GPUHandle);
     cmd->Dispatch((size.x + 7) / 8, (size.y + 7) / 8, 1);

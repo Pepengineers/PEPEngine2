@@ -19,8 +19,8 @@ void GDX12OutputToScreenPass::Describe(PassDescription& s) const
 void GDX12OutputToScreenPass::Execute(PassExecutionContext& context)
 {
 	auto* cmdList = context.GetCommandList();
-	auto* source = context.GetInputTexture(InColorTexture).GetTexture();
-	auto* target = context.GetInputTexture(InBackBuffer).GetTexture();
+	auto* source = context.GetInputTexture(InColorTexture)->GetTexture();
+	auto* target = context.GetInputTexture(InBackBuffer)->GetTexture();
 	cmdList->BeginPixEvent("Output to Screen", Colors::MediumPurple);
 	cmdList->CopyResource(target->GetResource()->D3DResource.Get(), source->GetResource()->D3DResource.Get());
 	cmdList->EndPixEvent();

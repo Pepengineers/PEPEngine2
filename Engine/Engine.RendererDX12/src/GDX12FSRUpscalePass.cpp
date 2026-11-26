@@ -31,6 +31,7 @@ void GDX12FSRUpscalePass::Describe(PassDescription& s) const
 	auto& mask = s.AddInputTexture(InTransparencyMask);
 	mask.Formats = {DXGI_FORMAT_R8_UNORM};
 	mask.Usages = read;
+	mask.IsOptionalInput = true;
 	auto& color = s.AddOutputTexture(OutColorTexture);
 	color.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
 	color.Size = Extent::Display();
@@ -73,7 +74,7 @@ void GDX12FSRUpscalePass::ResolveResourceRequirements(PassResourceRequirementsCo
 	context.RequireTextureSize(InColorTexture, renderSize);
 	context.RequireTextureSize(InDepthBuffer, renderSize);
 	context.RequireTextureSize(InVelocityBuffer, renderSize);
-	context.RequireTextureSize(InTransparencyMask, renderSize);
+	if (context.IsInputConnected(InTransparencyMask)) { context.RequireTextureSize(InTransparencyMask, renderSize); }
 	_resetHistory = true;
 }
 
@@ -83,14 +84,15 @@ void GDX12FSRUpscalePass::Execute(PassExecutionContext& context)
 	const auto displaySize = context.GetOutputResourceDescription(OutColorTexture).GetSize();
 	auto* cmdList = context.GetCommandList();
 	const auto* frame = context.GetFrameData();
+	const auto* mask = context.GetInputTexture(InTransparencyMask);
 	ffxDispatchDescUpscale dispatch = {};
 	dispatch.header.type = FFX_API_DISPATCH_DESC_TYPE_UPSCALE;
 	dispatch.commandList = cmdList->GetCommandList().Get();
-	dispatch.color = ffxApiGetResourceDX12(context.GetInputTexture(InColorTexture).GetTexture()->GetResource()->D3DResource.Get(),
+	dispatch.color = ffxApiGetResourceDX12(context.GetInputTexture(InColorTexture)->GetTexture()->GetResource()->D3DResource.Get(),
 		FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
-	dispatch.depth = ffxApiGetResourceDX12(context.GetInputTexture(InDepthBuffer).GetTexture()->GetResource()->D3DResource.Get(),
+	dispatch.depth = ffxApiGetResourceDX12(context.GetInputTexture(InDepthBuffer)->GetTexture()->GetResource()->D3DResource.Get(),
 		FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
-	dispatch.motionVectors = ffxApiGetResourceDX12(context.GetInputTexture(InVelocityBuffer).GetTexture()->GetResource()->D3DResource.Get(),
+	dispatch.motionVectors = ffxApiGetResourceDX12(context.GetInputTexture(InVelocityBuffer)->GetTexture()->GetResource()->D3DResource.Get(),
 		FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
 	dispatch.output = ffxApiGetResourceDX12(context.GetOutputTexture(OutColorTexture).GetTexture()->GetResource()->D3DResource.Get(),
 		FFX_API_RESOURCE_STATE_UNORDERED_ACCESS);
@@ -109,7 +111,7 @@ void GDX12FSRUpscalePass::Execute(PassExecutionContext& context)
 	dispatch.viewSpaceToMetersFactor = 1.f;
 	dispatch.exposure = ffxApiGetResourceDX12(nullptr, FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
 	// Coverage controls accumulation; the separate lock-protection mask is not needed here.
-	dispatch.reactive = ffxApiGetResourceDX12(context.GetInputTexture(InTransparencyMask).GetTexture()->GetResource()->D3DResource.Get(),
+	dispatch.reactive = ffxApiGetResourceDX12(mask ? mask->GetTexture()->GetResource()->D3DResource.Get() : nullptr,
 		FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
 	dispatch.transparencyAndComposition = ffxApiGetResourceDX12(nullptr, FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
 	cmdList->BeginPixEvent("FSR Upscale", Colors::Blue);

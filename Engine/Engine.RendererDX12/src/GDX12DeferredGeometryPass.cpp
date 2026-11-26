@@ -128,7 +128,7 @@ void GDX12DeferredGeometryPass::Execute(PassExecutionContext& context)
 	auto* albedoMetallic = context.GetOutputTexture(OutAlbedoMetallic).GetTexture();
 	auto* velocity = context.GetOutputTexture(OutVelocityBuffer).GetTexture();
 	auto* depthStencil = context.GetOutputTexture(OutDepthBuffer).GetTexture();
-	const auto& draws = context.GetInputDrawStream(InDrawStream);
+	const auto* draws = context.GetInputDrawStream(InDrawStream);
 	auto& currentFrameConstants = resources->FrameConstants[context.GetFrameSlotResourcesIndex()];
 
 	cmdList->BeginPixEvent("Depth Prepass", Colors::SteelBlue);
@@ -148,8 +148,8 @@ void GDX12DeferredGeometryPass::Execute(PassExecutionContext& context)
 	cmdList->SetGraphicsSRV(3, resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
 	auto drawVisibleMeshes = [&]()
 	{
-		cmdList->ExecuteIndirect(_opaqueCS.Get(), draws.Capacity,
-			draws.Arguments->D3DResource.Get(), 0, draws.Count->D3DResource.Get(), 0);
+		cmdList->ExecuteIndirect(_opaqueCS.Get(), draws->Capacity,
+			draws->Arguments->D3DResource.Get(), 0, draws->Count->D3DResource.Get(), 0);
 	};
 	cmdList->SetRenderTargets({}, depthStencil);
 	cmdList->ClearDepthStencilView(depthStencil);

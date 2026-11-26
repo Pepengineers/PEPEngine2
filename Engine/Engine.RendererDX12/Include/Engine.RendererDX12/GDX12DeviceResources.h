@@ -29,6 +29,7 @@ public:
     {
         GDX12Descriptor Texture2DSRV;
         GDX12Descriptor Texture2DArraySRV;
+        GDX12Descriptor TextureCubeSRV;
     };
     NullDescriptors NullViews;
 

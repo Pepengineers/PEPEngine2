@@ -160,11 +160,11 @@ void GDX12XeGTAOPass::Execute(PassExecutionContext& context)
     cmd->BeginPixEvent("XeGTAO", Colors::DarkSlateBlue);
     cmd->SetComputeRootSignature(_root.get());
     cmd->SetDescriptorHeaps({resources->SRV_UAV_Heap.get()});
-    cmd->GetCommandList()->SetComputeRoot32BitConstants(0, 5, &parameters, 0);
-    cmd->GetCommandList()->SetComputeRoot32BitConstants(1, sizeof(constants) / sizeof(UINT), &constants, 0);
+    cmd->SetComputeRootConstants(0, parameters);
+    cmd->SetComputeRootConstants(1, constants);
     cmd->SetComputeRootConstantBufferView(2, resources->FrameConstants[context.GetFrameSlotResourcesIndex()]->CameraCB->GetElementAddress(frame->ActiveCameraCBufferIndex));
-    cmd->SetComputeSRV(0, context.GetInputTexture("InDepthBuffer").GetSRV()->GPUHandle);
-    cmd->SetComputeSRV(1, context.GetInputTexture("InNormalRoughness").GetSRV()->GPUHandle);
+    cmd->SetComputeSRV(0, context.GetInputTexture("InDepthBuffer")->GetSRV()->GPUHandle);
+    cmd->SetComputeSRV(1, context.GetInputTexture("InNormalRoughness")->GetSRV()->GPUHandle);
     cmd->SetComputeUAV(0, context.GetOutputTexture("OutAmbientOcclusion").GetUAV()->GPUHandle);
     cmd->SetComputeUAV(1, _depth->GetUAV()->GPUHandle);
     for (UINT mip = 1; mip < XE_GTAO_DEPTH_MIP_LEVELS; ++mip)
@@ -189,7 +189,7 @@ void GDX12XeGTAOPass::Execute(PassExecutionContext& context)
         cmd->ResourceBarrier({_aoTerms[target]->GetResource()->GetUnorderedAccessBarrier()});
         cmd->SetComputeSRV(3, _aoTerms[source]->GetSRV()->GPUHandle);
         cmd->SetComputeUAV(6, _aoTerms[target]->GetUAV()->GPUHandle);
-        cmd->GetCommandList()->SetComputeRoot32BitConstant(0, pass + 1 == _settings.DenoisePasses, 3);
+        cmd->SetComputeRootConstants(0, pass + 1 == _settings.DenoisePasses ? 1u : 0u, 3);
         cmd->Dispatch(_depth->GetWidth() / 16, _depth->GetHeight() / 8, 1);
         cmd->ResourceBarrier({_aoTerms[target]->GetResource()->GetNonPixelShaderResourceBarrier()});
         source = target;

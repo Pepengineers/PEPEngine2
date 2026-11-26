@@ -79,8 +79,8 @@ void GDX12SkyBoxPass::Execute(PassExecutionContext& context)
     cmd->SetPipelineState(_pipeline);
     cmd->SetDescriptorHeaps({resources->SRV_UAV_Heap.get()});
     cmd->SetGraphicsRootConstantBufferView(0, frame.CameraCB->GetElementAddress(context.GetFrameData()->ActiveCameraCBufferIndex));
-    cmd->SetGraphicsSRV(0, context.GetInputTexture("InSkyBoxMap").GetSRV()->GPUHandle);
-    cmd->SetGraphicsSRV(1, context.GetInputTexture("InDepthBuffer").GetSRV()->GPUHandle);
+    cmd->SetGraphicsSRV(0, context.GetInputTexture("InSkyBoxMap")->GetSRV()->GPUHandle);
+    cmd->SetGraphicsSRV(1, context.GetInputTexture("InDepthBuffer")->GetSRV()->GPUHandle);
     cmd->SetViewport(color->GetViewport());
     cmd->SetScissorRect(color->GetScissorRect());
     cmd->SetRenderTargets({color, velocity}, nullptr);

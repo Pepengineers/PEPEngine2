@@ -72,9 +72,9 @@ void GDX12WBOITCompositionPass::Execute(PassExecutionContext& context)
 	auto* resources = context.GetDeviceResources();
 	auto* cmdList = context.GetCommandList();
 	auto* OUT_Result = context.GetOutputTexture(OutColorTexture).GetTexture();
-	GDX12Texture* opaqueAccum = context.GetInputTexture(InOpaqueTexture).GetTexture();
-	GDX12Texture* transparencyAccum = context.GetInputTexture(InAccumulationTexture).GetTexture();
-	GDX12Texture* transparencyRevealage = context.GetInputTexture(InRevealageTexture).GetTexture();
+	GDX12Texture* opaqueAccum = context.GetInputTexture(InOpaqueTexture)->GetTexture();
+	GDX12Texture* transparencyAccum = context.GetInputTexture(InAccumulationTexture)->GetTexture();
+	GDX12Texture* transparencyRevealage = context.GetInputTexture(InRevealageTexture)->GetTexture();
 
 	cmdList->BeginPixEvent("Composition Pass", Colors::Gold);
 	cmdList->SetViewport(OUT_Result->GetViewport());

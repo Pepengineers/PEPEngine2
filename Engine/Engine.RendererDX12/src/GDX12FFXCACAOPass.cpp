@@ -124,8 +124,8 @@ void GDX12FFXCACAOPass::Execute(PassExecutionContext& context)
     std::memcpy(&proj, &projection, sizeof(proj));
     std::memcpy(&normalsToView, &worldToView, sizeof(normalsToView));
     const FFX_CACAO_D3D12Views views = {
-        context.GetInputTexture("InDepthBuffer").GetSRV()->GPUHandle,
-        context.GetInputTexture("InNormalRoughness").GetSRV()->GPUHandle,
+        context.GetInputTexture("InDepthBuffer")->GetSRV()->GPUHandle,
+        context.GetInputTexture("InNormalRoughness")->GetSRV()->GPUHandle,
         context.GetOutputTexture("OutAmbientOcclusion").GetUAV()->GPUHandle
     };
     cmd->BeginPixEvent("FidelityFX CACAO", Colors::DarkSlateBlue);

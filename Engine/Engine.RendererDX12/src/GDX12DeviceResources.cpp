@@ -75,6 +75,14 @@ void GDX12DeviceResources::InitNullDescriptors()
     nullView.Texture2DArray.MipLevels = 1;
     NullViews.Texture2DArraySRV.InitAsSRV(nullptr, &nullView, SRV_UAV_Heap.get(),
         SRV_UAV_Heap->GetAvailableIndex(RendererResources_StartIndex));
+
+    nullView = {};
+    nullView.Format = DXGI_FORMAT_R32_FLOAT;
+    nullView.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    nullView.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
+    nullView.TextureCube.MipLevels = 1;
+    NullViews.TextureCubeSRV.InitAsSRV(nullptr, &nullView, SRV_UAV_Heap.get(),
+        SRV_UAV_Heap->GetAvailableIndex(RendererResources_StartIndex));
 }
 
 void GDX12DeviceResources::SetMeshDrawCommands(const std::vector<UINT>& instances, const GPUMesh* mesh)

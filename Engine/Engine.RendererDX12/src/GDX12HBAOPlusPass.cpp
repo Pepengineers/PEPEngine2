@@ -104,8 +104,8 @@ void GDX12HBAOPlusPass::Execute(PassExecutionContext& context)
     }
 
     auto& slot = GetContext(context);
-    auto* depth = context.GetInputTexture("InDepthBuffer").GetTexture();
-    auto* normals = context.GetInputTexture("InNormalRoughness").GetTexture();
+    auto* depth = context.GetInputTexture("InDepthBuffer")->GetTexture();
+    auto* normals = context.GetInputTexture("InNormalRoughness")->GetTexture();
 
     const auto* frame = context.GetFrameData();
     const auto size = context.GetOutputResourceDescription("OutAmbientOcclusion").GetSize();
@@ -119,11 +119,11 @@ void GDX12HBAOPlusPass::Execute(PassExecutionContext& context)
     input.DepthData.ProjectionMatrix.Data = GFSDK_SSAO_Float4x4(&projection._11);
     input.DepthData.MetersToViewSpaceUnits = 100.0f;
     input.DepthData.FullResDepthTextureSRV.pResource = depth->GetResource()->D3DResource.Get();
-    input.DepthData.FullResDepthTextureSRV.GpuHandle = context.GetInputTexture("InDepthBuffer").GetSRV()->GPUHandle.ptr;
+    input.DepthData.FullResDepthTextureSRV.GpuHandle = context.GetInputTexture("InDepthBuffer")->GetSRV()->GPUHandle.ptr;
     input.NormalData.Enable = true;
     input.NormalData.WorldToViewMatrix.Data = GFSDK_SSAO_Float4x4(&worldToView._11);
     input.NormalData.FullResNormalTextureSRV.pResource = normals->GetResource()->D3DResource.Get();
-    input.NormalData.FullResNormalTextureSRV.GpuHandle = context.GetInputTexture("InNormalRoughness").GetSRV()->GPUHandle.ptr;
+    input.NormalData.FullResNormalTextureSRV.GpuHandle = context.GetInputTexture("InNormalRoughness")->GetSRV()->GPUHandle.ptr;
 
     GFSDK_SSAO_RenderTargetView_D3D12 target;
     target.pResource = output->GetResource()->D3DResource.Get();

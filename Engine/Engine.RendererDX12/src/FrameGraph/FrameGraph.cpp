@@ -353,7 +353,7 @@ struct CompiledFrameGraph::Runtime
         for (auto& entry : Passes)
         {
             auto& node = Definition.Nodes.at(entry.first);
-            PassResourceRequirementsContext context(GetDeviceResources(node.DeviceRole), Common, node, CompileData);
+            PassResourceRequirementsContext context(GetDeviceResources(node.DeviceRole), Common, node, CompileData, Sources);
             entry.second->ResolveResourceRequirements(context);
         }
         if (Secondary && CompileData.QueuePolicy != TransportQueuePolicy::ForceCopy)

@@ -20,6 +20,7 @@ void GDX12TemporalAntiAliasingPass::Describe(PassDescription& description) const
     auto& mask = description.AddInputTexture("InTransparencyMask");
     mask.Formats = {DXGI_FORMAT_R8_UNORM};
     mask.Usages = ResourceUsage::PixelShaderRead;
+    mask.IsOptionalInput = true;
 
     auto& output = description.AddOutputTexture("OutColorTexture");
     output.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
@@ -122,16 +123,17 @@ void GDX12TemporalAntiAliasingPass::Execute(PassExecutionContext& context)
 
     auto* output = context.GetOutputTexture("OutColorTexture").GetTexture();
     auto& frame = *resources->FrameConstants[context.GetFrameSlotResourcesIndex()];
+    const auto* mask = context.GetInputTexture("InTransparencyMask");
     cmd->BeginPixEvent("Temporal Anti-Aliasing", Colors::MediumPurple);
     cmd->SetGraphicsRootSignature(_root.get());
     cmd->SetPipelineState(_pipeline);
     cmd->SetDescriptorHeaps({resources->SRV_UAV_Heap.get()});
-    cmd->GetCommandList()->SetGraphicsRoot32BitConstants(0, 4, &parameters, 0);
+    cmd->SetGraphicsRootConstants(0, parameters);
     cmd->SetGraphicsRootConstantBufferView(1, frame.CameraCB->GetElementAddress(common->ActiveCameraCBufferIndex));
-    cmd->SetGraphicsSRV(0, context.GetInputTexture("InColorTexture").GetSRV()->GPUHandle);
-    cmd->SetGraphicsSRV(1, context.GetInputTexture("InDepthBuffer").GetSRV()->GPUHandle);
-    cmd->SetGraphicsSRV(2, context.GetInputTexture("InVelocityBuffer").GetSRV()->GPUHandle);
-    cmd->SetGraphicsSRV(3, context.GetInputTexture("InTransparencyMask").GetSRV()->GPUHandle);
+    cmd->SetGraphicsSRV(0, context.GetInputTexture("InColorTexture")->GetSRV()->GPUHandle);
+    cmd->SetGraphicsSRV(1, context.GetInputTexture("InDepthBuffer")->GetSRV()->GPUHandle);
+    cmd->SetGraphicsSRV(2, context.GetInputTexture("InVelocityBuffer")->GetSRV()->GPUHandle);
+    cmd->SetGraphicsSRV(3, mask ? mask->GetSRV()->GPUHandle : resources->NullViews.Texture2DSRV.GPUHandle);
     cmd->SetGraphicsSRV(4, _history->GetSRV()->GPUHandle);
     cmd->SetViewport(output->GetViewport());
     cmd->SetScissorRect(output->GetScissorRect());

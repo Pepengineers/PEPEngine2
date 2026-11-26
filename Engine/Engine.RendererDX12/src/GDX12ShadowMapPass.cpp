@@ -127,9 +127,9 @@ void GDX12ShadowMapPass::Execute(PassExecutionContext& context)
     const auto& frame = resources->FrameConstants[context.GetFrameSlotResourcesIndex()];
     auto* directional = context.GetOutputTexture(OutDirectionalMaps).GetTexture();
     auto* pointSpot = context.GetOutputTexture(OutPointSpotMaps).GetTexture();
-    const auto& directionalDraws = context.GetInputDrawStream(InDirectionalDrawStream);
-    const auto& staticDraws = context.GetInputDrawStream(InPointSpotStaticDrawStream);
-    const auto& dynamicDraws = context.GetInputDrawStream(InPointSpotDynamicDrawStream);
+    const auto* directionalDraws = context.GetInputDrawStream(InDirectionalDrawStream);
+    const auto* staticDraws = context.GetInputDrawStream(InPointSpotStaticDrawStream);
+    const auto* dynamicDraws = context.GetInputDrawStream(InPointSpotDynamicDrawStream);
 
     commands->BeginPixEvent("Shadow Maps", Colors::DarkSlateBlue);
     commands->SetGraphicsRootSignature(_root.get());
@@ -147,8 +147,8 @@ void GDX12ShadowMapPass::Execute(PassExecutionContext& context)
     commands->SetScissorRect(directional->GetScissorRect());
     commands->SetRenderTargets({}, directional);
     commands->ClearDepthStencilView(directional);
-    commands->ExecuteIndirect(_signature.Get(), directionalDraws.Capacity,
-        directionalDraws.Arguments->D3DResource.Get(), 0, directionalDraws.Count->D3DResource.Get(), 0);
+    commands->ExecuteIndirect(_signature.Get(), directionalDraws->Capacity,
+        directionalDraws->Arguments->D3DResource.Get(), 0, directionalDraws->Count->D3DResource.Get(), 0);
 
     commands->SetPipelineState(_pointSpotPipeline);
     commands->SetViewport(pointSpot->GetViewport());
@@ -177,8 +177,8 @@ void GDX12ShadowMapPass::Execute(PassExecutionContext& context)
     {
         commands->BeginPixEvent("Point/Spot Static Cache", Colors::SlateBlue);
         commands->SetRenderTargets({}, staticCache);
-        commands->ExecuteIndirect(_signature.Get(), staticDraws.Capacity,
-            staticDraws.Arguments->D3DResource.Get(), 0, staticDraws.Count->D3DResource.Get(), 0);
+        commands->ExecuteIndirect(_signature.Get(), staticDraws->Capacity,
+            staticDraws->Arguments->D3DResource.Get(), 0, staticDraws->Count->D3DResource.Get(), 0);
         commands->EndPixEvent();
     }
     if (updateFinal)
@@ -198,8 +198,8 @@ void GDX12ShadowMapPass::Execute(PassExecutionContext& context)
         }
         commands->ResourceBarrier({pointSpot->GetResource()->GetDepthWriteBarrier()});
         commands->SetRenderTargets({}, pointSpot);
-        commands->ExecuteIndirect(_signature.Get(), dynamicDraws.Capacity,
-            dynamicDraws.Arguments->D3DResource.Get(), 0, dynamicDraws.Count->D3DResource.Get(), 0);
+        commands->ExecuteIndirect(_signature.Get(), dynamicDraws->Capacity,
+            dynamicDraws->Arguments->D3DResource.Get(), 0, dynamicDraws->Count->D3DResource.Get(), 0);
         commands->EndPixEvent();
         if (!_resetCache) context.SetUpdatedTextureArrayElements(OutPointSpotMaps, updatedArrayElements);
     }

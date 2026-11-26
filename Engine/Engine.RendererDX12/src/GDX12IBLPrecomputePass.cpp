@@ -69,13 +69,13 @@ void GDX12IBLPrecomputePass::Execute(PassExecutionContext& context)
     cmd->BeginPixEvent("Filter Environment Map", Colors::Gold);
     cmd->SetComputeRootSignature(_filterRoot.get());
     cmd->SetDescriptorHeaps({context.GetDeviceResources()->SRV_UAV_Heap.get()});
-    cmd->SetComputeSRV(0, context.GetInputTexture("InSkyBoxMap").GetSRV()->GPUHandle);
+    cmd->SetComputeSRV(0, context.GetInputTexture("InSkyBoxMap")->GetSRV()->GPUHandle);
     cmd->SetComputeUAV(0, irradiance.GetUAV()->GPUHandle);
     cmd->SetComputeUAV(1, brdf.GetUAV()->GPUHandle);
     auto dispatch = [&](UINT size, float roughness, UINT faces)
     {
         const struct { UINT Size; float Roughness; } parameters = {size, roughness};
-        cmd->GetCommandList()->SetComputeRoot32BitConstants(0, 2, &parameters, 0);
+        cmd->SetComputeRootConstants(0, parameters);
         cmd->Dispatch((size + 7) / 8, (size + 7) / 8, faces);
     };
     cmd->SetPipelineState(_irradiancePipeline);

@@ -4,7 +4,12 @@
 
 ConstantBuffer<IndirectConstants> CBIndirectConstants : register(b0);
 ConstantBuffer<LightGridCB> Grid : register(b1);
-ConstantBuffer<CameraCB> CBCamera : register(b2);
+cbuffer OptionalInputs : register(b2)
+{
+    uint HasDirectionalShadows;
+    uint HasPointSpotShadows;
+};
+ConstantBuffer<CameraCB> CBCamera : register(b3);
 
 SamplerState samLinearClamp : register(s3);
 SamplerState samAnisotropicWrap : register(s4);
@@ -153,7 +158,8 @@ float3 ShadeLight(PBRSurface s, float3 position, float3 v, GDX12LightConstants l
             result = EvaluateBRDF(s, v, l) * radiance * attenuation;
         }
     }
-    if (any(result > 0))
+    bool hasShadows = light.Type == LIGHT_TYPE_DIRECTIONAL ? HasDirectionalShadows != 0 : HasPointSpotShadows != 0;
+    if (hasShadows && any(result > 0))
         result *= ShadowVisibility(DirectionalShadowMaps, PointSpotShadowMaps, ShadowViews, samShadow,
             light, position, s.Normal, saturate(dot(s.Normal, l)), viewDepth, CBCamera.NearPlane);
     return result;

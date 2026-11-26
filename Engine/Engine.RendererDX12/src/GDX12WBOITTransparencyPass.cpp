@@ -16,17 +16,27 @@ void GDX12WBOITTransparencyPass::Describe(PassDescription& s) const
 	depth.Size = Extent::Render();
 	depth.Usages = ResourceUsage::DepthRead;
 	// These SRV tables use a graphics root signature with visibility ALL.
-	s.AddInputTexture("InIrradiance", ResourceType::TextureCube).Usages = ResourceUsage::GraphicsShaderRead;
-	s.AddInputTexture("InPrefilteredEnvironment", ResourceType::TextureCube).Usages = ResourceUsage::GraphicsShaderRead;
-	s.AddInputTexture("InBRDFLut", ResourceType::Texture2D).Usages = ResourceUsage::GraphicsShaderRead;
+	auto& irradiance = s.AddInputTexture("InIrradiance", ResourceType::TextureCube);
+	irradiance.Usages = ResourceUsage::GraphicsShaderRead;
+	irradiance.IsOptionalInput = true;
+
+	auto& prefiltered = s.AddInputTexture("InPrefilteredEnvironment", ResourceType::TextureCube);
+	prefiltered.Usages = ResourceUsage::GraphicsShaderRead;
+	prefiltered.IsOptionalInput = true;
+
+	auto& brdfLut = s.AddInputTexture("InBRDFLut");
+	brdfLut.Usages = ResourceUsage::GraphicsShaderRead;
+	brdfLut.IsOptionalInput = true;
 
 	auto& directionalMaps = s.AddInputTexture("InDirectionalMaps", ResourceType::Texture2DArray);
 	directionalMaps.Formats = {DXGI_FORMAT_D32_FLOAT};
 	directionalMaps.Usages = ResourceUsage::GraphicsShaderRead;
+	directionalMaps.IsOptionalInput = true;
 
 	auto& pointSpotMaps = s.AddInputTexture("InPointSpotMaps", ResourceType::Texture2DArray);
 	pointSpotMaps.Formats = {DXGI_FORMAT_D32_FLOAT};
 	pointSpotMaps.Usages = ResourceUsage::GraphicsShaderRead;
+	pointSpotMaps.IsOptionalInput = true;
 
 	auto& accum = s.AddOutputTexture(OutAccumulationTexture);
 	accum.Formats = {DXGI_FORMAT_R16G16B16A16_FLOAT};
@@ -61,7 +71,7 @@ void GDX12WBOITTransparencyPass::Initialize(PassInitContext& context)
 	shadowSampler.BorderColor = D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE;
 	RSDesc1.StaticSamplers.push_back(shadowSampler);
 	RSDesc1.SRVRanges.push_back(GDX12RootSignatureRange(Texture2D_RangeLength));
-	RSDesc1.Constants = {1, sizeof(GDX12LightGridConstants) / sizeof(UINT)};
+	RSDesc1.Constants = {1, sizeof(GDX12LightGridConstants) / sizeof(UINT), 2};
 	_transparencyRS = std::make_unique<GDX12RootSignature>(resources->Device, RSDesc1);
 
 	//Command Signatures
@@ -141,7 +151,14 @@ void GDX12WBOITTransparencyPass::Execute(PassExecutionContext& context)
 	const auto* common = context.GetFrameData();
 	auto* OUT_Accumulation = context.GetOutputTexture(OutAccumulationTexture).GetTexture();
 	auto* OUT_Revealage = context.GetOutputTexture(OutRevealageTexture).GetTexture();
-	const auto& draws = context.GetInputDrawStream(InDrawStream);
+	const auto* draws = context.GetInputDrawStream(InDrawStream);
+	const auto* irradiance = context.GetInputTexture("InIrradiance");
+	const auto* prefiltered = context.GetInputTexture("InPrefilteredEnvironment");
+	const auto* brdfLut = context.GetInputTexture("InBRDFLut");
+	const auto* directionalMaps = context.GetInputTexture("InDirectionalMaps");
+	const auto* pointSpotMaps = context.GetInputTexture("InPointSpotMaps");
+	const struct { UINT HasDirectionalShadows, HasPointSpotShadows; } optionalInputs = {
+		directionalMaps ? 1u : 0u, pointSpotMaps ? 1u : 0u};
 	auto& currentFrameConstants = resources->FrameConstants[context.GetFrameSlotResourcesIndex()];
 
 	cmdList->BeginPixEvent("Transparency Pass", Colors::Aqua);
@@ -150,8 +167,9 @@ void GDX12WBOITTransparencyPass::Execute(PassExecutionContext& context)
 	cmdList->SetGraphicsRootSignature(_transparencyRS.get());
 	cmdList->SetPipelineState(_transparencyPSO);
 	const auto& grid = currentFrameConstants->ClusteredLightingConstants;
-	cmdList->GetCommandList()->SetGraphicsRoot32BitConstants(1, sizeof(grid) / sizeof(UINT), &grid, 0);
-	cmdList->SetGraphicsRootConstantBufferView(2, currentFrameConstants->CameraCB->
+	cmdList->SetGraphicsRootConstants(1, grid);
+	cmdList->SetGraphicsRootConstants(2, optionalInputs);
+	cmdList->SetGraphicsRootConstantBufferView(3, currentFrameConstants->CameraCB->
 		GetElementAddress(common->ActiveCameraCBufferIndex));
 	cmdList->SetGeometryBuffer(resources->GeometryBuffer.get());
 	cmdList->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -159,23 +177,23 @@ void GDX12WBOITTransparencyPass::Execute(PassExecutionContext& context)
 	cmdList->SetGraphicsSRV(0, currentFrameConstants->MaterialCache->GetSRV()->GPUHandle);
 	cmdList->SetGraphicsSRV(1, currentFrameConstants->TransformCache->GetSRV()->GPUHandle);
 	cmdList->SetGraphicsSRV(2, currentFrameConstants->InstanceCache->GetSRV()->GPUHandle);
-	cmdList->SetGraphicsSRV(3, context.GetInputTexture("InIrradiance").GetSRV()->GPUHandle);
-	cmdList->SetGraphicsSRV(4, context.GetInputTexture("InPrefilteredEnvironment").GetSRV()->GPUHandle);
-	cmdList->SetGraphicsSRV(5, context.GetInputTexture("InBRDFLut").GetSRV()->GPUHandle);
+	cmdList->SetGraphicsSRV(3, irradiance ? irradiance->GetSRV()->GPUHandle : resources->NullViews.TextureCubeSRV.GPUHandle);
+	cmdList->SetGraphicsSRV(4, prefiltered ? prefiltered->GetSRV()->GPUHandle : resources->NullViews.TextureCubeSRV.GPUHandle);
+	cmdList->SetGraphicsSRV(5, brdfLut ? brdfLut->GetSRV()->GPUHandle : resources->NullViews.Texture2DSRV.GPUHandle);
 	cmdList->SetGraphicsSRV(6, currentFrameConstants->LightsCache->GetSRV()->GPUHandle);
 	cmdList->SetGraphicsSRV(7, currentFrameConstants->ClusterLightMaskBuffer->GetSRV()->GPUHandle);
-	cmdList->SetGraphicsSRV(8, context.GetInputTexture("InDirectionalMaps").GetSRV()->GPUHandle);
-	cmdList->SetGraphicsSRV(9, context.GetInputTexture("InPointSpotMaps").GetSRV()->GPUHandle);
+	cmdList->SetGraphicsSRV(8, directionalMaps ? directionalMaps->GetSRV()->GPUHandle : resources->NullViews.Texture2DArraySRV.GPUHandle);
+	cmdList->SetGraphicsSRV(9, pointSpotMaps ? pointSpotMaps->GetSRV()->GPUHandle : resources->NullViews.Texture2DArraySRV.GPUHandle);
 	cmdList->SetGraphicsSRV(10, currentFrameConstants->ShadowViews->GetSRV()->GPUHandle);
 	cmdList->SetGraphicsSRV(11, resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
 	const D3D12_CPU_DESCRIPTOR_HANDLE targets[] = {
 		context.GetOutputRTV(OutAccumulationTexture)->CPUHandle, context.GetOutputRTV(OutRevealageTexture)->CPUHandle};
-	const auto depth = context.GetInputTexture(InDepthBuffer).GetDSV()->CPUHandle;
+	const auto depth = context.GetInputTexture(InDepthBuffer)->GetDSV()->CPUHandle;
 	cmdList->GetCommandList()->OMSetRenderTargets(2, targets, FALSE, &depth);
 	cmdList->ClearRenderTargetView(OUT_Accumulation);
 	cmdList->ClearRenderTargetView(OUT_Revealage);
-	cmdList->ExecuteIndirect(_transparencyCS.Get(), draws.Capacity,
-		draws.Arguments->D3DResource.Get(), 0,
-		draws.Count->D3DResource.Get(), 0);
+	cmdList->ExecuteIndirect(_transparencyCS.Get(), draws->Capacity,
+		draws->Arguments->D3DResource.Get(), 0,
+		draws->Count->D3DResource.Get(), 0);
 	cmdList->EndPixEvent();
 }
