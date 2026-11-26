@@ -780,7 +780,7 @@ struct CompiledFrameGraph::Runtime
         const auto& resource = *input.Plan;
         const auto& replica = resource.Imports[role];
         if (input.Access == MemoryType::Local && !replica) { return material.ProducerReady; }
-        const auto* arrayElements = material.HasUpdatedDepthArrayElements ? &material.UpdatedDepthArrayElements : nullptr;
+        const auto* arrayElements = material.HasUpdatedTextureArrayElements ? &material.UpdatedTextureArrayElements : nullptr;
         auto& sharedSet = GetSharedResources(material);
         if (!material.SharedReady)
         {
@@ -905,8 +905,8 @@ struct CompiledFrameGraph::Runtime
         { if (!port.AliasOutput) { ApplyPortState(commandList, port); } }
         for (auto* output : pass.Outputs)
         {
-            output->HasUpdatedDepthArrayElements = false;
-            output->UpdatedDepthArrayElements.clear();
+            output->HasUpdatedTextureArrayElements = false;
+            output->UpdatedTextureArrayElements.clear();
         }
         pass.Pass->Execute(executionContext);
         // Alias outputs take their final state (e.g. PRESENT) after the pass has used their inputs.

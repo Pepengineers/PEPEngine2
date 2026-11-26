@@ -18,6 +18,8 @@ struct FrameGraphPhysicalResource
     GDX12Texture* ImportedTexture = nullptr;
     std::vector<FrameGraphBuffer> Buffers;
     std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> Footprints;
+    // Device-reported byte spans, including row padding, for partial texture transfers.
+    std::vector<uint64_t> SubresourceTransferBytes;
     uint64_t AllocationBytes = 0;
     uint64_t TransferBytes = 0; // Copyable footprint size of a shared texture.
     PassBinding CreatePassBinding(ResourceUsage usages);
@@ -46,8 +48,8 @@ struct FrameGraphMaterialization
     // Copy contents persist across uses of this slot; readiness fences are reset each frame.
     bool SharedInitialized = false;
     std::array<bool, 2> LocalCopyInitialized{};
-    bool HasUpdatedDepthArrayElements = false;
-    std::vector<UINT> UpdatedDepthArrayElements;
+    bool HasUpdatedTextureArrayElements = false;
+    std::vector<UINT> UpdatedTextureArrayElements;
 };
 
 std::unique_ptr<FrameGraphPhysicalResource> CreateFrameGraphNative(GDX12DeviceResources* owner, const ResourceDescription& description);
@@ -57,7 +59,7 @@ HRESULT TryCreateFrameGraphShared(GDX12DeviceResources* producer, GDX12DeviceRes
 void TransitionFrameGraphResource(GDX12CommandList* commands, FrameGraphPhysicalResource& resource, D3D12_RESOURCE_STATES state);
 void FrameGraphUAVBarrier(GDX12CommandList* commands, FrameGraphPhysicalResource& resource);
 struct FrameGraphCopyStatistics { uint64_t Bytes = 0; uint32_t Commands = 0; };
-// Null selects the whole resource. A validated list selects complete array elements of a D32_FLOAT array.
+// Null selects the whole resource. A validated list selects complete texture array elements, including all mips.
 FrameGraphCopyStatistics CopyFrameGraphResource(GDX12CommandList* commands, FrameGraphPhysicalResource& source,
     FrameGraphPhysicalResource& target, const std::vector<UINT>* arrayElements = nullptr);
 // Check whether the device is capable of doing operations, described by the port

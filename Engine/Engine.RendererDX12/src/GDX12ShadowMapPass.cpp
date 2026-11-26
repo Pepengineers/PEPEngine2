@@ -201,9 +201,9 @@ void GDX12ShadowMapPass::Execute(PassExecutionContext& context)
         commands->ExecuteIndirect(_signature.Get(), dynamicDraws.Capacity,
             dynamicDraws.Arguments->D3DResource.Get(), 0, dynamicDraws.Count->D3DResource.Get(), 0);
         commands->EndPixEvent();
-        if (!initializeOutput) context.SetUpdatedDepthArrayElements(OutPointSpotMaps, updatedArrayElements);
+        if (!initializeOutput) context.SetUpdatedTextureArrayElements(OutPointSpotMaps, updatedArrayElements);
     }
-    else { context.SetUpdatedDepthArrayElements(OutPointSpotMaps, {}); }
+    else { context.SetUpdatedTextureArrayElements(OutPointSpotMaps, {}); }
     _initializedSlots[slot] = true;
     _resetCache = false;
     commands->EndPixEvent();

@@ -175,13 +175,15 @@ namespace
     }
 
     void Footprints(GDX12Device* device, const ResourceDescription& description,
-        std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT>& footprints, uint64_t& bytes)
+        std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT>& footprints, uint64_t& bytes,
+        std::vector<uint64_t>* subresourceBytes = nullptr)
     {
         const auto native = NativeTextureDescription(description);
         const UINT count = description.ArraySize * description.MipLevels;
         if (!count || count > D3D12_REQ_SUBRESOURCES) { throw std::invalid_argument("ERROR: Given texture subresource count is zero or exceeds the D3D12 limit. Use a positive layer/mip count "
             "within D3D12_REQ_SUBRESOURCES."); }
         footprints.resize(count);
+        if (subresourceBytes) { subresourceBytes->resize(count); }
         std::vector<UINT> rows(count);
         std::vector<UINT64> rowBytes(count);
         device->GetDevice()->GetCopyableFootprints(&native, 0, count, 0, footprints.data(), rows.data(), rowBytes.data(), &bytes);
@@ -197,7 +199,9 @@ namespace
             { throw std::runtime_error("ERROR: Given texture copy footprint has an invalid alignment or row size. Use device-reported copy footprints "
                 "with valid row sizes and D3D12 alignment."); }
             const uint64_t rowSpan = uint64_t(p.Footprint.RowPitch) * (rows[i] - 1);
-            lastEnd = AddBytes(p.Offset, AddBytes(rowSpan, rowBytes[i]));
+            const uint64_t span = AddBytes(rowSpan, rowBytes[i]);
+            if (subresourceBytes) { (*subresourceBytes)[i] = span; }
+            lastEnd = AddBytes(p.Offset, span);
             if (lastEnd > bytes) { throw std::overflow_error("ERROR: Texture copy footprint exceeds the allocated payload buffer. Allocate the full payload byte count "
                 "returned by GetCopyableFootprints()."); }
         }
@@ -244,20 +248,20 @@ namespace
     }
 }
 
-void PassExecutionContext::SetUpdatedDepthArrayElements(const PinId& id, const std::vector<UINT>& arrayElements) const
+void PassExecutionContext::SetUpdatedTextureArrayElements(const PinId& id, const std::vector<UINT>& arrayElements) const
 {
     const auto& description = GetOutputTexture(id).GetDescription();
-    if (description.Type != ResourceType::Texture2DArray || description.Format != DXGI_FORMAT_D32_FLOAT)
-        throw std::invalid_argument("ERROR: " + _node.Id + "." + id + ": updated depth array elements require a D32_FLOAT Texture2DArray output.");
+    if (description.Type != ResourceType::Texture2DArray && description.Type != ResourceType::TextureCube)
+        throw std::invalid_argument("ERROR: " + _node.Id + "." + id + ": updated texture array elements require a Texture2DArray or TextureCube output.");
     if (std::any_of(arrayElements.begin(), arrayElements.end(), [&](UINT element) { return element >= description.ArraySize; }))
-        throw std::invalid_argument("ERROR: " + _node.Id + "." + id + ": updated depth array element is outside the texture array.");
+        throw std::invalid_argument("ERROR: " + _node.Id + "." + id + ": updated texture array element is outside the texture array.");
     auto* output = GetBinding(id).Output;
-    if (!output) throw std::logic_error("ERROR: Updated depth array elements require a FrameGraph output binding.");
-    output->UpdatedDepthArrayElements = arrayElements;
-    auto& elements = output->UpdatedDepthArrayElements;
+    if (!output) throw std::logic_error("ERROR: Updated texture array elements require a FrameGraph output binding.");
+    output->UpdatedTextureArrayElements = arrayElements;
+    auto& elements = output->UpdatedTextureArrayElements;
     std::sort(elements.begin(), elements.end());
     elements.erase(std::unique(elements.begin(), elements.end()), elements.end());
-    output->HasUpdatedDepthArrayElements = true;
+    output->HasUpdatedTextureArrayElements = true;
 }
 
 void PassResourceRequirementsContext::SetOutputTextureArraySize(const PinId& id, UINT arraySize)
@@ -390,10 +394,11 @@ HRESULT TryCreateFrameGraphShared(GDX12DeviceResources* producer, GDX12DeviceRes
     { throw std::invalid_argument("ERROR: Direct ROW_MAJOR texture binding is unsupported for this texture type or depth format. Use a color "
         "Texture2D or select Local storage/access so FrameGraph can stage the texture through a buffer."); }
     std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> footprints;
+    std::vector<uint64_t> subresourceBytes;
     uint64_t payloadBytes = 0;
     if (bufferPayload)
     {
-        Footprints(producer->Device, description, footprints, payloadBytes);
+        Footprints(producer->Device, description, footprints, payloadBytes, &subresourceBytes);
         ValidateFootprints(other->Device, description, footprints, payloadBytes);
     }
     else if (!description.IsBuffer())
@@ -413,6 +418,7 @@ HRESULT TryCreateFrameGraphShared(GDX12DeviceResources* producer, GDX12DeviceRes
         if (!mapping) { continue; }
         mapping->Description = description;
         mapping->Footprints = footprints;
+        mapping->SubresourceTransferBytes = subresourceBytes;
         mapping->TransferBytes = payloadBytes;
     }
     const size_t components = description.Type == ResourceType::DrawStream ? 2 : 1;
@@ -518,12 +524,15 @@ FrameGraphCopyStatistics CopyFrameGraphResource(GDX12CommandList* commands, Fram
     if (sourceTexture || targetTexture)
     {
         const auto* payload = sourceTexture && targetTexture ? nullptr : sourceTexture ? &target : &source;
-        if (payload && (payload->Footprints.empty() || payload->Buffers.size() != 1 || payload->Footprints.size() != a.ArraySize * a.MipLevels))
+        if (payload && (payload->Footprints.empty() || payload->Buffers.size() != 1 || payload->Footprints.size() != a.ArraySize * a.MipLevels ||
+            payload->SubresourceTransferBytes.size() != payload->Footprints.size()))
         { throw std::invalid_argument("ERROR: Texture transport has no complete canonical whole-resource copy footprints. Create whole-resource copy "
             "footprints for every texture subresource before transferring it."); }
         std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> nativeFootprints;
-        if (!payload) { Footprints(source.DeviceResources->Device, a, nativeFootprints, result.Bytes); result.Bytes = 0; }
+        std::vector<uint64_t> nativeSubresourceBytes;
+        if (!payload) { Footprints(source.DeviceResources->Device, a, nativeFootprints, result.Bytes, &nativeSubresourceBytes); result.Bytes = 0; }
         const auto& footprints = payload ? payload->Footprints : nativeFootprints;
+        const auto& subresourceBytes = payload ? payload->SubresourceTransferBytes : nativeSubresourceBytes;
         auto location = [](FrameGraphPhysicalResource& resource, GDX12Texture* texture, UINT subresource)
         {
             if (texture) return CD3DX12_TEXTURE_COPY_LOCATION(texture->GetResource()->D3DResource.Get(), subresource);
@@ -537,8 +546,7 @@ FrameGraphCopyStatistics CopyFrameGraphResource(GDX12CommandList* commands, Fram
             ++result.Commands;
             if (arrayElements)
             {
-                const auto& footprint = footprints[subresource].Footprint;
-                result.Bytes = AddBytes(result.Bytes, uint64_t(footprint.RowPitch) * (footprint.Height - 1) + uint64_t(footprint.Width) * sizeof(float));
+                result.Bytes = AddBytes(result.Bytes, subresourceBytes[subresource]);
             }
         };
         if (arrayElements)
