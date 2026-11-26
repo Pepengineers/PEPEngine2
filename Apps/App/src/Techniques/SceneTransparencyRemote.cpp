@@ -84,6 +84,7 @@ struct SceneTransparency::Shared
 		    D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, SceneDescriptorStart + 4096, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
 	}
 	GDX12DeviceResources SimulationResources;
+	std::unordered_map<std::string, uint64_t> TextureRevisions;
 	GDX12ParticleSimulation Simulation;
 	Id Owner;
 	uint64_t MeshRevision = UINT64_MAX;
@@ -607,7 +608,10 @@ void SceneTransparency::AppendRemote(SceneGeometry& geometry, UINT slot, Frame& 
 		const auto loader = _resources.TextureReplicaLoaders.find(source->first);
 		if (loader == _resources.TextureReplicaLoaders.end())
 			throw std::logic_error("Missing replica source for WBOIT texture " + source->first);
-		auto* copy = found == assetResources.Textures.end() ? loader->second.Load(assetResources) : found->second.get();
+		auto& revision = r.SharedInputs->TextureRevisions[source->first];
+		auto* copy = found == assetResources.Textures.end() || revision != loader->second.Revision ?
+		    loader->second.Load(assetResources) : found->second.get();
+		revision = loader->second.Revision;
 		auto* target = native(copy);
 		NativeWork::ImportReadOnlyTexture(plan, bindings, *copy->GetResource(), read, "WBOIT texture replica");
 		const auto desc = copy->ShaderViewDescription();

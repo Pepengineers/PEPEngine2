@@ -77,6 +77,7 @@ public:
     GPUTexture* GetTextureByName(const std::string& name);
     //returns a pointer to a fully initialized structure that you can specify in materials
     GPUTexture* CreateTexture(const std::string& name, const Texture* texture, ETextureType type, UINT maxDimension = 0);
+    GPUTexture* CreateMaterialTexture(const std::string& name, const Texture* texture, ETextureType type, UINT limit, bool& updated);
     using TextureSource = std::function<const Texture*(std::unique_ptr<Texture>&)>;
     void SetTextureReplicaSource(const std::string& name, ETextureType, TextureSource, UINT maxDimension = 0);
     void WaitForUploads();
@@ -304,6 +305,7 @@ private:
     decltype(GpuOwners::PrimaryTimer)& _primaryGPUTimer = _gpu->PrimaryTimer;
     decltype(GpuOwners::Primary)& _primaryResources = _gpu->Primary;
     decltype(GpuOwners::Textures)& _textures = _gpu->Textures;
+    bool _materialTextureBatchDrained = false;
     decltype(GpuOwners::Materials)& _materials = _gpu->Materials;
     decltype(GpuOwners::Uploads)& _textureUploadResources = _gpu->Uploads;
     decltype(GpuOwners::SkeletalStates)& _skeletalStates = _gpu->SkeletalStates;

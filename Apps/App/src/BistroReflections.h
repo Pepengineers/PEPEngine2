@@ -76,12 +76,12 @@ namespace BistroReflections
             for (size_t i = 0; i < adapters.size(); ++i) adapters[i] = Adapters[i]->GetValue();
             const auto firstFaces = FirstFacesPerFrame.GetValue();
             const auto firstImplementation = FirstImplementation.GetValue();
-            if (_entities.size() == requested &&
+            if (_activeCount == requested &&
                 _resolution == resolution && _samples == samples && _implementation == implementation &&
                 _adapters == adapters && _firstFaces == firstFaces && _firstImplementation == firstImplementation &&
                 !recapture) return;
             auto& render = *BenchmarkEngine::GetLocator().GetModule<RenderModule>();
-            if (_entities.size() != requested)
+            if (_activeCount != requested)
             {
                 render.WaitForUploads();
                 if (requested > _entities.size())
@@ -91,11 +91,6 @@ namespace BistroReflections
                 }
             }
             if (requested && !_mesh.IsValid()) CreateMesh();
-            while (_entities.size() > requested)
-            {
-                ecs.DestroyEntity(_entities.back());
-                _entities.pop_back();
-            }
             while (_entities.size() < requested)
             {
                 const size_t index = _entities.size();
@@ -118,23 +113,29 @@ namespace BistroReflections
                 Log::Info("BistroProbes", "terrace table=", index + 1,
                     "; origin=", position.x, ",", position.y, ",", position.z);
             }
-            auto order = _entities;
+            auto order = std::vector<Entity>(_entities.begin(), _entities.begin() + requested);
             std::sort(order.begin(), order.end()); // Same entity order as the published cubemap array.
             for (size_t index = 0; index < _entities.size(); ++index)
             {
                 const auto entity = _entities[index];
                 auto& probe = ecs.Get<ReflectionProbeComponent>(entity);
+                const bool active = index < requested;
+                probe.Enabled = active;
+                if (!active)
+                {
+                    ecs.Get<StaticMeshRenderComponent>(entity).Visible = false;
+                    continue;
+                }
                 if (recapture) probe.Invalidate();
-                if (_resolution != resolution) probe.Resolution = resolution;
-                if (_samples != samples) probe.PrefilterSamples = samples;
+                probe.Resolution = resolution;
+                probe.PrefilterSamples = samples;
                 if (index < adapters.size()) probe.Adapter = adapters[index];
                 if (index == 0)
                 {
-                    if (_firstFaces != firstFaces) probe.FacesPerFrame = firstFaces;
-                    if (_firstImplementation != firstImplementation || (firstImplementation < 0 && _implementation != implementation))
-                        probe.Implementation = firstImplementation >= 0 ? firstImplementation : implementation;
+                    probe.FacesPerFrame = firstFaces;
+                    probe.Implementation = firstImplementation >= 0 ? firstImplementation : implementation;
                 }
-                else if (_implementation != implementation) probe.Implementation = implementation;
+                else probe.Implementation = implementation;
                 const auto name = "BistroProbePreview" + std::to_string(index);
                 auto* material = render.GetMaterialByName(name);
                 if (!material) material = render.CreateMaterial(name);
@@ -151,8 +152,11 @@ namespace BistroReflections
                     transform.DirtyFlag = true;
                     ecs.GetEntityHandle(entity).AddComponent<StaticMeshRenderComponent>(_mesh, std::vector<GDX12Material*>{material});
                 }
-                ecs.Get<StaticMeshRenderComponent>(entity).CastsShadows = false;
+                auto& renderer = ecs.Get<StaticMeshRenderComponent>(entity);
+                renderer.CastsShadows = false;
+                renderer.Visible = true;
             }
+            _activeCount = requested;
             _recapture = Recapture.GetValue();
             _resolution = resolution;
             _samples = samples;
@@ -171,7 +175,7 @@ namespace BistroReflections
             XMStoreFloat4x4(&viewProjection, common->CameraView * common->CameraProjection);
             constexpr unsigned colors[] = {0xff40e8ff,0xff60ff60,0xffff70ff,0xffffb050};
             auto& ecs = world.GetECS();
-            for (size_t index = 0; index < _entities.size(); ++index)
+            for (size_t index = 0; index < _activeCount; ++index)
             {
                 const auto entity = _entities[index];
                 const auto& position = ecs.Get<TransformComponent>(entity).Location;
@@ -216,6 +220,7 @@ namespace BistroReflections
 
         UINT _recapture = 0;
         std::vector<Entity> _entities;
+        size_t _activeCount = 0;
         Engine::Core::MeshHandle _mesh;
         UINT _resolution = Resolution.GetValue();
         UINT _samples = PrefilterSamples.GetValue();

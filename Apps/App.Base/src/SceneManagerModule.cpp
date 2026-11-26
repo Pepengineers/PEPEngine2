@@ -327,12 +327,18 @@ bool SceneManagerModule::LoadWorldContents(World& world)
         OnWorldCreated.Broadcast(world);
         if (_retainObjBindings && world.GetPath() == _scenePath)
         {
+            const UINT limit = RenderModule::MaterialMaxDimension.GetValue();
+            if (_replayTextureLimit != limit) _replayScene = {};
             if (_replayScene)
             {
                 _replayScene(world);
                 return true;
             }
-            if (WorldLoader::LoadFromFile(world, _scenePath, &_replayScene)) return true;
+            if (WorldLoader::LoadFromFile(world, _scenePath, &_replayScene))
+            {
+                _replayTextureLimit = limit;
+                return true;
+            }
         }
         else
         if (world.Load()) return true;

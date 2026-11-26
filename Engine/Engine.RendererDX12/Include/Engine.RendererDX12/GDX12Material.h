@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include "Engine.RendererDX12/D3DHelpers.h"
 
 #include "Engine.Core/Types/TextureTypes.h"
@@ -19,6 +20,7 @@ struct GPUTexture
 {
 	std::string Name;
 	GDX12Texture* PrimaryDeviceTexture = nullptr;
+    std::optional<uint32_t> MaterialMaxDimension;
 };
 
 class GDX12Material

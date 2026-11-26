@@ -101,7 +101,7 @@ void SceneProbePreview::Append(Graph& graph, std::vector<ID3D12Resource*>& bindi
     auto& frame = _frames.at(slot);
     const UINT width = inputDepth->GetWidth(), height = inputDepth->GetHeight();
     // Append runs only after this frame slot retires; no descriptor is replaced while in flight.
-    if (!frame.Depth || frame.Depth->GetWidth() != width || frame.Depth->GetHeight() != height)
+    if (!draws.empty() && (!frame.Depth || frame.Depth->GetWidth() != width || frame.Depth->GetHeight() != height))
     {
         const auto desc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R32_TYPELESS, width, height, 1, 1, 1, 0,
             D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL);
@@ -144,25 +144,30 @@ void SceneProbePreview::Append(Graph& graph, std::vector<ID3D12Resource*>& bindi
     }
     else if (frame.HDR->GetWidth() != width || frame.HDR->GetHeight() != height) frame.HDR->Resize(width, height);
     _hdr = frame.HDR.get();
-    _readDepth = frame.ReadDsv.CPUHandle;
-    _depth = frame.Depth.get();
-    _motion = frame.Motion.get();
     const auto resource = [&](ID3D12Resource* value) {
         return NativeWork::ResourceFor(graph, bindings, value, "probe preview resource");
     };
     const auto texture = [&](GDX12Texture* value, Mode mode, State state) {
         return Access{resource(value->GetResource()->D3DResource.Get()), mode, state};
     };
-    auto* sourceDepth = inputDepth->GetResource()->D3DResource.Get();
-    auto* sourceMotion = inputMotion->GetResource()->D3DResource.Get();
-    auto* depth = frame.DepthResource.Get();
-    auto* motion = frame.Motion->GetResource()->D3DResource.Get();
-    work.Add(graph, "probe preview preserve opaque depth/motion",
-        {texture(inputDepth, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE),
-         texture(inputMotion, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE),
-         texture(frame.Depth.get(), Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST),
-         texture(frame.Motion.get(), Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST)},
-        [=](auto* cmd) { cmd->CopyResource(depth, sourceDepth); cmd->CopyResource(motion, sourceMotion); });
+    if (draws.empty())
+        _readDepth = geometry.ReadOnlyDepthDSV(slot);
+    else
+    {
+        _readDepth = frame.ReadDsv.CPUHandle;
+        _depth = frame.Depth.get();
+        _motion = frame.Motion.get();
+        auto* sourceDepth = inputDepth->GetResource()->D3DResource.Get();
+        auto* sourceMotion = inputMotion->GetResource()->D3DResource.Get();
+        auto* depth = frame.DepthResource.Get();
+        auto* motion = frame.Motion->GetResource()->D3DResource.Get();
+        work.Add(graph, "probe preview preserve opaque depth/motion",
+            {texture(inputDepth, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE),
+             texture(inputMotion, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE),
+             texture(frame.Depth.get(), Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST),
+             texture(frame.Motion.get(), Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST)},
+            [=](auto* cmd) { cmd->CopyResource(depth, sourceDepth); cmd->CopyResource(motion, sourceMotion); });
+    }
     auto& scene = geometry._slots.at(slot);
     const State read = D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE;
     std::vector<Access> backgroundReads;

@@ -73,6 +73,7 @@ private:
     std::filesystem::path _scenePath;
     bool _retainObjBindings;
     WorldLoader::ObjSceneReplay _replayScene;
+    std::uint32_t _replayTextureLimit = UINT32_MAX;
     bool LoadConfiguredWorld(
         const SceneWorldConfig& sceneWorldConfig,
         const AppConfig& appConfig

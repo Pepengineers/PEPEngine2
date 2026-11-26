@@ -295,17 +295,49 @@ AutoConsoleVariable<UINT> RenderModule::MaterialMaxDimension(L"Render.Textures.M
 
 GPUTexture* RenderModule::LoadMaterialTexture(const std::string& name, const std::filesystem::path& path, ETextureType type)
 {
-    if (auto* existing = GetTextureByName(name)) return existing;
+    const UINT limit = MaterialMaxDimension.GetValue();
+    const auto existing = _textures.find(name);
+    if (existing != _textures.end() && (!existing->second->MaterialMaxDimension ||
+        *existing->second->MaterialMaxDimension == limit))
+        return existing->second.get();
     const auto image = TextureLoader::LoadTextureAsset(path, true, type);
     if (!image) return nullptr;
-    const UINT limit = MaterialMaxDimension.GetValue();
-    auto* texture = CreateTexture(name, image.get(), type, limit);
-    if (texture)
+    bool updated = false;
+    auto* texture = CreateMaterialTexture(name, image.get(), type, limit, updated);
+    if (updated)
         SetTextureReplicaSource(name, type, [path, type](auto& temporary) {
             temporary = TextureLoader::LoadTextureAsset(path, true, type);
             return temporary.get();
         }, limit);
     return texture;
+}
+
+GPUTexture* RenderModule::CreateMaterialTexture(const std::string& name, const Texture* texture, ETextureType type, UINT limit, bool& updated)
+{
+    updated = false;
+    const auto existing = _textures.find(name);
+    if (existing != _textures.end())
+    {
+        if (!existing->second->MaterialMaxDimension || *existing->second->MaterialMaxDimension == limit)
+            return existing->second.get();
+        if (!_textureUploadBudget || !_materialTextureBatchDrained)
+        {
+            DrainFrameWork();
+            _materialTextureBatchDrained = true;
+        }
+        if (_primaryPipelineFlags & RENDER_PASS_FLAG_USE_MATERIALS)
+            existing->second->PrimaryDeviceTexture = CreateDX12Texture(name, &_primaryResources, texture, type, limit);
+        existing->second->MaterialMaxDimension = limit;
+        updated = true;
+        return existing->second.get();
+    }
+    auto* result = CreateTexture(name, texture, type, limit);
+    if (result)
+    {
+        result->MaterialMaxDimension = limit;
+        updated = true;
+    }
+    return result;
 }
 
 GPUTexture* RenderModule::CreateTexture(const std::string& name, const Texture* texture, ETextureType type, UINT maxDimension)
@@ -372,6 +404,7 @@ void RenderModule::ResetWorldHistory()
 void RenderModule::BeginTextureUploadBatch(std::uint64_t budgetBytes)
 {
     if (!budgetBytes || _textureUploadBudget) throw std::logic_error("Invalid or nested texture upload batch");
+    _materialTextureBatchDrained = false;
     _textureUploadBudget = budgetBytes;
 }
 
@@ -383,6 +416,7 @@ void RenderModule::EndTextureUploadBatch()
 
 GDX12Texture* RenderModule::CreateDX12Texture(const std::string& name, GDX12DeviceResources* resources, const Texture* texture, ETextureType type, UINT maxDimension)
 {
+    const auto existing = resources->Textures.find(name);
     GDX12TextureDesc desc;
     desc.SRV_UAV_Heap = resources->SRV_UAV_Heap.get();
     desc.Format = desc.SRVDesc.Format = texture->GetFormat();
@@ -417,7 +451,10 @@ GDX12Texture* RenderModule::CreateDX12Texture(const std::string& name, GDX12Devi
         desc.SRVDesc.TextureCube.MipLevels = numMipLevels;
         desc.SRVDesc.TextureCube.MostDetailedMip = 0;
         desc.SRVDesc.TextureCube.ResourceMinLODClamp = 0.0f;
-        desc.SRVHeapIndex = resources->SRV_UAV_Heap->GetAvailableIndex(TextureCube_StartIndex, TextureCube_RangeLength);
+        if (existing != resources->Textures.end() && existing->second->ShaderViewDescription().ViewDimension != desc.SRVDesc.ViewDimension)
+            throw std::logic_error("Cannot change the dimension of a texture binding: " + name);
+        desc.SRVHeapIndex = existing != resources->Textures.end() ? existing->second->GetSRV()->HeapIndex :
+            resources->SRV_UAV_Heap->GetAvailableIndex(TextureCube_StartIndex, TextureCube_RangeLength);
 
         auto texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
             desc.Format, desc.Width, desc.Height,
@@ -437,7 +474,10 @@ GDX12Texture* RenderModule::CreateDX12Texture(const std::string& name, GDX12Devi
         desc.SRVDesc.Texture2D.MostDetailedMip = 0;
         desc.SRVDesc.Texture2D.PlaneSlice = 0;
         desc.SRVDesc.Texture2D.ResourceMinLODClamp = 0.0f;
-        desc.SRVHeapIndex = resources->SRV_UAV_Heap->GetAvailableIndex(Texture2D_StartIndex, Texture2D_RangeLength);
+        if (existing != resources->Textures.end() && existing->second->ShaderViewDescription().ViewDimension != desc.SRVDesc.ViewDimension)
+            throw std::logic_error("Cannot change the dimension of a texture binding: " + name);
+        desc.SRVHeapIndex = existing != resources->Textures.end() ? existing->second->GetSRV()->HeapIndex :
+            resources->SRV_UAV_Heap->GetAvailableIndex(Texture2D_StartIndex, Texture2D_RangeLength);
 
         auto texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
             desc.Format, desc.Width, desc.Height,
@@ -542,14 +582,15 @@ GDX12Texture* RenderModule::CreateDX12Texture(const std::string& name, GDX12Devi
 
     desc.ExternalResource = textureResource;
 
-    resources->Textures[name] = std::make_unique<GDX12Texture>();
-    resources->Textures[name]->Initialize(desc);
+    auto& target = resources->Textures[name];
+    if (!target) target = std::make_unique<GDX12Texture>();
+    target->Initialize(desc);
     ++resources->TextureRevision;
     // The upload already transitioned every mip to SRV before the wrapper was created.
-    resources->Textures[name]->GetResource()->GDX12Resource::SetCurrentState(
+    target->GetResource()->GDX12Resource::SetCurrentState(
         D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 
-    return resources->Textures[name].get();
+    return target.get();
 }
 
 void RenderModule::SubmitMesh(const Mesh* mesh, MeshHandle handle)

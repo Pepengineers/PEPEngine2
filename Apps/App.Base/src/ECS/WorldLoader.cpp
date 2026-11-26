@@ -447,8 +447,8 @@ namespace
 
         const std::string textureName = sceneName + "_Texture_" + std::to_string(gpuTexturesByPath.size());
         const UINT maxDimension = RenderModule::MaterialMaxDimension.GetValue();
-        GPUTexture* gpuTexture = renderModule.CreateTexture(textureName, texture, textureType, maxDimension);
-        const bool created = gpuTexture != nullptr;
+        bool created = false;
+        GPUTexture* gpuTexture = renderModule.CreateMaterialTexture(textureName, texture, textureType, maxDimension, created);
         if (created)
         {
             const auto format = texture->GetFormat();
@@ -458,11 +458,6 @@ namespace
                 return temporary.get();
             }, maxDimension);
         }
-        if (!created)
-        {
-            gpuTexture = renderModule.GetTextureByName(textureName);
-        }
-
         if (gpuTexture != nullptr)
         {
             gpuTexturesByPath.emplace(textureKey, gpuTexture);
@@ -524,8 +519,8 @@ namespace
 
         const std::string textureName = sceneName + "_Texture_" + std::to_string(gpuTexturesByPath.size());
         const UINT maxDimension = RenderModule::MaterialMaxDimension.GetValue();
-        GPUTexture* gpuTexture = renderModule.CreateTexture(textureName, mergedTexture.get(), Engine::Core::ETextureType::Color, maxDimension);
-        const bool created = gpuTexture != nullptr;
+        bool created = false;
+        GPUTexture* gpuTexture = renderModule.CreateMaterialTexture(textureName, mergedTexture.get(), Engine::Core::ETextureType::Color, maxDimension, created);
         if (created)
             renderModule.SetTextureReplicaSource(textureName, Engine::Core::ETextureType::Color,
                 [diffuseTexturePath, opacityTexturePath, prepare](auto& temporary) -> const Engine::Core::Texture* {
@@ -534,11 +529,6 @@ namespace
                     if (diffuse && opacity) temporary = prepare(*diffuse, *opacity);
                     return temporary.get();
                 }, maxDimension);
-        if (!created)
-        {
-            gpuTexture = renderModule.GetTextureByName(textureName);
-        }
-
         if (gpuTexture != nullptr)
         {
             gpuTexturesByPath.emplace(textureKey, gpuTexture);
