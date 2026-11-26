@@ -1068,7 +1068,7 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
     auto& sun = createLight("Sun", LightType::Directional, Vector3::Zero, 0, 4.0f, Vector3(0.35f, -1.0f, 0.25f));
     sun.Color = Vector3(1.0f, 0.95f, 0.875f);
 
-    // Original Bistro lights on the restaurant facade and its nearest streetlight.
+    // Building facade.
     createLight("Paris_Building_01_paris_building_01_bottom_44", LightType::Point, { 361.331f, 410.190f, 279.902f }, 500.000f, 150.000f);
     createLight("Paris_Building_01_paris_building_01_bottom_45", LightType::Point, { 560.746f, 410.190f, 358.776f }, 500.000f, 150.000f);
     createLight("Paris_Building_01_paris_building_01_bottom_46", LightType::Point, { 778.120f, 410.190f, 444.753f }, 500.000f, 150.000f);
@@ -1079,7 +1079,113 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
     createLight("Paris_Building_01_paris_building_01_bottom_68", LightType::Point, { 212.189f, 410.189f, -1037.624f }, 500.000f, 150.000f);
     createLight("Paris_Building_01_paris_building_01_bottom_158", LightType::Point, { -178.991f, 266.331f, -222.308f }, 500.000f, 150.000f);
     createLight("Paris_Building_01_paris_building_01_bottom_159", LightType::Point, { -42.617f, 267.739f, 76.785f }, 500.000f, 150.000f);
+
+    // Streetlights.
+    createLight("Paris_Streetlight_01a", LightType::Point, { -433.326f, 409.493f, -419.017f }, 650.000f, 180.000f);
+    createLight("Paris_Streetlight_01a__2_", LightType::Point, { 373.428f, 409.996f, -2125.876f }, 650.000f, 180.000f);
+    createLight("Paris_Streetlight_01a__3_", LightType::Point, { -2081.920f, 409.996f, -1823.962f }, 650.000f, 180.000f);
+    createLight("Paris_Streetlight_01a__4_", LightType::Point, { -965.267f, 409.996f, 208.816f }, 650.000f, 180.000f);
     createLight("Paris_Streetlight_01a__5_", LightType::Point, { -208.779f, 409.996f, 465.133f }, 650.000f, 180.000f);
+    createLight("Paris_Streetlight_01a__6_", LightType::Point, { -175.615f, 409.996f, 1004.082f }, 650.000f, 180.000f);
+    createLight("Paris_Streetlight_01a__7_", LightType::Point, { 781.492f, 409.996f, 865.957f }, 650.000f, 180.000f);
+    createLight("Paris_Streetlight_01a__8_", LightType::Point, { 2158.015f, 409.996f, 1882.062f }, 650.000f, 180.000f);
+    createLight("Paris_Streetlight_01a__9_", LightType::Point, { 3330.580f, 409.996f, 2409.981f }, 650.000f, 180.000f);
+    createLight("Paris_Streetlight_01a__10_", LightType::Point, { 3879.824f, 409.996f, 3394.735f }, 650.000f, 180.000f);
+    createLight("Paris_Streetlight_01a__11_", LightType::Point, { 4932.883f, 409.996f, 3435.792f }, 650.000f, 180.000f);
+    createLight("Paris_Streetlight_01a__12_", LightType::Point, { 3510.323f, 409.996f, 1832.195f }, 650.000f, 180.000f);
+    createLight("Paris_StreetLight_01B", LightType::Point, { -1339.952f, 372.467f, 121.300f }, 650.000f, 180.000f);
+    createLight("Paris_StreetLight_01B__2_", LightType::Point, { -1725.812f, 372.467f, -378.603f }, 650.000f, 180.000f);
+    createLight("Paris_StreetLight_01B__3_", LightType::Point, { -2017.024f, 372.467f, -718.796f }, 650.000f, 180.000f);
+    createLight("Paris_StreetLight_01B__4_", LightType::Point, { -2458.580f, 371.137f, -1180.908f }, 650.000f, 180.000f);
+    createLight("Paris_StreetLight_01B__5_", LightType::Point, { -2851.466f, 298.162f, -1719.422f }, 650.000f, 180.000f);
+    createLight("Paris_StreetLight_01B__6_", LightType::Point, { -2689.168f, 298.162f, -2106.046f }, 650.000f, 180.000f);
+    createLight("Paris_StreetLight_01B__7_", LightType::Point, { -1773.059f, 372.793f, -1494.189f }, 650.000f, 180.000f);
+    createLight("Paris_StreetLight_01B__8_", LightType::Point, { -1193.675f, 372.467f, -961.885f }, 650.000f, 180.000f);
+    createLight("Paris_StreetLight_01B__9_", LightType::Point, { -843.238f, 375.138f, -1141.376f }, 650.000f, 180.000f);
+    createLight("Paris_StreetLight_01B__10_", LightType::Point, { -212.129f, 391.431f, -1828.257f }, 650.000f, 180.000f);
+    createLight("Paris_StreetLight_01B__11_", LightType::Point, { 1802.556f, 416.735f, -4156.665f }, 650.000f, 180.000f);
+    createLight("Paris_StreetLight_01B__12_", LightType::Point, { 1765.658f, 416.735f, -3440.353f }, 650.000f, 180.000f);
+    createLight("Paris_StreetLight_01B__13_", LightType::Point, { 898.219f, 423.911f, -2008.213f }, 650.000f, 180.000f);
+    createLight("Paris_StreetLight_01B__14_", LightType::Point, { 3000.853f, 374.075f, 1350.240f }, 650.000f, 180.000f);
+    createLight("Paris_StreetLight_01B__15_", LightType::Point, { 2446.246f, 429.276f, 2316.705f }, 650.000f, 180.000f);
+    createLight("Paris_StreetLight_01B__16_", LightType::Point, { 2076.290f, 374.075f, 1275.618f }, 650.000f, 180.000f);
+
+    // Spotlights.
+    createLight("Spotlights_1_1", LightType::Spot, { -2189.932f, 865.291f, -878.311f }, 1100.000f, 450.000f, { -0.258f, 0.940f, 0.224f });
+    createLight("Spotlights_1_2", LightType::Spot, { -2563.253f, 865.291f, -1309.126f }, 1100.000f, 450.000f, { -0.258f, 0.940f, 0.224f });
+    createLight("Spotlights_1_3", LightType::Spot, { 1231.022f, 340.951f, -2508.879f }, 1100.000f, 450.000f, { 0.000f, -1.000f, 0.000f });
+    createLight("Spotlights_2_1", LightType::Spot, { 983.025f, 339.634f, -2093.813f }, 1100.000f, 450.000f, { 0.000f, -1.000f, 0.000f });
+    createLight("Spotlights_3_1", LightType::Spot, { -1242.096f, 866.259f, 229.179f }, 1100.000f, 450.000f, { -0.258f, 0.940f, 0.224f });
+    createLight("Spotlights_4_1", LightType::Spot, { -1615.682f, 866.259f, -205.051f }, 1100.000f, 450.000f, { -0.250f, 0.940f, 0.233f });
+    createLight("Spotlights_5_1", LightType::Spot, { -1841.664f, 865.291f, -585.871f }, 1100.000f, 450.000f, { -0.254f, 0.940f, 0.229f });
+
+    // String lights.
+    createLight("paris_stringlights_01a8_Red_1", LightType::Point, { 269.315f, 398.968f, -945.381f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a8_Blue_1", LightType::Point, { -516.465f, 570.747f, -1658.131f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a8_Blue_2", LightType::Point, { -76.588f, 431.524f, -1255.428f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a8_Green_1", LightType::Point, { 38.002f, 413.645f, -1152.029f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a8_Pink_1", LightType::Point, { -190.160f, 456.598f, -1358.485f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a8_Orange_1", LightType::Point, { -300.488f, 487.891f, -1459.170f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a8_White_1", LightType::Point, { -409.375f, 525.982f, -1559.197f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a8_White_2", LightType::Point, { 153.299f, 402.848f, -1048.723f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a7_Red_1", LightType::Point, { -398.662f, 402.277f, -970.280f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a7_Blue_1", LightType::Point, { -762.247f, 464.884f, -1234.719f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a7_Blue_2", LightType::Point, { -149.645f, 393.773f, -786.914f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a7_Green_1", LightType::Point, { 96.381f, 412.834f, -603.955f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a7_Pink_1", LightType::Point, { -519.168f, 416.382f, -1058.355f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a7_Orange_1", LightType::Point, { -641.215f, 437.353f, -1147.127f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a7_Orange_2", LightType::Point, { -275.176f, 394.583f, -879.577f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a7_White_1", LightType::Point, { -23.891f, 400.074f, -693.617f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a6_Red_1", LightType::Point, { -442.248f, 376.678f, -669.502f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a6_Blue_1", LightType::Point, { -1100.092f, 505.251f, -1029.565f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a6_Blue_2", LightType::Point, { -841.299f, 426.313f, -890.624f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a6_Blue_3", LightType::Point, { -175.823f, 391.055f, -517.250f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a6_Green_1", LightType::Point, { -971.651f, 461.238f, -961.184f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a6_Green_2", LightType::Point, { -305.973f, 379.251f, -592.081f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a6_Pink_1", LightType::Point, { -578.188f, 384.001f, -745.768f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a6_White_1", LightType::Point, { -711.655f, 400.800f, -819.719f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a5_Red_1", LightType::Point, { -253.277f, 367.390f, -219.987f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a5_Blue_1", LightType::Point, { -1334.807f, 423.281f, 156.104f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a5_Blue_2", LightType::Point, { -724.166f, 346.979f, -63.053f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a5_Green_1", LightType::Point, { -567.342f, 346.328f, -116.469f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a5_Pink_1", LightType::Point, { -880.566f, 355.299f, -8.643f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a5_Orange_1", LightType::Point, { -1033.258f, 370.644f, 45.618f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a5_White_1", LightType::Point, { -1184.778f, 393.377f, 100.602f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a5_White_2", LightType::Point, { -410.368f, 353.183f, -168.821f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a4_Red_1", LightType::Point, { -286.899f, 368.573f, 258.690f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a4_Blue_1", LightType::Point, { -905.586f, 439.003f, 696.104f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a4_Blue_2", LightType::Point, { -661.700f, 382.764f, 523.168f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a4_Blue_3", LightType::Point, { -37.506f, 406.745f, 83.367f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a4_Green_1", LightType::Point, { -784.440f, 406.229f, 610.194f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a4_Green_2", LightType::Point, { -159.289f, 383.334f, 168.912f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a4_Pink_1", LightType::Point, { -414.404f, 363.773f, 348.520f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a4_White_1", LightType::Point, { -539.734f, 368.707f, 436.979f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a3_Red_1", LightType::Point, { 88.207f, 405.515f, 171.115f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a3_Blue_1", LightType::Point, { -535.231f, 530.034f, 1037.614f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a3_Blue_2", LightType::Point, { -189.162f, 417.896f, 544.928f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a3_Green_1", LightType::Point, { -97.711f, 406.800f, 419.826f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a3_Pink_1", LightType::Point, { -279.268f, 436.140f, 670.215f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a3_Orange_1", LightType::Point, { -366.305f, 460.666f, 793.115f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a3_White_1", LightType::Point, { -451.744f, 492.010f, 915.737f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a3_White_2", LightType::Point, { -5.287f, 402.726f, 295.209f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a2_Red_1", LightType::Point, { 290.190f, 340.401f, 600.641f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a2_Blue_1", LightType::Point, { 32.674f, 374.829f, 1179.033f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a2_Blue_2", LightType::Point, { 134.676f, 337.541f, 950.010f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a2_Blue_3", LightType::Point, { 392.957f, 381.904f, 369.871f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a2_Green_1", LightType::Point, { 83.319f, 352.265f, 1065.115f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a2_Green_2", LightType::Point, { 342.856f, 357.688f, 482.348f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a2_Pink_1", LightType::Point, { 237.422f, 331.411f, 719.197f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a2_White_1", LightType::Point, { 185.397f, 330.608f, 836.014f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a1_Red_1", LightType::Point, { 790.364f, 410.112f, 536.252f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a1_Blue_1", LightType::Point, { 460.590f, 575.318f, 1352.414f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a1_Blue_2", LightType::Point, { 645.596f, 446.863f, 894.465f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a1_Green_1", LightType::Point, { 693.610f, 428.758f, 775.627f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a1_Pink_1", LightType::Point, { 597.930f, 470.932f, 1012.440f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a1_Orange_1", LightType::Point, { 551.555f, 500.098f, 1127.192f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a1_White_1", LightType::Point, { 505.719f, 534.943f, 1240.619f }, 350.000f, 35.000f);
+    createLight("paris_stringlights_01a1_White_2", LightType::Point, { 741.889f, 416.556f, 656.215f }, 350.000f, 35.000f);
+
+    // Lanterns.
     createLight("Paris_Lantern_01A", LightType::Point, { 26.641f, 227.326f, -726.443f }, 450.000f, 120.000f);
     createLight("Paris_Lantern_01A1", LightType::Point, { -109.381f, 227.232f, -474.040f }, 450.000f, 120.000f);
     createLight("Paris_Lantern_01A2", LightType::Point, { 172.517f, 227.029f, 215.806f }, 450.000f, 120.000f);
