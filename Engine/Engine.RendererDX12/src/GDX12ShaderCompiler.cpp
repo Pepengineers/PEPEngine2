@@ -175,7 +175,9 @@ ComPtr<ID3DBlob> GDX12ShaderCompiler::CompileShaderDXC(const std::wstring& filen
     ComPtr<IDxcBlobWide> pdbName;
     results->GetOutput(DXC_OUT_PDB, IID_PPV_ARGS(&pdbBlob), &pdbName);
     const wchar_t* pdbNameStr = pdbName->GetStringPointer();
-    std::wstring pdbFilePath = std::wstring(SHADERS_FOLDER) + L"/PDBs/" + pdbNameStr;
+    const auto pdbDirectory = std::filesystem::path(SOLUTION_DIR) / L"Build" / L"ShaderPDBs";
+    std::filesystem::create_directories(pdbDirectory);
+    const auto pdbFilePath = pdbDirectory / pdbNameStr;
     std::ofstream pdbFile(pdbFilePath, std::ios::binary);
     if (pdbFile.is_open())
     {

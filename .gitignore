@@ -61,7 +61,6 @@ External/**/Debug/**
 External/**/Release/**
 !External/**/Release/**/*.lib
 
-Engine/Engine.RendererDX12/Shaders/PDBs/
 .idea/
 *.DotSettings.user
 
