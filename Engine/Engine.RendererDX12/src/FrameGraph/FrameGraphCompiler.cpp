@@ -146,7 +146,7 @@ namespace
             const auto& nodeDefinition = graphDefinition.Nodes.at(nodeId);
             for (const auto& inputEntry : nodeDefinition.Description.Inputs)
             {
-                if (inputEntry.second.Required && !inputSources.count({nodeId, inputEntry.first}))
+                if (!inputEntry.second.IsOptionalInput && !inputSources.count({nodeId, inputEntry.first}))
                 { throw std::invalid_argument("ERROR: " + nodeId + "." + inputEntry.first + " [" + GetDeviceRoleName(nodeDefinition.DeviceRole) + "]: required input has no connected source. Connect a compatible output to this required input before "
                     "Compile()."); }
             }
@@ -235,17 +235,23 @@ namespace
 
     // Enforce pass-declared size groups after resolving connected inputs and outputs.
     void ValidateMatchingTextureSizes(const NodeDefinition& nodeDefinition,
+        const InputSources& inputSources,
         const std::function<ResourceDescription(PinAddress)>& resolveResourceDescription)
     {
         for (const auto& textureGroup : nodeDefinition.Description.SameTextureSizeGroups)
         {
-            auto expectedSize = resolveResourceDescription({nodeDefinition.Id, textureGroup.front()}).GetSize();
+            UInt2 expectedSize{};
+            PinId expectedPin;
             for (const auto& pinId : textureGroup)
             {
+                const auto input = nodeDefinition.Description.Inputs.find(pinId);
+                if (input != nodeDefinition.Description.Inputs.end() && input->second.IsOptionalInput
+                    && !inputSources.count({nodeDefinition.Id, pinId})) { continue; }
                 const auto actualSize = resolveResourceDescription({nodeDefinition.Id, pinId}).GetSize();
+                if (expectedPin.empty()) { expectedSize = actualSize; expectedPin = pinId; }
                 if (actualSize != expectedSize)
                 { throw std::invalid_argument("ERROR: " + nodeDefinition.Id + "." + pinId + ": texture size " + FormatTextureSize(actualSize)
-                    + " differs from " + nodeDefinition.Id + "." + textureGroup.front() + " (" + FormatTextureSize(expectedSize)
+                    + " differs from " + nodeDefinition.Id + "." + expectedPin + " (" + FormatTextureSize(expectedSize)
                     + "). Make the textures in this RequireSameTextureSize() group use the same dimensions."); }
             }
         }
@@ -318,7 +324,7 @@ namespace
             for (const auto& portEntry : passDescription.Inputs)
             { if (inputSources.count({nodeId, portEntry.first})) { resolveResourceDescription({nodeId, portEntry.first}); } }
             for (const auto& portEntry : passDescription.Outputs) { resolveResourceDescription({nodeId, portEntry.first}); }
-            ValidateMatchingTextureSizes(graphDefinition.Nodes.at(nodeId), resolveResourceDescription);
+            ValidateMatchingTextureSizes(graphDefinition.Nodes.at(nodeId), inputSources, resolveResourceDescription);
         }
         return resourceDescriptions;
     }

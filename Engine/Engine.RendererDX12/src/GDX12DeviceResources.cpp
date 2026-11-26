@@ -36,6 +36,8 @@ void GDX12DeviceResources::Initialize(GDX12Device* device)
         D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 1000,
         D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
 
+    InitNullDescriptors();
+
     GeometryBuffer = std::make_unique<GDX12GeometryBuffer>(device);
 
     for (int i = 0; i < NumFrameConstantVariable.GetValue(); i++)
@@ -53,6 +55,26 @@ void GDX12DeviceResources::Initialize(GDX12Device* device)
 
     IndirectCommandsCache = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(device, 0, EBufferType::Upload, false);
     IndirectCommandsCache->CreateSRV(SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(RendererResources_StartIndex));
+}
+
+void GDX12DeviceResources::InitNullDescriptors()
+{
+    D3D12_SHADER_RESOURCE_VIEW_DESC nullView = {};
+    nullView.Format = DXGI_FORMAT_R32_FLOAT;
+    nullView.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    nullView.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    nullView.Texture2D.MipLevels = 1;
+    NullViews.Texture2DSRV.InitAsSRV(nullptr, &nullView, SRV_UAV_Heap.get(),
+        SRV_UAV_Heap->GetAvailableIndex(RendererResources_StartIndex));
+
+    nullView = {};
+    nullView.Format = DXGI_FORMAT_R32_FLOAT;
+    nullView.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    nullView.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+    nullView.Texture2DArray.ArraySize = 1;
+    nullView.Texture2DArray.MipLevels = 1;
+    NullViews.Texture2DArraySRV.InitAsSRV(nullptr, &nullView, SRV_UAV_Heap.get(),
+        SRV_UAV_Heap->GetAvailableIndex(RendererResources_StartIndex));
 }
 
 void GDX12DeviceResources::SetMeshDrawCommands(const std::vector<UINT>& instances, const GPUMesh* mesh)

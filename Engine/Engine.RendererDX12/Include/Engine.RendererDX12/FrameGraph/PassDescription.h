@@ -76,7 +76,10 @@ struct PortDescription
     // reuses local allocations whose entire alias chain stays on one DIRECT queue.
     // Applies to original outputs. FrameGraph orders reuse through GPU fences.
     bool ReuseAcrossFrames = false;
-    bool Required = true;
+    // Inputs are mandatory by default. Optional inputs can remain disconnected;
+    // the pass handles their absence through
+    // TryGetInputTexture/Buffer/DrawStream and supplies the effect's default behavior.
+    bool IsOptionalInput = false;
     bool AllowLocal = true;
     bool AllowShared = false;
     Extent Size;
@@ -121,6 +124,7 @@ struct PassDescription
         { throw std::invalid_argument("ERROR: Incorrect type for render pass parameter '" + name + "'."); }
         return *value;
     }
+    // Compare connected inputs and outputs; disconnected optional inputs are ignored.
     void RequireSameTextureSize(std::initializer_list<PinId> ids) { SameTextureSizeGroups.emplace_back(ids); }
     const PortDescription& GetPortDescription(const PinId& id) const;
     const PortDescription& GetInputDescription(const PinId& id) const;

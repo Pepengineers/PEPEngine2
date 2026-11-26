@@ -141,18 +141,21 @@ public:
         ValidateDrawStreamPort(id, _node.Description.GetOutputDescription(id));
         return GetBinding(id).Draws;
     }
+    // Return nullptr for an unconnected optional input; undeclared/wrong-type pins still fail.
     const TextureBinding* TryGetInputTexture(const PinId& id) const
     {
         ValidateTexturePort(id, _node.Description.GetInputDescription(id));
         auto* binding = FindBinding(id);
         return binding ? &binding->Texture : nullptr;
     }
+    // Return nullptr for an unconnected optional input; undeclared/wrong-type pins still fail.
     const BufferBinding* TryGetInputBuffer(const PinId& id) const
     {
         ValidateBufferPort(id, _node.Description.GetInputDescription(id));
         auto* binding = FindBinding(id);
         return binding ? &binding->Buffer : nullptr;
     }
+    // Return nullptr for an unconnected optional input; undeclared/wrong-type pins still fail.
     const DrawStreamBinding* TryGetInputDrawStream(const PinId& id) const
     {
         ValidateDrawStreamPort(id, _node.Description.GetInputDescription(id));

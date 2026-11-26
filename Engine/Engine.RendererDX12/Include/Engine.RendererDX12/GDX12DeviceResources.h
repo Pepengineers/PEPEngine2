@@ -23,6 +23,15 @@ public:
     std::unique_ptr<GDX12DescriptorHeap> SRV_UAV_Heap;
     std::unique_ptr<GDX12DescriptorHeap> DSVHeap;
 
+    // Null SRVs for floating-point texture inputs, shared by passes on this device.
+    // These descriptors allocate no texture memory and outlive pipeline rebuilds.
+    struct NullDescriptors
+    {
+        GDX12Descriptor Texture2DSRV;
+        GDX12Descriptor Texture2DArraySRV;
+    };
+    NullDescriptors NullViews;
+
     std::vector<std::unique_ptr<GDX12FrameConstants>> FrameConstants;
     UINT CurrFrameConstantsIndex;
 
@@ -36,4 +45,7 @@ public:
     void SetMeshDrawCommands(const std::vector<UINT>& instances, const GPUMesh* mesh);
     void UpdateMainCB(UINT width, UINT height, GameTimer* timer);
     void UpdateMaterialCB(const GDX12Material& material);
+
+private:
+    void InitNullDescriptors();
 };

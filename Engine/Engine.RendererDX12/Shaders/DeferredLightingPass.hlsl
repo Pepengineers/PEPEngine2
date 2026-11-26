@@ -3,7 +3,13 @@
 #include "ShadowSampling.hlsli"
 
 ConstantBuffer<LightGridCB> Grid : register(b0);
-ConstantBuffer<CameraCB> Camera : register(b1);
+cbuffer OptionalInputs : register(b1)
+{
+    uint HasDirectionalShadows;
+    uint HasPointSpotShadows;
+    uint HasAmbientOcclusion;
+};
+ConstantBuffer<CameraCB> Camera : register(b2);
 Texture2D<float4> AlbedoMetallic : register(t0);
 Texture2D<float4> NormalRoughness : register(t1);
 Texture2D<float4> F0Baked : register(t2);
@@ -76,7 +82,8 @@ float3 ShadeLight(PBRSurface s, float3 position, float3 v, GDX12LightConstants l
             result = EvaluateBRDF(s, v, l) * radiance * attenuation;
         }
     }
-    if (any(result > 0))
+    bool hasShadows = light.Type == LIGHT_TYPE_DIRECTIONAL ? HasDirectionalShadows != 0 : HasPointSpotShadows != 0;
+    if (hasShadows && any(result > 0))
         result *= ShadowVisibility(DirectionalShadowMaps, PointSpotShadowMaps, ShadowViews, samShadow,
             light, position, s.Normal, saturate(dot(s.Normal, l)), viewDepth, Camera.NearPlane);
     return result;
@@ -85,7 +92,8 @@ float3 ShadeLight(PBRSurface s, float3 position, float3 v, GDX12LightConstants l
 float3 ShadeSurface(PBRSurface s, float3 emissive, float3 position, uint2 pixel, float3 cameraPosition, float viewDepth)
 {
     float3 v = SafeNormalize(cameraPosition - position);
-    float3 result = EnvironmentLighting(s, v, AmbientOcclusion[pixel]) + emissive;
+    float ambientVisibility = HasAmbientOcclusion ? AmbientOcclusion[pixel] : 1.0f;
+    float3 result = EnvironmentLighting(s, v, ambientVisibility) + emissive;
     if (Grid.MaskWordsPerCluster > 0)
     {
         uint slice = (uint)clamp(log2(viewDepth) * Grid.DepthSliceScale + Grid.DepthSliceBias, 0, (float)(Grid.DepthSlices - 1));

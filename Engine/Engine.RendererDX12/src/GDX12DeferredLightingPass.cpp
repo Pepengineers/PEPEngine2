@@ -37,15 +37,18 @@ void GDX12DeferredLightingPass::Describe(PassDescription& s) const
     auto& directionalMaps = s.AddInputTexture("InDirectionalMaps", ResourceType::Texture2DArray);
     directionalMaps.Formats = {DXGI_FORMAT_D32_FLOAT};
     directionalMaps.Usages = ResourceUsage::NonPixelShaderRead;
+    directionalMaps.IsOptionalInput = true;
 
     auto& pointSpotMaps = s.AddInputTexture("InPointSpotMaps", ResourceType::Texture2DArray);
     pointSpotMaps.Formats = {DXGI_FORMAT_D32_FLOAT};
     pointSpotMaps.Usages = ResourceUsage::NonPixelShaderRead;
+    pointSpotMaps.IsOptionalInput = true;
 
     auto& occlusion = s.AddInputTexture("InAmbientOcclusion");
     occlusion.Formats = {DXGI_FORMAT_R32_FLOAT};
     occlusion.Usages = ResourceUsage::NonPixelShaderRead;
     occlusion.AllowShared = true;
+    occlusion.IsOptionalInput = true;
 
     s.RequireSameTextureSize({"InAlbedoMetallic", "InNormalRoughness", "InF0Baked", "InEmissive", "InDepthBuffer", "InAmbientOcclusion"});
     auto& output = s.AddOutputTexture("OutColorTexture");
@@ -60,7 +63,7 @@ void GDX12DeferredLightingPass::Initialize(PassInitContext& context)
     auto* resources = context.GetDeviceResources();
 
     GDX12RootSignatureDesc desc;
-    desc.Constants = {sizeof(GDX12LightGridConstants) / sizeof(UINT)};
+    desc.Constants = {sizeof(GDX12LightGridConstants) / sizeof(UINT), 3};
     desc.NumSingleCBVSlots = 1;
     desc.NumSingleSRVSlots = 14;
     desc.NumSingleUAVSlots = 1;
@@ -84,12 +87,18 @@ void GDX12DeferredLightingPass::Execute(PassExecutionContext& context)
     auto* resources = context.GetDeviceResources();
     auto& frame = *resources->FrameConstants[context.GetFrameSlotResourcesIndex()];
     const auto& color = context.GetOutputTexture("OutColorTexture");
+    const auto* directionalMaps = context.TryGetInputTexture("InDirectionalMaps");
+    const auto* pointSpotMaps = context.TryGetInputTexture("InPointSpotMaps");
+    const auto* occlusion = context.TryGetInputTexture("InAmbientOcclusion");
+    const struct { UINT HasDirectionalShadows, HasPointSpotShadows, HasAmbientOcclusion; } optionalInputs = {
+        directionalMaps ? 1u : 0u, pointSpotMaps ? 1u : 0u, occlusion ? 1u : 0u};
     cmd->BeginPixEvent("Deferred Lighting", Colors::Gold);
     cmd->SetComputeRootSignature(_root.get());
     cmd->SetPipelineState(_pipeline);
     cmd->SetDescriptorHeaps({resources->SRV_UAV_Heap.get()});
-    cmd->SetComputeRootConstantBufferView(1, frame.CameraCB->GetElementAddress(context.GetFrameData()->ActiveCameraCBufferIndex));
+    cmd->SetComputeRootConstantBufferView(2, frame.CameraCB->GetElementAddress(context.GetFrameData()->ActiveCameraCBufferIndex));
     cmd->GetCommandList()->SetComputeRoot32BitConstants(0, sizeof(frame.ClusteredLightingConstants) / sizeof(UINT), &frame.ClusteredLightingConstants, 0);
+    cmd->GetCommandList()->SetComputeRoot32BitConstants(1, 3, &optionalInputs, 0);
     cmd->SetComputeSRV(0, context.GetInputTexture("InAlbedoMetallic").GetSRV()->GPUHandle);
     cmd->SetComputeSRV(1, context.GetInputTexture("InNormalRoughness").GetSRV()->GPUHandle);
     cmd->SetComputeSRV(2, context.GetInputTexture("InF0Baked").GetSRV()->GPUHandle);
@@ -100,10 +109,10 @@ void GDX12DeferredLightingPass::Execute(PassExecutionContext& context)
     cmd->SetComputeSRV(7, context.GetInputTexture("InBRDFLut").GetSRV()->GPUHandle);
     cmd->SetComputeSRV(8, frame.LightsCache->GetSRV()->GPUHandle);
     cmd->SetComputeSRV(9, frame.ClusterLightMaskBuffer->GetSRV()->GPUHandle);
-    cmd->SetComputeSRV(10, context.GetInputTexture("InDirectionalMaps").GetSRV()->GPUHandle);
-    cmd->SetComputeSRV(11, context.GetInputTexture("InPointSpotMaps").GetSRV()->GPUHandle);
+    cmd->SetComputeSRV(10, directionalMaps ? directionalMaps->GetSRV()->GPUHandle : resources->NullViews.Texture2DArraySRV.GPUHandle);
+    cmd->SetComputeSRV(11, pointSpotMaps ? pointSpotMaps->GetSRV()->GPUHandle : resources->NullViews.Texture2DArraySRV.GPUHandle);
     cmd->SetComputeSRV(12, frame.ShadowViews->GetSRV()->GPUHandle);
-    cmd->SetComputeSRV(13, context.GetInputTexture("InAmbientOcclusion").GetSRV()->GPUHandle);
+    cmd->SetComputeSRV(13, occlusion ? occlusion->GetSRV()->GPUHandle : resources->NullViews.Texture2DSRV.GPUHandle);
     cmd->SetComputeUAV(0, color.GetUAV()->GPUHandle);
     const auto size = color.GetDescription().GetSize();
     cmd->Dispatch((size.x + 7) / 8, (size.y + 7) / 8, 1);
