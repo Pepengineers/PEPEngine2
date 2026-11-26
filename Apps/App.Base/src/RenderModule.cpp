@@ -15,7 +15,7 @@ namespace
 {
     void ConfigureDefaultPipeline(FrameGraph& graph, const FrameGraphInputs& inputs)
     {
-        auto culling = graph.AddPrimaryGPUPass<GDX12GPUCullingPass>("Frustum Culling");
+        auto culling = graph.AddPrimaryGPUPass<GDX12OcclusionCullingPass>("Occlusion Culling");
         auto shadowCulling = graph.AddPrimaryGPUPass<GDX12ShadowMapCullingPass>("Shadow Map Culling");
         auto shadows = graph.AddPrimaryGPUPass<GDX12ShadowMapPass>("Shadow Maps");
         auto opaque = graph.AddPrimaryGPUPass<GDX12DeferredGeometryPass>("Opaque");

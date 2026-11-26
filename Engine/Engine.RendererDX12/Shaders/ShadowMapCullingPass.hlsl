@@ -5,6 +5,8 @@ cbuffer CullingParameters : register(b0)
     uint DrawOffset;
     uint ViewOffset;
     uint ForcedUpdates;
+    uint ShadowMapResolution;
+    float4 MinCasterSizeTexels;
 };
 StructuredBuffer<InstanceData> InstanceCache : register(t0);
 StructuredBuffer<IndirectDrawArgs> InputCommands : register(t1);
@@ -39,7 +41,22 @@ void CS(uint3 id : SV_DispatchThreadID)
     if (instance.CastShadows == 0 || MaterialCache[instance.MaterialIndex].RenderLayer == RENDER_LAYER_TRANSPARENT) return;
     uint viewIndex = ViewOffset + id.y;
     ShadowView view = ShadowViews[viewIndex];
-    if (view.Type != LIGHT_TYPE_DIRECTIONAL)
+    if (view.Type == LIGHT_TYPE_DIRECTIONAL)
+    {
+        // Directional array elements are assigned four at a time, for each light.
+        float minimumSize = MinCasterSizeTexels[view.Layer % 4];
+        if (minimumSize > 0)
+        {
+            float3 projectionX = float3(view.ViewProj._11, view.ViewProj._21, view.ViewProj._31);
+            float3 projectionY = float3(view.ViewProj._12, view.ViewProj._22, view.ViewProj._32);
+            // Extents are half-sizes: the full NDC size and NDC-to-texel scale cancel the factor of two.
+            float2 sizeTexels = float2(dot(abs(projectionX), instance.BoundingBoxExtents),
+                                      dot(abs(projectionY), instance.BoundingBoxExtents)) * ShadowMapResolution;
+            // Keep long, thin casters; reject only when both projected sides are too small.
+            if (max(sizeTexels.x, sizeTexels.y) < minimumSize) return;
+        }
+    }
+    else
     {
         uint update = instance.DynamicShadowCaster != 0 ? SHADOW_UPDATE_FINAL : SHADOW_UPDATE_STATIC;
         if (((ShadowCacheUpdateFlags[view.LightIndex] | ForcedUpdates) & update) == 0) return;

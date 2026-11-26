@@ -17,8 +17,9 @@ public:
     void OnResourcesRecreated(PassInitContext& context) override;
 
 private:
-    std::unique_ptr<GDX12RootSignature> _root;
-    ComPtr<ID3D12PipelineState> _cullingPipeline;
-    ComPtr<ID3D12PipelineState> _clearPipeline;
-    bool _resetCache = true;
+    std::unique_ptr<GDX12RootSignature> _shadowCullingRootSignature;
+    ComPtr<ID3D12PipelineState> _shadowCullingPipeline;
+    ComPtr<ID3D12PipelineState> _clearDrawCountsPipeline;
+    XMFLOAT4 _cascadeMinCasterSizeTexels = {};
+    bool _resetShadowCache = true;
 };

@@ -588,7 +588,13 @@ struct CompiledFrameGraph::Runtime
                     {
                         auto description = resource.Description;
                         description.Usages |= resource.LocalTextureUsages[owner->Device->Role];
-                        material.LocalResource = CreateFrameGraphNative(owner, description);
+                        // Queues are drained before rebuilding. Keep unchanged persistent allocations
+                        auto previous = PersistentResources.find(entry.first);
+                        if (persistent && previous != PersistentResources.end() && previous->second.LocalResource
+                            && previous->second.LocalResource->DeviceResources == owner
+                            && previous->second.LocalResource->Description == description)
+                        { material.LocalResource = std::move(previous->second.LocalResource); }
+                        else { material.LocalResource = CreateFrameGraphNative(owner, description); }
                         material.ProducerResource = material.LocalResource.get();
                     }
                     if ((!alias && resource.Storage == MemoryType::Shared) || resource.Export)
@@ -642,7 +648,13 @@ struct CompiledFrameGraph::Runtime
                         else { replica.Usages |= resource.LocalTextureUsages[device]; }
                         try
                         {
-                            material.LocalCopies.emplace(device, CreateFrameGraphNative(GetDeviceResources(device), replica));
+                            auto previous = PersistentResources.find(entry.first);
+                            if (persistent && previous != PersistentResources.end() && previous->second.LocalCopies.count(device)
+                                && previous->second.LocalCopies.at(device)
+                                && previous->second.LocalCopies.at(device)->DeviceResources == GetDeviceResources(device)
+                                && previous->second.LocalCopies.at(device)->Description == replica)
+                            { material.LocalCopies.emplace(device, std::move(previous->second.LocalCopies.at(device))); }
+                            else { material.LocalCopies.emplace(device, CreateFrameGraphNative(GetDeviceResources(device), replica)); }
                         }
                         catch (const DxException& error)
                         {

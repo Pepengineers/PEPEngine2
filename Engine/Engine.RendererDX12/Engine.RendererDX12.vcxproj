@@ -20,6 +20,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\Engine.RendererDX12\FrameGraph\FrameGraph.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12OcclusionCullingPass.h" />
     <ClInclude Include="src\FrameGraph\FrameGraphDiagnostics.h" />
     <ClInclude Include="Include\Engine.RendererDX12\FrameGraph\ComputeCopyResources.h" />
     <ClInclude Include="Include\Engine.RendererDX12\FrameGraph\FrameGraphResources.h" />
@@ -49,7 +50,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12OutputToScreenPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12TextureClearPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12WBOITTransparencyPass.h" />
-    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12GPUCullingPass.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12FrustumCullingPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12ShadowMapCullingPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12ShadowMapPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12RenderPass.h" />
@@ -111,7 +112,8 @@
     <ClCompile Include="src\GDX12TemporalAntiAliasingPass.cpp" />
     <ClCompile Include="src\GDX12IBLPrecomputePass.cpp" />
     <ClCompile Include="src\GDX12FSRUpscalePass.cpp" />
-    <ClCompile Include="src\GDX12GPUCullingPass.cpp" />
+    <ClCompile Include="src\GDX12FrustumCullingPass.cpp" />
+    <ClCompile Include="src\GDX12OcclusionCullingPass.cpp" />
     <ClCompile Include="src\GDX12ShadowMapCullingPass.cpp" />
     <ClCompile Include="src\GDX12ShadowMapPass.cpp" />
     <ClCompile Include="src\GDX12NISUpscalePass.cpp" />
@@ -132,6 +134,8 @@
     <None Include="Shaders\CompositionPass.hlsl" />
     <None Include="Shaders\FrustumCullingPass.hlsl" />
     <None Include="Shaders\ShadowMapCullingPass.hlsl" />
+    <None Include="Shaders\ShadowOcclusionCullingPass.hlsl" />
+    <None Include="Shaders\OcclusionCullingPass.hlsl" />
     <None Include="Shaders\ShadowMapPass.hlsl" />
     <None Include="Shaders\FullScreenVS.hlsl" />
     <None Include="Shaders\DeferredGeometryPass.hlsl" />

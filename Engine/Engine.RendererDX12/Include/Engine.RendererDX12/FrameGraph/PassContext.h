@@ -52,6 +52,9 @@ struct DrawStreamBinding
     GDX12Resource* Count = nullptr;
     GDX12Descriptor* ArgumentUAV = nullptr;
     GDX12Descriptor* CountUAV = nullptr;
+    // Present when the port declares shader-read usage, for compute processing of a DrawStream.
+    GDX12Descriptor* ArgumentSRV = nullptr;
+    GDX12Descriptor* CountSRV = nullptr;
     uint32_t Capacity = 0;
 };
 

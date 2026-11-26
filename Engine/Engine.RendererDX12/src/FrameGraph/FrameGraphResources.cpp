@@ -298,6 +298,8 @@ PassBinding FrameGraphPhysicalResource::CreatePassBinding(ResourceUsage usages)
         result.Draws.Count = &Buffers[1].Resource;
         result.Draws.ArgumentUAV = HasUsage(usages, ResourceUsage::UnorderedAccess) ? Buffers[0].UAV.get() : nullptr;
         result.Draws.CountUAV = HasUsage(usages, ResourceUsage::UnorderedAccess) ? Buffers[1].UAV.get() : nullptr;
+        result.Draws.ArgumentSRV = HasUsage(usages, ResourceUsage::GraphicsShaderRead) ? Buffers[0].SRV.get() : nullptr;
+        result.Draws.CountSRV = HasUsage(usages, ResourceUsage::GraphicsShaderRead) ? Buffers[1].SRV.get() : nullptr;
         result.Draws.Capacity = static_cast<uint32_t>(Description.Capacity);
     }
     else

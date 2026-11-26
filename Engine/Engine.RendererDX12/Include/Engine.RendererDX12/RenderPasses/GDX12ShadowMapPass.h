@@ -16,16 +16,14 @@ public:
 
     // Checks texture limits and the minimum size required for directional texel snapping.
     // RenderModule validates the configuration before changing the shared CPU settings.
-    static void ValidateShadowMapResolutions(UINT directional, UINT pointSpot);
+    static void ValidateShadowMapResolutions(UINT directionalResolution, UINT pointSpotResolution);
 
     GDX12ShadowMapPass();
     void Describe(PassDescription& description) const override;
     void ResolveResourceRequirements(PassResourceRequirementsContext& context) override;
     void Initialize(PassInitContext& context) override;
     void Execute(PassExecutionContext& context) override;
-    // Rebuilds static depth when needed and initializes the new shared output arrays.
     void OnResourcesRecreated(PassInitContext& context) override;
-    // Retains static depth through GPU completion and tracks its state on this GPU's DIRECT queue.
     std::vector<ExternalResourceUse> GetExternalResources(PassExecutionContext& context) override;
 
 private:
@@ -33,10 +31,31 @@ private:
     // can replace its allocation; final depth is owned by FrameGraph and reused across slots.
     void CreatePointSpotCache(PassInitContext& context);
 
-    std::unique_ptr<GDX12RootSignature> _root;
-    ComPtr<ID3D12CommandSignature> _signature;
-    ComPtr<ID3D12PipelineState> _directionalPipeline;
-    ComPtr<ID3D12PipelineState> _pointSpotPipeline;
-    std::unique_ptr<GDX12Texture> _pointSpotStaticCache;
-    bool _resetCache = true;
+    // Hi-Z and compacted commands have one consumer and live on this pass's GPU.
+    // Recreated after the graph drains its queues when resolution or capacity changes.
+    void CreateDirectionalOcclusionResources(PassInitContext& context);
+    // Renders opaque occluders, builds a conservative max-depth pyramid for this frame,
+    // then draws only the remaining candidates not completely hidden from the light.
+    void RenderDirectionalShadows(PassExecutionContext& context, GDX12Texture* directionalShadowMaps, const DrawStreamBinding& directionalCandidateDraws);
+
+    std::unique_ptr<GDX12RootSignature> _shadowRootSignature;
+    ComPtr<ID3D12CommandSignature> _shadowDrawCommandSignature;
+    ComPtr<ID3D12PipelineState> _directionalShadowPipeline;
+    ComPtr<ID3D12PipelineState> _pointSpotShadowPipeline;
+    std::unique_ptr<GDX12Texture> _pointSpotStaticDepthCache;
+    XMFLOAT4 _cascadeMinOccluderSizeTexels = {};
+    std::unique_ptr<GDX12RootSignature> _directionalOcclusionRootSignature;
+    ComPtr<ID3D12PipelineState> _clearDirectionalDrawCountsPipeline;
+    ComPtr<ID3D12PipelineState> _selectDirectionalOccludersPipeline;
+    ComPtr<ID3D12PipelineState> _reduceDirectionalHiZDepthPipeline;
+    ComPtr<ID3D12PipelineState> _directionalOcclusionCullingPipeline;
+    std::unique_ptr<GDX12UploadBuffer<GDX12ShadowDrawArgs>> _directionalOccluderCommands;
+    std::unique_ptr<GDX12UploadBuffer<GDX12ShadowDrawArgs>> _directionalVisibleCommands;
+    // Two counts: occluder commands at byte offset 0, remaining visible commands at 4.
+    std::unique_ptr<GDX12UploadBuffer<UINT>> _directionalDrawCounts;
+    std::unique_ptr<GDX12Texture> _directionalHiZDepthTexture;
+    // Reduction reads mips [0, count-2]; mip 0's UAV is already owned by the texture.
+    std::vector<std::unique_ptr<GDX12Descriptor>> _directionalHiZMipSRVs;
+    std::vector<std::unique_ptr<GDX12Descriptor>> _directionalHiZMipUAVs;
+    bool _resetShadowCache = true;
 };

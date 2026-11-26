@@ -148,6 +148,12 @@ struct ResourceDescription
     std::string Layout;
     ResourceUsage Usages = ResourceUsage::None;
     std::array<float, 4> ClearColor = {0, 0, 0, 1};
+    bool operator==(const ResourceDescription& other) const
+    {
+        return Type == other.Type && Format == other.Format && Width == other.Width && Height == other.Height
+            && ArraySize == other.ArraySize && MipLevels == other.MipLevels && Capacity == other.Capacity
+            && Stride == other.Stride && Layout == other.Layout && Usages == other.Usages && ClearColor == other.ClearColor;
+    }
     bool IsBuffer() const { return !IsTexture(Type); }
     bool IsDepth() const { return IsDepthFormat(Format); }
     UInt2 GetSize() const { return {Width, Height}; }
