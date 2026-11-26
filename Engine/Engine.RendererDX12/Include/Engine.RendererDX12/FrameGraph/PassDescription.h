@@ -72,6 +72,10 @@ struct PortDescription
     ResourceUsage Usages = ResourceUsage::None;
     DataAccess Access = DataAccess::ReadOnly;
     MemoryType RequestedMemory = MemoryType::Auto;
+    // Force reuse even across queues/devices; otherwise the compiler automatically
+    // reuses local allocations whose entire alias chain stays on one DIRECT queue.
+    // Applies to original outputs. FrameGraph orders reuse through GPU fences.
+    bool ReuseAcrossFrames = false;
     bool Required = true;
     bool AllowLocal = true;
     bool AllowShared = false;

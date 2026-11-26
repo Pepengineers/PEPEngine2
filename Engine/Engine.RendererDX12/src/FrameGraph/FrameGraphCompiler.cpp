@@ -580,6 +580,43 @@ namespace
             }
         }
     }
+    // Select one lifetime for the allocation and every alias, after placement is known.
+    void SelectResourceReuse(const FrameGraphDefinition& definition, const FrameGraphCompileData& compileData,
+        const InputSources& inputSources, FrameGraphPlan& plan)
+    {
+        std::map<PinAddress, PinAddress> roots;
+        for (const auto& node : plan.Order)
+        {
+            for (const auto& [pin, port] : definition.Nodes.at(node).Description.Outputs)
+            {
+                const PinAddress address{node, pin};
+                const auto& resource = plan.Resources.at(address);
+                const auto root = resource.Alias.Node.empty() ? address : roots.at(inputSources.at(resource.Alias));
+                roots.emplace(address, root);
+                auto& allocation = plan.Resources.at(root);
+                const auto& producer = definition.Nodes.at(root.Node);
+                if (root == address)
+                {
+                    // Rotating imports retain their provider/slot bindings. Setup outputs
+                    // already have their own immutable storage outside frame slots.
+                    allocation.ReuseAcrossFrames = !GetPortCompileData(compileData, root).Imported.has_value()
+                        && !producer.Description.RunOnceDuringSetup;
+                }
+                if (definition.GetPortDescription(root).ReuseAcrossFrames) { continue; }
+                const bool local = resource.Storage == MemoryType::Local && !resource.Export
+                    && !resource.Imports[0] && !resource.Imports[1]
+                    && definition.Nodes.at(node).DeviceRole == producer.DeviceRole
+                    && std::all_of(resource.Consumers.begin(), resource.Consumers.end(), [&](const auto& consumer)
+                    {
+                        return consumer.second == MemoryType::Local
+                            && definition.Nodes.at(consumer.first.Node).DeviceRole == producer.DeviceRole;
+                    });
+                allocation.ReuseAcrossFrames &= local;
+            }
+        }
+        for (const auto& [address, root] : roots)
+        { plan.Resources.at(address).ReuseAcrossFrames = plan.Resources.at(root).ReuseAcrossFrames; }
+    }
 }
 
 const PortDescription& FrameGraphDefinition::GetPortDescription(const PinAddress& address) const
@@ -622,5 +659,6 @@ FrameGraphPlan CompileFrameGraph(const FrameGraphDefinition& graphDefinition, co
 
     const auto resourceDescriptions = ResolveResourceDescriptions(graphDefinition, compileData, inputSources, executionPlan.Order);
     BuildResourcePlacementPlans(graphDefinition, compileData, graphConnections, inputSources, resourceDescriptions, executionPlan);
+    SelectResourceReuse(graphDefinition, compileData, inputSources, executionPlan);
     return executionPlan;
 }

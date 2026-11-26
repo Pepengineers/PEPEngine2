@@ -266,10 +266,12 @@ struct CompiledFrameGraph::Runtime
     std::map<NodeId, std::function<GDX12Texture*()>> Imports;
     std::map<PinAddress, PinAddress> Sources;
     std::vector<FrameSlotResources> FrameSlots;
-    // Imported allocations can be shared by several frame slots and physical wrappers.
+    // Imported and persistent allocations can be shared by slots and device mappings.
     std::map<ID3D12Resource*, GDX12CompletionPoint> LastUse;
     // Immutable outputs and remote replicas outlive rotating frame slots, including window resize.
     std::map<PinAddress, Materialization> OnceResources;
+    // Mutable outputs explicitly reused across slots, including their transfer representations.
+    std::map<PinAddress, Materialization> PersistentResources;
     std::vector<PreparedPass> SetupPasses;
     std::vector<std::pair<EDeviceRole, PreparedInput>> SetupTransfers;
     bool SetupComplete = false;
@@ -283,8 +285,9 @@ struct CompiledFrameGraph::Runtime
     // DrawStream components are always submitted together, so their first buffer identifies the whole stream.
     GDX12CompletionPoint& GetLastUse(FrameGraphPhysicalResource& resource)
     {
-        auto* texture = resource.ImportedTexture ? resource.ImportedTexture : resource.Texture.get();
-        auto* native = texture ? texture->GetResource()->D3DResource.Get() : resource.Buffers.front().Resource.D3DResource.Get();
+        auto& mapping = resource.SharedProducer ? *resource.SharedProducer : resource;
+        auto* texture = mapping.ImportedTexture ? mapping.ImportedTexture : mapping.Texture.get();
+        auto* native = texture ? texture->GetResource()->D3DResource.Get() : mapping.Buffers.front().Resource.D3DResource.Get();
         return LastUse[native];
     }
     FrameGraphSharedResources& GetSharedResources(Materialization& material) { return material.SharedAllocationAlias ? *material.SharedAllocationAlias : material.Shared; }
@@ -292,6 +295,12 @@ struct CompiledFrameGraph::Runtime
     // Keep the latest retired frame's pass timestamps intact through submission and Present.
     uint32_t GetPassTimingSlotCount() const { return CompileData.FrameSlotCount + 1; }
     uint32_t GetPassTimingSlot(uint64_t frame) const { return uint32_t(frame % GetPassTimingSlotCount()); }
+
+    Materialization& GetMaterialization(const FrameGraphPlan& plan, const PinAddress& address, FrameSlotResources& slot)
+    {
+        if (Definition.Nodes.at(address.Node).Description.RunOnceDuringSetup) { return OnceResources.at(address); }
+        return (plan.Resources.at(address).ReuseAcrossFrames ? PersistentResources : slot.Resources).at(address);
+    }
 
     void WaitForGPUCompletion()
     {
@@ -490,7 +499,7 @@ struct CompiledFrameGraph::Runtime
                 const auto& source = connection->second;
                 const auto& resource = plan.Resources.at(source);
                 const bool immutable = Definition.Nodes.at(source.Node).Description.RunOnceDuringSetup;
-                auto& material = (immutable ? OnceResources : slot.Resources).at(source);
+                auto& material = GetMaterialization(plan, source, slot);
                 const auto access = resource.Consumers.at(target);
                 auto* physical = material.ProducerResource;
                 if (access == MemoryType::Shared) { physical = &GetSharedResources(material).GetDeviceMapping(device->Device); }
@@ -504,14 +513,14 @@ struct CompiledFrameGraph::Runtime
             for (const auto& [pin, port] : node.Description.Outputs)
             {
                 const PinAddress output{id, pin};
-                auto& material = (once ? OnceResources : slot.Resources).at(output);
+                auto& material = GetMaterialization(plan, output, slot);
                 const bool shared = plan.Resources.at(output).Storage == MemoryType::Shared;
                 if (!port.AliasInput.empty())
                 {
                     material.ProducerResource = pass.Bindings.at(port.AliasInput).Resource;
                     if (shared)
                     {
-                        auto& source = slot.Resources.at(Sources.at({id, port.AliasInput}));
+                        auto& source = GetMaterialization(plan, Sources.at({id, port.AliasInput}), slot);
                         material.SharedAllocationAlias = &GetSharedResources(source);
                     }
                 }
@@ -557,6 +566,7 @@ struct CompiledFrameGraph::Runtime
                     && old.Imports[0].Method == next.Imports[0].Method && old.Imports[1].Method == next.Imports[1].Method;
             });
             std::map<PinAddress, Materialization> newOnceResources;
+            std::map<PinAddress, Materialization> newPersistentResources;
             std::vector<FrameSlotResources> newFrameSlots(CompileData.FrameSlotCount);
             bool retry = false;
             for (auto& frameResources : newFrameSlots)
@@ -566,7 +576,9 @@ struct CompiledFrameGraph::Runtime
                     const auto& resource = entry.second;
                     const bool once = Definition.Nodes.at(entry.first.Node).Description.RunOnceDuringSetup;
                     if (once && (reuseSetup || &frameResources != &newFrameSlots.front())) { continue; }
-                    auto& material = (once ? newOnceResources : frameResources.Resources)[entry.first];
+                    const bool persistent = resource.ReuseAcrossFrames;
+                    if (persistent && &frameResources != &newFrameSlots.front()) { continue; }
+                    auto& material = (once ? newOnceResources : persistent ? newPersistentResources : frameResources.Resources)[entry.first];
                     const bool alias = !resource.Alias.Node.empty();
                     auto* owner = GetDeviceResources(Definition.Nodes.at(entry.first.Node).DeviceRole);
                     auto* other = owner == Primary ? Secondary : Primary;
@@ -648,6 +660,7 @@ struct CompiledFrameGraph::Runtime
             }
             if (retry) { continue; }
             if (!reuseSetup) { OnceResources = std::move(newOnceResources); }
+            PersistentResources = std::move(newPersistentResources);
             SetupComplete = reuseSetup;
             SetupPasses.clear();
             // Completion pointers in dependent setup passes must stay stable during binding.
@@ -822,15 +835,20 @@ struct CompiledFrameGraph::Runtime
         ResourceRebuildRequested = false;
     }
 
-    // Keep idle slot allocations while discarding readiness from their previous frame.
+    // Keep allocation contents while clearing this frame's producer/export/import readiness.
     void ResetFrameSlotReadiness(FrameSlotResources& frameResources)
     {
-        for (auto& resourceEntry : frameResources.Resources)
+        auto reset = [](auto& materials)
         {
-            resourceEntry.second.SharedReady = {};
-            resourceEntry.second.ProducerReady = {};
-            resourceEntry.second.LocalCopyReady = {};
-        }
+            for (auto& [id, material] : materials)
+            {
+                material.SharedReady = {};
+                material.ProducerReady = {};
+                material.LocalCopyReady = {};
+            }
+        };
+        reset(frameResources.Resources);
+        reset(PersistentResources);
     }
 
     // Resolve the current external texture and retain its native allocation for this frame.
@@ -890,8 +908,9 @@ struct CompiledFrameGraph::Runtime
             for (const auto& input : pass.Inputs)
             {
                 commandQueue->GPUWait(ResolveInputResource(input, pass.Node->DeviceRole, frameResources));
-                commandQueue->GPUWait(GetLastUse(*input.Resource));
             }
+            // Reused outputs can still be read by another queue or adapter from the previous frame.
+            for (const auto& port : pass.Ports) { commandQueue->GPUWait(GetLastUse(*port.Resource)); }
         }
         auto* commandList = GetFrameCommandList(commandQueue, frameResources);
         auto* passTimer = pass.Timer;
@@ -1099,7 +1118,7 @@ std::string CompiledFrameGraph::GetDebugReport() const
 {
     const auto* allocations = _runtime->FrameSlots.empty() ? nullptr : &_runtime->FrameSlots.front().Resources;
     return _runtime->Diagnostics.GetDebugReport(_runtime->Plan, _runtime->Definition, _runtime->CompileData,
-        _runtime->Secondary != nullptr, _runtime->Fallbacks, allocations);
+        _runtime->Secondary != nullptr, _runtime->Fallbacks, allocations, &_runtime->PersistentResources);
 }
 
 GDX12RenderPass& CompiledFrameGraph::FindPass(const NodeId& id) const

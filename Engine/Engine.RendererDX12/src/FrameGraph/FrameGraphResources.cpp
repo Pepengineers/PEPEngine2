@@ -412,6 +412,7 @@ HRESULT TryCreateFrameGraphShared(GDX12DeviceResources* producer, GDX12DeviceRes
     {
         created.Consumer = std::make_unique<FrameGraphPhysicalResource>();
         created.Consumer->DeviceResources = other;
+        created.Consumer->SharedProducer = created.Producer.get();
     }
     for (auto* mapping : {created.Producer.get(), created.Consumer.get()})
     {

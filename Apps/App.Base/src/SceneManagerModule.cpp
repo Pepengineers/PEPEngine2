@@ -36,9 +36,7 @@ void SceneManagerModule::Initialize()
     const std::filesystem::path scenePath =
     std::filesystem::path(ASSETS_FOLDER) /
     "Scenes" /
-    "Amazon Lumberyard Bistro" /
-    "Interior" /
-    "interior.obj";
+    "Amazon Lumberyard Bistro";
 
     if (!LoadWorld(scenePath))
     {

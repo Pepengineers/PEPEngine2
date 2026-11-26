@@ -55,7 +55,8 @@ struct FrameGraphDiagnostics
     FrameGraphPerFrameMetrics GetLatestFrameMetrics(const FrameGraphPlan& plan, const FrameGraphDefinition& definition) const;
     std::string GetDebugReport(const FrameGraphPlan& plan, const FrameGraphDefinition& definition,
         const FrameGraphCompileData& compileData, bool usesSecondary, const std::vector<std::string>& fallbacks,
-        const std::map<PinAddress, FrameGraphMaterialization>* allocations);
+        const std::map<PinAddress, FrameGraphMaterialization>* allocations,
+        const std::map<PinAddress, FrameGraphMaterialization>* persistentAllocations);
 
 private:
     // Each key identifies the logical output and its export or import operation.

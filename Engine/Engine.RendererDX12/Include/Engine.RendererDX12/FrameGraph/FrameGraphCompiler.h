@@ -88,6 +88,8 @@ struct ResourcePlan
 {
     ResourceDescription Description;
     MemoryType Storage = MemoryType::Local;
+    // Resolved for the entire allocation, including all mutable alias versions.
+    bool ReuseAcrossFrames = false;
     ResourceTransfer Export;
     // Each device imports at most once for all consumers of this version of the resource.
     std::array<ResourceTransfer, 2> Imports{};

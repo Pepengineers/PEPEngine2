@@ -186,7 +186,8 @@ FrameGraphPerFrameMetrics FrameGraphDiagnostics::GetLatestFrameMetrics(const Fra
 
 std::string FrameGraphDiagnostics::GetDebugReport(const FrameGraphPlan& plan, const FrameGraphDefinition& definition,
     const FrameGraphCompileData& compileData, bool usesSecondary, const std::vector<std::string>& fallbacks,
-    const std::map<PinAddress, FrameGraphMaterialization>* allocations)
+    const std::map<PinAddress, FrameGraphMaterialization>* allocations,
+    const std::map<PinAddress, FrameGraphMaterialization>* persistentAllocations)
 {
     std::ostringstream out;
     out << std::fixed << std::setprecision(6);
@@ -269,10 +270,11 @@ std::string FrameGraphDiagnostics::GetDebugReport(const FrameGraphPlan& plan, co
     if (!fallbacks.empty()) { out << "\n[Placement fallbacks]\n"; }
     for (const auto& fallback : fallbacks) { out << "  " << fallback << '\n'; }
 
-    if (allocations)
+    for (const auto* resources : {allocations, persistentAllocations})
     {
-        out << "\n[Allocations per slot]\n";
-        for (const auto& resource : *allocations)
+        if (!resources || resources->empty()) { continue; }
+        out << (resources == allocations ? "\n[Allocations per slot]\n" : "\n[Allocations reused across frames]\n");
+        for (const auto& resource : *resources)
         {
             const auto& material = resource.second;
             if (!material.LocalResource && material.Shared.Allocations.empty() && material.LocalCopies.empty()) { continue; }
@@ -339,6 +341,7 @@ std::string FrameGraphPlan::GetDebugReport(const FrameGraphDefinition& definitio
             if (p.Description.MipLevels > 1) { out << " mips=" << p.Description.MipLevels; }
         }
         out << " | usages=" << uint32_t(p.Description.Usages);
+        if (p.ReuseAcrossFrames) { out << " | reused across frames"; }
         if (p.CopyCount) { out << " | copies=" << p.CopyCount; }
         if (p.Export) { out << (p.Export.Method == TransferMethod::ComputeCopy ? " export via ComputeCopy (DIRECT)" : " export"); }
         if (p.BufferPayload && (p.Export || p.Storage == MemoryType::Shared)) { out << " via footprint buffer"; }

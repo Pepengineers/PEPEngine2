@@ -29,7 +29,7 @@ void ShadowMapSystem::RemoveCaster(UINT instance)
     _casterBoundsDirty = true;
 }
 
-void ShadowMapSystem::BuildViews(const std::vector<GDX12LightConstants>& lights, UINT frameSlotCount)
+void ShadowMapSystem::BuildViews(const std::vector<GDX12LightConstants>& lights)
 {
     UINT viewCount = 0;
     UINT pointSpotCount = 0;
@@ -43,7 +43,6 @@ void ShadowMapSystem::BuildViews(const std::vector<GDX12LightConstants>& lights,
     }
     Views.resize(viewCount);
     LightUpdateFlags.assign(lights.size(), 0);
-    if (_finalFramesDirty.size() != lights.size()) _finalFramesDirty.assign(lights.size(), frameSlotCount);
     const bool arrayChanged = pointSpotCount != PointSpotArraySize;
     DirectionalArraySize = PointSpotArraySize = 0;
     if (_casterBoundsDirty)
@@ -74,12 +73,6 @@ void ShadowMapSystem::BuildViews(const std::vector<GDX12LightConstants>& lights,
                 if (!influence.Intersects(change.Bounds)) continue;
                 updates |= SHADOW_UPDATE_FINAL;
                 if (change.Static) updates |= SHADOW_UPDATE_STATIC;
-            }
-            if (updates & SHADOW_UPDATE_FINAL) _finalFramesDirty[lightIndex] = frameSlotCount;
-            if (_finalFramesDirty[lightIndex])
-            {
-                updates |= SHADOW_UPDATE_FINAL;
-                --_finalFramesDirty[lightIndex];
             }
             LightUpdateFlags[lightIndex] = updates;
         }

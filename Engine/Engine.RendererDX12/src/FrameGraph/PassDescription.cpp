@@ -137,6 +137,8 @@ void PassDescription::ValidatePorts(const NodeId& node) const
             if (port.Access == DataAccess::ReadOnly && HasUsage(port.Usages, writes))
             { throw std::invalid_argument("ERROR: " + label + ": ReadOnly input declares a write usage. Remove write usages or declare the input as DataAccess::ReadWrite or "
                 "DataAccess::WriteOnly."); }
+            if (port.ReuseAcrossFrames && (ports != &Outputs || !port.AliasInput.empty()))
+            { throw std::invalid_argument("ERROR: " + label + ": ReuseAcrossFrames belongs on the original output allocation, not an input or alias."); }
             if (!port.AliasInput.empty())
             {
                 auto input = Inputs.find(port.AliasInput);

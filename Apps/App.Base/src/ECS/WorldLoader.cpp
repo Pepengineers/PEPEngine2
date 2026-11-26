@@ -783,6 +783,7 @@ namespace
         }
         
         CreateCameraForBounds(world, sceneBounds);
+        renderModule.SetActiveCamera(&world.GetECS().Get<CameraComponent>(world.ActiveCamera));
         return true;
     }
 }
@@ -801,29 +802,23 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
     auto& assetManager = Engine::Core::AssetManager::GetInstance();
     auto renderModule = BenchmarkEngine::GetLocator().GetModule<RenderModule>();
     
-    if (std::filesystem::is_directory(path))
+    const bool isDirectory = std::filesystem::is_directory(path);
+    if (isDirectory || IsObjPath(path))
     {
-        return LoadObjSceneFiles(world, *renderModule, assetManager, path, CollectSceneObjPaths(path));
-    }
-    
-    if (IsObjPath(path))
-    {
+        const auto sceneFiles = isDirectory
+            ? CollectSceneObjPaths(path)
+            : std::vector<std::filesystem::path>{path};
+        if (sceneFiles.empty()) { return false; }
         DirectX::BoundingBox sceneBounds = {};
         std::unordered_map<std::wstring, GPUTexture*> gpuTexturesByPath;
-        if (!LoadObjSceneEntity(
-            world,
-            *renderModule,
-            assetManager,
-            path,
-            BuildScenePartName(path.parent_path(), path),
-            gpuTexturesByPath,
-            sceneBounds))
+        for (const auto& sceneFile : sceneFiles)
         {
-            return false;
+            if (!LoadObjSceneEntity(world, *renderModule, assetManager, sceneFile,
+                BuildScenePartName(isDirectory ? path : path.parent_path(), sceneFile), gpuTexturesByPath, sceneBounds))
+            {
+                return false;
+            }
         }
-
-        //CreateCameraForBounds(world, sceneBounds);
-        //return true;
     }
 
     //Textures: 
@@ -870,8 +865,9 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
     //
     // Creating Entities and components
     //
-    WorldECS& ecs = world.GetECS();
     
+    WorldECS& ecs = world.GetECS();
+
     auto en1 = ecs.CreateEntity();
     en1.AddComponent<NameComponent>("en1");
     en1.AddComponent<TransformComponent>(Vector3(0.0f, 0.f, 0.f));
@@ -1072,6 +1068,24 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
     auto& sun = createLight("Sun", LightType::Directional, Vector3::Zero, 0, 4.0f, Vector3(0.35f, -1.0f, 0.25f));
     sun.Color = Vector3(1.0f, 0.95f, 0.875f);
 
+    // Original Bistro lights on the restaurant facade and its nearest streetlight.
+    createLight("Paris_Building_01_paris_building_01_bottom_44", LightType::Point, { 361.331f, 410.190f, 279.902f }, 500.000f, 150.000f);
+    createLight("Paris_Building_01_paris_building_01_bottom_45", LightType::Point, { 560.746f, 410.190f, 358.776f }, 500.000f, 150.000f);
+    createLight("Paris_Building_01_paris_building_01_bottom_46", LightType::Point, { 778.120f, 410.190f, 444.753f }, 500.000f, 150.000f);
+    createLight("Paris_Building_01_paris_building_01_bottom_47", LightType::Point, { -117.551f, 410.188f, -426.037f }, 500.000f, 150.000f);
+    createLight("Paris_Building_01_paris_building_01_bottom_48", LightType::Point, { -6.615f, 410.189f, -631.797f }, 500.000f, 150.000f);
+    createLight("Paris_Building_01_paris_building_01_bottom_49", LightType::Point, { 95.156f, 410.189f, -820.557f }, 500.000f, 150.000f);
+    createLight("Paris_Building_01_paris_building_01_bottom_67", LightType::Point, { 131.870f, 410.190f, 189.603f }, 500.000f, 150.000f);
+    createLight("Paris_Building_01_paris_building_01_bottom_68", LightType::Point, { 212.189f, 410.189f, -1037.624f }, 500.000f, 150.000f);
+    createLight("Paris_Building_01_paris_building_01_bottom_158", LightType::Point, { -178.991f, 266.331f, -222.308f }, 500.000f, 150.000f);
+    createLight("Paris_Building_01_paris_building_01_bottom_159", LightType::Point, { -42.617f, 267.739f, 76.785f }, 500.000f, 150.000f);
+    createLight("Paris_Streetlight_01a__5_", LightType::Point, { -208.779f, 409.996f, 465.133f }, 650.000f, 180.000f);
+    createLight("Paris_Lantern_01A", LightType::Point, { 26.641f, 227.326f, -726.443f }, 450.000f, 120.000f);
+    createLight("Paris_Lantern_01A1", LightType::Point, { -109.381f, 227.232f, -474.040f }, 450.000f, 120.000f);
+    createLight("Paris_Lantern_01A2", LightType::Point, { 172.517f, 227.029f, 215.806f }, 450.000f, 120.000f);
+    createLight("Paris_Lantern_01A3", LightType::Point, { 450.699f, 227.030f, 325.834f }, 450.000f, 120.000f);
+    createLight("Paris_Lantern_01A4", LightType::Point, { 726.789f, 227.031f, 435.034f }, 450.000f, 120.000f);
+
     // Interior MASTER_Interior_01_Paris_Lantern, below each shade opening.
     createLight("paris_building_01_interior_63", LightType::Point, { 722.376f, 248.922f, -278.580f }, 450.000f, 120.000f);
     createLight("paris_building_01_interior_105", LightType::Point, { 879.741f, 248.922f, -192.013f }, 450.000f, 120.000f);
@@ -1100,6 +1114,7 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
     // Two ceiling fan bottom glass globes
     createLight("Paris_CeilingFan_01A_Base_mesh_01__2_", LightType::Point, { 639.938f, 351.970f, 88.496f }, 450.000f, 120.000f);
     createLight("Paris_CeilingFan_01A_Base_mesh_01", LightType::Point, { 340.091f, 351.970f, -97.993f }, 450.000f, 120.000f);
+
     
     return true;
 }

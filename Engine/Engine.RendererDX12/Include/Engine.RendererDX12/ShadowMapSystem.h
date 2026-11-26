@@ -17,7 +17,7 @@ class ShadowMapSystem
 {
 public:
     static constexpr UINT DefaultDirectionalLightShadowMapResolution = 2048;
-    static constexpr UINT DefaultPointSpotLightShadowMapResolution = 1024;
+    static constexpr UINT DefaultPointSpotLightShadowMapResolution = 512;
 
     // RenderModule applies the pass parameters before compiling a new pipeline.
     UINT DirectionalLightShadowMapResolution = DefaultDirectionalLightShadowMapResolution;
@@ -37,9 +37,8 @@ public:
     void UpdatePointSpotViews(const GDX12LightConstants& light);
 
     // Merges caster bounds, rebuilds directional cascades and assigns array layers.
-    // Final-cache changes stay dirty for frameSlotCount consecutive rendered frames, so every
-    // cyclic FrameGraph slot receives the latest depth. Static-cache changes apply once.
-    void BuildViews(const std::vector<GDX12LightConstants>& lights, UINT frameSlotCount);
+    // Shared shadow outputs apply each cache change once, independently of the frame slot.
+    void BuildViews(const std::vector<GDX12LightConstants>& lights);
 
     std::vector<ShadowView> Views;
     // One cache-update mask per light, indexed like LightsCache. All views of a light share this entry.
@@ -65,8 +64,6 @@ private:
     std::vector<ChangedCasterBounds> _changedCasterBounds;
     // Pending projection changes, keyed by the light's first view; consumed by BuildViews.
     std::unordered_map<UINT, UINT> _pointSpotUpdates;
-    // One counter per light, following the same propagation pattern as component _numFramesDirty.
-    std::vector<UINT> _finalFramesDirty;
     BoundingBox _casterBounds{};
     bool _casterBoundsDirty = false;
     Matrix _inverseView = Matrix::Identity;

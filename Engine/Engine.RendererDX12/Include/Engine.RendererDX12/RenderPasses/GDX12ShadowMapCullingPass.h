@@ -13,7 +13,7 @@ public:
     void ResolveResourceRequirements(PassResourceRequirementsContext& context) override;
     void Initialize(PassInitContext& context) override;
     void Execute(PassExecutionContext& context) override;
-    // Rebuild static depth once and generate dynamic draws on the first use of each new output slot.
+    // Generate static and dynamic draws once after shadow resources are recreated.
     void OnResourcesRecreated(PassInitContext& context) override;
 
 private:
@@ -21,5 +21,4 @@ private:
     ComPtr<ID3D12PipelineState> _cullingPipeline;
     ComPtr<ID3D12PipelineState> _clearPipeline;
     bool _resetCache = true;
-    std::vector<bool> _initializedSlots;
 };

@@ -42,11 +42,13 @@ void GDX12ShadowMapPass::Describe(PassDescription& description) const
     directionalMaps.Formats = {DXGI_FORMAT_D32_FLOAT};
     directionalMaps.Usages = ResourceUsage::DepthWrite;
     directionalMaps.ClearColor = {1, 0, 0, 0};
+    directionalMaps.ReuseAcrossFrames = true;
 
     auto& pointSpotMaps = description.AddOutputTexture(OutPointSpotMaps, ResourceType::Texture2DArray);
     pointSpotMaps.Formats = {DXGI_FORMAT_D32_FLOAT};
     pointSpotMaps.Usages = ResourceUsage::DepthWrite | ResourceUsage::CopyDest;
     pointSpotMaps.ClearColor = {1, 0, 0, 0};
+    pointSpotMaps.ReuseAcrossFrames = true;
 }
 
 void GDX12ShadowMapPass::ResolveResourceRequirements(PassResourceRequirementsContext& context)
@@ -64,7 +66,6 @@ void GDX12ShadowMapPass::ResolveResourceRequirements(PassResourceRequirementsCon
 void GDX12ShadowMapPass::Initialize(PassInitContext& context)
 {
     CreatePointSpotCache(context);
-    _initializedSlots.assign(context.GetDeviceResources()->FrameConstants.size(), false);
 
     GDX12RootSignatureDesc root;
     root.Constants = {2};
@@ -153,16 +154,15 @@ void GDX12ShadowMapPass::Execute(PassExecutionContext& context)
     commands->SetViewport(pointSpot->GetViewport());
     commands->SetScissorRect(pointSpot->GetScissorRect());
     auto* staticCache = _pointSpotStaticCache.get();
-    const auto slot = context.GetFrameSlotResourcesIndex();
-    const bool initializeOutput = !_initializedSlots[slot];
-    const UINT forcedUpdates = _resetCache ? SHADOW_UPDATE_STATIC | SHADOW_UPDATE_FINAL :
-        initializeOutput ? SHADOW_UPDATE_FINAL : 0;
+    const UINT forcedUpdates = _resetCache ? SHADOW_UPDATE_STATIC | SHADOW_UPDATE_FINAL : 0;
     const auto& shadows = context.GetFrameData()->ShadowSystem;
     const auto& views = shadows.Views;
-    if (_resetCache) commands->ClearDepthStencilView(staticCache);
-
-    if (initializeOutput) commands->ClearDepthStencilView(pointSpot);
-    bool updateStatic = _resetCache, updateFinal = initializeOutput || _resetCache;
+    if (_resetCache)
+    {
+        commands->ClearDepthStencilView(staticCache);
+        commands->ClearDepthStencilView(pointSpot);
+    }
+    bool updateStatic = _resetCache, updateFinal = _resetCache;
     for (const auto& view : views)
     {
         if (view.Type == LightType::Directional) continue;
@@ -201,10 +201,9 @@ void GDX12ShadowMapPass::Execute(PassExecutionContext& context)
         commands->ExecuteIndirect(_signature.Get(), dynamicDraws.Capacity,
             dynamicDraws.Arguments->D3DResource.Get(), 0, dynamicDraws.Count->D3DResource.Get(), 0);
         commands->EndPixEvent();
-        if (!initializeOutput) context.SetUpdatedTextureArrayElements(OutPointSpotMaps, updatedArrayElements);
+        if (!_resetCache) context.SetUpdatedTextureArrayElements(OutPointSpotMaps, updatedArrayElements);
     }
     else { context.SetUpdatedTextureArrayElements(OutPointSpotMaps, {}); }
-    _initializedSlots[slot] = true;
     _resetCache = false;
     commands->EndPixEvent();
 }
@@ -237,7 +236,6 @@ void GDX12ShadowMapPass::CreatePointSpotCache(PassInitContext& context)
 void GDX12ShadowMapPass::OnResourcesRecreated(PassInitContext& context)
 {
     CreatePointSpotCache(context);
-    _initializedSlots.assign(context.GetDeviceResources()->FrameConstants.size(), false);
     _resetCache = true;
 }
 

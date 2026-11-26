@@ -13,6 +13,8 @@ struct FrameGraphBuffer
 struct FrameGraphPhysicalResource
 {
     GDX12DeviceResources* DeviceResources = nullptr;
+    // Both device mappings of shared memory use the producer mapping's fence history.
+    FrameGraphPhysicalResource* SharedProducer = nullptr;
     ResourceDescription Description;
     std::unique_ptr<GDX12Texture> Texture;
     GDX12Texture* ImportedTexture = nullptr;
@@ -33,7 +35,7 @@ struct FrameGraphSharedResources
     FrameGraphPhysicalResource& GetDeviceMapping(GDX12Device* device) const;
 };
 
-// Physical representations and readiness of one logical output in one frame slot.
+// Physical representations and readiness of one logical output, per slot or reused across frames.
 // Alias outputs can refer to the same local or shared allocation.
 struct FrameGraphMaterialization
 {
@@ -45,7 +47,7 @@ struct FrameGraphMaterialization
     GDX12CompletionPoint ProducerReady;
     GDX12CompletionPoint SharedReady;
     std::array<GDX12CompletionPoint, 2> LocalCopyReady{};
-    // Copy contents persist across uses of this slot; readiness fences are reset each frame.
+    // Copy contents persist between frames; initialized replicas accept partial updates.
     bool SharedInitialized = false;
     std::array<bool, 2> LocalCopyInitialized{};
     bool HasUpdatedTextureArrayElements = false;
