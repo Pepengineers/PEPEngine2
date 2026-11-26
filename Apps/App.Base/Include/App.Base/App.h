@@ -48,7 +48,7 @@ public:
 
     static App* GetInstance();
     JobSystem& GetJobs() { return _jobs; }
-    void ReportLoading(const std::wstring& stage);
+    void ReportLoading(const std::wstring& stage, size_t completed = 0, size_t total = 0);
     bool ContinueLoading();
     void WaitForLoading(const JobHandle& work);
 protected:
@@ -76,6 +76,8 @@ protected:
     void SetCaptionTimingEnabled(bool enabled);
     virtual void OnResize();
     virtual void OnPauseChanged(bool) {}
+    virtual void OnLoadingProgress(const std::wstring&, size_t, size_t) {}
+    virtual bool LoadingCancelRequested() const { return false; }
 
     // Convenience overrides for handling mouse input.
     virtual void OnMouseDown(WPARAM btnState, int x, int y)
@@ -129,5 +131,6 @@ private:
     std::atomic<bool> _loadingCancelled{false};
     DWORD _windowThread = GetCurrentThreadId();
     std::wstring _loadingStage = L"Preparing renderer";
+    size_t _loadingCompleted = 0, _loadingTotal = 0;
     ULONGLONG _loadingStarted = GetTickCount64();
 };

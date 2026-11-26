@@ -58,8 +58,10 @@
     <ClCompile Include="src\Rendering\BistroRenderPipeline.cpp" />
     <ClCompile Include="src\Techniques\UI\ScenePostUI.cpp" />
     <ClCompile Include="src\Techniques\UI\BistroInfoPanel.cpp" />
+    <ClCompile Include="src\Techniques\UI\BistroLoadingScreen.cpp" />
     <ClCompile Include="src\Techniques\UI\BistroComparePanel.cpp" />
     <ClInclude Include="src\Techniques\UI\BistroInfoPanel.h" />
+    <ClInclude Include="src\Techniques\UI\BistroLoadingScreen.h" />
     <ClInclude Include="src\Techniques\UI\BistroComparePanel.h" />
     <ClInclude Include="src\Techniques\UI\BistroPlot.h" />
     <ClCompile Include="src\Techniques\UI\SceneTextureInspector.cpp" />

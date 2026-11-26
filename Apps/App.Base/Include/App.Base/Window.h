@@ -23,7 +23,7 @@ public:
 private:
     HWND MainWndHandle = nullptr;
 
-    std::wstring Title = L"Renderer";
+    std::wstring Title = L"PEPENGINE2";
     uint16_t WindowWidth = 1280;
     uint16_t WindowHeight = 800;
     HINSTANCE AppInstance;

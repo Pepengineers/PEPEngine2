@@ -157,12 +157,19 @@ void App::UpdatePauseState()
     OnPauseChanged(paused);
 }
 
-void App::ReportLoading(const std::wstring& stage)
+void App::ReportLoading(const std::wstring& stage, size_t completed, size_t total)
 {
-    if (!_initializing) return;
-    _loadingStage = stage;
-    const auto title = L"Renderer - " + stage;
-    SetWindowTextW(_window->GetWindowHandle(), title.c_str());
+    if (GetCurrentThreadId() != _windowThread || !_initializing) return;
+    if (_loadingCancelled) throw std::runtime_error("Scene loading cancelled");
+    if (stage != _loadingStage || !total)
+    {
+        _loadingStage = stage;
+        const auto title = _window->GetWindowTitle() + L" - " + stage;
+        SetWindowTextW(_window->GetWindowHandle(), title.c_str());
+    }
+    _loadingCompleted = completed;
+    _loadingTotal = total;
+    OnLoadingProgress(stage, completed, total);
     InvalidateRect(_window->GetWindowHandle(), nullptr, FALSE);
     if (!ContinueLoading()) throw std::runtime_error("Scene loading cancelled");
 }
@@ -176,6 +183,7 @@ bool App::LoadWithProgress(const std::wstring& label, const std::function<void()
     {
         ReportLoading(label);
         load();
+        ContinueLoading();
     }
     catch (...)
     {
@@ -196,13 +204,18 @@ bool App::ContinueLoading()
         MSG message{};
         while (PeekMessage(&message, nullptr, 0, 0, PM_REMOVE))
         {
-            if (message.message == WM_QUIT) _loadingCancelled = true;
+            if (message.message == WM_QUIT)
+            {
+                _closeAfterLoading = true;
+                _loadingCancelled = true;
+            }
             else
             {
                 TranslateMessage(&message);
                 DispatchMessage(&message);
             }
         }
+        if (LoadingCancelRequested()) _loadingCancelled = true;
     }
     return !_loadingCancelled;
 }
@@ -310,6 +323,7 @@ LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             if (msg == WM_CLOSE) _closeAfterLoading = true;
             _loadingCancelled = true;
             _loadingStage = L"Cancelling loading...";
+            _loadingTotal = 0;
             SetWindowTextW(hwnd, _loadingStage.c_str());
             InvalidateRect(hwnd, nullptr, FALSE);
             return 0;
@@ -323,7 +337,8 @@ LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             FillRect(dc, &rect, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
             SetBkMode(dc, TRANSPARENT);
             SetTextColor(dc, RGB(230, 230, 230));
-            const auto text = _loadingStage + L"\n" +
+            const auto count = _loadingTotal ? L"  " + std::to_wstring(_loadingCompleted) + L"/" + std::to_wstring(_loadingTotal) : L"";
+            const auto text = _loadingStage + count + L"\n" +
                 std::to_wstring((GetTickCount64() - _loadingStarted) / 1000) + L" s - Esc to cancel";
             rect.top += 40;
             DrawTextW(dc, text.c_str(), -1, &rect, DT_CENTER | DT_TOP | DT_NOPREFIX);

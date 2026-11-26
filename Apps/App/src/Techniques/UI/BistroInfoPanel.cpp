@@ -4,45 +4,83 @@
 #include "BistroBenchmark.h"
 #include "Engine.Core/BenchmarkEngine.h"
 #include "Engine.UI/UI_test.h"
+#include "../../../Resources/Resource.h"
+#include <directxtex/DirectXTex.h>
 #include <imgui/imgui.h>
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 namespace
 {
+constexpr ImVec4 Rgb(unsigned rgb)
+{
+    return {float((rgb >> 16) & 255) / 255.f, float((rgb >> 8) & 255) / 255.f, float(rgb & 255) / 255.f, 1.f};
+}
+constexpr ImVec4 Pond = Rgb(0x101b1a), Mint = Rgb(0x60dab4), Lime = Rgb(0xb5ed7d);
 constexpr std::pair<ImGuiCol, ImVec4> FullPalette[] = {
-    {ImGuiCol_WindowBg, {.055f, .082f, .105f, 1.f}},
-    {ImGuiCol_ChildBg, {.09f, .13f, .16f, 1.f}},
-    {ImGuiCol_PopupBg, {.10f, .15f, .18f, 1.f}},
-    {ImGuiCol_Border, {.23f, .30f, .35f, 1.f}},
-    {ImGuiCol_Separator, {.21f, .28f, .33f, 1.f}},
-    {ImGuiCol_Text, {.94f, .96f, .98f, 1.f}},
-    {ImGuiCol_CheckMark, {.36f, .89f, .74f, 1.f}},
-    {ImGuiCol_NavCursor, {.66f, .99f, .89f, 1.f}},
-    {ImGuiCol_Button, {.14f, .21f, .25f, 1.f}},
-    {ImGuiCol_ButtonHovered, {.19f, .31f, .34f, 1.f}},
-    {ImGuiCol_ButtonActive, {.14f, .38f, .35f, 1.f}},
-    {ImGuiCol_FrameBg, {.075f, .11f, .14f, 1.f}},
-    {ImGuiCol_FrameBgHovered, {.14f, .22f, .25f, 1.f}},
-    {ImGuiCol_FrameBgActive, {.16f, .29f, .29f, 1.f}},
-    {ImGuiCol_Header, {.13f, .20f, .24f, 1.f}},
-    {ImGuiCol_HeaderHovered, {.16f, .30f, .34f, 1.f}},
-    {ImGuiCol_HeaderActive, {.105f, .22f, .23f, 1.f}},
-    {ImGuiCol_Tab, {.08f, .11f, .14f, 1.f}},
-    {ImGuiCol_TabHovered, {.15f, .28f, .31f, 1.f}},
-    {ImGuiCol_TabSelected, {.13f, .24f, .27f, 1.f}},
-    {ImGuiCol_TabSelectedOverline, {.26f, .87f, .81f, 1.f}},
-    {ImGuiCol_TableHeaderBg, {.15f, .19f, .23f, 1.f}},
-    {ImGuiCol_TextDisabled, {.67f, .72f, .76f, 1.f}},
+    {ImGuiCol_WindowBg, Pond},                          {ImGuiCol_ChildBg, Rgb(0x182522)},
+    {ImGuiCol_PopupBg, Rgb(0x20302c)},                  {ImGuiCol_Border, Rgb(0x3c534b)},
+    {ImGuiCol_Separator, Rgb(0x344b43)},                {ImGuiCol_Text, Rgb(0xeff6f0)},
+    {ImGuiCol_TextDisabled, Rgb(0xacc1b7)},             {ImGuiCol_CheckMark, Mint},
+    {ImGuiCol_NavCursor, Lime},                         {ImGuiCol_Button, Rgb(0x283e35)},
+    {ImGuiCol_ButtonHovered, Rgb(0x385648)},            {ImGuiCol_ButtonActive, Rgb(0x416853)},
+    {ImGuiCol_FrameBg, Rgb(0x121f1b)},                  {ImGuiCol_FrameBgHovered, Rgb(0x263d32)},
+    {ImGuiCol_FrameBgActive, Rgb(0x304b3b)},            {ImGuiCol_Header, Rgb(0x24392e)},
+    {ImGuiCol_HeaderHovered, Rgb(0x334c3d)},            {ImGuiCol_HeaderActive, Rgb(0x294535)},
+    {ImGuiCol_Tab, Rgb(0x16231f)},                      {ImGuiCol_TabHovered, Rgb(0x334c3d)},
+    {ImGuiCol_TabSelected, Rgb(0x294535)},              {ImGuiCol_TabSelectedOverline, Mint},
+    {ImGuiCol_TableHeaderBg, Rgb(0x24352e)},            {ImGuiCol_SliderGrab, Mint},
+    {ImGuiCol_SliderGrabActive, Lime},
 };
+
+// The app's icon group contains transparent PNGs. Keep the header mark in the UI atlas
+// so the launcher can draw it before initializing the world renderer.
+ImFontAtlasRectId LoadEngineMark(ImFontAtlas& atlas)
+{
+    const auto module = GetModuleHandleW(nullptr);
+    const auto group = FindResourceW(module, MAKEINTRESOURCEW(IDI_PEPENGINE2), RT_GROUP_ICON);
+    if (!group) return ImFontAtlasRectId_Invalid;
+    auto* directory = static_cast<PBYTE>(LockResource(LoadResource(module, group)));
+    if (!directory) return ImFontAtlasRectId_Invalid;
+    const int id = LookupIconIdFromDirectoryEx(directory, TRUE, 128, 128, LR_DEFAULTCOLOR);
+    const auto icon = FindResourceW(module, MAKEINTRESOURCEW(id), RT_ICON);
+    if (!icon) return ImFontAtlasRectId_Invalid;
+    const auto* data = static_cast<const uint8_t*>(LockResource(LoadResource(module, icon)));
+    struct Apartment
+    {
+        HRESULT Status = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        ~Apartment() { if (SUCCEEDED(Status)) CoUninitialize(); }
+    } apartment;
+    if (FAILED(apartment.Status) && apartment.Status != RPC_E_CHANGED_MODE) return ImFontAtlasRectId_Invalid;
+    DirectX::ScratchImage decoded;
+    if (!data || FAILED(DirectX::LoadFromWICMemory(data, SizeofResource(module, icon), DirectX::WIC_FLAGS_FORCE_RGB,
+        nullptr, decoded))) return ImFontAtlasRectId_Invalid;
+    const auto* bitmap = decoded.GetImage(0, 0, 0);
+    if (!bitmap || (bitmap->format != DXGI_FORMAT_R8G8B8A8_UNORM && bitmap->format != DXGI_FORMAT_R8G8B8A8_UNORM_SRGB))
+        return ImFontAtlasRectId_Invalid;
+    ImFontAtlasRect rect;
+    const auto rectId = atlas.AddCustomRect(int(bitmap->width), int(bitmap->height), &rect);
+    if (rectId == ImFontAtlasRectId_Invalid) return rectId;
+    if (atlas.TexData->Format != ImTextureFormat_RGBA32)
+    {
+        atlas.RemoveCustomRect(rectId);
+        return ImFontAtlasRectId_Invalid;
+    }
+    atlas.TexPixelsUseColors = atlas.TexData->UseColors = true;
+    for (int y = 0; y < rect.h; ++y)
+        std::memcpy(atlas.TexData->GetPixelsAt(rect.x, rect.y + y), bitmap->pixels + y * bitmap->rowPitch, rect.w * 4);
+    return rectId;
+}
+
 bool PageButton(const char* label, bool selected, ImVec2 size)
 {
     if (selected)
     {
-        ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(12, 34, 33, 255));
-        ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(95, 226, 191, 255));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(121, 238, 207, 255));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, IM_COL32(80, 205, 174, 255));
+        ImGui::PushStyleColor(ImGuiCol_Text, Pond);
+        ImGui::PushStyleColor(ImGuiCol_Button, Mint);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Rgb(0x8de8c9));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, Rgb(0x4cb995));
     }
     const bool pressed = ImGui::Button(label, size);
     if (selected) ImGui::PopStyleColor(4);
@@ -67,6 +105,7 @@ void BistroInfoPanel::InitializeFont()
     }
     if (!_fullFont) _fullFont = atlas->AddFontDefaultVector();
     if (!_headingFont) _headingFont = _fullFont;
+    _engineMark = LoadEngineMark(*atlas);
 }
 
 void BistroInfoPanel::ShowSettings(bool openResults, const std::string& error)
@@ -129,10 +168,10 @@ void DrawModeCard(const RunMode& mode, BistroRun::Launch& launch, ImFont* headin
     }
     const auto a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
     auto* draw = ImGui::GetWindowDrawList();
-    const auto accent = ImGui::GetColorU32(ImGuiCol_CheckMark);
+    const auto accent = ImGui::GetColorU32(selected ? Lime : Mint);
     const bool hovered = ImGui::IsItemHovered();
     const bool focused = ImGui::GetIO().NavVisible && ImGui::IsItemFocused();
-    const ImU32 fill = selected ? ImGui::GetColorU32(hovered ? ImVec4{.12f, .20f, .23f, 1} : ImVec4{.09f, .15f, .18f, 1}) :
+    const ImU32 fill = selected ? ImGui::GetColorU32(hovered ? ImGuiCol_HeaderHovered : ImGuiCol_HeaderActive) :
         ImGui::GetColorU32(hovered ? ImGuiCol_FrameBgHovered : ImGuiCol_FrameBg);
     draw->AddRectFilled(a, b, fill, .45f * em);
     draw->AddRect(a, b, focused ? ImGui::GetColorU32(ImGuiCol_NavCursor) : selected ? accent : ImGui::GetColorU32(ImGuiCol_Border),
@@ -173,7 +212,7 @@ void DrawModeCard(const RunMode& mode, BistroRun::Launch& launch, ImFont* headin
     draw->PushClipRect(a, b, true);
     draw->AddText(heading, titleSize, {left, top}, ImGui::GetColorU32(ImGuiCol_Text), mode.Name);
     draw->AddText(ImGui::GetFont(), descriptionSize, {left, top + titleSize + .20f * em},
-        ImGui::GetColorU32(ImVec4{.80f, .85f, .89f, 1}), mode.Description, nullptr, textWidth);
+        ImGui::GetColorU32(Rgb(0xcadbcf)), mode.Description, nullptr, textWidth);
     draw->PopClipRect();
 }
 
@@ -215,7 +254,7 @@ void DrawRoutePreview(const BistroRun::Map& map, float height)
     for (const auto& leg : legs)
         for (size_t i = 1; i < leg.Count; ++i)
             draw->AddLine(project(leg.Points[i-1]), project(leg.Points[i]), accent, std::max(1.25f, .09f * em));
-    draw->AddCircleFilled(project(Red[0]), .2f * em, ImGui::GetColorU32(ImGuiCol_Text));
+    draw->AddCircleFilled(project(Red[0]), .23f * em, ImGui::GetColorU32(Lime));
     draw->AddRect(a, b, ImGui::GetColorU32(ImGuiCol_Border), .35f * em);
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Camera route viewed from above");
 }
@@ -333,10 +372,10 @@ void BistroInfoPanel::DrawLaunchControls(BistroBenchmark& benchmark)
     ImGui::TextUnformatted(summary.c_str());
     ImGui::PopClipRect();
     ImGui::SetCursorScreenPos({start.x + area.x - buttonWidth, start.y + (narrowFooter ? em + gap : 0.f)});
-    ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_CheckMark));
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, {.52f, .97f, .82f, 1});
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive, {.25f, .78f, .63f, 1});
-    ImGui::PushStyleColor(ImGuiCol_Text, {.035f, .1f, .12f, 1});
+    ImGui::PushStyleColor(ImGuiCol_Button, Lime);
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Rgb(0xc7f496));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, Rgb(0x98cf66));
+    ImGui::PushStyleColor(ImGuiCol_Text, Pond);
     ImGui::PushFont(_headingFont, 0.f);
     if (ImGui::Button(action, {buttonWidth, actionHeight}))
         benchmark.Launch(_launch, *BenchmarkEngine::GetLocator().GetModule<ConsoleModule>());
@@ -376,14 +415,30 @@ void BistroInfoPanel::DrawSettings(RenderModule& render, BistroBenchmark& benchm
         const ImVec2 start = ImGui::GetCursorPos();
         const float navHeight = 2.60f * em;
         const float baseSize = ImGui::GetStyle().FontSizeBase;
-        ImGui::PushFont(_headingFont, 2.15f * baseSize);
+        ImGui::BeginGroup();
+        ImFontAtlasRect mark;
+        auto* atlas = ImGui::GetIO().Fonts;
+        if (atlas->GetCustomRect(_engineMark, &mark))
+        {
+            ImGui::Image(atlas->TexRef, {2.85f * em, 2.85f * em}, mark.uv0, mark.uv1);
+            ImGui::SameLine(0.f, .68f * em);
+        }
+        ImGui::BeginGroup();
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {0.f, 0.f});
+        ImGui::PushFont(_headingFont, 1.65f * baseSize);
+        ImGui::TextColored(Lime, "PEPENGINE2");
+        ImGui::PopFont();
+        ImGui::PushFont(_fullFont, baseSize);
         ImGui::TextUnformatted("Benchmark");
         ImGui::PopFont();
-        const float titleWidth = ImGui::GetItemRectSize().x;
+        ImGui::PopStyleVar();
+        ImGui::EndGroup();
+        ImGui::EndGroup();
+        const ImVec2 titleSize = ImGui::GetItemRectSize();
         const float navWidth = std::clamp(width * .125f, 5.1f * em, 8.f * em);
         const float navGap = ImGui::GetStyle().ItemSpacing.x * .35f;
-        if (titleWidth + 2.f * navWidth + 2.f * navGap < width)
-            ImGui::SetCursorPos({start.x + width - 2.f * navWidth - navGap, start.y});
+        if (titleSize.x + 2.f * navWidth + 2.f * navGap < width)
+            ImGui::SetCursorPos({start.x + width - 2.f * navWidth - navGap, start.y + (titleSize.y - navHeight) * .5f});
         ImGui::PushFont(_headingFont, 1.12f * baseSize);
         if (PageButton("Setup", _tab == Tab::Setup, {navWidth, navHeight})) _tab = Tab::Setup;
         ImGui::SameLine(0.f, navGap);

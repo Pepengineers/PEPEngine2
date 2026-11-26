@@ -672,16 +672,18 @@ namespace
         const std::string& sceneName,
         GDX12Material* fallbackMaterial,
         const SceneDefaultMaterialTextures& defaultTextures,
-        SceneTextureCache& gpuTexturesByPath)
+        SceneTextureCache& gpuTexturesByPath,
+        const std::wstring& displayName)
     {
         std::vector<GDX12Material*> materialSlots = BuildFallbackMaterialSlots(mesh, fallbackMaterial);
         const std::vector<Engine::Core::MeshMaterial>& materials = mesh.GetMaterials();
 
         const size_t materialCount = (std::min)(materialSlots.size(), materials.size());
+        auto* app = App::GetInstance();
+        const auto stage = L"Preparing materials for " + displayName;
         for (size_t materialIndex = 0; materialIndex < materialCount; ++materialIndex)
         {
-            if (auto* app = App::GetInstance())
-                app->ReportLoading(L"Uploading materials " + std::to_wstring(materialIndex + 1) + L"/" + std::to_wstring(materialCount));
+            if (app) app->ReportLoading(stage, materialIndex, materialCount);
             const std::filesystem::path diffuseTexturePath = materials[materialIndex].DiffuseTexturePath;
 
             MaterialTextureSet textures = {};
@@ -747,6 +749,7 @@ namespace
             }
         }
 
+        if (app && materialCount) app->ReportLoading(stage, materialCount, materialCount);
         return materialSlots;
     }
 
@@ -826,11 +829,15 @@ namespace
             return false;
         }
 
+        auto* app = App::GetInstance();
+        const auto displayName = objPath.filename().wstring();
+        if (app) app->ReportLoading(L"Uploading geometry for " + displayName);
         renderModule.SubmitMesh(sceneMesh, sceneMeshHandle);
 
         ObjScenePart part{sceneName, sceneMeshHandle,
             BuildObjMaterialSlots(renderModule, assetManager, *sceneMesh, sceneName, fallbackMaterial,
-                defaultMaterialTextures, gpuTexturesByPath), static_cast<UINT>(sceneMesh->GetSubMeshCount())};
+                defaultMaterialTextures, gpuTexturesByPath, displayName), static_cast<UINT>(sceneMesh->GetSubMeshCount())};
+        if (app) app->ReportLoading(L"Building scene objects for " + displayName);
         SpawnObjScenePart(world, renderModule, part);
         if (bindings) bindings->push_back(std::move(part));
 
@@ -935,6 +942,7 @@ namespace
         Log::Info("Loading", "Preparing ", objPaths.size(), " scene files, budget ", budget,
             " bytes, ", jobs.GetThreadCount(), " job threads");
         const auto started = std::chrono::steady_clock::now();
+        auto* app = App::GetInstance();
         MeshImportJob imports;
         std::vector<Engine::Core::MeshHandle> meshHandles;
         std::vector<std::uint64_t> estimates;
@@ -953,8 +961,9 @@ namespace
         }
         for (size_t begin = 0; begin < imports.Paths.size();)
         {
-            if (auto* app = App::GetInstance()) app->ReportLoading(L"Importing " + imports.Paths[begin].filename().wstring());
             const auto end = LoadingBatchEnd(estimates, begin, budget, jobs.GetThreadCount());
+            if (app) app->ReportLoading(end == begin + 1 ? L"Importing " + imports.Paths[begin].filename().wstring() :
+                L"Importing mesh files", begin, imports.Paths.size());
             Log::Info("Loading", "Import batch ", begin, "..", end, " of ", imports.Paths.size(), " meshes");
             if (estimates[begin] > budget)
                 Log::Warning("Loading", "Import exceeds the estimated budget; importing alone: ", imports.Paths[begin]);
@@ -962,7 +971,7 @@ namespace
             imports.Results.resize(end - begin);
             LastLoadingMeasurements.MaxImportTasks = (std::max)(LastLoadingMeasurements.MaxImportTasks, end - begin);
             const auto work = imports.Schedule(jobs, end - begin, 1);
-            if (auto* app = App::GetInstance()) app->WaitForLoading(work); else work.Complete();
+            if (app) app->WaitForLoading(work); else work.Complete();
             for (size_t index = begin; index < end; ++index)
             {
                 if (!imports.Results[index - begin]) return false;
@@ -970,11 +979,14 @@ namespace
             }
             begin = end;
         }
+        if (app && !imports.Paths.empty())
+            app->ReportLoading(L"Mesh files imported", imports.Paths.size(), imports.Paths.size());
         const auto imported = std::chrono::steady_clock::now();
         LastLoadingMeasurements.ImportSeconds = std::chrono::duration<double>(imported - started).count();
         Log::Info("Loading", "CPU mesh import completed in ", LastLoadingMeasurements.ImportSeconds, " s");
 
         TextureDecodeJob textures;
+        if (app) app->ReportLoading(L"Collecting material textures");
         std::unordered_set<std::uint32_t> seen;
         estimates.clear();
         for (const auto& path : objPaths)
@@ -1000,7 +1012,7 @@ namespace
         Log::Info("Loading", "Decoding ", textures.Inputs.size(), " unique textures");
         for (size_t begin = 0; begin < textures.Inputs.size();)
         {
-            if (auto* app = App::GetInstance()) app->ReportLoading(L"Preparing textures " + std::to_wstring(begin) + L"/" + std::to_wstring(textures.Inputs.size()));
+            if (app) app->ReportLoading(L"Decoding material textures", begin, textures.Inputs.size());
             const auto end = LoadingBatchEnd(estimates, begin, budget, jobs.GetThreadCount());
             Log::Info("Loading", "Texture batch ", begin, "..", end, " of ", textures.Inputs.size());
             if (estimates[begin] > budget)
@@ -1009,12 +1021,14 @@ namespace
             textures.Results.resize(end - begin);
             LastLoadingMeasurements.MaxTextureTasks = (std::max)(LastLoadingMeasurements.MaxTextureTasks, end - begin);
             const auto work = textures.Schedule(jobs, end - begin, 1);
-            if (auto* app = App::GetInstance()) app->WaitForLoading(work); else work.Complete();
+            if (app) app->WaitForLoading(work); else work.Complete();
             for (size_t index = begin; index < end; ++index)
                 if (textures.Results[index - begin])
                     if (!assets.Textures().Cache(textures.Inputs[index].Handle, std::move(textures.Results[index - begin]))) return false;
             begin = end;
         }
+        if (app && !textures.Inputs.empty())
+            app->ReportLoading(L"Decoding material textures", textures.Inputs.size(), textures.Inputs.size());
         LastLoadingMeasurements.TextureSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - imported).count();
         Log::Info("Loading", "CPU texture decoding completed in ", LastLoadingMeasurements.TextureSeconds, " s");
         return true;
@@ -1092,6 +1106,7 @@ namespace
 
         CreateCameraForBounds(world, sceneBounds);
         Log::Info("Loading", "Waiting for GPU uploads to complete");
+        if (auto* app = App::GetInstance()) app->ReportLoading(L"Waiting for geometry and texture uploads on the GPU");
         renderModule.WaitForUploads();
         std::unordered_set<std::uint32_t> releasedTextures;
         std::uint64_t releasedBytes = 0;
@@ -1134,7 +1149,8 @@ std::vector<GDX12Material*> WorldLoader::BuildMaterialSlots(RenderModule& render
     auto* fallback = CreateSceneFallbackMaterial(render, assets, resourceName, defaults);
     if (!fallback) throw std::runtime_error("Cannot create skeletal fallback material");
     SceneTextureCache textureCache;
-    auto materials = BuildObjMaterialSlots(render, assets, mesh, resourceName, fallback, defaults, textureCache);
+    auto materials = BuildObjMaterialSlots(render, assets, mesh, resourceName, fallback, defaults, textureCache,
+        std::filesystem::u8path(resourceName).wstring());
     render.WaitForUploads();
     return materials;
 }
@@ -1542,7 +1558,8 @@ static bool LoadMeshes(WorldLoadContext& context, ryml::NodeRef meshesNode)
                 id,
                 fallbackMaterial,
                 defaultTextures,
-                importedTexturesByPath);
+                importedTexturesByPath,
+                meshPath.filename().wstring());
 
             if (resource.ImportedMaterials.empty())
             {

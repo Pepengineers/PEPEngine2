@@ -115,12 +115,11 @@ void BistroBenchmark::Launch(BistroRun::Launch launch, ConsoleModule& console)
         _launch.Kind == BistroRun::Mode::Profile ? Action::MultiGPU : Action::Automatic, _launch.Profile);
 }
 
-void BistroBenchmark::RejectLaunch(std::string error)
+void BistroBenchmark::AbortLaunch(std::string message, Outcome outcome)
 {
     _action = Action::None;
-    _outcome = Outcome::Failed;
-    _message = std::move(error);
-    Log::Error("BistroBenchmark", _message);
+    _outcome = outcome;
+    _message = std::move(message);
 }
 
 double BistroBenchmark::HudRemainingSeconds() const

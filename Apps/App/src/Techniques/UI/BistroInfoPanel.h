@@ -41,6 +41,7 @@ private:
     BistroComparePanel _compare;
     ImFont* _fullFont = nullptr;
     ImFont* _headingFont = nullptr;
+    int _engineMark = -1;
     Tab _tab = Tab::Setup;
     std::string _displayError;
     bool _initializedSize = false;

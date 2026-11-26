@@ -19,6 +19,7 @@
 #include "BistroBenchmark.h"
 #include "BistroTaskbar.h"
 #include "Techniques/UI/BistroInfoPanel.h"
+#include "Techniques/UI/BistroLoadingScreen.h"
 #include "Techniques/UI/BistroUICanvases.h"
 #include "Techniques/UI/SceneTextureInspector.h"
 #include "Components/BistroInteractionSource.h"
@@ -209,17 +210,24 @@ class BistroApplication final : public App
 		for (const auto* part : {"Exterior/exterior.obj", "Interior/interior.obj"})
 			Require(std::filesystem::is_regular_file(scene / part), "Missing Bistro scene part");
 		auto render = Locator.GetModule<RenderModule>();
+		ReportLoading(L"Initializing the render pipeline and frame resources");
 		render->BeginSceneRendering();
+		ReportLoading(L"Preparing render targets for the selected output");
 		render->OnResize();
 		render->ResetWorldHistory();
 		auto scenes = Locator.GetModule<SceneManagerModule>();
+		_loadingPhase = BistroLoadingScreen::SceneAssets;
+		ReportLoading(L"Opening scene files");
 		scenes->LoadMap(scene);
+		_loadingPhase = BistroLoadingScreen::World;
+		ReportLoading(L"Preparing sunlight and reflection probes");
 		_map = std::make_unique<MapScene>();
 		auto& world = *scenes->GetWorld();
 		world.SetPaused(false);
 		InitializeSky(world);
 		_map->Reflections.Update(world, 0);
 		UpdateSky(world);
+		ReportLoading(L"Creating vegetation, particles and water");
 		_map->Grass.Update(world, 0);
 		CreateBistroParticles(world);
 		_map->Water.Update(world, 0);
@@ -229,14 +237,19 @@ class BistroApplication final : public App
 			    Log::Info("Bistro", "Bistro water target=", BistroWater::ParticleCount.GetValue(),
 			              "; seed particles=", fluid.GetParticles() ? fluid.GetParticles()->size() : 0);
 		    });
+		ReportLoading(L"Placing characters and setting up scene bounds");
 		_map->Characters.Update(world, 0, GetJobs());
 		_map->Bounds = std::make_unique<BistroBounds::Scene>(world);
 		_map->Bounds->UpdateEmitters(world);
 		BistroParticles::Update(world);
+		ReportLoading(_measurementMap ? L"Preparing the camera route and physics snapshots" : L"Preparing the free camera");
 		InitializeCamera(world);
 		if (_measurementMap) _benchmark.Initialize(world, _map->Characters, *_bistroPipeline);
+		_loadingPhase = BistroLoadingScreen::FirstFrame;
+		ReportLoading(L"Building draw commands for the first frame");
 		IndirectCommandBuildSystem commands;
 		commands.Schedule(GetJobs(), world, 0).Complete();
+		ReportLoading(L"Rendering the first frame");
 		Log::Info("Bistro", "Loaded ", map.Name, " / ", _measurementMap ? map.Route : "free camera");
 	}
 	void Update(const GameTimer& timer) override
@@ -259,7 +272,7 @@ class BistroApplication final : public App
 		if (const auto* level = _info.TakeDebugMap(); !_map && level) StartMap(*level);
 #endif
 		if (const auto* launch = _benchmark.PendingLaunch(); !_map && launch) StartMap(*launch->Level, launch->Output);
-		if (_map && _measurementMap)
+		if (_map && _measurementMap && !_loadingScreen)
 		{
 			auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
 			_benchmark.Update(world, *console, *render, *_bistroPipeline, *GetWindow());
@@ -287,7 +300,7 @@ class BistroApplication final : public App
 		BistroParticles::Update(world);
 		App::Update(timer);
 		_map->Reflections.DrawBounds(world, *render);
-		if (_measurementMap) _info.DrawMeasurement(_benchmark);
+		if (_measurementMap && !_loadingScreen) _info.DrawMeasurement(_benchmark);
 	}
 	void Render(const GameTimer& timer) override
 	{
@@ -299,6 +312,21 @@ class BistroApplication final : public App
 		}
 		const auto framesBefore = _bistroPipeline->PresentedFrames();
 		App::Render(timer);
+		if (_loadingScreen)
+		{
+			const bool cancelled = _loadingScreen->Cancelled();
+			// The first draw can compile shaders. Finish it before starting the route or its warmup clock.
+			// A covering window can make Present report occlusion even when that draw was submitted.
+			_loadingScreen.reset();
+			Timer.Tick(0);
+			if (cancelled)
+			{
+				if (_measurementMap) _benchmark.AbortLaunch("Map loading cancelled", BistroBenchmark::Outcome::Cancelled);
+				ReturnToSettings("Map loading cancelled");
+			}
+			else if (!_measurementMap) RefreshWindowCaption();
+			return;
+		}
 		if (!_measurementMap) return;
 		const bool presented = _bistroPipeline->PresentedFrames() != framesBefore;
 		if (presented)
@@ -323,8 +351,17 @@ class BistroApplication final : public App
 	}
 
   private:
+	void OnLoadingProgress(const std::wstring& detail, size_t completed, size_t total) override
+	{
+		if (_loadingScreen) _loadingScreen->Update(_loadingPhase, detail, completed, total);
+	}
+	bool LoadingCancelRequested() const override
+	{
+		return _loadingScreen && _loadingScreen->Cancelled();
+	}
 	LRESULT MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) override
 	{
+		if (_loadingScreen && msg == WM_KEYUP && wParam == VK_ESCAPE) _loadingScreen->RequestCancel();
 		_taskbar.OnMessage(hwnd, msg, wParam);
 		return App::MsgProc(hwnd, msg, wParam, lParam);
 	}
@@ -355,10 +392,13 @@ class BistroApplication final : public App
 		Engine::UI::SetSettingsEditingEnabled(!_measurementMap);
 		SetCaptionTimingEnabled(!_measurementMap);
 		std::string error;
+		bool cancelled = false;
 		try
 		{
 			if (measurementSize) SetMeasurementWindow(*measurementSize);
-			if (LoadWithProgress(_measurementMap ? L"Loading benchmark map" : L"Loading debug map", [&] { LoadBistro(map); }))
+			_loadingPhase = BistroLoadingScreen::Renderer;
+			_loadingScreen.emplace(GetWindow()->GetWindowHandle(), std::filesystem::u8path(map.Name).wstring());
+			if (LoadWithProgress(L"Opening the map", [&] { LoadBistro(map); }))
 			{
 				// Loading pumps WM_SIZE without resizing a partially initialized scene.
 				_resizePending = bMinimized;
@@ -375,15 +415,16 @@ class BistroApplication final : public App
 #if defined(_DEBUG) || defined(DEBUG)
 				if (!_measurementMap) BistroRender::SceneTextureInspector::SetVisible(true);
 #endif
-				RefreshWindowCaption();
 				return;
 			}
+			cancelled = true;
 			error = "Map loading cancelled";
 		}
 		catch (const std::exception& failure) { error = failure.what(); }
 		catch (const DxException& failure) { error = WStringToString(failure.ToString()); }
-		Log::Warning("Bistro", error);
-		if (_measurementMap) _benchmark.RejectLaunch(error);
+		if (cancelled) Log::Info("Bistro", error);
+		else Log::Warning("Bistro", error);
+		if (_measurementMap) _benchmark.AbortLaunch(error, cancelled ? BistroBenchmark::Outcome::Cancelled : BistroBenchmark::Outcome::Failed);
 		ReturnToSettings(error);
 	}
 	void ReturnToSettings(const std::string& error = {})
@@ -411,6 +452,7 @@ class BistroApplication final : public App
 		}
 		if (!bMinimized) App::OnResize();
 		_resizePending = false;
+		_loadingScreen.reset();
 		Engine::UI::SetSettingsEditingEnabled(true);
 		_info.ShowSettings(completed || (failed && error.empty()), error);
 		SetCaptionTimingEnabled(true);
@@ -444,6 +486,8 @@ class BistroApplication final : public App
 		return key == VK_F1 || key == VK_F6 || key == VK_F7 || key == VK_F8;
 	}
 	uint64_t _legNumber = 0;
+	std::optional<BistroLoadingScreen> _loadingScreen;
+	BistroLoadingScreen::Phase _loadingPhase = BistroLoadingScreen::Renderer;
 	bool _measurementMap = false;
 	bool _settingsPresented = false, _windowChanged = false;
 	WINDOWPLACEMENT _savedPlacement{};

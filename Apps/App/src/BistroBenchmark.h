@@ -163,11 +163,11 @@ public:
     bool CanStart() const { return !_active && _action == Action::None; }
     void Launch(BistroRun::Launch launch, ConsoleModule& console);
     const BistroRun::Launch* PendingLaunch() const { return !_active && _action != Action::None ? &_launch : nullptr; }
-    void RejectLaunch(std::string error);
     double HudRemainingSeconds() const;
     const char* HudPhase() const;
     bool ManualGpuTimings() const { return _stage == Stage::Placement && _manualPlacement && _manualGpuTimings; }
     enum class Outcome { Completed, Failed, Cancelled };
+    void AbortLaunch(std::string message, Outcome outcome);
     std::optional<Outcome> TakeOutcome() { return std::exchange(_outcome, std::nullopt); }
     int RunPercent() const;
     bool Active() const { return _active; }
@@ -179,7 +179,11 @@ public:
     void Initialize(World& world, BistroCharacters::Scene& characters, BistroRenderPipeline& pipeline);
     void ReleaseScene();
     uint64_t LegNumber() const { return _legNumber; }
-    void RequestCancel() { if (_active) _action = Action::Cancel; }
+    void RequestCancel()
+    {
+        if (_active) _action = Action::Cancel;
+        else if (_action != Action::None) AbortLaunch("Map loading cancelled", Outcome::Cancelled);
+    }
     std::wstring Caption() const;
 
     void Update(World& world, ConsoleModule& console, RenderModule& render, BistroRenderPipeline& pipeline, ::Window& window);
