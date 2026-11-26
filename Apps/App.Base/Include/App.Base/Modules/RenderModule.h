@@ -48,13 +48,16 @@ class RenderModule final : public Module
 {
 public:
     RenderModule(Window* window, GameTimer* timer, std::unique_ptr<IRenderPipeline> pipeline,
-                 std::vector<DeviceDesc> adapters);
+                 std::vector<DeviceDesc> adapters, bool startInSettings = false);
     ~RenderModule() override;
 
     void Initialize() override;
     void Uninitialize() override;
 
     void OnResize();
+    void BeginSceneRendering();
+    void BeginSettingsRendering();
+    bool PresentSettings();
     void BeginFrame();
     void SetFrameGenerationSuspended(bool);
     const GDX12ReconstructionStatus& GetReconstructionStatus() const;
@@ -310,6 +313,8 @@ private:
     decltype(GpuOwners::Pipeline)& _pipeline = _gpu->Pipeline;
     std::uint64_t _frameSubmission = 0;
     bool _uiInitialized = false;
+    bool _settingsScene = false, _pipelineInitialized = false;
+    std::uint64_t _settingsFence = 0;
     bool _renderingSuspended = false;
     GDX12GPUTimer* PrimaryTimer() const;
     mutable bool _measureSkeletalPreparation = false;

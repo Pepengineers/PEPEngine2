@@ -105,6 +105,7 @@ protected:
     void Update(const GameTimer& gameTimer) override;
 
     void UpdatePhysics(World& world, float dt);
+    bool LoadWithProgress(const std::wstring& label, const std::function<void()>& load);
 
     JobSystem _jobs;
     MovementSystem _movement;
@@ -124,6 +125,7 @@ private:
     std::wstring _frameTimingCaption;
     std::unique_ptr<Window> _window;
     bool _initializing = true;
+    bool _closeAfterLoading = false;
     std::atomic<bool> _loadingCancelled{false};
     DWORD _windowThread = GetCurrentThreadId();
     std::wstring _loadingStage = L"Preparing renderer";

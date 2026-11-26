@@ -6,6 +6,7 @@
 #include "BistroCharacters.h"
 #include "Common/RuntimePaths.h"
 #include "Engine.Core/Logging/Logger.h"
+#include "Engine.RendererDX12/GDX12LocalLights.h"
 #include <cstdio>
 #include <sstream>
 
@@ -98,9 +99,48 @@ const char* BistroBenchmark::SectionName(size_t section)
     return names.at(section);
 }
 
-void BistroBenchmark::Launch(Action action, BistroPlacement::Profile profile)
+void BistroBenchmark::Launch(BistroRun::Launch launch, ConsoleModule& console)
 {
-    if (CanStart()) Request(action, profile);
+    if (!CanStart()) return;
+    const auto pages = console.FindConsoleVariable(L"Render.Shadows.Local.AtlasCount").GetUInt();
+    for (UINT page = 0; page < pages; ++page) RegisterLocalShadowPageSettings(page);
+    if (launch.Kind == BistroRun::Mode::Manual)
+    {
+        launch.Settings.clear();
+        for (const auto* variable : console.GetConsoleVariables())
+            launch.Settings.emplace_back(variable->GetName(), variable->GetString());
+    }
+    _launch = std::move(launch);
+    Request(_launch.Kind == BistroRun::Mode::Manual ? Action::PlacementRun :
+        _launch.Kind == BistroRun::Mode::Profile ? Action::MultiGPU : Action::Automatic, _launch.Profile);
+}
+
+void BistroBenchmark::RejectLaunch(std::string error)
+{
+    _action = Action::None;
+    _outcome = Outcome::Failed;
+    _message = std::move(error);
+    Log::Error("BistroBenchmark", _message);
+}
+
+double BistroBenchmark::HudRemainingSeconds() const
+{
+    if (_stage == Stage::Placement && !_manualPlacement)
+        return std::max(0., Seconds(Clock::now(), _placementDeadline) + FinishReserve);
+    if (TimedSearch()) return std::max(0., Remaining());
+    return std::max(0., LegWarmup() + _window.End - _preroll - _elapsed);
+}
+
+const char* BistroBenchmark::HudPhase() const
+{
+    if (_stage != Stage::Placement) return StageName();
+    if (_trial.InspectImage) return "Checking reconstruction modes";
+    if (!_placementInitialProbesReady) return "Preparing scene";
+    if (_manualPlacement) return Measuring() ? "Manual route" : "Route warmup";
+    if (_calibrating) return "Single GPU / baseline and route checkpoints";
+    if (_placementSearch.RemotePhase())
+        return _trial.Full ? "Multi-GPU / full confirmation" : "Multi-GPU / placement probe";
+    return _trial.Full ? "Single GPU / full confirmation" : "Single GPU / quality probe";
 }
 
 int BistroBenchmark::RunPercent() const
@@ -137,7 +177,11 @@ void BistroBenchmark::Stop(World& world, ConsoleModule& console, BistroRenderPip
 
 void BistroBenchmark::Initialize(World& world, BistroCharacters::Scene& characters, BistroRenderPipeline& pipeline)
 {
+    _route.emplace();
     _characters = &characters;
+    _startupLayout = 14695981039346656037ull;
+    _doors.fill(InvalidEntity);
+    _fountain = InvalidEntity;
     // Capture authored startup state before either simulation or interactive play can advance it.
     _replayScene = CaptureScene(world, pipeline);
     std::vector<std::string> bodies;
@@ -159,6 +203,7 @@ void BistroBenchmark::Initialize(World& world, BistroCharacters::Scene& characte
         for (unsigned char c : body) _startupLayout = (_startupLayout ^ c) * 1099511628211ull;
         _startupLayout = (_startupLayout ^ '\n') * 1099511628211ull;
     }
+    _startupDefault.reset();
     if (std::filesystem::exists(DefaultsPath())) _startupDefault = CurrentMask(ConsoleModule{});
     world.GetECS().ForEach<NameComponent>([&](Entity entity, const NameComponent& name)
     {
@@ -166,6 +211,28 @@ void BistroBenchmark::Initialize(World& world, BistroCharacters::Scene& characte
             if (name.value == BistroEntrance::Names[leaf]) _doors[leaf] = entity;
         if (name.value == "BistroEntranceFountain") _fountain = entity;
     });
+}
+
+void BistroBenchmark::ReleaseScene()
+{
+    _route.reset();
+    _characters = nullptr;
+    _replayScene = {};
+    _placementPhysics = {};
+    _initialScene = {};
+    _windowPhysics = {};
+    _extraPhysics = {};
+    _primaryProbes = {};
+    _extraProbes = {};
+    _activityProbes = {};
+    _checkpoints.clear();
+    _roundProbe = nullptr;
+    _scheduleEvidence.clear();
+    _placementSearch = BistroPlacement::Search{};
+    _measurementIndex.clear();
+    _measurementDefaults.clear();
+    _legMeasurements = {};
+    _trialMeasurements = {};
 }
 
 std::wstring BistroBenchmark::Caption() const
@@ -217,7 +284,7 @@ void BistroBenchmark::Update(World& world, ConsoleModule& console, RenderModule&
         }
         if (!_legDone && CheckPlacementDeadline(world, console, pipeline, Clock::now())) return;
         if (_legDone) CompleteLeg(world, console, render, pipeline);
-        if (!_active) return;
+        if (!_active || (_stage == Stage::Placement && _trial.InspectImage)) return;
 
         _routeTime = std::min(_window.End, _preroll + std::max(0., _elapsed - LegWarmup()));
         if (_stage == Stage::Baseline)
@@ -227,14 +294,14 @@ void BistroBenchmark::Update(World& world, ConsoleModule& console, RenderModule&
             CaptureCheckpoint(world, pipeline);
         }
         if (_stage == Stage::Placement && _calibrating) CapturePlacementWindows(world, pipeline);
-        if (_stage == Stage::Placement && !_trial.Full && _placementSearch.RemotePhase() &&
+        if (_stage == Stage::Placement && (ManualGpuTimings() || (!_trial.Full && _placementSearch.RemotePhase())) &&
             _placementInitialProbesReady && !_placementWaitsOpen && Measuring() && _routeTime < _window.End)
         {
             pipeline.BenchmarkSubmissions().BeginBenchmarkWaits();
             _placementWaitsOpen = true;
         }
         pipeline.SetBenchmarkTime(_routeTime, _warmup, _stage != Stage::Placement || !_manualPlacement,
-            _stage == Stage::Placement && !_manualPlacement && _placementInitialProbesReady && Measuring() && _routeTime < _window.End);
+            _stage == Stage::Placement && _placementInitialProbesReady && Measuring() && _routeTime < _window.End);
         const auto pose = Flight(float(_routeTime));
         auto& ecs = world.GetECS();
         auto& camera = ecs.Get<TransformComponent>(_camera);
@@ -267,6 +334,12 @@ void BistroBenchmark::FrameRendered(World& world, ConsoleModule& console, Render
             return;
         }
         if (_stage == Stage::Placement && CheckPlacementDeadline(world, console, pipeline, pipeline.PresentCompletedAt())) return;
+        if (_stage == Stage::Placement && _trial.InspectImage)
+        {
+            ObservePlacementImage(render, pipeline);
+            _legDone = true;
+            return;
+        }
         if (_stage == Stage::Placement && !_placementInitialProbesReady)
         {
             const auto [published, expected] = pipeline.GetWorldProbeReadiness();
@@ -359,26 +432,26 @@ void BistroBenchmark::SetFlightDuration(float seconds)
     if (moving < 1.)
         throw std::runtime_error("FlightSeconds must allow all painting stops plus at least one second of movement.");
     const float scale = float(moving / movingSeconds);
-    const float interior = _yellow.Distance(BistroBenchmarkRoute::EntryDoor, BistroBenchmarkRoute::ExitDoor);
-    const float exterior = 2 * _red.Distance() + _blue.Distance() + _yellow.Distance() - interior;
+    const float interior = _route->Yellow.Distance(BistroBenchmarkRoute::EntryDoor, BistroBenchmarkRoute::ExitDoor);
+    const float exterior = 2 * _route->Red.Distance() + _route->Blue.Distance() + _route->Yellow.Distance() - interior;
     const float outsidePace = exteriorSeconds * scale / exterior;
-    _red.SetPace([&](size_t) { return outsidePace; });
-    _blue.SetPace([&](size_t) { return outsidePace; });
-    _yellow.SetPace([&](size_t i)
+    _route->Red.SetPace([&](size_t) { return outsidePace; });
+    _route->Blue.SetPace([&](size_t) { return outsidePace; });
+    _route->Yellow.SetPace([&](size_t i)
     {
         return i > EntryDoor && i <= ExitDoor ? interiorSeconds * scale / interior : outsidePace;
     }, _paintingHold);
 
     constexpr size_t ArchEntrance = 4, ArchExit = 6, TreeStart = 9, TreeEnd = 21;
     constexpr size_t ReturnArchEntrance = 25, ReturnArchExit = 27;
-    const float streetPace = 20.f / _green.Distance();
+    const float streetPace = 20.f / _route->Green.Distance();
     constexpr float archPace = 1.f / 300.f, connectorPace = 1.f / 500.f;
-    const float street = _green.Distance(0, ArchEntrance) + _green.Distance(ReturnArchExit, std::size(Green) - 1);
-    const float arch = _green.Distance(ArchEntrance, ArchExit) + _green.Distance(ReturnArchEntrance, ReturnArchExit);
-    const float connectors = _green.Distance(ArchExit, TreeStart) + _green.Distance(TreeEnd, ReturnArchEntrance);
+    const float street = _route->Green.Distance(0, ArchEntrance) + _route->Green.Distance(ReturnArchExit, std::size(Green) - 1);
+    const float arch = _route->Green.Distance(ArchEntrance, ArchExit) + _route->Green.Distance(ReturnArchEntrance, ReturnArchExit);
+    const float connectors = _route->Green.Distance(ArchExit, TreeStart) + _route->Green.Distance(TreeEnd, ReturnArchEntrance);
     const float orbitSeconds = greenSeconds - street * streetPace - arch * archPace - connectors * connectorPace;
-    const float orbitPace = orbitSeconds / _green.Distance(TreeStart, TreeEnd);
-    _green.SetPace([&](size_t i)
+    const float orbitPace = orbitSeconds / _route->Green.Distance(TreeStart, TreeEnd);
+    _route->Green.SetPace([&](size_t i)
     {
         if (i <= ArchEntrance || i > ReturnArchExit) return streetPace * scale;
         if (i <= ArchExit || i > ReturnArchEntrance) return archPace * scale;
@@ -399,22 +472,22 @@ BistroBenchmark::Pose BistroBenchmark::Flight(float time) const
             pose.Forward = BlendDirection(pose.Forward, next.Sample(nextTime).Forward, blend);
         return pose;
     };
-    if (time < _red.Duration()) return _red.Sample(time);
-    time -= _red.Duration();
-    if (time < _blue.Duration()) return fly(_blue, _green, time, 0);
-    time -= _blue.Duration();
-    if (time < _green.Duration()) return fly(_green, _yellow, time, 0);
-    time -= _green.Duration();
-    if (time < _yellow.Duration()) return fly(_yellow, _red, time, _red.Duration());
-    return _red.Sample(_red.Duration() - (time - _yellow.Duration()));
+    if (time < _route->Red.Duration()) return _route->Red.Sample(time);
+    time -= _route->Red.Duration();
+    if (time < _route->Blue.Duration()) return fly(_route->Blue, _route->Green, time, 0);
+    time -= _route->Blue.Duration();
+    if (time < _route->Green.Duration()) return fly(_route->Green, _route->Yellow, time, 0);
+    time -= _route->Green.Duration();
+    if (time < _route->Yellow.Duration()) return fly(_route->Yellow, _route->Red, time, _route->Red.Duration());
+    return _route->Red.Sample(_route->Red.Duration() - (time - _route->Yellow.Duration()));
 }
 
 void BistroBenchmark::AnimateDoor(WorldECS& ecs, float time)
 {
-    const float yellowTime = time - (_red.Duration() + _blue.Duration() + _green.Duration());
+    const float yellowTime = time - (_route->Red.Duration() + _route->Blue.Duration() + _route->Green.Duration());
     const auto opening = [&](size_t threshold)
     {
-        const auto offset = yellowTime - _yellow.At(threshold);
+        const auto offset = yellowTime - _route->Yellow.At(threshold);
         return Ease((offset + 1.55f) / 1.15f) * Ease((1.55f - offset) / 1.15f);
     };
     const float swing = 85 * std::max(opening(BistroBenchmarkRoute::EntryDoor), opening(BistroBenchmarkRoute::ExitDoor));
@@ -478,14 +551,15 @@ double BistroBenchmark::Seconds(Clock::time_point begin, Clock::time_point end)
 
 void BistroBenchmark::Request(Action action, BistroPlacement::Profile profile)
 {
-    _requestedAt = Clock::now();
     _action = action;
     _placementProfile = profile;
 }
 
 const char* BistroBenchmark::StageName() const
 {
-    if (_stage == Stage::Placement) return _manualPlacement ? "Manual route" : _trial.Full ? "Full route" : "Placement window";
+    if (_stage == Stage::Placement)
+        return _manualPlacement ? "Manual route" : _trial.InspectImage ? "Image mode discovery" :
+            _trial.Full ? "Full route" : "Placement window";
     if (_roundNeedsControl && (_stage == Stage::Tiebreak || _stage == Stage::Elimination)) return "Short window control";
     constexpr std::array names{"Baseline", "Short window controls", "Control repeat", "Single transfers", "Combinations",
         "Neighbor masks", "Elimination expansion", "Boundary recheck", "Full route control repeat", "Finalist", "Full sweep"};
@@ -514,12 +588,12 @@ size_t BistroBenchmark::Phase(double time) const
 
 void BistroBenchmark::SetWindows()
 {
-    const double blue = _red.Duration();
-    const double green = blue + _blue.Duration();
-    const double yellow = green + _green.Duration();
-    const double entry = yellow + _yellow.At(BistroBenchmarkRoute::EntryDoor);
-    const double clouds = yellow + _yellow.At(10); // Painting C hosts CloudPicture.
-    const double returnFlight = yellow + _yellow.Duration();
+    const double blue = _route->Red.Duration();
+    const double green = blue + _route->Blue.Duration();
+    const double yellow = green + _route->Green.Duration();
+    const double entry = yellow + _route->Yellow.At(BistroBenchmarkRoute::EntryDoor);
+    const double clouds = yellow + _route->Yellow.At(10); // Painting C hosts CloudPicture.
+    const double returnFlight = yellow + _route->Yellow.Duration();
     const double paintingEnd = clouds + _paintingHold;
     _sections = {blue, green, entry, clouds, paintingEnd, returnFlight};
     _phaseEnds = {green, entry, clouds, Duration()};
@@ -530,16 +604,16 @@ void BistroBenchmark::SetWindows()
         return Window{begin, begin + length, weight};
     };
     _windows = {{
-        window(blue, green, blue + _blue.At(3), 1.5, green),
-        window(green, yellow, green + _green.At(4), 1.5, entry - green),
-        window(entry, clouds, yellow + _yellow.At(7), 1.5, clouds - entry),
+        window(blue, green, blue + _route->Blue.At(3), 1.5, green),
+        window(green, yellow, green + _route->Green.At(4), 1.5, entry - green),
+        window(entry, clouds, yellow + _route->Yellow.At(7), 1.5, clouds - entry),
         window(clouds, std::min(returnFlight, std::max(paintingEnd, clouds + 1.5)), clouds + .5, 1.5, Duration() - clouds),
     }};
     _extraWindows = {{
-        window(blue, green, blue + _blue.At(10), 2., _windows[0].Weight),
-        window(green, yellow, green + _green.At(13), 2., _windows[1].Weight),
+        window(blue, green, blue + _route->Blue.At(10), 2., _windows[0].Weight),
+        window(green, yellow, green + _route->Green.At(13), 2., _windows[1].Weight),
         window(entry, clouds, entry, 2., _windows[2].Weight),
-        window(paintingEnd, returnFlight, yellow + _yellow.At(16) + 1., 2., _windows[3].Weight),
+        window(paintingEnd, returnFlight, yellow + _route->Yellow.At(16) + 1., 2., _windows[3].Weight),
     }};
 }
 
@@ -550,9 +624,12 @@ BistroBenchmark::Config BistroBenchmark::EffectiveConfig(RenderModule& render)
     {
         return std::to_string(width) + "x" + std::to_string(height);
     };
+    const auto& image = render.GetReconstructionStatus();
     return {{"Render.Display.OutputResolution", dimensions(common.WindowWidth, common.WindowHeight)},
         {"Render.Display.InternalResolution", dimensions(common.DownscaledWidth, common.DownscaledHeight)},
-        {"Render.Upscaler.EffectiveProvider", std::to_string(int(render.GetReconstructionStatus().Effective))},
+        {"Render.Upscaler.EffectiveProvider", std::to_string(int(image.Effective))},
+        {"Render.Upscaler.EffectiveQuality", image.Effective == GDX12UpscalerProvider::Native ?
+            "n/a" : std::to_string(int(image.Requested.Quality))},
         {"Render.FrameGeneration.EffectiveProvider", std::to_string(int(render.GetFrameGenerationStatus().Effective))}};
 }
 
@@ -599,10 +676,32 @@ ConsoleVariablePatch BistroBenchmark::LocalAdapters(ConsoleModule& console)
 void BistroBenchmark::Start(World& world, ConsoleModule& console, RenderModule& render, BistroRenderPipeline& pipeline,
     ::Window& window, Action action)
 {
-    _multiGPU = action == Action::MultiGPU || action == Action::PlacementRun;
+    uint16_t width, height;
+    window.GetWindowSize(width, height);
+    if (IsIconic(window.GetWindowHandle()) || _launch.Output != BistroPlacement::Size{width, height})
+        throw std::runtime_error("Requested benchmark output size is unavailable");
+    std::vector<int> adapters;
+    auto& submissions = pipeline.BenchmarkSubmissions();
+    if (action == Action::MultiGPU)
+        for (int index : submissions.BenchmarkAdapterIndices(true))
+            if (submissions.SelectAdapter(index)) adapters.push_back(index);
+    _multiGPU = !adapters.empty();
     if (std::find(_doors.begin(), _doors.end(), InvalidEntity) != _doors.end())
         throw std::runtime_error("Both Bistro entrance door leaves are required");
-    _started = _requestedAt;
+    _started = Clock::now();
+    if (action == Action::PlacementRun)
+    {
+        // The selection was captured in the settings scene. Startup-only values
+        // are already locked and remain part of the reported configuration.
+        ConsoleVariablePatch changed;
+        for (const auto& [name, value] : _launch.Settings)
+        {
+            const auto& variable = console.FindConsoleVariable(name);
+            if (variable.GetString() != value && variable.GetFlags() == EConsoleVariableFlags::Default)
+                changed.emplace_back(name, value);
+        }
+        Apply(console, changed);
+    }
     _search = action == Action::Automatic || action == Action::Search || action == Action::Exhaustive;
     using BistroBenchmarkData::RunMode;
     _runMode = action == Action::PlacementRun ? RunMode::Manual : _search ? RunMode::Async :
@@ -649,13 +748,27 @@ void BistroBenchmark::Start(World& world, ConsoleModule& console, RenderModule& 
 
     auto directory = Engine::Core::GetExecutableDirectory() / "BenchmarkResults";
     if (_stage == Stage::Exhaustive) directory /= "Exhaustive";
-    if (_stage == Stage::Placement) directory /= _multiGPU ? "MultiGPU" : "SingleGPU";
+    if (_stage == Stage::Placement)
+        directory /= action == Action::PlacementRun ? "Manual" : _multiGPU ? "MultiGPU" : "SingleGPU";
     std::filesystem::create_directories(directory);
     const auto stamp = std::chrono::system_clock::now().time_since_epoch().count();
     const auto id = std::to_string(stamp) + "-" + std::to_string(GetCurrentProcessId()) + "-" + std::to_string(++_runId);
     _path = directory / ("bistro-" + id + ".csv");
     _csv.Open(_path);
     _csv.Config("RunId", id);
+    _csv.Config("MapId", _launch.Level->Id);
+    _csv.Config("RouteId", _launch.Level->Route);
+    _csv.Config("RequestedOutput", std::to_string(_launch.Output.first) + "x" + std::to_string(_launch.Output.second));
+    _csv.Config("PrimaryAdapter", submissions.AdapterLabel(0));
+    if (action == Action::MultiGPU)
+    {
+        _csv.Config("AllowUpscalers", _launch.AllowUpscalers ? "true" : "false");
+        for (int index : submissions.BenchmarkAdapterIndices(true))
+        {
+            const bool eligible = std::find(adapters.begin(), adapters.end(), index) != adapters.end();
+            _csv.Config(eligible ? "EligiblePeer" : "UnavailablePeer", submissions.AdapterLabel(index + 1));
+        }
+    }
     for (const auto& [name, value] : RenderConfig(console))
         _csv.Config("Before." + std::filesystem::path(name).u8string(), value);
     for (const auto& [name, value] : EffectiveConfig(render))
@@ -687,7 +800,7 @@ void BistroBenchmark::Start(World& world, ConsoleModule& console, RenderModule& 
     BistroRender::SceneTextureInspector::SetVisible(false);
     if (_stage == Stage::Placement)
     {
-        StartPlacement(world, console, render, pipeline, window, action == Action::PlacementRun);
+        StartPlacement(world, console, render, pipeline, adapters, action == Action::PlacementRun);
         return;
     }
     if (_search)
@@ -1444,6 +1557,15 @@ void BistroBenchmark::Finish(World& world, ConsoleModule& console, BistroRenderP
             if (_trialPending) WritePlacementTrialReport(pipeline, status);
             if (!_manualPlacement)
                 _placementSearch.Report(_csv, status, console, _path);
+            const auto* winner = _manualPlacement ? nullptr : _placementSearch.Winner();
+            const char* finalStatus = "no confirmed result";
+            if (outcome == Outcome::Cancelled) finalStatus = "cancelled";
+            else if (winner) finalStatus = winner->Fps >= BistroPlacement::Threshold[_placementProfile] ? "target reached" : "reserve";
+            else if (_manualPlacement && outcome == Outcome::Completed && _trialResult.Valid && _trialCompletedPasses)
+                finalStatus = "completed";
+            _csv.Config("FinalStatus", finalStatus);
+            if (winner) _csv.Config("WinningTrial", std::to_string(winner->Id));
+            if (!winner && outcome == Outcome::Completed && !_manualPlacement) outcome = Outcome::Failed;
             _csv.Config("StopReason", status);
             _csv.Config("ElapsedSeconds", Csv::Number(SecondsSince(_started)));
         }
@@ -1501,33 +1623,13 @@ void BistroBenchmark::Finish(World& world, ConsoleModule& console, BistroRenderP
         timedWinner = false;
         status = "deadline";
     }
-    if (_placementWindow)
-    {
-        const auto* window = std::exchange(_placementWindow, nullptr);
-        try { RestoreSettings(console, selected); }
-        catch (const std::exception& failure) { error = failure.what(); }
-        const auto hwnd = window->GetWindowHandle();
-        if (_placementBorderless)
-        {
-            SetLastError(ERROR_SUCCESS);
-            if ((!SetWindowLongPtrW(hwnd, GWL_STYLE, _placementWindowStyle & ~WS_MAXIMIZE) &&
-                 GetLastError() != ERROR_SUCCESS) && error.empty())
-                error = "Cannot restore Bistro window style";
-            if (!SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED) && error.empty())
-                error = "Cannot restore Bistro window frame";
-        }
-        if (!SetWindowPlacement(hwnd, &_placementRestore) && error.empty())
-            error = "Cannot restore Bistro window placement";
-    }
     try
     {
-        if (_stage != Stage::Placement || _manualPlacement) RestoreSettings(console, selected);
+        RestoreSettings(console, _stage == Stage::Exhaustive ? selected : std::nullopt);
         if (timedWinner && Remaining() <= 0)
         {
             selected = defaultMask;
             timedWinner = false;
-            RestoreSettings(console, selected);
             status = "deadline";
         }
         if (TimedSearch()) _csv.Result(selected.value_or(_userMask), SecondsSince(_started), status);
@@ -1536,7 +1638,6 @@ void BistroBenchmark::Finish(World& world, ConsoleModule& console, BistroRenderP
         {
             selected = defaultMask;
             timedWinner = false;
-            RestoreSettings(console, selected);
             status = "deadline while closing CSV";
             _csv.AppendResult(_path, *selected, SecondsSince(_started), status);
         }

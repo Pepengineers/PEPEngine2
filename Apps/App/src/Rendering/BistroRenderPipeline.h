@@ -31,6 +31,7 @@ class BistroRenderPipeline final : public IRenderPipeline
 		}
 	}
 	void UpdateFrameSettings(RenderPipelineContext&) override;
+	void UsePrimaryPresentation(RenderPipelineContext& c) override;
 	void ResetWorldHistory() override
 	{
 		if (_post)
@@ -117,6 +118,7 @@ class BistroRenderPipeline final : public IRenderPipeline
 	void PauseIndependentClocks();
 
   private:
+	void RefreshPostBindings();
 	bool _observePlacement = false;
 	std::vector<FrameLink> _benchmarkLinks;
 	std::vector<BistroRender::SimulationPublication> _benchmarkSimulations;

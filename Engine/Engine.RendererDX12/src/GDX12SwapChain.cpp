@@ -11,7 +11,7 @@
 
 GDX12SwapChain::GDX12SwapChain(GDX12Device* device, const HWND hwnd,
     const DXGI_FORMAT format, const UINT bufferCount, const UINT width, const UINT height, bool applySettings)
-    : bVSyncEnabled(false), _device(device),
+    : _device(device),
     _rtvHeap(std::make_unique<GDX12DescriptorHeap>(device, D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
         bufferCount, D3D12_DESCRIPTOR_HEAP_FLAG_NONE)),
     _format(format), _bufferCount(bufferCount), _currentBufferIndex(0), _hwnd(hwnd),
@@ -91,7 +91,7 @@ void GDX12SwapChain::CreateBuffers()
     }
 }
 
-void GDX12SwapChain::Resize(const UINT width, const UINT height)
+void GDX12SwapChain::Resize(const UINT width, const UINT height, bool applySettings)
 {
     if (!width || !height || (_width == width && _height == height)) return;
 
@@ -100,13 +100,13 @@ void GDX12SwapChain::Resize(const UINT width, const UINT height)
     _width = width;
     _height = height;
 
-    CreatePresentation(true);
+    CreatePresentation(applySettings);
 }
 
-bool GDX12SwapChain::Present()
+bool GDX12SwapChain::Present(bool vsync)
 {
-    UINT syncInterval = bVSyncEnabled ? 1 : 0;
-    UINT presentFlags = bVSyncEnabled ? 0 : DXGI_PRESENT_ALLOW_TEARING;
+    const UINT syncInterval = vsync ? 1 : 0;
+    const UINT presentFlags = vsync ? 0 : DXGI_PRESENT_ALLOW_TEARING;
     _frameGeneration->BeforePresent();
     const auto result = GetPresentationSwapChain()->Present(syncInterval, presentFlags);
     ThrowIfFailed(result);

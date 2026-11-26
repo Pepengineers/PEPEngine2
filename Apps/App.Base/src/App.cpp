@@ -167,6 +167,28 @@ void App::ReportLoading(const std::wstring& stage)
     if (!ContinueLoading()) throw std::runtime_error("Scene loading cancelled");
 }
 
+bool App::LoadWithProgress(const std::wstring& label, const std::function<void()>& load)
+{
+    _initializing = true;
+    _loadingCancelled = false;
+    _loadingStarted = GetTickCount64();
+    try
+    {
+        ReportLoading(label);
+        load();
+    }
+    catch (...)
+    {
+        _initializing = false;
+        if (!_loadingCancelled) throw;
+    }
+    _initializing = false;
+    if (_closeAfterLoading) PostMessageW(_window->GetWindowHandle(), WM_CLOSE, 0, 0);
+    const bool completed = !_loadingCancelled;
+    _loadingCancelled = false;
+    return completed;
+}
+
 bool App::ContinueLoading()
 {
     if (GetCurrentThreadId() == _windowThread && _initializing)
@@ -285,6 +307,7 @@ LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     {
         if (msg == WM_CLOSE || (msg == WM_KEYUP && wParam == VK_ESCAPE))
         {
+            if (msg == WM_CLOSE) _closeAfterLoading = true;
             _loadingCancelled = true;
             _loadingStage = L"Cancelling loading...";
             SetWindowTextW(hwnd, _loadingStage.c_str());

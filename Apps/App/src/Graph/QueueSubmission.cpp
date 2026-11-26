@@ -168,6 +168,34 @@ std::vector<QueueSubmission::BenchmarkPacket> QueueSubmission::TakeBenchmarkPack
     return std::exchange(_benchmarkPackets, {});
 }
 
+std::vector<QueueSubmission::PacketInterval> QueueSubmission::ReadBenchmarkIntervals(
+    uint64_t& epoch, size_t& cursor, bool consume)
+{
+    std::vector<PacketInterval> intervals;
+    if (!BenchmarkEpoch()) return intervals;
+    std::lock_guard lock(_mutex);
+    const auto active = BenchmarkEpoch();
+    if (epoch != active)
+    {
+        epoch = active;
+        cursor = 0;
+    }
+    if (!active) return intervals;
+    for (; cursor < _benchmarkPackets.size(); ++cursor)
+    {
+        const auto& packet = _benchmarkPackets[cursor];
+        if (packet.Token && packet.Calibrated && packet.BeginMs > 0 && packet.EndMs > packet.BeginMs)
+            intervals.push_back({packet.Token.Device, packet.BeginMs, packet.EndMs});
+    }
+    // Search owns the detailed packets until it has ranked the probe. A manual run only draws them.
+    if (consume)
+    {
+        _benchmarkPackets.clear();
+        cursor = 0;
+    }
+    return intervals;
+}
+
 std::vector<int> QueueSubmission::BenchmarkAdapterIndices(bool includeUnavailable) const
 {
     std::lock_guard lock(_mutex);

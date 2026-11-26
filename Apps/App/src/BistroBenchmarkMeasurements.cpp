@@ -18,7 +18,7 @@ void BistroBenchmark::OpenPlacementMeasurements(const std::string& conditions)
             unsigned version = 0, profile = 0;
             std::string saved, line;
             if (!(input >> version >> profile >> std::quoted(saved)) || version != 1 ||
-                profile > BistroPlacement::Quality || profile == _placementProfile || saved != conditions) continue;
+                profile > BistroPlacement::Quality || saved != conditions) continue;
             std::getline(input, line);
             for (auto offset = input.tellg(); std::getline(input, line); offset = input.tellg())
             {
@@ -42,7 +42,7 @@ std::string BistroBenchmark::PlacementMeasurementKey(const BistroRenderPipeline&
     const auto& s = _trial.Settings;
     std::ostringstream key;
     key << std::setprecision(17) << _trial.Full << ' ' << _placementWindowIndex << ' ' << _window.Begin << ' ' <<
-        _window.End << ' ' << s.Resolution << ' ' << s.Provider << ' ' << s.Preset << ' ' << int(s.ProbeFrequency)
+        _window.End << ' ' << s.Provider << ' ' << s.Preset << ' ' << int(s.ProbeFrequency)
         << ' ' << s.ProbeCapture << ' ' << s.ProbeDelivery << ' ' << s.RemoteAOFilter;
     for (auto level : s.Levels) key << ' ' << int(level);
     for (size_t i = 0; i < s.Owners.size(); ++i) key << ' ' << s.Owners[i] << '/' << s.Sync[i];

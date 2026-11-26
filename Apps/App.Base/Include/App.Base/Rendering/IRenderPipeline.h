@@ -36,6 +36,7 @@ public:
     virtual std::pair<size_t, size_t> GetWorldProbeReadiness() const { return {}; }
     // Before frame constants/camera uploads, so a changed render grid applies to the same frame.
     virtual void UpdateFrameSettings(RenderPipelineContext&) {}
+    virtual void UsePrimaryPresentation(RenderPipelineContext&) {}
     virtual void PrepareFrame(RenderPipelineContext&) = 0;
     virtual void RebuildExecution(RenderPipelineContext&) {}
     virtual void DrainExecution() {}

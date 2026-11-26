@@ -5,19 +5,18 @@
 #include <filesystem>
 #include <ios>
 #include <map>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
+
+struct ImFont;
 
 class BistroComparePanel
 {
   public:
     void UpdateHistory(const std::filesystem::path& latestCompleted, bool force = false);
-    bool LatestQuality(const char* mode) const;
-    bool LatestSingleGpuIsAsync() const;
-    void DrawLatest(const char* mode, const char* profile, bool& fps, bool canApply,
-        std::filesystem::path& pendingPreset, std::pair<uint16_t, uint16_t>& pendingSize);
-    void Draw(const std::filesystem::path& latestCompleted);
+    void DrawHistory(const std::filesystem::path& latestCompleted, std::filesystem::path& pendingPreset, ImFont* headingFont);
 
   private:
     struct Window
@@ -37,9 +36,10 @@ class BistroComparePanel
     {
         Values Fields, Techniques, GpuSettings;
     };
-    struct Winner
+    struct Winner : PlacementResult
     {
-        Values Fields, Settings;
+        Values Settings;
+        std::vector<std::string> Improvements;
         std::array<PlacementResult, 2> Placements;
         int RunIndex = -1, PassIndex = -1;
     };
@@ -47,7 +47,9 @@ class BistroComparePanel
     {
         std::filesystem::path Path;
         std::filesystem::file_time_type Modified;
-        std::string Label, Mode, Profile;
+        std::string Label, Mode, Profile, MapId, RouteId, FinalStatus, SelectedImage;
+        std::string MapName, DisplayMode, Output, Timestamp;
+        std::optional<double> SummaryFps, MinimumFps;
         bool AfterRender = false;
         Values Settings, Before, TrialPasses, MaskBits;
         std::array<Winner, 2> Winners;
@@ -60,7 +62,8 @@ class BistroComparePanel
         std::string Mode, Error;
         Window Range;
         bool AfterRender = false;
-        std::map<std::string, std::string> Settings;
+        PlacementResult Observed;
+        Values Settings;
         struct Sample
         {
             double RouteSeconds, IntervalMs, FrameMs;
@@ -74,17 +77,24 @@ class BistroComparePanel
     };
     void Refresh(bool force);
     bool _upscaled = false;
+    ImFont* _headingFont = nullptr;
     void Select(Selection &, int run, int pass);
     void DrawSelection(Selection &, size_t index);
     static void DrawPlot(const Selection* series, size_t count, bool fps, double target = 0);
     static void DrawPlacementComparison(const Winner& winner);
-    using Filter = std::pair<std::string, std::string>;
-    std::filesystem::file_time_type LatestTime(const Filter& filter) const;
-    std::map<Filter, std::filesystem::file_time_type> _completed;
-    std::map<Filter, Selection> _lastPass;
+    static void DrawTechniques(const PlacementResult& before, const PlacementResult& after,
+        const char* title, const char* left, const char* right);
+    void DrawRun(int index, std::filesystem::path& pendingPreset);
+    int DrawRunList(bool compact);
+    void DrawComparison();
+    Selection _lastPass;
+    std::filesystem::path _historyPath, _imageRun;
+    bool _showComparison = false, _runFps = false;
     bool _loadComparison = false;
     std::string _openError;
     std::vector<Run> _runs;
+    std::array<std::vector<std::string>, 3> _filterOptions;
+    std::array<std::string, 3> _filters;
     std::array<Selection, 2> _selected;
     bool _fps = false, _indexed = false;
     std::filesystem::path _latestCompleted;

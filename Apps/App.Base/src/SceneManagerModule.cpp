@@ -30,8 +30,11 @@ void SceneManagerModule::Initialize()
     Uninitialize();
     if (_scenePath.empty()) return;
 
-    const std::filesystem::path& scenePath = _scenePath;
+    LoadMap(_scenePath);
+}
 
+void SceneManagerModule::LoadMap(const std::filesystem::path& scenePath)
+{
     if (!LoadWorld(scenePath))
     {
         Log::Error("Scene", "Failed to load world: ", scenePath);

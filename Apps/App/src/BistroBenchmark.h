@@ -3,6 +3,7 @@
 #include "App.Base/ECS/World.h"
 #include "BistroBenchmarkRoute.h"
 #include "BistroBenchmarkCsv.h"
+#include "BistroBenchmarkLaunch.h"
 #include "BistroPlacementSearch.h"
 #include "BistroProbeFreshness.h"
 #include "Rendering/BistroRenderPipeline.h"
@@ -160,18 +161,23 @@ public:
     double BaseWarmup() const { return _active ? _warmup : WarmupSeconds.GetValue(); }
     float PaintingHold() const { return _active ? _paintingHold : PaintingHoldSeconds.GetValue(); }
     bool CanStart() const { return !_active && _action == Action::None; }
-    void Launch(Action action, BistroPlacement::Profile profile = BistroPlacement::Performance);
+    void Launch(BistroRun::Launch launch, ConsoleModule& console);
+    const BistroRun::Launch* PendingLaunch() const { return !_active && _action != Action::None ? &_launch : nullptr; }
+    void RejectLaunch(std::string error);
+    double HudRemainingSeconds() const;
+    const char* HudPhase() const;
+    bool ManualGpuTimings() const { return _stage == Stage::Placement && _manualPlacement && _manualGpuTimings; }
     enum class Outcome { Completed, Failed, Cancelled };
     std::optional<Outcome> TakeOutcome() { return std::exchange(_outcome, std::nullopt); }
     int RunPercent() const;
     bool Active() const { return _active; }
 
     static std::filesystem::path DefaultsPath();
-    void RequestAutomatic() { if (!_active) Request(Action::Automatic); }
     static int QueueGroup(std::string_view name);
     void Stop(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline, const char* status = "cancelled");
 
     void Initialize(World& world, BistroCharacters::Scene& characters, BistroRenderPipeline& pipeline);
+    void ReleaseScene();
     uint64_t LegNumber() const { return _legNumber; }
     void RequestCancel() { if (_active) _action = Action::Cancel; }
     std::wstring Caption() const;
@@ -182,7 +188,10 @@ public:
 private:
     static float Ease(float t);
     static Vector3 BlendDirection(Vector3 a, Vector3 b, float t);
-    float Duration() const { return 2 * _red.Duration() + _blue.Duration() + _green.Duration() + _yellow.Duration(); }
+    float Duration() const
+    {
+        return 2 * _route->Red.Duration() + _route->Blue.Duration() + _route->Green.Duration() + _route->Yellow.Duration();
+    }
 
     void SetFlightDuration(float seconds);
     Pose Flight(float time) const;
@@ -214,7 +223,8 @@ private:
     static ConsoleVariablePatch LocalAdapters(ConsoleModule& console);
 
     void StartPlacement(World& world, ConsoleModule& console, const RenderModule& render,
-        BistroRenderPipeline& pipeline, ::Window& window, bool manual);
+        BistroRenderPipeline& pipeline, const std::vector<int>& adapters, bool manual);
+    void ObservePlacementImage(RenderModule& render, BistroRenderPipeline& pipeline);
     void BeginPlacementTrial(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline,
         BistroPlacement::Trial trial, bool first = false);
     void CapturePlacementWindows(World& world, BistroRenderPipeline& pipeline);
@@ -290,8 +300,12 @@ private:
         std::optional<unsigned> selected = {}, double gain = 0, Outcome outcome = Outcome::Completed);
     void Fail(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline, std::string error);
 
-    Shot _red{BistroBenchmarkRoute::Red}, _blue{BistroBenchmarkRoute::Blue};
-    Shot _green{BistroBenchmarkRoute::Green}, _yellow{BistroBenchmarkRoute::Yellow};
+    struct Route
+    {
+        Shot Red{BistroBenchmarkRoute::Red}, Blue{BistroBenchmarkRoute::Blue};
+        Shot Green{BistroBenchmarkRoute::Green}, Yellow{BistroBenchmarkRoute::Yellow};
+    };
+    std::optional<Route> _route;
     std::array<Entity, BistroEntrance::Names.size()> _doors{InvalidEntity, InvalidEntity};
     Entity _fountain = InvalidEntity, _camera = InvalidEntity;
     Pose _previousPose{};
@@ -303,6 +317,7 @@ private:
     PhysicsStates _windowPhysics, _extraPhysics;
     BistroCharacters::Scene* _characters = nullptr;
     std::optional<Outcome> _outcome;
+    BistroRun::Launch _launch;
     Action _action = Action::None;
     BistroPlacement::Profile _placementProfile = BistroPlacement::Performance;
     Stage _stage = Stage::Baseline;
@@ -312,7 +327,7 @@ private:
     size_t _windowIndex = 0;
     double _elapsed = 0, _routeTime = 0, _preroll = 0, _finalReserve = 0, _probeScale = 1;
     double _meanThreshold = .01, _p95Threshold = .02;
-    Clock::time_point _requestedAt, _started, _legStarted, _frameStart, _lastPresent, _probeStarted;
+    Clock::time_point _started, _legStarted, _frameStart, _lastPresent, _probeStarted;
     std::filesystem::path _path;
     Csv _csv;
     Window _window{};
@@ -349,16 +364,11 @@ private:
     float _paintingHold = 5;
     bool _multiGPU = false;
     bool _inspectorWasVisible = false;
-    bool _manualPlacement = false, _calibrating = false, _placementWaitsOpen = false;
+    bool _manualPlacement = false, _manualGpuTimings = false, _calibrating = false, _placementWaitsOpen = false;
     bool _placementInitialProbesReady = false;
     BistroRender::CompletionToken _placementPreparationFence;
     unsigned _placementPhase = 0;
     size_t _placementWindowIndex = 0, _trialWindowCount = 0;
-    ::Window* _placementWindow = nullptr;
-    WINDOWPLACEMENT _placementRestore{};
-    RECT _placementMonitor{};
-    LONG_PTR _placementWindowStyle = 0;
-    bool _placementBorderless = false;
     Clock::time_point _trialStarted, _placementLegStarted, _placementDeadline, _singleDeadline, _phaseDeadline;
     double _placementSetupReserve = 2;
     std::array<std::function<void()>, 8> _placementPhysics;

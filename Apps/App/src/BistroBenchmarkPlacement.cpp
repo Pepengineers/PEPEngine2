@@ -1,5 +1,4 @@
 #include "BistroBenchmark.h"
-#include "App.Base/Window.h"
 #include "BistroCharacters.h"
 #include "Components/FluidRenderComponent.h"
 #include "Engine.Core/Logging/Logger.h"
@@ -9,16 +8,14 @@
 #include <sstream>
 
 void BistroBenchmark::StartPlacement(World& world, ConsoleModule& console, const RenderModule& render,
-    BistroRenderPipeline& pipeline, ::Window& window, bool manual)
+    BistroRenderPipeline& pipeline, const std::vector<int>& adapters, bool manual)
 {
-    using BistroPlacement::Size;
     _manualPlacement = manual;
+    _manualGpuTimings = manual && !pipeline.BenchmarkSubmissions().BenchmarkAdapterIndices().empty();
     _placementPhase = 0;
     _calibrating = !manual;
-    _placementWindow = nullptr;
-    _placementBorderless = false;
     _placementPhysics = {};
-    _placementSearch = BistroPlacement::Search(_placementProfile);
+    _placementSearch = BistroPlacement::Search(_placementProfile, _launch.Level->Techniques);
     _placementSetupReserve = 2;
     _trial = {};
     _placementWaitsOpen = false;
@@ -28,29 +25,11 @@ void BistroBenchmark::StartPlacement(World& world, ConsoleModule& console, const
         _csv.Config("MinimumFps", Csv::Number(BistroPlacement::Threshold[_placementProfile]));
     }
     _initialScene = CaptureScene(world, pipeline);
-    ConsoleVariablePatch patch{{L"Render.FrameGeneration.Provider", "0"}, {L"Render.Sky.SunCycle.Enabled", "false"}};
     if (!manual)
     {
+        ConsoleVariablePatch patch{{L"Render.FrameGeneration.Provider", "0"}, {L"Render.Sky.SunCycle.Enabled", "false"}};
         if (world.GetECS().GetPool<RigidBodyComponent>().Size() != _startupBodies)
             throw std::runtime_error("Cannot replay the Bistro startup scene after changing its physics bodies");
-        uint16_t width, height;
-        window.GetWindowSize(width, height);
-        if (!width || !height || IsIconic(window.GetWindowHandle()))
-            throw std::runtime_error("Restore the Bistro window before searching profiles");
-        _placementRestore = {};
-        _placementRestore.length = sizeof(_placementRestore);
-        if (!GetWindowPlacement(window.GetWindowHandle(), &_placementRestore))
-            throw std::runtime_error("Cannot save Bistro window placement");
-        _placementWindow = &window;
-        _placementWindowStyle = GetWindowLongPtrW(window.GetWindowHandle(), GWL_STYLE);
-        MONITORINFOEXW monitor{};
-        monitor.cbSize = sizeof(monitor);
-        const auto handle = MonitorFromWindow(window.GetWindowHandle(), MONITOR_DEFAULTTONEAREST);
-        if (!GetMonitorInfoW(handle, &monitor))
-            throw std::runtime_error("Cannot determine the Bistro monitor size");
-        _placementMonitor = monitor.rcMonitor;
-        const Size screen{unsigned(_placementMonitor.right - _placementMonitor.left),
-            unsigned(_placementMonitor.bottom - _placementMonitor.top)};
         std::set<std::wstring> shadowNames;
         world.GetECS().ForEach<NameComponent, LightComponent>([&](Entity, const NameComponent& name, const LightComponent& light)
         {
@@ -64,20 +43,8 @@ void BistroBenchmark::StartPlacement(World& world, ConsoleModule& console, const
             fixedWaterSubsteps &= fluid.GetSettings().MaxSubsteps != 0;
         });
         auto& submissions = pipeline.BenchmarkSubmissions();
-        const auto physicalPeers = submissions.BenchmarkAdapterIndices(true);
-        std::vector<int> adapters;
-        for (const int index : physicalPeers)
-        {
-            if (_multiGPU && !submissions.SelectAdapter(index))
-            {
-                _csv.Config("UnavailablePeer", submissions.AdapterLabel(index + 1) + ": cross-adapter device or fence unavailable");
-                continue;
-            }
-            adapters.push_back(index);
-            if (_multiGPU) _csv.Config("EligiblePeer", submissions.AdapterLabel(index + 1));
-        }
-        _placementSearch.Start(console, screen, adapters, _multiGPU, fixedWaterSubsteps,
-            render.UsesSkinningPoseRatePreset(), shadowNames, _csv);
+        _placementSearch.Start(console, _launch.Output, adapters, _multiGPU, fixedWaterSubsteps,
+            render.UsesSkinningPoseRatePreset(), shadowNames, _csv, _launch.AllowUpscalers);
         const auto local = LocalAdapters(console);
         patch.insert(patch.end(), local.begin(), local.end());
         const auto controlled = _placementSearch.ControlledSettings();
@@ -86,10 +53,11 @@ void BistroBenchmark::StartPlacement(World& world, ConsoleModule& console, const
         if (!exeLength || exeLength == std::size(executable))
             throw std::runtime_error("Cannot identify benchmark executable");
         std::ostringstream conditions;
-        conditions << "bistro-baseline-v13 measurement-" << BistroBenchmarkData::MeasurementVersion << ' ' <<
+        conditions << "fixed-output-v1 measurement-" << BistroBenchmarkData::MeasurementVersion << ' ' <<
+            std::quoted(_launch.Level->Id) << ' ' << std::quoted(_launch.Level->Route) << ' ' <<
+            _launch.Output.first << 'x' << _launch.Output.second << ' ' << _launch.AllowUpscalers << ' ' <<
             std::setprecision(17) << Duration() << ' ' << _paintingHold << ' ' << _warmup << ' ' <<
             std::filesystem::last_write_time(executable).time_since_epoch().count() << ' ' <<
-            std::quoted(std::filesystem::path(monitor.szDevice).u8string()) << ' ' <<
             world.GetTimeScale() << ' ' << _characters->Seed() << ' ' << _startupLayout << ' ' <<
             fixedWaterSubsteps << ' ' << render.UsesSkinningPoseRatePreset();
         const auto identifyAdapter = [&](BistroRender::Id id)
@@ -98,15 +66,13 @@ void BistroBenchmark::StartPlacement(World& world, ConsoleModule& console, const
             conditions << ' ' << std::quoted(submissions.AdapterLabel(id)) << ' ' << luid.HighPart << ' ' << luid.LowPart;
         };
         identifyAdapter(0);
-        for (const int index : physicalPeers) identifyAdapter(index + 1);
+        for (const int index : adapters) identifyAdapter(index + 1);
         for (const auto& name : shadowNames) conditions << ' ' << std::quoted(std::filesystem::path(name).u8string());
         for (size_t i = 0; i < _placementPhysics.size(); ++i)
         {
             const auto window = PlacementWindow(i);
             conditions << ' ' << window.Begin << ' ' << window.End;
         }
-        for (const auto& [outputWidth, outputHeight] : _placementSearch.Resolutions())
-            conditions << ' ' << outputWidth << 'x' << outputHeight;
         for (size_t technique = 0; technique < std::size(BistroPlacement::Techniques); ++technique)
             for (auto level : {BistroPlacement::Off, BistroPlacement::Low, BistroPlacement::Medium, BistroPlacement::High, BistroPlacement::Epic})
                 conditions << ' ' << _placementSearch.QualityValue(technique, level);
@@ -146,10 +112,10 @@ void BistroBenchmark::StartPlacement(World& world, ConsoleModule& console, const
             Finish(world, console, pipeline, "full route does not fit in budget", {}, 0, Outcome::Failed);
             return;
         }
+        if (const auto result = console.ApplyPatch(patch, &_previous); !result.Error.empty())
+            throw std::runtime_error(result.Error);
     }
     else _trial = {1, {}, "current settings", true};
-    if (const auto result = console.ApplyPatch(patch, &_previous); !result.Error.empty())
-        throw std::runtime_error(result.Error);
     BeginPlacementTrial(world, console, pipeline, _trial, true);
 }
 
@@ -177,45 +143,38 @@ void BistroBenchmark::BeginPlacementTrial(World& world, ConsoleModule& console, 
     _trialPending = true;
     _trialPrefix = "Trial." + std::to_string(_trial.Id) + ".";
     _csv.Config(_trialPrefix + "Source", _trial.Source);
-    _csv.Config(_trialPrefix + "Scope", _trial.Full ? "full route" : "common windows");
-    _csv.Config(_trialPrefix + "PacketTimingRequested", !_trial.Full && _placementSearch.RemotePhase() ? "true" : "false");
+    _csv.Config(_trialPrefix + "Scope", _trial.InspectImage ? "image mode discovery" : _trial.Full ? "full route" : "common windows");
+    _csv.Config(_trialPrefix + "PacketTimingRequested",
+        ManualGpuTimings() || (!_trial.Full && _placementSearch.RemotePhase()) ? "true" : "false");
     const auto shadowCeiling = _manualPlacement ? console.FindConsoleVariable(L"Render.Shadows.Local.Resolution").GetInt() :
         _placementSearch.QualityValue(BistroPlacement::LocalShadowQuality, _trial.Settings.Levels[BistroPlacement::LocalShadowQuality]);
     _csv.Config(_trialPrefix + "RequestedLocalShadowCeiling", std::to_string(shadowCeiling));
     if (!_manualPlacement)
     {
         if (!first) Apply(console, _placementSearch.Patch(_trial.Settings));
+        if (_trial.InspectImage)
+        {
+            // Render one frame with this provider. Its SDK chooses the internal
+            // grid; no route sample, physics reset or cache entry is produced.
+            _legOpen = _legDone = _frameConfigPending = false;
+            _csv.Config(_trialPrefix + "Render.Upscaler.Provider", std::to_string(_trial.Settings.Provider));
+            _csv.Config(_trialPrefix + "Render.Upscaler.Quality", std::to_string(_trial.Settings.Preset));
+            return;
+        }
         pipeline.ResetBenchmarkProbeCaptures();
-        const auto [width, height] = _placementSearch.Resolution(_trial.Settings);
+        const auto [width, height] = _placementSearch.Output();
         if (_placementSearch.LowFirst() || _placementSearch.HighFirst())
             Log::Info("BistroBenchmark", "SingleGPU ", BistroPlacement::ProfileName[_placementProfile], " trial ", _trial.Id, "; ", _trial.Source,
                 "; requested output=", width, "x", height, "; provider=", _trial.Settings.Provider,
                 "; preset=", _trial.Settings.Preset);
-        const auto hwnd = _placementWindow->GetWindowHandle();
-        const bool changeStyle = !_placementBorderless;
-        if (changeStyle)
-        {
-            if (IsZoomed(hwnd)) ShowWindow(hwnd, SW_RESTORE);
-            const auto style = (_placementWindowStyle & ~(WS_OVERLAPPEDWINDOW | WS_MAXIMIZE)) | WS_POPUP;
-            SetLastError(ERROR_SUCCESS);
-            if (!SetWindowLongPtrW(hwnd, GWL_STYLE, style) && GetLastError() != ERROR_SUCCESS)
-                throw std::runtime_error("Cannot switch Bistro to a borderless measurement window");
-            _placementBorderless = true;
-        }
-        uint16_t currentWidth, currentHeight;
-        _placementWindow->GetWindowSize(currentWidth, currentHeight);
-        if (changeStyle || width != currentWidth || height != currentHeight)
-        {
-            const int x = _placementMonitor.left + (_placementMonitor.right - _placementMonitor.left - int(width)) / 2;
-            const int y = _placementMonitor.top + (_placementMonitor.bottom - _placementMonitor.top - int(height)) / 2;
-            if (!SetWindowPos(hwnd, nullptr, x, y, int(width), int(height),
-                SWP_NOZORDER | SWP_NOACTIVATE | (changeStyle ? SWP_FRAMECHANGED : 0)))
-                throw std::runtime_error("Cannot resize the Bistro measurement window");
-        }
     }
     _trialRequested = RenderConfig(console);
     for (const auto& [name, value] : _trialRequested)
-        if (name != L"Render.Shadows.Local.AtlasCount") _csv.Config(_trialPrefix + std::filesystem::path(name).u8string(), value);
+        _csv.Config(_trialPrefix + std::filesystem::path(name).u8string(), value);
+    if (_manualPlacement)
+        for (const auto& [name, value] : _launch.Settings)
+            if (name.rfind(L"Render.", 0) != 0 && name.rfind(L"App.", 0) != 0)
+                _csv.Config(_trialPrefix + std::filesystem::path(name).u8string(), console.FindConsoleVariable(name).GetString());
     BeginPlacementLeg(world, pipeline);
 }
 
@@ -385,8 +344,41 @@ void BistroBenchmark::ObservePlacement(BistroRenderPipeline& pipeline)
     effectiveActivity[BistroPlacement::LocalShadowQuality] = shadowTexels != 0;
     for (size_t i = 0; i < activity.size(); ++i)
     {
-        measurements.Activity[i] |= effectiveActivity[i] && _trial.Settings.Levels[i] != BistroPlacement::Off;
+        measurements.Activity[i] |= effectiveActivity[i] && (_manualPlacement || _trial.Settings.Levels[i] != BistroPlacement::Off);
         if (_calibrating) _placementSeenOnRoute[i] |= measurements.Activity[i];
+    }
+}
+
+void BistroBenchmark::ObservePlacementImage(RenderModule& render, BistroRenderPipeline& pipeline)
+{
+    _trialConfig = EffectiveConfig(render);
+    const auto& common = *render.GetRenderPipelineCommonData();
+    _trialResult.Output = {common.WindowWidth, common.WindowHeight};
+    _trialResult.Render = {common.DownscaledWidth, common.DownscaledHeight};
+    const auto& status = render.GetReconstructionStatus();
+    _trialProvider = status.Effective;
+    _trialFrameGeneration = render.GetFrameGenerationStatus().Effective;
+    _trialFallback = status.FallbackReason;
+    if (_trialResult.Output != _launch.Output)
+        _trialReason = "requested output size unavailable";
+    else if (!_manualPlacement)
+    {
+        if (int(status.Requested.Provider) != _trial.Settings.Provider ||
+            int(status.Requested.Quality) != _trial.Settings.Preset ||
+            int(status.Effective) != _trial.Settings.Provider ||
+            (status.Effective == GDX12UpscalerProvider::Native ? _trialResult.Render != _launch.Output :
+                !_trialResult.Render.first || !_trialResult.Render.second ||
+                _trialResult.Render.first >= _launch.Output.first || _trialResult.Render.second >= _launch.Output.second))
+            _trialReason = "requested image mode unavailable";
+        else if (!_trial.InspectImage && pipeline.CloudPictureSizeUnavailable())
+            _trialReason = "requested cloud picture texture unavailable";
+        else if (_trialFrameGeneration != GDX12FrameGenerationProvider::Off)
+            _trialReason = "frame generation is active";
+    }
+    if (const auto& failure = pipeline.BenchmarkNISFailure(); !failure.empty())
+    {
+        _trialFallback = failure;
+        _trialReason = "NIS reconstruction failed";
     }
 }
 
@@ -396,37 +388,12 @@ void BistroBenchmark::RecordPlacementFrame(RenderModule& render, BistroRenderPip
     if (!_legConfigured)
     {
         _legConfigured = true;
-        const auto effective = EffectiveConfig(render);
         if (_trialConfig.empty())
         {
-            _trialConfig = effective;
+            ObservePlacementImage(render, pipeline);
             _frameConfigPending = true;
-            const auto& common = *render.GetRenderPipelineCommonData();
-            _trialResult.Output = {common.WindowWidth, common.WindowHeight};
-            _trialResult.Render = {common.DownscaledWidth, common.DownscaledHeight};
-            const auto& status = render.GetReconstructionStatus();
-            _trialProvider = status.Effective;
-            _trialFrameGeneration = render.GetFrameGenerationStatus().Effective;
-            _trialFallback = status.FallbackReason;
-            if (!_manualPlacement)
-            {
-                uint16_t width, height;
-                _placementWindow->GetWindowSize(width, height);
-                if (_trialResult.Output != _placementSearch.Resolution(_trial.Settings) ||
-                    _trialResult.Output != BistroPlacement::Size{width, height})
-                    _trialReason = "requested output size unavailable";
-                else if (pipeline.CloudPictureSizeUnavailable())
-                    _trialReason = "requested cloud picture texture unavailable";
-                else if (int(status.Effective) != _trial.Settings.Provider ||
-                    (status.Effective == GDX12UpscalerProvider::Native) != (_trialResult.Render == _trialResult.Output) ||
-                    (_trial.Settings.Provider &&
-                     (_trialResult.Render.first >= _trialResult.Output.first || _trialResult.Render.second >= _trialResult.Output.second)))
-                    _trialReason = "requested image mode unavailable";
-            }
-            if (_trialFrameGeneration != GDX12FrameGenerationProvider::Off)
-                _trialReason = "frame generation is active";
         }
-        else if (_trialConfig != effective)
+        else if (_trialConfig != EffectiveConfig(render))
             _trialReason = "effective display or reconstruction changed";
         if (!_trialReason.empty() && !_calibrating)
         {
@@ -451,10 +418,10 @@ void BistroBenchmark::RecordPlacementFrame(RenderModule& render, BistroRenderPip
         _legDone = true;
         return;
     }
+    ObservePlacement(pipeline);
     if (!_manualPlacement)
     {
-        ObservePlacement(pipeline);
-        if (_frames.empty() && _trialReason.empty())
+        if (!_trial.Full && _frames.empty() && _trialReason.empty())
         {
             _measurementKey = PlacementMeasurementKey(pipeline);
             if (!_calibrating && !_trial.RequireLive && RestorePlacementWindow())
@@ -478,6 +445,16 @@ void BistroBenchmark::RecordPlacementFrame(RenderModule& render, BistroRenderPip
 
 void BistroBenchmark::CompletePlacementLeg(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline)
 {
+    if (_trial.InspectImage)
+    {
+        _placementSearch.RecordImageMode(_trial, _trialResult.Render, _trialReason.empty());
+        for (const auto& [name, value] : _trialConfig) _csv.Config(_trialPrefix + name, value);
+        if (!_trialFallback.empty()) _csv.Config(_trialPrefix + "ReconstructionFallback", _trialFallback);
+        _csv.Config(_trialPrefix + "Status", _trialReason.empty() ? "available" : _trialReason);
+        _trialPending = false;
+        NextPlacementTrial(world, console, pipeline);
+        return;
+    }
     auto& measurements = _trialMeasurements;
     const bool reachedEnd = _elapsed >= LegWarmup() + _window.End - _preroll;
     const bool covered = BistroBenchmarkData::CoversWindow(_frames, _window.Begin, _window.End);
@@ -503,7 +480,7 @@ void BistroBenchmark::CompletePlacementLeg(World& world, ConsoleModule& console,
             _legMeasurements.FullP95 = *rank;
             intervals.clear();
         }
-        if (_trialReason.empty() && !_manualPlacement) SavePlacementWindow();
+        if (_trialReason.empty() && !_manualPlacement && !_trial.Full) SavePlacementWindow();
     }
     else
     {
@@ -511,11 +488,6 @@ void BistroBenchmark::CompletePlacementLeg(World& world, ConsoleModule& console,
         _trialLastPass = _reusedPass;
         for (const auto& [name, value] : _trialConfig) _csv.Config(_trialPrefix + name, value);
         _csv.Config(_trialPrefix + "Window." + std::to_string(_placementWindowIndex) + ".ReusedPassCSV", _reusedPass);
-        if (_trialReason.empty())
-        {
-            _latestResultSlot = ResultSlot(_runMode, _placementProfile);
-            _lastPasses[_latestResultSlot] = {_path.parent_path() / std::filesystem::u8path(_reusedPass), _runMode};
-        }
     }
     if (_trialReason.empty()) ++_trialCompletedPasses;
     AccumulatePlacementWindow(_trial.Full || _placementWindowIndex < _windows.size());
@@ -567,7 +539,7 @@ void BistroBenchmark::WritePlacementWaits(BistroRenderPipeline& pipeline)
     const auto& submissions = pipeline.BenchmarkSubmissions();
     const auto waits = pipeline.BenchmarkSubmissions().EndBenchmarkWaits();
     auto packets = pipeline.BenchmarkSubmissions().TakeBenchmarkPackets();
-    if (!_reusedPass.empty()) return;
+    if (_manualPlacement || !_reusedPass.empty()) return;
     for (const auto& wait : waits)
     {
         const auto queues = std::array{"DIRECT", "COMPUTE", "COPY"};
@@ -744,10 +716,7 @@ void BistroBenchmark::WritePlacementTrialReport(BistroRenderPipeline& pipeline, 
     const auto& submissions = pipeline.BenchmarkSubmissions();
     if (_manualPlacement && _trialCompletedPasses)
     {
-        pipeline.BenchmarkPlacement(ObserveSchedule(pipeline).Roles, _framePlacement);
-        measurements.Passes.insert(_legMeasurements.Passes.begin(), _legMeasurements.Passes.end());
-        for (const auto& [role, owner] : _framePlacement.ActiveOwners) measurements.ActiveOwners[role].insert(owner);
-        _csv.Config(_trialPrefix + "PlacementEvidenceScope", "last presented frame");
+        _csv.Config(_trialPrefix + "PlacementEvidenceScope", "measured route frames");
     }
     for (const auto& [name, owners] : measurements.ActiveOwners)
         for (const auto owner : owners) _csv.Config(_trialPrefix + name, submissions.AdapterLabel(owner));
@@ -760,10 +729,19 @@ void BistroBenchmark::WritePlacementTrialReport(BistroRenderPipeline& pipeline, 
     for (size_t i = 0; i < _trialResult.Activity.size(); ++i)
         if (_trialResult.Activity[i])
         {
-            _csv.Config(_trialPrefix + "ActiveTechnique", BistroPlacement::Techniques[i].Pass);
-            if (!_manualPlacement)
-                _csv.Config(_trialPrefix + "ActiveTechniqueLevel", std::string(BistroPlacement::Techniques[i].Pass) + "=" +
-                    (BistroPlacement::Techniques[i].Quality ?
+            _csv.Config(_trialPrefix + "ActiveTechnique", _launch.Level->Techniques[i].Pass);
+            if (_manualPlacement)
+            {
+                const auto* quality = _launch.Level->Techniques[i].Quality;
+                const auto found = std::find_if(_trialRequested.begin(), _trialRequested.end(), [&](const auto& entry) {
+                    return quality && entry.first == quality;
+                });
+                _csv.Config(_trialPrefix + "ActiveTechniqueLevel", std::string(_launch.Level->Techniques[i].Pass) + "=" +
+                    (found == _trialRequested.end() ? "On" : found->second));
+            }
+            else
+                _csv.Config(_trialPrefix + "ActiveTechniqueLevel", std::string(_launch.Level->Techniques[i].Pass) + "=" +
+                    (_launch.Level->Techniques[i].Quality ?
                         std::to_string(_placementSearch.QualityValue(i, _trialResult.Settings.Levels[i])) : "On"));
         }
     for (const auto& pass : measurements.Passes)
@@ -807,7 +785,6 @@ bool BistroBenchmark::CheckPlacementDeadline(World& world, ConsoleModule& consol
     WritePlacementWaits(pipeline);
     WriteLeg("single-GPU budget exhausted");
     WritePlacementTrialReport(pipeline, "single-GPU budget exhausted");
-    _placementSearch.EndPhase();
     _placementPhase = 2;
     BeginNextPlacementPhase(world, console, pipeline);
     return true;
@@ -853,7 +830,6 @@ void BistroBenchmark::NextPlacementTrial(World& world, ConsoleModule& console, B
                 BeginPlacementTrial(world, console, pipeline, std::move(*trial));
                 return;
             }
-        _placementSearch.EndPhase();
         ++_placementPhase;
         BeginNextPlacementPhase(world, console, pipeline);
         return;
@@ -876,7 +852,6 @@ void BistroBenchmark::NextPlacementTrial(World& world, ConsoleModule& console, B
         BeginPlacementTrial(world, console, pipeline, _placementSearch.Confirm(*finalist));
         return;
     }
-    _placementSearch.EndPhase();
     ++_placementPhase;
     BeginNextPlacementPhase(world, console, pipeline);
 }

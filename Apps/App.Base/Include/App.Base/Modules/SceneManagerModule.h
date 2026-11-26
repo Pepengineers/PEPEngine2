@@ -38,6 +38,7 @@ public:
 
     void Initialize() override;
     void Uninitialize() override;
+    void LoadMap(const std::filesystem::path& scenePath);
 
     bool LoadScene(const std::string& scenePath, const AppConfig& appConfig);
 

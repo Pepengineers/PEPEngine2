@@ -46,6 +46,8 @@ public:
     std::vector<BenchmarkWait> EndBenchmarkWaits();
     uint64_t BenchmarkEpoch() const { return _benchmarkEpoch.load(std::memory_order_relaxed); }
     std::vector<BenchmarkPacket> TakeBenchmarkPackets();
+    struct PacketInterval { Id Device; double BeginMs, EndMs; };
+    std::vector<PacketInterval> ReadBenchmarkIntervals(uint64_t& epoch, size_t& cursor, bool consume);
     std::vector<int> BenchmarkAdapterIndices(bool includeUnavailable = false) const;
     uint64_t Incarnation() const { return _incarnation; }
     struct TransferBuffer {

@@ -17,8 +17,8 @@ public:
         bool applySettings = false);
     ~GDX12SwapChain();
 
-    void Resize(UINT width, UINT height);
-    bool Present();
+    void Resize(UINT width, UINT height, bool applySettings = true);
+    bool Present(bool vsync = false);
     GDX12Device& Device() const { return *_device; }
     bool NeedsPresentationReset() const;
     void BeginFrame(RenderPipelineCommonData&);
@@ -38,8 +38,6 @@ public:
     const ComPtr<IDXGISwapChain4>& GetSwapChain();
 
     void Reset();
-
-    bool bVSyncEnabled;
 
 private:
     void CreateBuffers();

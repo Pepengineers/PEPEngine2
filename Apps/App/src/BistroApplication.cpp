@@ -20,11 +20,13 @@
 #include "BistroTaskbar.h"
 #include "Techniques/UI/BistroInfoPanel.h"
 #include "Techniques/UI/BistroUICanvases.h"
+#include "Techniques/UI/SceneTextureInspector.h"
 #include "Components/BistroInteractionSource.h"
 #include "Components/FluidRenderComponent.h"
 #include <stdexcept>
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <WindowsX.h>
 #include <shellapi.h>
 #include "Engine.UI/UI_test.h"
@@ -66,12 +68,14 @@ bool IsLegacyLocalShadowPlacement(const std::wstring& key)
 
 constexpr float SunDiskScale = 2.5f;
 constexpr float DaylightSunElevation = 70.f;
+#if defined(_DEBUG) || defined(DEBUG)
 constexpr float MouseDegreesPerPixel = 0.15f;
 constexpr float CameraPitchLimit = 89.0f;
 constexpr float CameraSpeedStep = 1.25f;
 constexpr float MinCameraSpeed = 0.1f;
 constexpr float MaxCameraSpeed = 10000.0f;
 constexpr float CameraSpeedBoost = 4.0f;
+#endif
 const Vector3 InitialCameraPosition{400, 230, -370};
 const Vector3 InitialCameraRotation{8, 40, 0};
 
@@ -177,13 +181,8 @@ class BistroApplication final : public App
 	{
 		auto pipeline = std::make_unique<BistroRenderPipeline>();
 		_bistroPipeline = pipeline.get();
-		Locator.RegisterModule(std::make_shared<RenderModule>(GetWindow(), &Timer, std::move(pipeline), _adapters));
-		const auto scene = std::filesystem::path(ASSETS_FOLDER) / "Scenes/Amazon Lumberyard Bistro";
-		for (const auto* part : {"Exterior/exterior.obj", "Interior/interior.obj"})
-		{
-			Require(std::filesystem::is_regular_file(scene / part), "Missing Bistro scene part");
-		}
-		Locator.RegisterModule(std::make_shared<SceneManagerModule>(scene));
+		Locator.RegisterModule(std::make_shared<RenderModule>(GetWindow(), &Timer, std::move(pipeline), _adapters, true));
+		Locator.RegisterModule(std::make_shared<SceneManagerModule>());
 		return BenchmarkEngine::AddModules();
 	}
 	bool Initialize() override
@@ -192,101 +191,121 @@ class BistroApplication final : public App
 		{
 			return false;
 		}
-		auto scenes = Locator.GetModule<SceneManagerModule>();
+		_info.InitializeFont();
+		Engine::UI::EnableApplicationUIInput();
+		Engine::UI::HideSettings();
+		Engine::UI::SetDebugReconstructionStatusVisible(false);
+#if !defined(_DEBUG) && !defined(DEBUG)
+		_autoBenchmarkPending = BistroBenchmark::AutoStart.GetValue() && !SkipAutomaticBenchmark();
+#endif
+		RefreshWindowCaption();
+		Log::Info("Bistro", "Benchmark settings ready; VSync on");
+		return true;
+	}
 
+	void LoadBistro(const BistroRun::Map& map)
+	{
+		const auto scene = std::filesystem::path(ASSETS_FOLDER) / map.Scene;
+		for (const auto* part : {"Exterior/exterior.obj", "Interior/interior.obj"})
+			Require(std::filesystem::is_regular_file(scene / part), "Missing Bistro scene part");
+		auto render = Locator.GetModule<RenderModule>();
+		render->BeginSceneRendering();
+		render->OnResize();
+		render->ResetWorldHistory();
+		auto scenes = Locator.GetModule<SceneManagerModule>();
+		scenes->LoadMap(scene);
+		_map = std::make_unique<MapScene>();
 		auto& world = *scenes->GetWorld();
 		world.SetPaused(false);
 		InitializeSky(world);
-		_bistroReflections.Update(world, 0);
+		_map->Reflections.Update(world, 0);
 		UpdateSky(world);
-		_bistroGrass.Update(world, 0);
+		_map->Grass.Update(world, 0);
 		CreateBistroParticles(world);
-		_bistroWater.Update(world, 0);
+		_map->Water.Update(world, 0);
 		world.GetECS().ForEach<FluidRenderComponent>(
 		    [](Entity, const FluidRenderComponent& fluid)
 		    {
 			    Log::Info("Bistro", "Bistro water target=", BistroWater::ParticleCount.GetValue(),
 			              "; seed particles=", fluid.GetParticles() ? fluid.GetParticles()->size() : 0);
 		    });
-		_bistroCharacters.Update(world, 0, GetJobs());
-		_bistroBounds = std::make_unique<BistroBounds::Scene>(world);
-		_bistroBounds->UpdateEmitters(world);
+		_map->Characters.Update(world, 0, GetJobs());
+		_map->Bounds = std::make_unique<BistroBounds::Scene>(world);
+		_map->Bounds->UpdateEmitters(world);
 		BistroParticles::Update(world);
 		InitializeCamera(world);
-		_benchmark.Initialize(world, _bistroCharacters, *_bistroPipeline);
-		_info.InitializeFont();
-		Engine::UI::EnableApplicationUIInput();
-		Engine::UI::HideSettings();
-		Engine::UI::SetDebugReconstructionStatusVisible(false);
+		if (_measurementMap) _benchmark.Initialize(world, _map->Characters, *_bistroPipeline);
 		IndirectCommandBuildSystem commands;
 		commands.Schedule(GetJobs(), world, 0).Complete();
-#if !defined(_DEBUG) && !defined(DEBUG)
-		_autoBenchmarkPending = BistroBenchmark::AutoStart.GetValue() && !SkipAutomaticBenchmark();
-#endif
-		Log::Info("Bistro",
-		          "Loaded Bistro interior/exterior; fixed-step interior physics enabled; sun and local shadows");
-		return true;
+		Log::Info("Bistro", "Loaded ", map.Name, " / ", _measurementMap ? map.Route : "free camera");
 	}
 	void Update(const GameTimer& timer) override
 	{
-		auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
 		auto render = Locator.GetModule<RenderModule>();
-		if (_autoBenchmarkPending && _bistroPipeline->PresentedFrames())
+		auto console = Locator.GetModule<ConsoleModule>();
+		if (!_map && _autoBenchmarkPending && _settingsPresented)
 		{
 			_autoBenchmarkPending = false;
-			_benchmark.RequestAutomatic();
-		}
-		_info.ApplyResolution(*GetWindow());
-		_benchmark.Update(world, *Locator.GetModule<ConsoleModule>(), *render, *_bistroPipeline, *GetWindow());
-		if (_resizePending)
-		{
-			uint16_t width, height;
-			GetWindow()->GetWindowSize(width, height);
-			if (width && height)
+			if (_benchmark.CanStart())
 			{
-				_resizePending = false;
-				App::OnResize();
+				auto launch = _info.SelectedLaunch();
+				launch.Kind = BistroRun::Mode::Automatic;
+				_benchmark.Launch(std::move(launch), *console);
 			}
 		}
-		const bool active = _benchmark.Active();
-		if (active != _runActive) SetCaptionTimingEnabled(!active);
-		if (active && (!_runActive || _legNumber != _benchmark.LegNumber()))
+		if (std::exchange(_resizePending, false) && !bMinimized) App::OnResize();
+#if defined(_DEBUG) || defined(DEBUG)
+		if (std::exchange(_leaveDebugMap, false)) ReturnToSettings();
+		if (const auto* level = _info.TakeDebugMap(); !_map && level) StartMap(*level);
+#endif
+		if (const auto* launch = _benchmark.PendingLaunch(); !_map && launch) StartMap(*launch->Level, launch->Output);
+		if (_map && _measurementMap)
 		{
-			_info.Hide();
-			Engine::UI::HideSettings();
+			auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
+			_benchmark.Update(world, *console, *render, *_bistroPipeline, *GetWindow());
+			if (!_benchmark.Active()) ReturnToSettings();
+		}
+		if (!_map)
+		{
+			Engine::UI::BeginFrame();
+			_info.DrawSettings(*render, _benchmark);
+			return;
+		}
+		auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
+		if (_legNumber != _benchmark.LegNumber())
+		{
 			_legNumber = _benchmark.LegNumber();
 			RefreshWindowCaption();
 		}
-		if (!active && _runActive)
-		{
-			_info.Show(std::exchange(_compactAfterRun, false));
-			if (std::exchange(_settingsAfterRun, false)) Engine::UI::OpenSettings();
-			RefreshWindowCaption();
-		}
-		_runActive = active;
-		Engine::UI::SetSettingsEditingEnabled(!_runActive);
-		_bistroReflections.Update(world, timer.DeltaTime());
+		_map->Reflections.Update(world, timer.DeltaTime());
 		const float sceneDelta = world.IsPaused() ? 0.f : timer.DeltaTime() * world.GetTimeScale();
 		UpdateSky(world, sceneDelta);
-		_bistroWater.Update(world, timer.DeltaTime());
-		_bistroCharacters.Update(world, timer.DeltaTime(), GetJobs());
-		_bistroGrass.Update(world, timer.DeltaTime());
-		_bistroBounds->UpdateEmitters(world);
+		_map->Water.Update(world, timer.DeltaTime());
+		_map->Characters.Update(world, timer.DeltaTime(), GetJobs());
+		_map->Grass.Update(world, timer.DeltaTime());
+		_map->Bounds->UpdateEmitters(world);
 		BistroParticles::Update(world);
 		App::Update(timer);
-		_bistroReflections.DrawBounds(world, *render);
-		_info.Draw(*render, *_bistroPipeline, _benchmark, timer.DeltaTime());
+		_map->Reflections.DrawBounds(world, *render);
+		if (_measurementMap) _info.DrawMeasurement(_benchmark);
 	}
 	void Render(const GameTimer& timer) override
 	{
-		const auto presented = _bistroPipeline->PresentedFrames();
-		App::Render(timer);
-		if (_benchmark.Active())
+		auto render = Locator.GetModule<RenderModule>();
+		if (!_map)
 		{
-			_benchmark.FrameRendered(*Locator.GetModule<SceneManagerModule>()->GetWorld(), *Locator.GetModule<ConsoleModule>(),
-			    *Locator.GetModule<RenderModule>(), *_bistroPipeline, _bistroPipeline->PresentedFrames() != presented);
+			if (render->PresentSettings()) _settingsPresented = true;
+			return;
 		}
-		UpdateTaskbar();
+		const auto framesBefore = _bistroPipeline->PresentedFrames();
+		App::Render(timer);
+		if (!_measurementMap) return;
+		const bool presented = _bistroPipeline->PresentedFrames() != framesBefore;
+		if (presented)
+			_info.RecordPresent(_bistroPipeline->PresentTime(), _bistroPipeline->BenchmarkSubmissions(), _benchmark.ManualGpuTimings());
+		_benchmark.FrameRendered(*Locator.GetModule<SceneManagerModule>()->GetWorld(), *Locator.GetModule<ConsoleModule>(),
+		    *render, *_bistroPipeline, presented);
+		if (_benchmark.Active()) _taskbar.Set(GetWindow()->GetWindowHandle(), BistroTaskbar::State::Running, _benchmark.RunPercent());
 	}
 	int Run()
 	{
@@ -310,55 +329,131 @@ class BistroApplication final : public App
 		return App::MsgProc(hwnd, msg, wParam, lParam);
 	}
 
-	void UpdateTaskbar()
+	void SetMeasurementWindow(BistroPlacement::Size size)
 	{
-		using State = BistroTaskbar::State;
 		const HWND hwnd = GetWindow()->GetWindowHandle();
-		if (const auto outcome = _benchmark.TakeOutcome())
-		{
-			const auto state = *outcome == BistroBenchmark::Outcome::Completed ? State::Completed :
-				*outcome == BistroBenchmark::Outcome::Failed ? State::Failed : State::Idle;
-			_taskbar.Set(hwnd, state);
-		}
-		else if (_benchmark.Active())
-			_taskbar.Set(hwnd, State::Running, _benchmark.RunPercent());
+		_savedPlacement.length = sizeof(_savedPlacement);
+		Require(GetWindowPlacement(hwnd, &_savedPlacement), "Cannot save window placement");
+		_savedStyle = GetWindowLongPtrW(hwnd, GWL_STYLE);
+		_windowChanged = true;
+		MONITORINFO monitor{sizeof(monitor)};
+		Require(GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &monitor), "Cannot locate benchmark monitor");
+		if (IsZoomed(hwnd)) ShowWindow(hwnd, SW_RESTORE);
+		SetLastError(0);
+		const auto previous = SetWindowLongPtrW(hwnd, GWL_STYLE, (_savedStyle & ~(WS_OVERLAPPEDWINDOW | WS_MAXIMIZE)) | WS_POPUP);
+		Require(previous || !GetLastError(), "Cannot switch to a borderless benchmark window");
+		const auto& rect = monitor.rcMonitor;
+		const int x = rect.left + (rect.right - rect.left - int(size.first)) / 2;
+		const int y = rect.top + (rect.bottom - rect.top - int(size.second)) / 2;
+		Require(SetWindowPos(hwnd, nullptr, x, y, int(size.first), int(size.second),
+		    SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED), "Cannot set benchmark output size");
 	}
-
+	void StartMap(const BistroRun::Map& map, std::optional<BistroPlacement::Size> measurementSize = {})
+	{
+		_measurementMap = measurementSize.has_value();
+		Engine::UI::HideSettings();
+		Engine::UI::SetSettingsEditingEnabled(!_measurementMap);
+		SetCaptionTimingEnabled(!_measurementMap);
+		std::string error;
+		try
+		{
+			if (measurementSize) SetMeasurementWindow(*measurementSize);
+			if (LoadWithProgress(_measurementMap ? L"Loading benchmark map" : L"Loading debug map", [&] { LoadBistro(map); }))
+			{
+				// Loading pumps WM_SIZE without resizing a partially initialized scene.
+				_resizePending = bMinimized;
+				if (!bMinimized)
+				{
+					uint16_t width, height;
+					GetWindow()->GetWindowSize(width, height);
+					GetWindow()->UpdateClientSize(width, height);
+					const auto* frame = Locator.GetModule<RenderModule>()->GetRenderPipelineCommonData();
+					if (width && height && (width != frame->WindowWidth || height != frame->WindowHeight))
+						App::OnResize();
+				}
+				Timer.Tick(0);
+#if defined(_DEBUG) || defined(DEBUG)
+				if (!_measurementMap) BistroRender::SceneTextureInspector::SetVisible(true);
+#endif
+				RefreshWindowCaption();
+				return;
+			}
+			error = "Map loading cancelled";
+		}
+		catch (const std::exception& failure) { error = failure.what(); }
+		catch (const DxException& failure) { error = WStringToString(failure.ToString()); }
+		Log::Warning("Bistro", error);
+		if (_measurementMap) _benchmark.RejectLaunch(error);
+		ReturnToSettings(error);
+	}
+	void ReturnToSettings(const std::string& error = {})
+	{
+		const auto outcome = _benchmark.TakeOutcome();
+		const bool completed = outcome == BistroBenchmark::Outcome::Completed;
+		const bool failed = outcome == BistroBenchmark::Outcome::Failed;
+		auto* hwnd = GetWindow()->GetWindowHandle();
+		_taskbar.Set(hwnd, completed ? BistroTaskbar::State::Completed : failed ? BistroTaskbar::State::Failed : BistroTaskbar::State::Idle);
+		if (_measurementMap) _benchmark.ReleaseScene();
+#if defined(_DEBUG) || defined(DEBUG)
+		else BistroRender::SceneTextureInspector::SetVisible(false);
+#endif
+		Engine::UI::HideSettings();
+		auto render = Locator.GetModule<RenderModule>();
+		render->BeginSettingsRendering();
+		Locator.GetModule<SceneManagerModule>()->Uninitialize();
+		_map.reset();
+		_measurementMap = false;
+		if (std::exchange(_windowChanged, false))
+		{
+			SetWindowLongPtrW(hwnd, GWL_STYLE, _savedStyle);
+			SetWindowPlacement(hwnd, &_savedPlacement);
+			SetWindowPos(hwnd, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+		}
+		if (!bMinimized) App::OnResize();
+		_resizePending = false;
+		Engine::UI::SetSettingsEditingEnabled(true);
+		_info.ShowSettings(completed || (failed && error.empty()), error);
+		SetCaptionTimingEnabled(true);
+		RefreshWindowCaption();
+		Log::Info("Bistro", "Returned to benchmark settings; VSync on");
+	}
 	std::wstring StatusCaption() const override
 	{
 		if (_benchmark.Active()) return _benchmark.Caption() + L" | Esc: cancel";
-		return L"F1: CVars | F6: compact | F7: full | F8: textures";
+#if defined(_DEBUG) || defined(DEBUG)
+		if (_map && !_measurementMap) return L"Debug map | WASD + RMB: camera | F1: settings | F8: textures | Esc: launcher";
+#endif
+		return L"Benchmark settings";
 	}
 	bool OnKeyReleased(WPARAM key) override
 	{
-		if (key == VK_ESCAPE && _benchmark.Active()) { _benchmark.RequestCancel(); return true; }
-		if (_benchmark.Active() && key == VK_F1) { _settingsAfterRun = true; return true; }
-		if (key == VK_F6 || key == VK_F7)
+#if defined(_DEBUG) || defined(DEBUG)
+		if (_map && !_measurementMap)
 		{
-			if (_benchmark.Active()) _compactAfterRun = key == VK_F6;
-			else _info.Toggle(key == VK_F6);
-			return true;
+			if (key == VK_ESCAPE) { _leaveDebugMap = true; return true; }
+			if (key == VK_F8)
+			{
+				using BistroRender::SceneTextureInspector;
+				SceneTextureInspector::SetVisible(!SceneTextureInspector::Visible());
+				return true;
+			}
+			return false; // The engine settings window handles F1 and its own input.
 		}
-		if (key == VK_F8)
-		{
-			using BistroRender::SceneTextureInspector;
-			if (!_benchmark.Active()) SceneTextureInspector::SetVisible(!SceneTextureInspector::Visible());
-			return true;
-		}
-		return false;
+#endif
+		if (key == VK_ESCAPE && _map) { _benchmark.RequestCancel(); return true; }
+		return key == VK_F1 || key == VK_F6 || key == VK_F7 || key == VK_F8;
 	}
-	bool _runActive = false;
-	bool _compactAfterRun = false, _settingsAfterRun = false;
 	uint64_t _legNumber = 0;
+	bool _measurementMap = false;
+	bool _settingsPresented = false, _windowChanged = false;
+	WINDOWPLACEMENT _savedPlacement{};
+	LONG_PTR _savedStyle = 0;
+
 	void StopBenchmark(const char* status = "cancelled")
 	{
-		if (_benchmark.Active())
-		{
+		if (_benchmark.Active() && _map)
 			_benchmark.Stop(*Locator.GetModule<SceneManagerModule>()->GetWorld(), *Locator.GetModule<ConsoleModule>(),
 			    *_bistroPipeline, status);
-			UpdateTaskbar();
-		}
-		Engine::UI::SetSettingsEditingEnabled(true);
 	}
 	// WM_SIZE can arrive inside a benchmark patch. Resize once all requested settings are known.
 	void OnResize() override { _resizePending = true; }
@@ -366,18 +461,20 @@ class BistroApplication final : public App
 	std::vector<DeviceDesc> _adapters;
 	Entity _skyEntity = InvalidEntity;
 	double _sunCyclePhase = 0;
-	BistroGrass::Scene _bistroGrass;
-	BistroCharacters::Scene _bistroCharacters{20261122};
-	BistroWater::Scene _bistroWater;
-	BistroReflections::Scene _bistroReflections;
+	struct MapScene
+	{
+		BistroGrass::Scene Grass;
+		BistroCharacters::Scene Characters{20261122};
+		BistroWater::Scene Water;
+		BistroReflections::Scene Reflections;
+		std::unique_ptr<BistroBounds::Scene> Bounds;
+	};
+	std::unique_ptr<MapScene> _map;
 	BistroBenchmark _benchmark;
 	BistroTaskbar _taskbar;
 	bool _autoBenchmarkPending = false;
 	BistroInfoPanel _info;
 	BistroRenderPipeline* _bistroPipeline = nullptr;
-	std::unique_ptr<BistroBounds::Scene> _bistroBounds;
-	POINT _lastMousePos{};
-	float _cameraSpeed = 500.f;
 	void InitializeSky(World& world)
 	{
 		_sunCyclePhase = 0;
@@ -436,28 +533,34 @@ class BistroApplication final : public App
 
 	void OnPauseChanged(bool paused) override
 	{
-		if (paused && _bistroPipeline)
+		if (paused && _map)
 		{
 			StopBenchmark();
 			_bistroPipeline->PauseIndependentClocks();
 		}
 	}
-
-	void OnMouseDown(WPARAM, int x, int y) override
+#if defined(_DEBUG) || defined(DEBUG)
+	bool _leaveDebugMap = false;
+	POINT _lastMousePos{};
+	float _cameraSpeed = 500.f;
+	void OnMouseDown(WPARAM buttons, int x, int y) override
 	{
 		_lastMousePos = {x, y};
-		if (Engine::UI::WantsMouseInput())
+		if (!_map || _measurementMap || !(buttons & MK_RBUTTON) || Engine::UI::WantsMouseInput())
 		{
 			return;
 		}
 		SetCapture(GetWindow()->GetWindowHandle());
 	}
 
-	void OnMouseUp(WPARAM, int, int) override { ReleaseCapture(); }
+	void OnMouseUp(WPARAM buttons, int, int) override
+	{
+		if (_map && !_measurementMap && !(buttons & MK_RBUTTON) && GetCapture() == GetWindow()->GetWindowHandle()) ReleaseCapture();
+	}
 
 	void OnMouseMove(WPARAM buttons, int x, int y) override
 	{
-		if (!_benchmark.Active() && !Engine::UI::WantsMouseInput() && (buttons & MK_RBUTTON))
+		if (_map && !_measurementMap && !Engine::UI::WantsMouseInput() && (buttons & MK_RBUTTON))
 		{
 			auto* world = Locator.GetModule<SceneManagerModule>()->GetWorld();
 			auto& camera = world->GetECS().Get<TransformComponent>(world->ActiveCamera);
@@ -472,7 +575,7 @@ class BistroApplication final : public App
 
 	void OnMouseWheelMove(WPARAM rotation) override
 	{
-		if (Engine::UI::WantsMouseInput())
+		if (!_map || _measurementMap || Engine::UI::WantsMouseInput())
 		{
 			return;
 		}
@@ -483,7 +586,7 @@ class BistroApplication final : public App
 
 	void OnKeyboardInput(const GameTimer& timer) override
 	{
-		if (_benchmark.Active() || bInactive || Engine::UI::WantsKeyboardInput())
+		if (!_map || _measurementMap)
 		{
 			return;
 		}
@@ -524,6 +627,7 @@ class BistroApplication final : public App
 			camera.DirtyFlag = true;
 		}
 	}
+#endif
 };
 } // namespace
 

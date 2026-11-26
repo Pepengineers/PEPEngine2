@@ -285,84 +285,7 @@ namespace Engine::UI
             ImGui::SetNextWindowSize(ImVec2(720, 580), ImGuiCond_FirstUseEver);
             if (ImGui::Begin("Settings (F1)", &Visible))
             {
-                ImGui::TextWrapped("For changes across Bistro launches, edit Configs/Startup.ini.");
-                ConsoleModule console;
-                IConsoleVariable* inspector = nullptr;
-                if (console.TryFindConsoleVariable(L"Render.Debug.SceneTextures", inspector))
-                {
-                    bool enabled = inspector->GetBool();
-                    static std::string visibilityError;
-                    if (ImGui::Checkbox("Scene textures", &enabled))
-                        visibilityError = SetSceneTexturesVisible(enabled);
-                    if (!visibilityError.empty()) ImGui::TextWrapped("%s", visibilityError.c_str());
-                }
-                static ImGuiTextFilter filter;
-                filter.Draw("Search", -90);
-                static SettingsCache settings;
-                static SettingEditor editor;
-                const UINT shadowPages = console.FindConsoleVariable(L"Render.Shadows.Local.Resolution").GetUInt()
-                    ? console.FindConsoleVariable(L"Render.Shadows.Local.AtlasCount").GetUInt() : 0u;
-                const auto inactiveShadowPage = [shadowPages](std::wstring_view name)
-                {
-                    const auto page = LocalShadowPageSettingsIndex(name);
-                    return page && *page >= shadowPages;
-                };
-                auto revision = console.GetConsoleVariableRevision();
-                if (!settings.IsCurrent(revision, filter, shadowPages))
-                {
-                    auto variables = console.GetConsoleVariables({}, &revision);
-                    variables.erase(std::remove_if(variables.begin(), variables.end(), [&](const auto* variable)
-                    { return inactiveShadowPage(variable->GetName()); }), variables.end());
-                    settings.Update(variables, revision, filter, shadowPages);
-                }
-
-                const auto drawGroup = [&](auto&& self, const SettingsCache::Group& group) -> void
-                {
-                    for (const auto& setting : group.Variables)
-                    {
-                        ImGui::PushID(setting.Name.c_str());
-                        if (ImGui::Selectable(setting.Label.c_str(), setting.RegistryName == editor.Name))
-                        {
-                            IConsoleVariable* variable = nullptr;
-                            if (console.TryFindConsoleVariable(setting.RegistryName, variable)) editor.Select(*variable);
-                        }
-                        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", setting.Name.c_str());
-                        ImGui::PopID();
-                    }
-                    for (const auto& [name, child] : group.Children)
-                    {
-                        if (filter.IsActive()) ImGui::SetNextItemOpen(true, ImGuiCond_Always);
-                        if (ImGui::TreeNodeEx(name.c_str(), ImGuiTreeNodeFlags_SpanAvailWidth))
-                        {
-                            self(self, child);
-                            ImGui::TreePop();
-                        }
-                    }
-                };
-                if (ImGui::BeginChild("Variables", ImVec2(ImGui::GetContentRegionAvail().x * 0.42f, 0),
-                    ImGuiChildFlags_Borders))
-                {
-                    ImGui::PushID(filter.IsActive() ? "FilteredSettings" : "SettingsTree");
-                    const auto& root = settings.Root();
-                    if (root.Children.empty() && root.Variables.empty()) ImGui::TextDisabled("No matching settings");
-                    drawGroup(drawGroup, root);
-                    ImGui::PopID();
-                }
-                ImGui::EndChild();
-                ImGui::SameLine();
-                if (ImGui::BeginChild("Editor", ImVec2(0, 0), ImGuiChildFlags_Borders))
-                {
-                    IConsoleVariable* variable = nullptr;
-                    if (!editor.Name.empty() && !inactiveShadowPage(editor.Name) &&
-                        console.TryFindConsoleVariable(editor.Name, variable))
-                    {
-                        editor.Draw(*variable);
-                        if (editor.Name == L"App.Physics.Quality") DrawPhysicsQuality(console);
-                    }
-                    else
-                        ImGui::TextDisabled("Select a setting to edit");
-                }
-                ImGui::EndChild();
+                DrawSettingsEditor(true);
             }
             ImGui::End();
         }
@@ -818,10 +741,98 @@ namespace Engine::UI
         catch (...) { ShutdownUI(); throw; }
     }
 
+    void DrawSettingsEditor(bool sceneTools)
+    {
+        if (!SettingsEditingEnabled) return;
+        ImGui::TextWrapped("For changes across Bistro launches, edit Configs/Startup.ini.");
+        ConsoleModule console;
+        IConsoleVariable* inspector = nullptr;
+        if (sceneTools && console.TryFindConsoleVariable(L"Render.Debug.SceneTextures", inspector))
+        {
+            bool enabled = inspector->GetBool();
+            static std::string visibilityError;
+            if (ImGui::Checkbox("Scene textures", &enabled))
+                visibilityError = SetSceneTexturesVisible(enabled);
+            if (!visibilityError.empty()) ImGui::TextWrapped("%s", visibilityError.c_str());
+        }
+        struct Browser
+        {
+            ImGuiTextFilter Filter;
+            SettingsCache Settings;
+            SettingEditor Editor;
+        };
+        static Browser launcher, scene;
+        auto& browser = sceneTools ? scene : launcher;
+        auto& filter = browser.Filter;
+        filter.Draw("Search", -90);
+        auto& settings = browser.Settings;
+        auto& editor = browser.Editor;
+        const UINT shadowPages = console.FindConsoleVariable(L"Render.Shadows.Local.Resolution").GetUInt()
+            ? console.FindConsoleVariable(L"Render.Shadows.Local.AtlasCount").GetUInt() : 0u;
+        const auto hidden = [shadowPages, sceneTools](std::wstring_view name)
+        {
+            if (!sceneTools && name == L"Render.Debug.SceneTextures") return true;
+            const auto page = LocalShadowPageSettingsIndex(name);
+            return page && *page >= shadowPages;
+        };
+        auto revision = console.GetConsoleVariableRevision();
+        if (!settings.IsCurrent(revision, filter, shadowPages))
+        {
+            for (UINT page = 0; page < shadowPages; ++page) RegisterLocalShadowPageSettings(page);
+            auto variables = console.GetConsoleVariables({}, &revision);
+            variables.erase(std::remove_if(variables.begin(), variables.end(), [&](const auto* variable)
+            { return hidden(variable->GetName()); }), variables.end());
+            settings.Update(variables, revision, filter, shadowPages);
+        }
 
-
-
-
+        const auto drawGroup = [&](auto&& self, const SettingsCache::Group& group) -> void
+        {
+            for (const auto& setting : group.Variables)
+            {
+                ImGui::PushID(setting.Name.c_str());
+                if (ImGui::Selectable(setting.Label.c_str(), setting.RegistryName == editor.Name))
+                {
+                    IConsoleVariable* variable = nullptr;
+                    if (console.TryFindConsoleVariable(setting.RegistryName, variable)) editor.Select(*variable);
+                }
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", setting.Name.c_str());
+                ImGui::PopID();
+            }
+            for (const auto& [name, child] : group.Children)
+            {
+                if (filter.IsActive()) ImGui::SetNextItemOpen(true, ImGuiCond_Always);
+                if (ImGui::TreeNodeEx(name.c_str(), ImGuiTreeNodeFlags_SpanAvailWidth))
+                {
+                    self(self, child);
+                    ImGui::TreePop();
+                }
+            }
+        };
+        if (ImGui::BeginChild("Variables", ImVec2(ImGui::GetContentRegionAvail().x * 0.42f, 0),
+            ImGuiChildFlags_Borders))
+        {
+            ImGui::PushID(filter.IsActive() ? "FilteredSettings" : "SettingsTree");
+            const auto& root = settings.Root();
+            if (root.Children.empty() && root.Variables.empty()) ImGui::TextDisabled("No matching settings");
+            drawGroup(drawGroup, root);
+            ImGui::PopID();
+        }
+        ImGui::EndChild();
+        ImGui::SameLine();
+        if (ImGui::BeginChild("Editor", ImVec2(0, 0), ImGuiChildFlags_Borders))
+        {
+            IConsoleVariable* variable = nullptr;
+            if (!editor.Name.empty() && !hidden(editor.Name) &&
+                console.TryFindConsoleVariable(editor.Name, variable))
+            {
+                editor.Draw(*variable);
+                if (editor.Name == L"App.Physics.Quality") DrawPhysicsQuality(console);
+            }
+            else
+                ImGui::TextDisabled("Select a setting to edit");
+        }
+        ImGui::EndChild();
+    }
 
     void BeginFrame()
     {
@@ -975,7 +986,7 @@ namespace Engine::UI
     {
         if ((!DebugEnabled && !ApplicationUIInput) || !ImGui::GetCurrentContext()) return false;
         const bool handled = ImGui_ImplWin32_WndProcHandler(window, message, wParam, lParam) != 0;
-        if (message == WM_KEYUP && wParam == VK_F1) { Visible = !Visible; return true; }
+        if (SettingsEditingEnabled && message == WM_KEYUP && wParam == VK_F1) { Visible = !Visible; return true; }
         return handled || (message >= WM_MOUSEFIRST && message <= WM_MOUSELAST && WantsMouseInput()) ||
             (message >= WM_KEYFIRST && message <= WM_KEYLAST && WantsKeyboardInput());
     }

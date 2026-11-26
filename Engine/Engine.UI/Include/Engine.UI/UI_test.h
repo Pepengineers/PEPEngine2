@@ -40,6 +40,7 @@ namespace Engine::UI
     void SetLocalShadowDistribution(std::function<std::string()> layout);
     void HideSettings();
     void OpenSettings();
+    void DrawSettingsEditor(bool sceneTools = false);
     void EnableDebugUI(); // Startup opt-in for non-Debug builds.
     bool DebugUIVisible();
 }

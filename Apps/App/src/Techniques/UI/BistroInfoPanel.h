@@ -1,61 +1,59 @@
 #pragma once
 
+#include "BistroBenchmarkLaunch.h"
 #include "BistroComparePanel.h"
 #include <array>
-#include <cstddef>
-#include <cstdint>
-#include <filesystem>
+#include <chrono>
 #include <map>
-#include <optional>
-#include <utility>
 #include <vector>
+#include <optional>
 #include <string>
+#include <utility>
 
 class BistroBenchmark;
-class BistroRenderPipeline;
 class RenderModule;
-class Window;
 struct ImFont;
-namespace BistroBenchmarkData { enum class RunMode; }
+namespace BistroRender { class QueueSubmission; }
 
 class BistroInfoPanel
 {
 public:
     void InitializeFont();
-    void Hide() { _hidden = true; _count = _next = 0; _frames = 0; _elapsed = _displayFps = 0; }
-    void Show(bool compact = false) { _hidden = false; _compact = compact; _checkPlacement = true; }
-    void Toggle(bool compact)
-    {
-        if (!_hidden && _compact == compact) { Hide(); return; }
-        Show(compact);
-    }
-    void ApplyResolution(Window&);
-    void Draw(RenderModule&, BistroRenderPipeline&, BistroBenchmark&, float frameSeconds);
+    BistroRun::Launch SelectedLaunch() const { return _launch; }
+#if defined(_DEBUG) || defined(DEBUG)
+    const BistroRun::Map* TakeDebugMap() { return std::exchange(_requestedDebugMap, nullptr); }
+#endif
+    void DrawSettings(RenderModule&, BistroBenchmark&);
+    void DrawMeasurement(const BistroBenchmark&) const;
+    void RecordPresent(std::chrono::steady_clock::time_point now, BistroRender::QueueSubmission&, bool manualGpuTimings);
+    void ShowSettings(bool openResults, const std::string& error = {});
 
 private:
-    struct Placement { std::string Technique, Adapter, Queue; };
-    void RefreshPlacement(const BistroRenderPipeline&);
-    void DrawPlacement(bool compact) const;
-    void DrawFull(RenderModule&, BistroBenchmark&);
-    void DrawResult(const BistroBenchmark&, BistroBenchmarkData::RunMode tab);
-    void DrawCurrentSettings(RenderModule&);
-    void DrawLivePlot() const;
+    enum class Tab { Setup, Results };
+    void DrawLaunchControls(BistroBenchmark& benchmark);
+    void ApplyPreset(const std::filesystem::path& path);
 
+    BistroRun::Launch _launch;
+    bool _parametersOpen = false;
+#if defined(_DEBUG) || defined(DEBUG)
+    const BistroRun::Map* _requestedDebugMap = nullptr;
+#endif
     BistroComparePanel _compare;
     ImFont* _fullFont = nullptr;
-    std::vector<Placement> _placement;
-    std::map<std::pair<std::string, std::string>, std::string> _groups;
-    std::vector<std::string> _peers;
-    std::pair<uint16_t, uint16_t> _pendingSize{};
-    std::filesystem::path _pendingPreset;
-    std::filesystem::path _latestResult;
-    std::optional<bool> _queueResults, _singleQuality, _multiQuality;
+    ImFont* _headingFont = nullptr;
+    Tab _tab = Tab::Setup;
     std::string _displayError;
-    bool _plotFps = false;
-    std::string _primary;
-    bool _compact = false, _hidden = false, _checkPlacement = true;
-    std::array<float, 180> _frameMs{};
-    size_t _next = 0, _count = 0;
-    float _elapsed = 0, _displayFps = 0;
-    unsigned _frames = 0;
+    bool _initializedSize = false;
+    struct GpuWork
+    {
+        std::string Adapter;
+        std::vector<std::pair<double, double>> Intervals;
+    };
+    std::map<unsigned, GpuWork> _gpuWork;
+    uint64_t _timingEpoch = 0;
+    size_t _packetCursor = 0;
+    std::array<double, 180> _presentBeginMs{};
+    std::array<float, 180> _presentMs{};
+    size_t _count = 0, _next = 0;
+    std::optional<std::chrono::steady_clock::time_point> _lastPresent;
 };

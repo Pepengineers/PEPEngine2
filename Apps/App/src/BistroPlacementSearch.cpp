@@ -14,6 +14,7 @@ void Search::LinkBaseline(const std::filesystem::path& output, std::string condi
     _conditions = std::string(ProfileName[_profile]) + ' ' + conditions;
     _baselineFile = output;
     _baselineFile.replace_extension(".baseline");
+    std::filesystem::path latestSelection;
     for (const auto* folder : {"SingleGPU", "MultiGPU"})
     {
         const auto directory = output.parent_path().parent_path() / folder;
@@ -23,28 +24,24 @@ void Search::LinkBaseline(const std::filesystem::path& output, std::string condi
             if (item.path().extension() != ".baseline" || !item.is_regular_file()) continue;
             std::ifstream input(item.path());
             std::string key;
-            std::array<bool, 2> completed{};
-            if (!(input >> std::quoted(key) >> completed[0] >> completed[1]) || key != _conditions)
-            {
-                _incompatibleBaseline = true;
-                continue;
-            }
+            if (!(input >> std::quoted(key)) || key != _conditions) continue;
             Result result;
-            while (ReadReference(input, result))
+            std::string role;
+            while (input >> role && ReadReference(input, result))
             {
-                const auto size = std::find(_sizes.begin(), _sizes.end(), result.Output);
-                if (size == _sizes.end()) continue;
-                result.Settings.Resolution = size - _sizes.begin();
+                if (result.Output != _output || (!_allowUpscalers && result.Settings.Provider)) continue;
                 result.Settings.Owners = _high.Owners;
                 result.Settings.Sync = _high.Sync;
                 result.Settings = Canonical(std::move(result.Settings));
                 const auto source = result.SourceCsv.empty() ? std::filesystem::path(item.path()).replace_extension(".csv") :
                     (directory / std::filesystem::u8path(result.SourceCsv)).lexically_normal();
                 result.SourceCsv = source.lexically_relative(output.parent_path()).generic_u8string();
-                if (completed[bool(result.Settings.Provider)] && result.Fps >= Threshold[_profile])
-                    _cachedMode[bool(result.Settings.Provider)] = true;
-                ObserveComposition(result);
-                _references.push_back(result);
+                if (role == "selected" && item.path().filename() >= latestSelection)
+                {
+                    _savedSelection = result;
+                    latestSelection = item.path().filename();
+                }
+                if (role == "local") _references.push_back(result);
             }
         }
     }
@@ -53,15 +50,16 @@ void Search::LinkBaseline(const std::filesystem::path& output, std::string condi
     });
 }
 
-void Search::Start(ConsoleModule& console, Size screen, std::vector<int> adapters, bool remote,
-    bool fixedWaterSubsteps, bool usesSkinningPreset, const std::set<std::wstring>& shadowFixtures, BistroBenchmarkData::Csv& csv)
+void Search::Start(ConsoleModule& console, Size output, std::vector<int> adapters, bool remote,
+    bool fixedWaterSubsteps, bool usesSkinningPreset, const std::set<std::wstring>& shadowFixtures, BistroBenchmarkData::Csv& csv,
+    bool allowUpscalers)
 {
     _adapters = std::move(adapters);
     _remote = remote;
     _aoDepthNormals = console.FindConsoleVariable(L"Render.DepthNormals.PrepassEnabled").GetBool();
     _windAlgorithm = console.FindConsoleVariable(L"Render.Wind.Algorithm").GetString();
-    _preferredProvider = console.FindConsoleVariable(L"Render.Upscaler.Provider").GetInt();
-    _preferredPreset = console.FindConsoleVariable(L"Render.Upscaler.Quality").GetInt();
+    _output = output;
+    _allowUpscalers = allowUpscalers;
     _placements.assign(std::begin(Placements), std::end(Placements));
     for (size_t i = 0; i < BistroReflections::AdapterNames.size(); ++i)
         _placements.push_back({BistroReflections::AdapterNames[i], "Probe " + std::to_string(i)});
@@ -76,18 +74,13 @@ void Search::Start(ConsoleModule& console, Size screen, std::vector<int> adapter
                 LocalShadowPageCrossSyncName(page), {int(ShadowCrossSync::Exact), int(ShadowCrossSync::Latest)}});
         }
     }
-    for (unsigned height : {480u, 720u, 900u, 1080u, 1440u, 2160u, screen.second})
-        if (height <= screen.second)
-            _sizes.emplace_back(unsigned((uint64_t(height) * screen.first + screen.second / 2) / screen.second), height);
-    std::sort(_sizes.begin(), _sizes.end());
-    _sizes.erase(std::unique(_sizes.begin(), _sizes.end()), _sizes.end());
     _high.Owners.assign(_placements.size(), -1);
     _high.Sync.assign(_placements.size(), -1);
     _high.Levels.fill(High);
     _minimum = _high;
     for (size_t i = 0; i < std::size(Techniques); ++i)
     {
-        const auto& technique = Techniques[i];
+        const auto& technique = _techniques[i];
         if (!technique.Quality) continue;
         const auto& variable = console.FindConsoleVariable(technique.Quality);
         auto& levels = _values[i];
@@ -158,10 +151,10 @@ ConsoleVariablePatch Search::Patch(const Config& config) const
     };
     for (size_t i = 0; i < std::size(Techniques); ++i)
     {
-        if (Techniques[i].Enable)
-            patch.emplace_back(Techniques[i].Enable, config.Levels[i] == Off ? "false" : "true");
-        if (Techniques[i].Quality && QualityValue(i, config.Levels[i]) >= 0)
-            patch.emplace_back(Techniques[i].Quality, std::to_string(QualityValue(i, config.Levels[i])));
+        if (_techniques[i].Enable)
+            patch.emplace_back(_techniques[i].Enable, config.Levels[i] == Off ? "false" : "true");
+        if (_techniques[i].Quality && QualityValue(i, config.Levels[i]) >= 0)
+            patch.emplace_back(_techniques[i].Quality, std::to_string(QualityValue(i, config.Levels[i])));
     }
     for (size_t i = 0; i < _placements.size(); ++i)
     {
@@ -175,27 +168,18 @@ ConsoleVariablePatch Search::Patch(const Config& config) const
 
 Trial Search::Calibration()
 {
-    if (LowFirst())
-    {
-        const auto* saved = SavedPerformance(false);
-        auto trial = Make(saved ? saved->Settings : _minimum, saved ?
-            "recheck saved Native preset and capture route checkpoints" : "Native lower anchor and route checkpoints", true);
-        _calibrationId = trial.Id;
-        return trial;
-    }
-    auto settings = _high;
-    settings.Resolution = _sizes.size() - 1;
-    return Make(settings, "maximum Native output with full High and route checkpoints", true);
+    const auto* saved = _savedSelection ? &*_savedSelection : SavedPreset(false);
+    auto trial = Make(saved ? saved->Settings : LowFirst() ? _minimum : _high,
+        saved ? "remeasure saved preset and capture route checkpoints" :
+        LowFirst() ? "Native minimum active levels and route checkpoints" : "Native High and route checkpoints", true);
+    _calibrationId = trial.Id;
+    return trial;
 }
 
 bool Search::NeedsPhase(unsigned phase) const
 {
-    if (phase < 2)
-    {
-        if (!_remote || !_cachedMode[phase]) return true;
-        const auto* reference = BestReference(phase != 0);
-        return !reference || reference->Fps < Threshold[_profile];
-    }
+    if ((phase & 1) && !_allowUpscalers) return false;
+    if (phase < 2) return true;
     return phase < 4 && _remote && !_adapters.empty() && HasReference(phase == 3);
 }
 
@@ -214,25 +198,30 @@ bool Search::BeginPhase(unsigned phase)
     _short.clear();
     _failedProbes.clear();
     if (!NeedsPhase(phase)) return false;
+    if (phase == 1)
+    {
+        using U = GDX12UpscalerProvider;
+        using P = GDX12UpscalerQuality;
+        // Default aliases an explicit mode. NativeAA has no reconstruction step.
+        for (const auto [provider, last] : {std::pair{U::XeSS, P::UltraQualityPlus}, {U::FSR, P::UltraPerformance},
+                {U::DLSS, P::UltraQuality}, {U::NIS, P::Performance}, {U::TAA, P::Performance}})
+            for (int preset = int(P::Quality); preset <= int(last); ++preset)
+                _inspect.emplace_back(int(provider), preset);
+    }
     if (HighFirst())
     {
         _quality = {};
-        auto high = _high;
-        high.Resolution = _sizes.size() - 1;
-        _quality.Modes = Upscaled() ? UpscalerModes(high) : std::vector<Config>{high};
-        return !_quality.Modes.empty();
+        return true;
     }
     if (LowFirst())
     {
         _performance = {};
-        if (const auto* saved = SavedPerformance(Upscaled()))
+        if (const auto* saved = SavedPreset(Upscaled()))
         {
-            _performance.Stage = PerformanceStage::Saved;
-            _performance.Full.emplace_back(saved->Settings, "recheck saved preset");
+            _performance.Full.emplace_back(saved->Settings, "remeasure saved preset");
             if (auto other = SavedCompetitor(*saved))
-                _performance.Full.emplace_back(std::move(*other), "recheck nearest saved competitor");
+                Schedule(*other, "probe nearest saved competitor");
         }
-        else BeginPerformanceLower();
         return true;
     }
     if (const auto* reference = BestReference(Upscaled()))
@@ -241,40 +230,25 @@ bool Search::BeginPhase(unsigned phase)
         Seed(reference->Settings, false, true);
         auto next = FullComposition(reference->Settings);
         if (next.Levels != reference->Settings.Levels) Seed(next, false, true);
-        if (next.Resolution + 1 < _sizes.size())
-        {
-            ++next.Resolution;
-            Seed(next, true);
-        }
+        if (Step(next) + 1 < StepCount())
+            for (const auto& higher : AtStep(next, Step(next) + 1)) Seed(higher, true);
         const auto closest = ClosestReference(Upscaled());
         if (closest != reference && closest) Seed(FullComposition(closest->Settings), true);
         const auto detail = DetailedReference(Upscaled());
         if (detail && detail != reference && detail != closest) Seed(FullComposition(detail->Settings), true);
     }
     else return false;
-    Config seed = _high;
-    seed.Resolution = _sizes.size() - 1;
-    if (!Upscaled())
+    for (size_t i = 0; i < StepCount(); ++i)
     {
-        Seed(seed);
-        return true;
+        const size_t step = _profile == Quality ? StepCount() - 1 - i : i;
+        for (const auto& mode : AtStep(_high, step)) Seed(mode);
     }
-    const auto modes = UpscalerModes(seed);
-    for (const auto& mode : modes) Seed(mode, true);
-    for (const auto& mode : modes) Seed(mode);
-    return !_pending.empty();
-}
-
-void Search::EndPhase()
-{
-    if (RemotePhase() || !HasReference(Upscaled())) return;
-    if (BestReference(Upscaled())->Fps < Threshold[_profile]) return;
-    _completedMode[Upscaled()] = true;
-    SaveReferences();
+    return !_initialPlacements.empty() || !_priority.empty() || !_pending.empty();
 }
 
 std::optional<Trial> Search::NextProbe(BistroBenchmarkData::Csv& csv)
 {
+    if (auto inspect = InspectNextImage()) return inspect;
     while (!_initialPlacements.empty())
     {
         auto [adapter, settings] = std::move(_initialPlacements.front());
@@ -325,7 +299,7 @@ std::optional<Trial> Search::NextProbe(BistroBenchmarkData::Csv& csv)
 
 std::optional<Trial> Search::PerformanceConfirmation(BistroBenchmarkData::Csv& csv)
 {
-    if (!LowFirst()) return {};
+    if (!LowFirst() || (Upscaled() && !_inspect.empty())) return {};
     for (;;)
     {
         if (_performance.Full.empty() && _pending.empty() && _priority.empty()) AdvancePerformance(csv);
@@ -335,7 +309,6 @@ std::optional<Trial> Search::PerformanceConfirmation(BistroBenchmarkData::Csv& c
         if (!_fullSettings.count(settings))
         {
             auto trial = Make(settings, std::move(source), true);
-            trial.RequireLive = _performance.Stage == PerformanceStage::Saved;
             return trial;
         }
     }
@@ -343,11 +316,19 @@ std::optional<Trial> Search::PerformanceConfirmation(BistroBenchmarkData::Csv& c
 
 std::optional<Trial> Search::NextQualityTrial(BistroBenchmarkData::Csv& csv, bool canProbe)
 {
+    if (Upscaled() && !_inspect.empty()) return canProbe ? InspectNextImage() : std::nullopt;
+    if (_quality.RecheckSaved)
+    {
+        _quality.RecheckSaved = false;
+        if (const auto* saved = SavedPreset(Upscaled()); saved && !_fullSettings.count(saved->Settings))
+            return Make(saved->Settings, "remeasure saved preset", true);
+    }
     if (_pending.empty())
         if (auto full = AdvanceQuality(csv, canProbe)) return full;
     if (canProbe)
         if (auto probe = NextProbe(csv)) return probe;
     if (const auto* finalist = QualityFinalist()) return Confirm(*finalist);
+    if (const auto* reserve = Finalist()) return Confirm(*reserve);
     return {};
 }
 
@@ -436,7 +417,7 @@ void Search::Record(const Trial& trial, const Result& result, BistroBenchmarkDat
                 return;
             }
             _confirmed.push_back(result);
-            if (!result.Remote) SaveReferences();
+            SaveReferences();
         }
         else if (outputUnavailable || rejection == "requested image mode unavailable" ||
             rejection == "NIS reconstruction failed" ||
@@ -454,12 +435,6 @@ void Search::Record(const Trial& trial, const Result& result, BistroBenchmarkDat
         {
             ExpandPolicies(trial, result);
             ScheduleReflectionVariants(trial.Settings, "different reflection workload after missed deadline", true);
-        }
-        if (outputUnavailable && trial.Settings.Resolution)
-        {
-            auto smaller = trial.Settings;
-            --smaller.Resolution;
-            Schedule(smaller, "lower output after window size rejection", true);
         }
         return;
     }
@@ -502,14 +477,34 @@ void Search::Record(const Trial& trial, const Result& result, BistroBenchmarkDat
 void Search::Report(BistroBenchmarkData::Csv& csv, std::string_view reason,
     ConsoleModule& console, const std::filesystem::path& output) const
 {
+    if (const auto* selected = Winner()) csv.Config("SelectedImage", selected->Settings.Provider ? "Upscaled" : "Native");
+    const Result* native = nullptr;
+    const auto changes = [&](const std::string& key, const Result& before, const Result& after, bool improvementsOnly)
+    {
+        static constexpr const char* names[] = {"Off", "Low", "Medium", "High", "Epic"};
+        for (size_t i = 0; i < std::size(Techniques); ++i)
+        {
+            const auto from = before.Activity[i] ? before.Settings.Levels[i] : Off;
+            const auto to = after.Activity[i] ? after.Settings.Levels[i] : Off;
+            if (from != to && (!improvementsOnly || to > from))
+                csv.Config(key, std::string(_techniques[i].Pass) + " " + names[from] + " -> " + names[to]);
+        }
+        if (after.Activity[ProbeQuality] && before.Activity[ProbeQuality] && after.Settings.ProbeFrequency != before.Settings.ProbeFrequency &&
+            (!improvementsOnly || after.Settings.ProbeFrequency > before.Settings.ProbeFrequency))
+            csv.Config(key, "reflection probe update frequency " + std::to_string(int(before.Settings.ProbeFrequency)) +
+                " -> " + std::to_string(int(after.Settings.ProbeFrequency)));
+    };
     for (bool upscaled : {false, true})
     {
+        if (upscaled && !_allowUpscalers) continue;
         const auto prefix = std::string(upscaled ? "Upscaled." : "Native.") + ProfileName[_profile] + ".";
         const auto* remote = _remote ? Best(upscaled, true) : nullptr;
         const auto* reference = BestReference(upscaled);
         const auto* best = remote && (!reference || Better(*remote, *reference)) ? remote : reference;
         ReportResult(csv, prefix, best);
-        if (best && best->Fps >= Threshold[_profile])
+        if (!upscaled) native = best;
+        else if (native && best) changes(prefix + "ChangeFromNative", *native, *best, false);
+        if (best)
         {
             auto path = output.parent_path() / (output.stem().wstring() + (upscaled ? L"-upscaled.ini" : L"-native.ini"));
             auto patch = Patch(best->Settings);
@@ -543,26 +538,22 @@ void Search::Report(BistroBenchmarkData::Csv& csv, std::string_view reason,
             }
             ReportResult(csv, prefix + "SingleGPU.", reference);
             ReportResult(csv, prefix + "MultiGPU.", remote);
-            if (reference && !remote && reference->Fps >= Threshold[_profile])
+            if (reference && !remote)
                 csv.Config(prefix + "Winner", "Single GPU");
             if (!reference || !remote)
                 csv.Config(prefix + "Comparison", !reference ?
-                    (_incompatibleBaseline ? "no baseline matching build, profile, route and scene replay state" :
-                        "no saved Single GPU route for this profile and image mode") :
+                    "no confirmed Single GPU route in this run for this image mode" :
                     "no verified route with a consumed remote publication");
             else
             {
-                csv.Config(prefix + "Winner", best->Fps < Threshold[_profile] ? "neither met the target" :
-                    best == reference ? "Single GPU" : "Multi-GPU");
+                csv.Config(prefix + "Winner", best == reference ? "Single GPU" : "Multi-GPU");
                 if (SameImage(*remote, *reference))
                     csv.Config(prefix + "SameImageFpsGainPct",
                         BistroBenchmarkData::Csv::Number(100 * (remote->Fps / reference->Fps - 1)));
                 else
                 {
-                    csv.Config(prefix + "Comparison", "image comparability not verified; compare output, render, techniques and local-shadow texels");
-                    csv.Config(prefix + "OutputPixelChangePct", BistroBenchmarkData::Csv::Number(100 *
-                        (double(remote->Output.first) * remote->Output.second /
-                            (double(reference->Output.first) * reference->Output.second) - 1)));
+                    csv.Config(prefix + "Comparison", "compare measured render size, technique levels and local-shadow coverage");
+                    changes(prefix + "ImprovedSetting", *reference, *remote, true);
                 }
             }
         }
@@ -580,45 +571,52 @@ void Search::Report(BistroBenchmarkData::Csv& csv, std::string_view reason,
     }
 }
 
-std::vector<Config> Search::UpscalerModes(Config settings) const
+std::optional<Trial> Search::InspectNextImage()
 {
-    using U = GDX12UpscalerProvider;
-    using P = GDX12UpscalerQuality;
-    std::vector<Config> modes;
-    const auto add = [&](int provider, int preset)
-    {
-        if (!provider || preset == int(P::NativeAA) ||
-            (provider == int(U::NIS) && preset > int(P::Performance))) return;
-        settings.Provider = provider;
-        settings.Preset = preset;
-        if (std::find(modes.begin(), modes.end(), settings) == modes.end()) modes.push_back(settings);
-    };
-    add(_preferredProvider, _preferredPreset);
-    if (LowFirst())
-    {
-        add(int(U::TAA), int(P::Balanced));
-        add(int(U::TAA), int(P::UltraPerformance));
-        for (int provider = int(U::TAA); provider > 0; --provider)
-            add(provider, int(P::Performance));
-        for (int provider = int(U::TAA) - 1; provider > 0; --provider)
-            add(provider, int(P::Balanced));
-        return modes;
-    }
-    for (int provider = int(U::TAA); provider > 0; --provider)
-        add(provider, int(P::Balanced));
-    for (const int preset : {int(P::Quality), int(P::Performance), int(P::UltraQuality), int(P::UltraPerformance),
-                            int(P::UltraQualityPlus), int(P::Default)})
-        for (int provider = int(U::TAA); provider > 0; --provider)
-            add(provider, preset);
-    return modes;
+    if (!Upscaled() || RemotePhase() || _inspect.empty()) return {};
+    auto config = _profile == Performance ? _minimum : _high;
+    std::tie(config.Provider, config.Preset) = _inspect.front();
+    _inspect.pop_front();
+    auto trial = Make(config, "query effective reconstruction size", false);
+    trial.RequireLive = trial.InspectImage = true;
+    return trial;
 }
 
-const Result* Search::SavedPerformance(bool upscaled) const
+void Search::RecordImageMode(const Trial& trial, Size render, bool available)
 {
+    if (available && render.first && render.second && render.first < _output.first && render.second < _output.second)
+        _steps[render].emplace_back(trial.Settings.Provider, trial.Settings.Preset);
+}
+
+size_t Search::Step(const Config& settings) const
+{
+    if (!settings.Provider) return 0;
+    const ImageMode mode{settings.Provider, settings.Preset};
+    const auto it = std::find_if(_steps.begin(), _steps.end(), [&](const auto& step) {
+        return std::find(step.second.begin(), step.second.end(), mode) != step.second.end();
+    });
+    return std::distance(_steps.begin(), it);
+}
+
+std::vector<Config> Search::AtStep(const Config& base, size_t step) const
+{
+    if (!Upscaled()) return {base};
+    std::vector<Config> candidates;
+    for (const auto& mode : std::next(_steps.begin(), step)->second)
+    {
+        auto candidate = base;
+        std::tie(candidate.Provider, candidate.Preset) = mode;
+        candidates.push_back(std::move(candidate));
+    }
+    return candidates;
+}
+
+const Result* Search::SavedPreset(bool upscaled) const
+{
+    if (_savedSelection && bool(_savedSelection->Settings.Provider) == upscaled) return &*_savedSelection;
     const Result* best = nullptr;
     for (const auto& result : _references)
-        if (bool(result.Settings.Provider) == upscaled && result.Fps >= Threshold[Performance] &&
-            (!best || Better(result, *best))) best = &result;
+        if (bool(result.Settings.Provider) == upscaled && (!best || Better(result, *best))) best = &result;
     return best;
 }
 
@@ -629,54 +627,20 @@ std::optional<Config> Search::SavedCompetitor(const Result& saved) const
     const auto distance = [&](const Result& result)
     {
         const auto& other = result.Settings;
-        const auto size = (std::max)(base.Resolution, other.Resolution) - (std::min)(base.Resolution, other.Resolution);
-        return std::pair{other.Provider != base.Provider || other.Preset != base.Preset, size};
+        return std::pair{other.Provider != base.Provider,
+            std::abs(int64_t(saved.Render.second) - result.Render.second)};
     };
     for (const auto& result : _references)
         if (bool(result.Settings.Provider) == bool(base.Provider) && !(result.Settings == base) &&
             (!nearest || distance(result) < distance(*nearest) || (distance(result) == distance(*nearest) &&
                 Better(result, *nearest)))) nearest = &result;
-    if (nearest) return nearest->Settings;
-    auto neighbor = base;
-    if (neighbor.Resolution) --neighbor.Resolution;
-    else if (_sizes.size() > 1) ++neighbor.Resolution;
-    else
-    {
-        for (size_t i = 0; i < neighbor.Levels.size(); ++i)
-            if (PerformanceScale(i) && neighbor.Levels[i] > _minimum.Levels[i])
-            {
-                neighbor.Levels[i] = _minimum.Levels[i];
-                return Canonical(std::move(neighbor));
-            }
-        for (size_t i = 0; i < neighbor.Levels.size(); ++i)
-            if (PerformanceScale(i) && neighbor.Levels[i] != Off && neighbor.Levels[i] < High)
-            {
-                neighbor.Levels[i] = High;
-                return Canonical(std::move(neighbor));
-            }
-        if (neighbor.Levels[ProbeQuality] != Off)
-        {
-            neighbor.ProbeCapture = 1 - neighbor.ProbeCapture;
-            return neighbor;
-        }
-        return {};
-    }
-    return neighbor;
-}
-
-void Search::BeginPerformanceLower()
-{
-    _performance.Stage = PerformanceStage::Lower;
-    _performance.Modes = Upscaled() ? UpscalerModes(_minimum) : std::vector<Config>{_minimum};
+    return nearest ? std::optional<Config>(nearest->Settings) : std::nullopt;
 }
 
 const Result* Search::QualityFull(const Config& settings) const
 {
     for (const auto& result : _confirmed)
         if (result.Settings == settings) return &result;
-    if (!_fullSettings.count(settings))
-        for (const auto& result : _references)
-            if (result.Settings == settings) return &result;
     return nullptr;
 }
 
@@ -697,13 +661,7 @@ const Result* Search::QualityFinalist(const std::vector<Config>* alternatives, c
     {
         if ((alternatives && std::find(alternatives->begin(), alternatives->end(), settings) == alternatives->end()) ||
             ShortFps(result) < Threshold[Quality] * .96 || _fullSettings.count(settings) || QualityFull(settings)) continue;
-        const auto pruned = [&](const Result& full)
-        {
-            return full.Fps >= Threshold[Quality] && !_fullSettings.count(full.Settings) &&
-                QualityOutranks(full, result);
-        };
-        if (std::any_of(_references.begin(), _references.end(), pruned) ||
-            std::any_of(_confirmed.begin(), _confirmed.end(), [&](const Result& full) {
+        if (std::any_of(_confirmed.begin(), _confirmed.end(), [&](const Result& full) {
                 return full.Fps >= Threshold[Quality] && QualityOutranks(full, result);
             })) continue;
         const bool covers = reductionBase && ShortFps(result) >= Threshold[Quality] &&
@@ -714,15 +672,6 @@ const Result* Search::QualityFinalist(const std::vector<Config>* alternatives, c
             bestCovers = covers;
         }
     }
-    return best;
-}
-
-size_t Search::SmallerQualityResolution(size_t current) const
-{
-    const unsigned target = _sizes[current].second / 2;
-    size_t best = 0;
-    for (size_t i = 1; i < current; ++i)
-        if (std::abs(int64_t(_sizes[i].second) - target) < std::abs(int64_t(_sizes[best].second) - target)) best = i;
     return best;
 }
 
@@ -746,81 +695,75 @@ std::optional<Trial> Search::AdvanceQuality(BistroBenchmarkData::Csv& csv, bool 
             if (const auto* result = QualityFull(config); passes(result) && (!best || Better(*result, *best))) best = result;
         return best;
     };
-    const auto finishMode = [&]()
+    while (StepCount() && progress.Stage != QualityStage::Done && _pending.empty())
     {
-        progress.Alternatives.clear();
-        progress.Stage = QualityStage::High;
-        ++progress.Mode;
-    };
-    while (progress.Mode < progress.Modes.size() && _pending.empty())
-    {
-        auto mode = progress.Modes[progress.Mode];
         switch (progress.Stage)
         {
         case QualityStage::High:
-        case QualityStage::RaiseOutput:
+        case QualityStage::RaiseDetail:
         {
-            const bool raising = progress.Stage == QualityStage::RaiseOutput;
-            const auto* anchor = raising ? QualityFull(progress.Anchor) : nullptr;
-            if (raising) mode = progress.Anchor;
-            mode.Resolution = _sizes.size() - 1;
-            size_t upper = _sizes.size();
+            const bool raising = progress.Stage == QualityStage::RaiseDetail;
+            const auto& base = raising ? progress.Anchor : _high;
+            size_t step = StepCount() - 1, upper = StepCount();
             std::optional<size_t> lower;
-            const char* source = raising ? "find highest output for the confirmed composition" : "maximum output with full High";
             for (;;)
             {
-                Config candidate = mode;
-                const Result* full;
-                const Result* sample;
-                bool passed;
-                for (;;)
+                const Result* passing = nullptr;
+                const Result* reserve = nullptr;
+                for (auto candidate : AtStep(base, step))
                 {
-                    full = QualityFull(candidate);
-                    sample = QualityShort(candidate);
-                    if (!full && !_fullSettings.count(candidate) && !sample && !_failedProbes.count(candidate))
+                    for (;;)
                     {
-                        if (canProbe) Schedule(candidate, candidate.ProbeFrequency != mode.ProbeFrequency ?
-                            "try static reflections at the same output and spatial quality" : source);
-                        return {};
+                        const auto* full = QualityFull(candidate);
+                        const auto* sample = QualityShort(candidate);
+                        if (!full && !sample && !_fullSettings.count(candidate) && !_failedProbes.count(candidate))
+                        {
+                            if (canProbe) Schedule(candidate, "find largest internal size for the full composition");
+                            break;
+                        }
+                        const auto* measured = full ? full : sample;
+                        if (measured && (!reserve || measured->Fps > reserve->Fps)) reserve = measured;
+                        const auto* anchor = raising ? QualityFull(progress.Anchor) : nullptr;
+                        const bool retainsEffects = !full ? false : anchor ?
+                            std::equal(anchor->Activity.begin(), anchor->Activity.end(), full->Activity.begin(),
+                                [](bool required, bool active) { return !required || active; }) : QualityComplete(*full);
+                        const bool passed = full ? passes(full) && retainsEffects :
+                            sample && !_fullSettings.count(candidate) && ShortFps(*sample) >= threshold * .96;
+                        if (passed)
+                        {
+                            if (!passing || Better(*measured, *passing, false, true)) passing = measured;
+                            break;
+                        }
+                        if (raising || candidate.ProbeFrequency == Frequency::Off) break;
+                        candidate.ProbeFrequency = Frequency::Off;
                     }
-                    passed = full ? passes(full) && (anchor ?
-                        std::equal(anchor->Activity.begin(), anchor->Activity.end(), full->Activity.begin(),
-                            [](bool required, bool active) { return !required || active; }) : QualityComplete(*full)) :
-                        !_fullSettings.count(candidate) && sample && ShortFps(*sample) >= threshold * .96;
-                    if (passed || raising || candidate.ProbeFrequency == Frequency::Off) break;
-                    candidate.ProbeFrequency = Frequency::Off;
                 }
-                if (passed)
+                if (!_pending.empty()) return {};
+                if (passing)
                 {
-                    lower = mode.Resolution;
-                    if (upper == *lower + 1)
+                    lower = step;
+                    if (upper == step + 1)
                     {
-                        if (!full) return Confirm(*sample);
-                        progress.Anchor = candidate;
+                        if (!QualityFull(passing->Settings)) return Confirm(*passing);
+                        progress.Anchor = passing->Settings;
                         progress.Stage = raising ? QualityStage::Reflections : QualityStage::Epic;
                         break;
                     }
                 }
-                else upper = mode.Resolution;
-                if (lower)
-                {
-                    mode.Resolution = *lower + (upper - *lower) / 2;
-                    source = "refine output between passing and failing steps";
-                }
-                else if (mode.Resolution)
-                {
-                    mode.Resolution = SmallerQualityResolution(mode.Resolution);
-                    source = "halve output height after the target was missed";
-                }
+                else upper = step;
+                if (lower) step = *lower + (upper - *lower) / 2;
+                else if (step) step /= 2;
                 else
                 {
-                    progress.Anchor = candidate;
+                    if (!reserve) { progress.Stage = QualityStage::Done; break; }
+                    progress.Anchor = reserve->Settings;
                     progress.Stage = QualityStage::Fallback;
                     break;
                 }
             }
             break;
         }
+        case QualityStage::Done: return {};
         case QualityStage::Epic:
         {
             auto epic = progress.Anchor;
@@ -841,7 +784,7 @@ std::optional<Trial> Search::AdvanceQuality(BistroBenchmarkData::Csv& csv, bool 
                     }
                     else
                     {
-                        if (canProbe) Schedule(epic, "all Epic at confirmed High output");
+                        if (canProbe) Schedule(epic, "all Epic at the confirmed High internal size");
                         return {};
                     }
                 }
@@ -864,7 +807,7 @@ std::optional<Trial> Search::AdvanceQuality(BistroBenchmarkData::Csv& csv, bool 
                     {
                         auto next = progress.Candidate;
                         next.Levels[i] = High;
-                        QueueQualityAlternative(next, "measure Epic to High frame-time change for " + std::string(Techniques[i].Pass));
+                        QueueQualityAlternative(next, "measure Epic to High frame-time change for " + std::string(_techniques[i].Pass));
                     }
             if (!_pending.empty()) break;
             const auto* base = QualityShort(progress.Candidate);
@@ -901,7 +844,7 @@ std::optional<Trial> Search::AdvanceQuality(BistroBenchmarkData::Csv& csv, bool 
                     }
             if (!_pending.empty()) break;
             if (const auto* finalist = QualityFinalist(&progress.Alternatives)) return Confirm(*finalist);
-            finishMode();
+            progress.Stage = QualityStage::Done;
             break;
         }
         case QualityStage::Fallback:
@@ -918,10 +861,10 @@ std::optional<Trial> Search::AdvanceQuality(BistroBenchmarkData::Csv& csv, bool 
                     {
                         auto next = progress.Anchor;
                         next.Levels[i] = medium.Levels[i] = Medium;
-                        QueueQualityAlternative(next, "reduce one technique after High failed at minimum output");
+                        QueueQualityAlternative(next, "reduce one technique after High failed at minimum internal size");
                     }
-                QueueQualityAlternative(medium, "full Medium after High failed at minimum output");
-                QueueQualityAlternative(minimum, "minimum active levels at minimum output");
+                QueueQualityAlternative(medium, "full Medium after High failed at minimum internal size");
+                QueueQualityAlternative(minimum, "minimum active levels at minimum internal size");
             }
             if (!_pending.empty()) break;
             if (const auto* finalist = QualityFinalist(&progress.Alternatives)) return Confirm(*finalist);
@@ -930,7 +873,7 @@ std::optional<Trial> Search::AdvanceQuality(BistroBenchmarkData::Csv& csv, bool 
             if (full && QualityComplete(*full))
             {
                 progress.Anchor = full->Settings;
-                progress.Stage = QualityStage::RaiseOutput;
+                progress.Stage = QualityStage::RaiseDetail;
             }
             else if (const auto* measure = QualityFull(minimum); measure && measure->Fps < threshold)
             {
@@ -942,7 +885,7 @@ std::optional<Trial> Search::AdvanceQuality(BistroBenchmarkData::Csv& csv, bool 
                 progress.Anchor = minimum;
                 progress.Stage = QualityStage::Remove;
             }
-            else finishMode();
+            else progress.Stage = QualityStage::Done;
             break;
         }
         case QualityStage::Remove:
@@ -954,11 +897,11 @@ std::optional<Trial> Search::AdvanceQuality(BistroBenchmarkData::Csv& csv, bool 
                 if (!base) base = QualityShort(progress.Anchor);
                 WriteRemovalEvidence(*base, csv);
                 for (size_t i = 0; i < base->Activity.size(); ++i)
-                    if (base->Activity[i] && (Techniques[i].Enable || Techniques[i].ScaledOff))
+                    if (base->Activity[i] && (_techniques[i].Enable || _techniques[i].ScaledOff))
                     {
                         auto next = progress.Anchor;
                         next.Levels[i] = Off;
-                        QueueQualityAlternative(next, "remove " + std::string(Techniques[i].Pass) +
+                        QueueQualityAlternative(next, "remove " + std::string(_techniques[i].Pass) +
                             " at minimum active levels after trial " + std::to_string(base->Id));
                     }
             }
@@ -968,7 +911,7 @@ std::optional<Trial> Search::AdvanceQuality(BistroBenchmarkData::Csv& csv, bool 
             {
                 progress.Anchor = full->Settings;
                 progress.Alternatives.clear();
-                progress.Stage = QualityStage::RaiseOutput;
+                progress.Stage = QualityStage::RaiseDetail;
                 break;
             }
             const Result* best = nullptr;
@@ -987,7 +930,7 @@ std::optional<Trial> Search::AdvanceQuality(BistroBenchmarkData::Csv& csv, bool 
             }
             progress.Alternatives.clear();
             if (best) progress.Anchor = best->Settings;
-            else finishMode();
+            else progress.Stage = QualityStage::Done;
             break;
         }
         }
@@ -1000,20 +943,6 @@ const Result* Search::PerformanceMeasure(const Config& settings, bool reuseCalib
     if (const auto it = _short.find(settings); it != _short.end()) return &it->second;
     if (reuseCalibration && _calibration && _calibration->Settings == settings) return &*_calibration;
     return nullptr;
-}
-
-size_t Search::LargerPerformanceResolution(size_t current) const
-{
-    const uint64_t target = uint64_t(_sizes[current].second) * 2;
-    size_t best = current + 1;
-    const auto distance = [&](size_t index) -> uint64_t
-    {
-        const uint64_t height = _sizes[index].second;
-        return height > target ? height - target : target - height;
-    };
-    for (size_t i = best + 1; i < _sizes.size(); ++i)
-        if (distance(i) <= distance(best)) best = i;
-    return best;
 }
 
 Config Search::PerformanceHigh(Config settings) const
@@ -1040,8 +969,8 @@ void Search::WriteRemovalEvidence(const Result& base, BistroBenchmarkData::Csv& 
     csv.Config(key + "FPS", BistroBenchmarkData::Csv::Number(ShortFps(base)));
     for (size_t i = 0; i < base.Activity.size(); ++i)
         if (base.Activity[i])
-            csv.Config(key + "ActiveTechnique", std::string(Techniques[i].Pass) + "=" +
-                (Techniques[i].Quality ? std::to_string(QualityValue(i, base.Settings.Levels[i])) : "On"));
+            csv.Config(key + "ActiveTechnique", std::string(_techniques[i].Pass) + "=" +
+                (_techniques[i].Quality ? std::to_string(QualityValue(i, base.Settings.Levels[i])) : "On"));
 }
 
 void Search::AdvancePerformance(BistroBenchmarkData::Csv& csv)
@@ -1053,38 +982,32 @@ void Search::AdvancePerformance(BistroBenchmarkData::Csv& csv)
         if (!_short.count(settings) && !_failedProbes.count(settings)) Schedule(settings, source);
         return !_pending.empty();
     };
+    const auto measureStep = [&](const Config& base, size_t step, const char* source)
+    {
+        const Result* best = nullptr;
+        for (const auto& candidate : AtStep(base, step))
+        {
+            if (const auto* result = PerformanceMeasure(candidate, true))
+            {
+                if (!best || Better(*result, *best, false, true)) best = result;
+            }
+            else measure(candidate, source);
+        }
+        return best;
+    };
+    if (!StepCount()) return;
     while (_pending.empty() && progress.Full.empty())
     {
         auto next = progress.Anchor;
         switch (progress.Stage)
         {
-        case PerformanceStage::Saved:
-            if (const auto* best = Best(Upscaled(), false); best && best->Fps >= Threshold[Performance])
-                progress.Stage = PerformanceStage::Done;
-            else BeginPerformanceLower();
-            break;
         case PerformanceStage::Lower:
         {
-            if (progress.NextMode == progress.Modes.size())
-            {
-                const Result* fastest = nullptr;
-                for (const auto& mode : progress.Modes)
-                    if (const auto* result = PerformanceMeasure(mode, true); result &&
-                        (!fastest || ShortFps(*result) > ShortFps(*fastest))) fastest = result;
-                if (!fastest) { progress.Stage = PerformanceStage::Done; break; }
-                progress.Anchor = fastest->Settings;
-                progress.Stage = PerformanceStage::Remove;
-                break;
-            }
-            const auto& lower = progress.Modes[progress.NextMode];
-            const auto* result = PerformanceMeasure(lower, true);
-            if (!result && measure(lower, Upscaled() ? "upscaled lower anchor" : "Native lower anchor")) return;
-            ++progress.NextMode;
-            if (passes(result))
-            {
-                progress.Anchor = lower;
-                progress.Stage = PerformanceStage::Raise;
-            }
+            const auto* result = measureStep(_minimum, 0, "minimum internal size with all effects at minimum active levels");
+            if (!_pending.empty()) return;
+            if (!result) { progress.Stage = PerformanceStage::Done; break; }
+            progress.Anchor = result->Settings;
+            progress.Stage = passes(result) ? PerformanceStage::Raise : PerformanceStage::Remove;
             break;
         }
         case PerformanceStage::Remove:
@@ -1093,13 +1016,13 @@ void Search::AdvancePerformance(BistroBenchmarkData::Csv& csv)
             WriteRemovalEvidence(base, csv);
             progress.Alternatives.clear();
             for (size_t i = 0; i < base.Activity.size(); ++i)
-                if (base.Activity[i] && (Techniques[i].Enable || Techniques[i].ScaledOff))
+                if (base.Activity[i] && (_techniques[i].Enable || _techniques[i].ScaledOff))
                 {
                     next = progress.Anchor;
                     next.Levels[i] = Off;
                     next = Canonical(std::move(next));
                     progress.Alternatives.push_back(next);
-                    Schedule(next, "remove " + std::string(Techniques[i].Pass) + " at lower anchor / trial " +
+                    Schedule(next, "remove " + std::string(_techniques[i].Pass) + " at lower anchor / trial " +
                         std::to_string(base.Id));
                 }
             progress.Stage = PerformanceStage::RemovalResults;
@@ -1117,44 +1040,36 @@ void Search::AdvancePerformance(BistroBenchmarkData::Csv& csv)
             break;
         }
         case PerformanceStage::Raise:
-            if (next.Resolution + 1 == _sizes.size())
-            {
-                progress.Stage = PerformanceStage::Neighbor;
-                break;
-            }
-            next.Resolution = LargerPerformanceResolution(next.Resolution);
-            if (measure(next, "raise output at minimum active quality")) return;
-            if (passes(PerformanceMeasure(next))) progress.Anchor = next;
+        {
+            const size_t current = Step(next);
+            if (current + 1 >= StepCount()) { progress.Stage = PerformanceStage::High; break; }
+            const size_t step = (std::min)(StepCount() - 1, current + (StepCount() - current) / 2);
+            const auto* result = measureStep(next, step, "increase internal size with the same active levels");
+            if (!_pending.empty()) return;
+            if (passes(result)) progress.Anchor = result->Settings;
             else
             {
-                progress.RefineResolution = next.Resolution - 1;
+                progress.RefineStep = step - 1;
                 progress.Stage = PerformanceStage::Refine;
             }
             break;
+        }
         case PerformanceStage::Refine:
-            if (progress.RefineResolution <= next.Resolution)
-            {
-                progress.Stage = PerformanceStage::Neighbor;
-                break;
-            }
-            next.Resolution = progress.RefineResolution;
-            if (measure(next, "refine output between passing and failing sizes")) return;
-            if (passes(PerformanceMeasure(next))) progress.Anchor = next;
-            --progress.RefineResolution;
+        {
+            if (progress.RefineStep <= Step(next)) { progress.Stage = PerformanceStage::High; break; }
+            const auto* result = measureStep(next, progress.RefineStep, "refine internal size after a missed target");
+            if (!_pending.empty()) return;
+            if (passes(result)) progress.Anchor = result->Settings;
+            --progress.RefineStep;
             break;
-        case PerformanceStage::Neighbor:
-            if (next.Resolution)
-            {
-                --next.Resolution;
-                if (measure(next, "compare adjacent lower output at minimum quality")) return;
-            }
-            progress.Stage = PerformanceStage::High;
-            break;
+        }
         case PerformanceStage::High:
-            next = PerformanceHigh(progress.Anchor);
-            if (measure(next, "raise all active techniques to High")) return;
+        {
+            const auto* result = measureStep(PerformanceHigh(progress.Anchor), Step(progress.Anchor), "raise all active techniques to High");
+            if (!_pending.empty()) return;
+            next = result ? result->Settings : progress.Anchor;
             progress.Quality = next;
-            if (const auto* result = PerformanceMeasure(next); passes(result))
+            if (passes(result))
             {
                 progress.Stage = PerformanceStage::NeighborHigh;
                 if (!_fullSettings.count(next))
@@ -1173,13 +1088,14 @@ void Search::AdvancePerformance(BistroBenchmarkData::Csv& csv)
             }
             else
             {
-                progress.Stage = PerformanceMeasure(next) ? PerformanceStage::Reduce : PerformanceStage::NeighborHigh;
+                progress.Stage = result ? PerformanceStage::Reduce : PerformanceStage::NeighborHigh;
                 if (progress.Stage == PerformanceStage::NeighborHigh) progress.Quality = progress.Anchor;
             }
             break;
+        }
         case PerformanceStage::Reduce:
         {
-            const auto& base = *PerformanceMeasure(progress.Quality);
+            const auto& base = *PerformanceMeasure(progress.Quality, true);
             progress.Alternatives.clear();
             for (size_t i = 0; i < base.Activity.size(); ++i)
             {
@@ -1193,7 +1109,7 @@ void Search::AdvancePerformance(BistroBenchmarkData::Csv& csv)
                     next.Levels[i] = Level(lower);
                     next = Canonical(std::move(next));
                     progress.Alternatives.push_back(next);
-                    Schedule(next, "lower " + std::string(Techniques[i].Pass) + " / trial " +
+                    Schedule(next, "lower " + std::string(_techniques[i].Pass) + " / trial " +
                         std::to_string(base.Id));
                     if (!progress.DeepReduction) break;
                 }
@@ -1203,7 +1119,7 @@ void Search::AdvancePerformance(BistroBenchmarkData::Csv& csv)
         }
         case PerformanceStage::ReductionResults:
         {
-            const auto& base = *PerformanceMeasure(progress.Quality);
+            const auto& base = *PerformanceMeasure(progress.Quality, true);
             const double deficit = (std::max)(progress.RemainingDeficit, 1000. / ShortFps(base) - 1000. / Threshold[Performance]);
             const Result* best = nullptr;
             double bestSaving = 0;
@@ -1248,14 +1164,13 @@ void Search::AdvancePerformance(BistroBenchmarkData::Csv& csv)
         case PerformanceStage::NeighborHigh:
         {
             const auto* quality = PerformanceMeasure(progress.Quality, true);
-            if (quality && progress.Quality.Resolution && !HighMajority(progress.Quality, quality->Activity))
+            const size_t step = Step(progress.Quality);
+            if (quality && step && step < StepCount() && !HighMajority(progress.Quality, quality->Activity))
             {
-                next = progress.Anchor;
-                --next.Resolution;
-                next = PerformanceHigh(next);
-                if (measure(next, "compare adjacent lower output with all active techniques at High")) return;
-                if (const auto* neighbor = PerformanceMeasure(next); passes(neighbor) && Better(*neighbor, *quality, false, true))
-                    progress.Quality = next;
+                const auto* neighbor = measureStep(PerformanceHigh(progress.Anchor), step - 1,
+                    "compare the adjacent smaller internal size with all active techniques at High");
+                if (!_pending.empty()) return;
+                if (passes(neighbor) && Better(*neighbor, *quality, false, true)) progress.Quality = neighbor->Settings;
             }
             progress.Stage = PerformanceStage::Improve;
             break;
@@ -1279,9 +1194,9 @@ void Search::ImprovePerformance(const Config& settings)
         {
             auto next = settings;
             next.Levels[i] = Epic;
-            Schedule(next, "raise " + std::string(Techniques[i].Pass) + " to Epic at chosen output");
+            Schedule(next, "raise " + std::string(_techniques[i].Pass) + " to Epic at the chosen internal size");
         }
-    ScheduleReflectionVariants(settings, "reflection options at chosen output");
+    ScheduleReflectionVariants(settings, "reflection options at the chosen internal size");
 }
 
 Config Search::EffectiveSettings(Config config) const
@@ -1399,7 +1314,7 @@ void Search::SaveReferences() const
     auto pending = _baselineFile;
     pending += ".tmp";
     std::ofstream output(pending, std::ios::trunc);
-    output << std::quoted(_conditions) << ' ' << _completedMode[0] << ' ' << _completedMode[1] << '\n' << std::setprecision(17);
+    output << std::quoted(_conditions) << '\n' << std::setprecision(17);
     const auto write = [&output](const Result& r)
     {
         output << r.Id << ' ' << r.Settings.Provider << ' ' << r.Settings.Preset << ' ' <<
@@ -1415,12 +1330,18 @@ void Search::SaveReferences() const
         }
         output << '\n';
     };
+    if (const auto* winner = Winner())
+    {
+        // A placement winner is a seed on the next run. Its owners are reset to the primary GPU.
+        auto seed = *winner;
+        seed.Settings.Owners = _high.Owners;
+        seed.Settings.Sync = _high.Sync;
+        seed.Settings = Canonical(std::move(seed.Settings));
+        output << "selected ";
+        write(seed);
+    }
     for (const auto& r : _confirmed)
-        if (!r.Remote) write(r);
-    for (bool upscaled : {false, true})
-        if (_completedMode[upscaled])
-            if (const auto* reference = BestReference(upscaled); reference && !reference->SourceCsv.empty())
-                write(*reference);
+        if (!r.Remote) { output << "local "; write(r); }
     output.close();
     if (!output || !MoveFileExW(pending.c_str(), _baselineFile.c_str(), MOVEFILE_REPLACE_EXISTING))
         throw std::runtime_error("Cannot save Single GPU reference");
@@ -1441,12 +1362,7 @@ bool Search::SameImage(const Result& a, const Result& b)
 
 const Result* Search::BestReference(bool upscaled) const
 {
-    const Result* best = Best(upscaled, false);
-    if (_profile == Performance && !(_remote && _cachedMode[upscaled])) return best;
-    for (const auto& r : _references)
-        if (bool(r.Settings.Provider) == upscaled && !_fullSettings.count(r.Settings) &&
-            (!best || Better(r, *best))) best = &r;
-    return best;
+    return Best(upscaled, false);
 }
 
 const Result* Search::ClosestReference(bool upscaled) const
@@ -1475,7 +1391,7 @@ const Result* Search::DetailedReference(bool upscaled) const
 
 Trial Search::Make(const Config& config, std::string source, bool full)
 {
-    return {++_nextId, config, std::move(source), full};
+    return {++_nextId, config, std::move(source), full, full};
 }
 
 void Search::Schedule(Config config, const std::string& source, bool priority)
@@ -1895,10 +1811,10 @@ void Search::Expand(const Trial& trial, const Result& result, BistroBenchmarkDat
     ExpandPolicies(trial, result);
     if (result.ThresholdFps < threshold)
     {
-        if (config.Resolution)
+        const size_t step = Step(config);
+        if (step && step < StepCount())
         {
-            --next.Resolution;
-            enqueue(next, "lower output, same effects", true);
+            for (const auto& smaller : AtStep(config, step - 1)) enqueue(smaller, "smaller internal size, same effects", true);
         }
         else
         {
@@ -1908,12 +1824,12 @@ void Search::Expand(const Trial& trial, const Result& result, BistroBenchmarkDat
             minimum.ProbeFrequency = (std::min)(minimum.ProbeFrequency, _minimum.ProbeFrequency);
             minimum = Canonical(std::move(minimum));
             if (!(minimum == config))
-                enqueue(minimum, "measure minimum active levels at minimum output", true);
+                enqueue(minimum, "measure minimum active levels at minimum internal size", true);
             else if (result.Settings == config)
             {
                 WriteRemovalEvidence(result, csv);
                 for (size_t i = 0; i < config.Levels.size(); ++i)
-                    if ((Techniques[i].Enable || Techniques[i].ScaledOff) && result.Activity[i])
+                    if ((_techniques[i].Enable || _techniques[i].ScaledOff) && result.Activity[i])
                     {
                         next = config;
                         next.Levels[i] = Off;
@@ -1924,30 +1840,23 @@ void Search::Expand(const Trial& trial, const Result& result, BistroBenchmarkDat
     }
     if (ShortFps(result) >= threshold * .96)
     {
-        if (config.Resolution + 1 < _sizes.size())
-        {
-            next = config;
-            ++next.Resolution;
-            enqueue(next, "higher output", consumed);
-            if (_profile == Performance && KeepsComposition(config))
+        if (Step(config) + 1 < StepCount())
+            for (const auto& higher : AtStep(config, Step(config) + 1))
             {
-                if (next.Levels[SunShadowQuality] == High && next.Levels[LocalShadowQuality] == High)
-                {
-                    const auto mediumShadows = WithMediumShadows(next);
-                    if (HighMajority(mediumShadows, result.Activity))
-                        enqueue(mediumShadows, "higher output with Medium shadows", true);
-                }
+                enqueue(higher, "larger internal size", consumed);
+                if (_profile != Performance || !KeepsComposition(config)) continue;
+                const auto mediumShadows = WithMediumShadows(higher);
+                if (HighMajority(mediumShadows, result.Activity))
+                    enqueue(mediumShadows, "larger internal size with Medium shadows", true);
                 for (size_t i = 0; i < std::size(Techniques); ++i)
-                {
-                    if (config.Levels[i] != High || _values[i][Medium] == _values[i][High]) continue;
-                    next = config;
-                    ++next.Resolution;
-                    next.Levels[i] = Medium;
-                    if (HighMajority(next, result.Activity))
-                        enqueue(next, "higher output with Medium", Techniques[i].ScaledOff);
-                }
+                    if (config.Levels[i] == High && _values[i][Medium] != _values[i][High])
+                    {
+                        next = higher;
+                        next.Levels[i] = Medium;
+                        if (HighMajority(next, result.Activity))
+                            enqueue(next, "larger internal size with Medium", _techniques[i].ScaledOff);
+                    }
             }
-        }
         const bool allHigh = std::none_of(config.Levels.begin(), config.Levels.end(), [](Level l) { return l == Low || l == Medium; });
         for (size_t i = 0; i < std::size(Techniques); ++i)
         {
@@ -2030,7 +1939,7 @@ auto Search::QualityImageRank(const Result& result) const
         medium += level >= Medium;
         epic += level == Epic;
     }
-    const uint64_t pixels = uint64_t(result.Output.first) * result.Output.second;
+    const uint64_t pixels = uint64_t(result.Render.first) * result.Render.second;
     const auto probe = result.Activity[ProbeQuality] ? result.Settings.Levels[ProbeQuality] : Off;
     return std::tuple{QualityComplete(result), active, allHigh, allHigh ? pixels : 0, high, medium, pixels, epic,
         probe, probe == Off ? Frequency::Off : result.Settings.ProbeFrequency};
@@ -2041,7 +1950,7 @@ bool Search::QualityOutranks(const Result& full, const Result& sample) const
     const auto& a = full.Settings;
     const auto& b = sample.Settings;
     if (a.Provider != b.Provider || a.Preset != b.Preset || full.Activity != sample.Activity) return false;
-    if (full.Output != sample.Output && (a.ProbeFrequency != b.ProbeFrequency || a.ProbeCapture != b.ProbeCapture)) return false;
+    if (full.Render != sample.Render && (a.ProbeFrequency != b.ProbeFrequency || a.ProbeCapture != b.ProbeCapture)) return false;
     return QualityImageRank(full) > QualityImageRank(sample);
 }
 
@@ -2052,12 +1961,29 @@ bool Search::Better(const Result& a, const Result& b, bool preferDetail, bool sh
     const double fpsA = fps(a), fpsB = fps(b);
     const bool meetsA = fpsA >= threshold, meetsB = fpsB >= threshold;
     if (meetsA != meetsB) return meetsA;
+    if (meetsA && (a.Settings.Provider || b.Settings.Provider))
+    {
+        const auto* native = Best(false, false);
+        const auto* remote = Best(false, true);
+        if (remote && (!native || Better(*remote, *native))) native = remote;
+        if (native)
+        {
+            const auto preserves = [native](const Result& r)
+            {
+                if (!r.Settings.Provider) return true;
+                for (size_t i = 0; i < r.Activity.size(); ++i)
+                    if (native->Activity[i] && (!r.Activity[i] || r.Settings.Levels[i] < native->Settings.Levels[i]))
+                        return false;
+                return !native->Activity[ProbeQuality] || r.Settings.ProbeFrequency >= native->Settings.ProbeFrequency;
+            };
+            if (preserves(a) != preserves(b)) return preserves(a);
+        }
+    }
     if (!meetsA && !preferDetail && fpsA != fpsB) return fpsA > fpsB;
     if (_profile == Quality)
     {
         const auto rank = [&](const Result& result) {
-            return std::tuple{QualityImageRank(result), result.ShadowTexels,
-                uint64_t(result.Render.first) * result.Render.second, fps(result), -result.P95};
+            return std::tuple{QualityImageRank(result), result.ShadowTexels, fps(result), -result.P95};
         };
         return rank(a) > rank(b);
     }
@@ -2100,10 +2026,9 @@ bool Search::Better(const Result& a, const Result& b, bool preferDetail, bool sh
         const auto epic = count(r, Epic);
         const bool resolutionFirst = _profile == Performance && KeepsComposition(r.Settings) &&
             HighMajority(r.Settings, r.Activity);
-        const auto pixels = uint64_t(r.Output.first) * r.Output.second;
+        const auto pixels = uint64_t(r.Render.first) * r.Render.second;
         return std::tuple{resolutionFirst, resolutionFirst ? pixels : 0, high, count(r, Medium),
-            pixels, epic, r.ShadowTexels,
-            uint64_t(r.Render.first) * r.Render.second, fps(r), -r.P95};
+            pixels, epic, r.ShadowTexels, fps(r), -r.P95};
     };
     return rank(a) > rank(b);
 }
@@ -2139,22 +2064,24 @@ const Result* Search::Best(bool upscaled, bool remote) const
     return best;
 }
 
+const Result* Search::Winner() const
+{
+    const Result* best = nullptr;
+    for (const auto& result : _confirmed)
+        if (!best || Better(result, *best)) best = &result;
+    return best;
+}
+
 void Search::ReportResult(BistroBenchmarkData::Csv& csv, const std::string& prefix, const Result* r) const
 {
-    csv.Config(prefix + "Status", !r || r->Fps < Threshold[_profile] ? "not found during search" :
+    csv.Config(prefix + "Status", !r ? "no confirmed result" : r->Fps < Threshold[_profile] ? "reserve below target" :
         _profile != Quality ? "confirmed" : r->Fps < 30 ? "confirmed within tolerance" : "confirmed at or above target");
     if (!r) return;
     csv.Config(prefix + "Trial", std::to_string(r->Id));
-    if (!r->SourceCsv.empty())
-    {
-        csv.Config(prefix + "CSV", r->SourceCsv);
-        auto trial = std::filesystem::u8path(r->SourceCsv);
-        trial.replace_extension();
-        trial /= "trial-" + std::to_string(r->Id) + ".csv";
-        std::error_code error;
-        if (std::filesystem::is_regular_file(_baselineFile.parent_path() / trial, error))
-            csv.Config(prefix + "TrialCSV", trial.generic_u8string());
-    }
+    const auto trialPath = _baselineFile.stem() / ("trial-" + std::to_string(r->Id) + ".csv");
+    std::error_code error;
+    if (std::filesystem::is_regular_file(_baselineFile.parent_path() / trialPath, error))
+        csv.Config(prefix + "TrialCSV", trialPath.generic_u8string());
     csv.Config(prefix + "Provider", std::to_string(r->Settings.Provider));
     csv.Config(prefix + "Preset", std::to_string(r->Settings.Preset));
     for (size_t i = 0; i < r->Settings.Owners.size(); ++i)
@@ -2170,10 +2097,12 @@ void Search::ReportResult(BistroBenchmarkData::Csv& csv, const std::string& pref
     csv.Config(prefix + "ReflectionPreference", _profile == Quality ?
         "spatial quality, update cadence, FPS/P95" : "update cadence, spatial quality, FPS/P95");
     for (size_t i = 0; i < r->Activity.size(); ++i)
-        if (r->Activity[i]) csv.Config(prefix + "Technique", std::string(Techniques[i].Pass) + "=" +
-            (HasQualityScale(i) ? std::to_string(QualityValue(i, r->Settings.Levels[i])) : "enabled"));
+        if (r->Activity[i]) csv.Config(prefix + "Technique", std::string(_techniques[i].Pass) + "=" +
+            (_techniques[i].Quality ? std::to_string(QualityValue(i, r->Settings.Levels[i])) : "enabled"));
     csv.Config(prefix + "Output", std::to_string(r->Output.first) + "x" + std::to_string(r->Output.second));
     csv.Config(prefix + "Render", std::to_string(r->Render.first) + "x" + std::to_string(r->Render.second));
+    csv.Config(prefix + "ScaleX", BistroBenchmarkData::Csv::Number(double(r->Render.first) / r->Output.first));
+    csv.Config(prefix + "ScaleY", BistroBenchmarkData::Csv::Number(double(r->Render.second) / r->Output.second));
     csv.Config(prefix + "FPS", BistroBenchmarkData::Csv::Number(r->Fps));
     csv.Config(prefix + "P95ms", BistroBenchmarkData::Csv::Number(r->P95));
 }

@@ -87,7 +87,6 @@ inline constexpr const char* ProfileName[]{"Performance", "Quality"};
 
 struct Config
 {
-    size_t Resolution = 0;
     int Provider = 0, Preset = 0;
     std::array<Level, std::size(Techniques)> Levels{};
     std::vector<int> Owners;
@@ -98,8 +97,8 @@ struct Config
 
     bool operator<(const Config& rhs) const
     {
-        return std::tie(Resolution, Provider, Preset, Levels, Owners, Sync, ProbeFrequency, ProbeCapture, ProbeDelivery, RemoteAOFilter) <
-            std::tie(rhs.Resolution, rhs.Provider, rhs.Preset, rhs.Levels, rhs.Owners, rhs.Sync, rhs.ProbeFrequency,
+        return std::tie(Provider, Preset, Levels, Owners, Sync, ProbeFrequency, ProbeCapture, ProbeDelivery, RemoteAOFilter) <
+            std::tie(rhs.Provider, rhs.Preset, rhs.Levels, rhs.Owners, rhs.Sync, rhs.ProbeFrequency,
                 rhs.ProbeCapture, rhs.ProbeDelivery, rhs.RemoteAOFilter);
     }
     bool operator==(const Config& rhs) const
@@ -135,19 +134,23 @@ struct Trial
     std::string Source;
     bool Full = false;
     bool RequireLive = false;
+    bool InspectImage = false;
 };
 
 class Search
 {
 public:
-    explicit Search(Profile profile = Performance) : _profile(profile) {}
+    explicit Search(Profile profile = Performance, decltype(Techniques)& techniques = Techniques)
+        : _profile(profile), _techniques(techniques) {}
 
     void LinkBaseline(const std::filesystem::path& output, std::string conditions);
-    void Start(ConsoleModule& console, Size screen, std::vector<int> adapters, bool remote,
-        bool fixedWaterSubsteps, bool usesSkinningPreset, const std::set<std::wstring>& shadowFixtures, BistroBenchmarkData::Csv& csv);
+    void Start(ConsoleModule& console, Size output, std::vector<int> adapters, bool remote,
+        bool fixedWaterSubsteps, bool usesSkinningPreset, const std::set<std::wstring>& shadowFixtures, BistroBenchmarkData::Csv& csv,
+        bool allowUpscalers);
 
-    Size Resolution(const Config& config) const { return _sizes.at(config.Resolution); }
-    const auto& Resolutions() const { return _sizes; }
+    Size Output() const { return _output; }
+    const Result* Winner() const;
+    void RecordImageMode(const Trial& trial, Size render, bool available);
     const auto& Candidates() const { return _placements; }
     Config EffectiveConfig(Config config) const { return Canonical(std::move(config)); }
     int QualityValue(size_t technique, Level level) const { return _values[technique][level]; }
@@ -162,7 +165,6 @@ public:
     bool NeedsPhase(unsigned phase) const;
     bool HasReference(bool upscaled) const { return BestReference(upscaled) != nullptr; }
     bool BeginPhase(unsigned phase);
-    void EndPhase();
 
     std::optional<Trial> NextProbe(BistroBenchmarkData::Csv& csv);
     void RetryChangedEstimates();
@@ -179,48 +181,48 @@ public:
     bool RemotePhase() const { return _phase >= 2; }
 
 private:
-    enum class QualityStage { High, Epic, Reduce, Reflections, Fallback, Remove, RaiseOutput };
+    enum class QualityStage { High, Epic, Reduce, Reflections, Fallback, Remove, RaiseDetail, Done };
 
     struct QualityProgress
     {
         QualityStage Stage = QualityStage::High;
-        size_t Mode = 0;
-        std::vector<Config> Modes;
+        bool RecheckSaved = true;
         Config Anchor, Candidate;
         std::vector<Config> Alternatives;
     };
 
-    enum class PerformanceStage { Saved, Lower, Remove, RemovalResults, Raise, Refine, Neighbor, High, Reduce,
+    enum class PerformanceStage { Lower, Remove, RemovalResults, Raise, Refine, High, Reduce,
         ReductionResults, NeighborHigh, Improve, Done };
 
     struct PerformanceProgress
     {
         PerformanceStage Stage = PerformanceStage::Lower;
         Config Anchor, Quality;
-        size_t NextMode = 0, RefineResolution = 0;
+        size_t RefineStep = 0;
         double RemainingDeficit = 0;
         bool ConfirmingHigh = false;
         bool DeepReduction = false;
-        std::vector<Config> Modes, Alternatives;
+        std::vector<Config> Alternatives;
         std::deque<std::pair<Config, std::string>> Full;
     };
 
-    std::vector<Config> UpscalerModes(Config settings) const;
-    const Result* SavedPerformance(bool upscaled) const;
+    using ImageMode = std::pair<int, int>;
+    std::optional<Trial> InspectNextImage();
+    size_t StepCount() const { return Upscaled() ? _steps.size() : 1; }
+    size_t Step(const Config& settings) const;
+    std::vector<Config> AtStep(const Config& base, size_t step) const;
+    const Result* SavedPreset(bool upscaled) const;
     std::optional<Config> SavedCompetitor(const Result& saved) const;
 
-    void BeginPerformanceLower();
     static double ShortFps(const Result& result) { return result.ThresholdFps; }
 
     const Result* QualityFull(const Config& settings) const;
     const Result* QualityShort(const Config& settings) const;
     const Result* QualityFinalist(const std::vector<Config>* alternatives = nullptr, const Result* reductionBase = nullptr) const;
-    size_t SmallerQualityResolution(size_t current) const;
     void QueueQualityAlternative(Config settings, const std::string& source);
     std::optional<Trial> AdvanceQuality(BistroBenchmarkData::Csv& csv, bool canProbe);
 
     const Result* PerformanceMeasure(const Config& settings, bool reuseCalibration = false) const;
-    size_t LargerPerformanceResolution(size_t current) const;
     Config PerformanceHigh(Config settings) const;
     void ReducePerformanceQuality(const Result* full);
     void WriteRemovalEvidence(const Result& base, BistroBenchmarkData::Csv& csv) const;
@@ -272,10 +274,14 @@ private:
 
     unsigned _phase = 0;
     Profile _profile;
+    const Technique* _techniques;
     bool _remote = false, _aoDepthNormals = false;
     unsigned _probeIndex = 0;
     size_t _nextId = 0;
-    int _preferredProvider = 0, _preferredPreset = 0;
+    bool _allowUpscalers = false;
+    Size _output{};
+    std::deque<ImageMode> _inspect;
+    std::map<Size, std::vector<ImageMode>> _steps;
     std::string _windAlgorithm;
     std::mt19937 _random{20261122};
     Config _high, _minimum;
@@ -286,7 +292,6 @@ private:
     std::vector<int> _adapters;
     std::vector<Placement> _placements;
     size_t _firstLocalShadow = 0;
-    std::vector<Size> _sizes;
     std::array<std::array<int, Epic + 1>, std::size(Techniques)> _values{};
     std::array<bool, std::size(Techniques)> _fixedQuality{};
     std::array<bool, std::size(Techniques)> _available{};
@@ -315,9 +320,7 @@ private:
     std::vector<Result> _references;
     std::filesystem::path _baselineFile;
     std::string _conditions;
-    bool _incompatibleBaseline = false;
-    std::array<bool, 2> _completedMode{};
-    std::array<bool, 2> _cachedMode{};
+    std::optional<Result> _savedSelection;
     bool _triedClosest = false;
     std::array<std::optional<Result>, 2> _nearest, _detail, _nearMiss;
     std::array<unsigned, 2> _rejected{};

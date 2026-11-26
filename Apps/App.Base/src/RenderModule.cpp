@@ -38,10 +38,11 @@ RenderModule::GpuOwners::~GpuOwners() = default;
 
 
 RenderModule::RenderModule(Window* window, GameTimer* timer, std::unique_ptr<IRenderPipeline> pipeline,
-                           std::vector<DeviceDesc> adapters) :
+                           std::vector<DeviceDesc> adapters, bool startInSettings) :
     _timer(timer), _window(window),
     _primaryPipelineFlags(0)
 {
+    _settingsScene = startInSettings;
     if (!pipeline) throw std::invalid_argument("Cannot use a null render pipeline");
     _pipeline = std::move(pipeline);
     _adapters = std::move(adapters);
@@ -146,11 +147,7 @@ void RenderModule::Initialize()
 
     Log::Info("Renderer", "Creating back buffers");
     BuildBackBuffer();
-    Log::Info("Renderer", "Configuring render passes and pipeline states");
-    auto context = PipelineContext();
-    _pipeline->Initialize(context, adapters);
-    RefreshPipelineFlags();
-    RebuildRenderGraph();
+    if (!_settingsScene) BeginSceneRendering();
 
     Engine::UI::Initialize(_window->GetWindowHandle(), _primaryDevice.get(),
         static_cast<int>(_primaryResources.FrameConstants.size()), _backBuffer->GetFormat(), adapters);
@@ -158,6 +155,47 @@ void RenderModule::Initialize()
 
     SubscribeToSceneManager();
     Log::Info("Renderer", "Rendering initialization complete");
+}
+
+void RenderModule::BeginSceneRendering()
+{
+    if (_settingsFence) _primaryDevice->GetCommandQueue()->CPUWaitForFenceValue(_settingsFence);
+    _settingsScene = false;
+    if (!_pipelineInitialized)
+    {
+        auto context = PipelineContext();
+        _pipeline->Initialize(context, _adapters);
+        _pipelineInitialized = true;
+        RefreshPipelineFlags();
+        RebuildRenderGraph();
+    }
+}
+
+void RenderModule::BeginSettingsRendering()
+{
+    _settingsScene = true;
+    DrainFrameWork();
+    if (_pipelineInitialized)
+    {
+        auto context = PipelineContext();
+        _pipeline->UsePrimaryPresentation(context);
+    }
+    _backBuffer->SetFrameGenerationSuspended(true);
+}
+
+bool RenderModule::PresentSettings()
+{
+    auto* queue = _primaryDevice->GetCommandQueue();
+    queue->CPUWaitForFenceValue(_settingsFence);
+    auto* commands = queue->GetCommandList();
+    auto* target = _backBuffer->GetCurrentBuffer();
+    commands->ResourceBarrier({target->GetResource()->GetRenderTargetBarrier()});
+    commands->ClearRenderTargetView(target);
+    Engine::UI::Render(commands, target);
+    commands->ResourceBarrier({target->GetResource()->GetPresentBarrier()});
+    queue->ExecuteCommandList(commands);
+    _settingsFence = queue->FenceValue;
+    return _backBuffer->Present(true);
 }
 
 void RenderModule::Uninitialize()
@@ -183,16 +221,17 @@ void RenderModule::QuarantineGpuOwners() noexcept
 void RenderModule::OnResize()
 {
     _RPcommonData.RequestHistoryReset = true;
-    _pipeline->DrainExecution();
+    if (_pipelineInitialized) _pipeline->DrainExecution();
     _primaryDevice->GetCommandQueue()->Flush();
 
     uint16_t width, height;
     _window->GetWindowSize(width, height);
 
-    _backBuffer->Resize(width, height);
+    _backBuffer->Resize(width, height, !_settingsScene);
 
     _RPcommonData.WindowWidth = width;
     _RPcommonData.WindowHeight = height;
+    if (_settingsScene) return;
     auto context = PipelineContext();
     _pipeline->Resize(context);
     RefreshPipelineFlags();
@@ -974,7 +1013,7 @@ void RenderModule::OnRender()
     if (timer) timer->OnCommandListExecuted(completion);
     _backBuffer->GetFrameGeneration().EndRendering();
     _pipeline->BeforePresent();
-    if (_backBuffer->Present()) _pipeline->FramePresented();
+    if (_backBuffer->Present(false)) _pipeline->FramePresented();
 }
 
 void RenderModule::CollectParticleEmitters()
@@ -1129,7 +1168,7 @@ void RenderModule::SetFrameGenerationSuspended(bool suspended)
     if (_renderingSuspended == suspended) return;
     _renderingSuspended = suspended;
     _RPcommonData.RequestHistoryReset = true;
-    if (_backBuffer) _backBuffer->SetFrameGenerationSuspended(suspended);
+    if (_backBuffer) _backBuffer->SetFrameGenerationSuspended(suspended || _settingsScene);
 }
 
 const GDX12FrameGenerationStatus& RenderModule::GetFrameGenerationStatus() const

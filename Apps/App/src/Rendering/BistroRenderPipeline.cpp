@@ -27,7 +27,6 @@ void BistroRenderPipeline::Initialize(RenderPipelineContext& c, const std::vecto
 {
 	c.Primary.SRV_UAV_Heap->UseTransientDescriptorTail();
 	_post = std::make_unique<BistroRender::ScenePostUI>(c);
-	ConfigureBistroProps(*BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>(), App::GetInstance()->GetJobs(), _waves);
 	_cloudPicture = std::make_unique<BistroRender::SceneCloudPicture>(c);
 	_geometry = std::make_unique<BistroRender::SceneGeometry>(c);
 	_environment = std::make_unique<BistroRender::SceneEnvironment>(c.Primary, c.Common);
@@ -36,9 +35,7 @@ void BistroRenderPipeline::Initialize(RenderPipelineContext& c, const std::vecto
 	_sceneFlags.SetFlag(RENDER_PASS_FLAG_USE_INSTANCES, true);
 	_sceneFlags.SetFlag(RENDER_PASS_FLAG_USE_GEOMETRY, true);
 	_sceneFlags.SetFlag(RENDER_PASS_FLAG_USE_MATERIALS, true);
-	_bindings.PrimaryPasses = _post->Passes();
-	_bindings.PrimaryPasses.push_back(&_sceneFlags);
-	_bindings.Reconstruction = &_post->Reconstruction();
+	RefreshPostBindings();
 	ConsoleModule console;
 	const int primaryIndex = console.FindConsoleVariable(L"Render.Device.PrimaryAdapter").GetInt();
 	auto submissions = std::make_shared<BistroRender::QueueSubmission>(*c.Primary.Device,
@@ -47,7 +44,20 @@ void BistroRenderPipeline::Initialize(RenderPipelineContext& c, const std::vecto
 	_executor = std::make_unique<BistroRender::Executor>(std::move(submissions), 0, UINT(c.Primary.FrameConstants.size()));
 	_lighting->SetWaterRetirement([this] { _executor->Drain(); });
 	_environment->SetRetirement([this] { _executor->Drain(); });
+	ConfigureBistroProps(*BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>(), App::GetInstance()->GetJobs(), _waves);
 	Log::Info("Renderer", "Bistro packet renderer initialized; one rendering path");
+}
+
+void BistroRenderPipeline::UsePrimaryPresentation(RenderPipelineContext& c)
+{
+	if (_post->UpdatePostOwner(c, _executor->Submissions(), 0)) RefreshPostBindings();
+}
+
+void BistroRenderPipeline::RefreshPostBindings()
+{
+	_bindings.PrimaryPasses = _post->Passes();
+	_bindings.PrimaryPasses.push_back(&_sceneFlags);
+	_bindings.Reconstruction = &_post->Reconstruction();
 }
 
 void BistroRenderPipeline::UpdateFrameSettings(RenderPipelineContext& c)
@@ -60,9 +70,7 @@ void BistroRenderPipeline::UpdateFrameSettings(RenderPipelineContext& c)
 		if (_post->NeedsResize()) DrainExecution();
 		return;
 	}
-	_bindings.PrimaryPasses = _post->Passes();
-	_bindings.PrimaryPasses.push_back(&_sceneFlags);
-	_bindings.Reconstruction = &_post->Reconstruction();
+	RefreshPostBindings();
 	c.Resize();
 }
 
