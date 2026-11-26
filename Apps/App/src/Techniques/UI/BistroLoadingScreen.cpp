@@ -21,8 +21,19 @@ using namespace Gdiplus;
 
 constexpr wchar_t WindowClass[] = L"PEPENGINE2.Bistro.Loading";
 constexpr std::array<const wchar_t*, 4> Phases{L"Renderer", L"Scene assets", L"World", L"First frame"};
-const Color Pond(16, 27, 26), Leaf(181, 237, 125), Mint(96, 218, 180), White(242, 248, 238);
-const Color Muted(172, 193, 180), Track(51, 72, 64);
+const Color Pond(16, 27, 25), Panel(22, 38, 32), Leaf(185, 239, 123), Mint(102, 219, 178), White(243, 244, 234);
+const Color Muted(180, 199, 187), Track(56, 77, 67);
+
+void DrawMark(Graphics& graphics, HICON icon, float x, float y, float diameter)
+{
+    if (!icon) return;
+    if (HDC dc = graphics.GetHDC())
+    {
+        const int size = std::max(1, int(std::round(diameter)));
+        DrawIconEx(dc, int(std::round(x)), int(std::round(y)), icon, size, size, 0, nullptr, DI_NORMAL);
+        graphics.ReleaseHDC(dc);
+    }
+}
 
 void Text(Graphics& graphics, const std::wstring& value, RectF area, float size, Color ink,
     bool bold = false, bool right = false)
@@ -43,8 +54,8 @@ struct Layout
 
     RectF Art() const
     {
-        if (Stacked) return {Pad, .12f * H, Inner, .30f * H};
-        return {.52f * W, .12f * H, .48f * W - Pad, .60f * H};
+        if (Stacked) return {Pad, .14f * H, Inner, .28f * H};
+        return {.52f * W, .15f * H, .48f * W - Pad, .57f * H};
     }
     float TitleY() const { return H * (Stacked ? .44f : .24f); }
     float DetailY() const { return H * (Stacked ? .56f : .49f); }
@@ -182,6 +193,19 @@ struct BistroLoadingScreen::Impl
         g.SetSmoothingMode(SmoothingModeAntiAlias);
         g.SetTextRenderingHint(TextRenderingHintClearTypeGridFit);
         const float u = l.U;
+        const float headerY = .5f * l.Pad, mark = 34 * u, headerEnd = headerY + mark + 12 * u;
+        const auto icon = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_PEPENGINE2),
+            IMAGE_ICON, 64, 64, LR_SHARED));
+        DrawMark(g, icon, l.Pad, headerY, mark);
+        const float wordX = l.Pad + (icon ? mark + 9 * u : 0.f);
+        Text(g, L"Pepengine2", {wordX, headerY, l.W - l.Pad - wordX, mark}, 25 * u, White, true);
+        const Pen rule(Track, std::max(1.f, u));
+        g.DrawLine(&rule, l.Pad, headerEnd, l.W - l.Pad, headerEnd);
+        const RectF panel(.42f * l.Pad, headerEnd + 9 * u, l.W - .84f * l.Pad,
+            l.H - headerEnd - 9 * u - .42f * l.Pad);
+        const SolidBrush panelBrush(Panel);
+        g.FillRectangle(&panelBrush, panel);
+        g.DrawRectangle(&rule, panel);
         const auto art = l.Art();
         const float diameter = std::min(art.Width, art.Height) * .94f;
         const float x = art.X + (art.Width - diameter) * .5f, y = art.Y + (art.Height - diameter) * .5f;
@@ -199,22 +223,9 @@ struct BistroLoadingScreen::Impl
         }
         else
         {
-            const auto icon = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_PEPENGINE2),
-                IMAGE_ICON, 64, 64, LR_SHARED));
-            if (icon)
-            {
-                const int d = std::max(1, int(diameter * .53f));
-                HDC iconDc = g.GetHDC();
-                if (iconDc)
-                {
-                    DrawIconEx(iconDc, int(x + (diameter - d) / 2), int(y + (diameter - d) / 2), icon, d, d, 0, nullptr, DI_NORMAL);
-                    g.ReleaseHDC(iconDc);
-                }
-            }
+            const float d = diameter * .53f;
+            DrawMark(g, icon, x + (diameter - d) / 2, y + (diameter - d) / 2, d);
         }
-        Text(g, L"PEPENGINE2", {l.Pad, l.Pad * .78f, l.Inner, 32 * u}, 22 * u, Leaf, true);
-        const Pen rule(Track, std::max(1.f, u));
-        g.DrawLine(&rule, l.Pad, l.Pad + 33 * u, l.W - l.Pad, l.Pad + 33 * u);
         Text(g, Title, {l.Pad, l.TitleY(), l.CopyWidth(), l.DetailY() - l.TitleY() - 4 * u}, 48 * u, White, true);
     }
 

@@ -1,4 +1,5 @@
 #include "SceneTextureInspector.h"
+#include "BistroPlot.h"
 #include "Common/ConsoleVariables.h"
 #include "Common/RuntimePaths.h"
 #include "Engine.Core/Logging/Logger.h"
@@ -7,6 +8,7 @@
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
 #include "Engine.UI/UI_test.h"
+#include "Engine.UI/PepengineTheme.h"
 #include <imgui/imgui.h>
 #include <cctype>
 #include <cmath>
@@ -25,31 +27,33 @@ constexpr UINT TilesAcross = 3;
 constexpr UINT Capacity = 6;
 constexpr DXGI_FORMAT PreviewFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 using View = SceneTextureInspector::View;
+namespace Theme = Engine::UI::PepengineTheme;
 
+const char* PreviewFormatName(DXGI_FORMAT format)
+{
+	switch (format)
+	{
+	case DXGI_FORMAT_R32_FLOAT: return "R32_FLOAT";
+	case DXGI_FORMAT_R16_FLOAT: return "R16_FLOAT";
+	case DXGI_FORMAT_R8_UNORM: return "R8_UNORM";
+	case DXGI_FORMAT_R16G16_FLOAT: return "R16G16_FLOAT";
+	case DXGI_FORMAT_R32G32_FLOAT: return "R32G32_FLOAT";
+	case DXGI_FORMAT_R16G16B16A16_FLOAT: return "R16G16B16A16_FLOAT";
+	case DXGI_FORMAT_R32G32B32A32_FLOAT: return "R32G32B32A32_FLOAT";
+	case DXGI_FORMAT_R11G11B10_FLOAT: return "R11G11B10_FLOAT";
+	case DXGI_FORMAT_R8G8B8A8_UNORM: return "R8G8B8A8_UNORM";
+	case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB: return "R8G8B8A8_UNORM_SRGB";
+	case DXGI_FORMAT_R10G10B10A2_UNORM: return "R10G10B10A2_UNORM";
+	default: return nullptr;
+	}
+}
 DXGI_FORMAT PreviewSRV(const D3D12_RESOURCE_DESC& desc)
 {
 	if (desc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D || desc.DepthOrArraySize != 1 ||
 	    desc.SampleDesc.Count != 1 || (desc.Flags & D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE))
 		return DXGI_FORMAT_UNKNOWN;
-	switch (desc.Format)
-	{
-	case DXGI_FORMAT_R32_TYPELESS:
-		return DXGI_FORMAT_R32_FLOAT;
-	case DXGI_FORMAT_R32_FLOAT:
-	case DXGI_FORMAT_R16_FLOAT:
-	case DXGI_FORMAT_R8_UNORM:
-	case DXGI_FORMAT_R16G16_FLOAT:
-	case DXGI_FORMAT_R32G32_FLOAT:
-	case DXGI_FORMAT_R16G16B16A16_FLOAT:
-	case DXGI_FORMAT_R32G32B32A32_FLOAT:
-	case DXGI_FORMAT_R11G11B10_FLOAT:
-	case DXGI_FORMAT_R8G8B8A8_UNORM:
-	case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
-	case DXGI_FORMAT_R10G10B10A2_UNORM:
-		return desc.Format;
-	default:
-		return DXGI_FORMAT_UNKNOWN;
-	}
+	const auto format = desc.Format == DXGI_FORMAT_R32_TYPELESS ? DXGI_FORMAT_R32_FLOAT : desc.Format;
+	return PreviewFormatName(format) ? format : DXGI_FORMAT_UNKNOWN;
 }
 View DefaultView(const D3D12_RESOURCE_DESC& desc, DXGI_FORMAT format)
 {
@@ -274,11 +278,20 @@ SceneTextureInspector::Atlases SceneTextureInspector::Append(const Input& scene,
 	bool open = true;
 	std::array<std::vector<Source>, 2> previews;
 	const auto* viewport = ImGui::GetMainViewport();
-	ImGui::SetNextWindowSize({viewport->WorkSize.x * .88f, viewport->WorkSize.y * .85f}, ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowSize({viewport->WorkSize.x * .94f, viewport->WorkSize.y * .87f}, ImGuiCond_FirstUseEver);
 	ImGui::SetNextWindowPos(viewport->GetWorkCenter(), ImGuiCond_FirstUseEver, {.5f, .5f});
-	_collapsed = !ImGui::Begin("Scene Textures", &open);
+	const float size = std::clamp(std::round(viewport->WorkSize.y / 36.f), 17.f, 32.f);
+	ImGui::PushFont(Theme::BodyFont(), size);
+	Theme::Push();
+	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {.6f * size, .48f * size});
+	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, {.42f * size, .25f * size});
+	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {.48f * size, .28f * size});
+	_collapsed = !ImGui::Begin("Scene textures   [F8]###Scene Textures", &open);
 	if (!_collapsed && open)
 	{
+		const float em = ImGui::GetFontSize();
+		Theme::DrawToolHeading("Scene textures");
+		ImGui::Separator();
 		auto catalog = Collect(scene.Plan, scene.Bindings, scene.BackBuffer);
 		if (post)
 		{
@@ -295,35 +308,47 @@ SceneTextureInspector::Atlases SceneTextureInspector::Append(const Input& scene,
 		catalog.erase(std::remove_if(catalog.begin(), catalog.end(),
 		    [&](const Source& source) { return !listed.insert(source.Resource).second; }), catalog.end());
 
-		if (ImGui::BeginTable("inspector", 2, ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersInnerV))
+		const auto area = ImGui::GetContentRegionAvail();
+		const bool split = area.x >= 34.f * em;
+		if (ImGui::BeginTable("inspector", split ? 2 : 1, split ? ImGuiTableFlags_Resizable : ImGuiTableFlags_None))
 		{
-			ImGui::TableSetupColumn("Textures", ImGuiTableColumnFlags_WidthFixed, viewport->WorkSize.x * .22f);
+			if (split) ImGui::TableSetupColumn("Textures", ImGuiTableColumnFlags_WidthFixed, area.x * .27f);
 			ImGui::TableSetupColumn("Preview", ImGuiTableColumnFlags_WidthStretch);
 			ImGui::TableNextColumn();
-			ImGui::BeginChild("browser");
+			ImGui::BeginChild("browser", {0, split ? 0.f : (std::max)(7.f * em, area.y * .33f)}, ImGuiChildFlags_Borders);
 			ImGui::SetNextItemWidth(-1);
 			ImGui::InputTextWithHint("##filter", "Find a texture by name", _filter.data(), _filter.size());
-			if (ImGui::Button("Depth")) _selected = {"Scene.Depth"};
-			ImGui::SameLine();
-			if (ImGui::Button("AO")) _selected = {"Scene.AO"};
-			ImGui::SameLine();
-			if (ImGui::Button("G-buffer"))
+			const auto presetButton = [](const char* label, bool first = false) {
+				if (!first) BistroPlot::ContinueRowIfFits(ImGui::CalcTextSize(label).x + 2.f * ImGui::GetStyle().FramePadding.x);
+				return ImGui::Button(label);
+			};
+			if (presetButton("Depth", true)) _selected = {"Scene.Depth"};
+			if (presetButton("AO")) _selected = {"Scene.AO"};
+			if (presetButton("G-buffer"))
 				_selected = {"GBuffer.AlbedoMetallic", "GBuffer.NormalRoughness", "GBuffer.Motion",
 				             "GBuffer.F0Baked", "GBuffer.Emissive", "Scene.Depth"};
-			ImGui::SameLine();
-			if (ImGui::Button("Clear")) _selected.clear();
+			if (presetButton("Clear")) _selected.clear();
 
 			ImGui::TextDisabled("%zu / %u selected", _selected.size(), Capacity);
 			ImGui::BeginChild("catalog", {}, 0, ImGuiWindowFlags_HorizontalScrollbar);
 			const std::string_view filter(_filter.data());
+			bool matches = false;
 			for (const auto& source : catalog)
 			{
 				const auto match = std::search(source.Name.begin(), source.Name.end(), filter.begin(), filter.end(),
 				    [](unsigned char a, unsigned char b) { return std::tolower(a) == std::tolower(b); });
 				if (!filter.empty() && match == source.Name.end())
 					continue;
+				matches = true;
 				const auto selected = std::find(_selected.begin(), _selected.end(), source.Name);
 				bool checked = selected != _selected.end();
+				if (checked)
+				{
+					const auto row = ImGui::GetCursorScreenPos();
+					ImGui::GetWindowDrawList()->AddRectFilled(row,
+					    {row.x + ImGui::GetContentRegionAvail().x, row.y + ImGui::GetFrameHeight()},
+					    ImGui::GetColorU32(ImGuiCol_Header), ImGui::GetStyle().FrameRounding);
+				}
 				ImGui::BeginDisabled(!checked && _selected.size() == Capacity);
 				if (ImGui::Checkbox(source.Name.c_str(), &checked))
 				{
@@ -332,30 +357,45 @@ SceneTextureInspector::Atlases SceneTextureInspector::Append(const Input& scene,
 				}
 				ImGui::EndDisabled();
 			}
+			if (!matches) ImGui::TextDisabled("No matching textures");
 			ImGui::EndChild();
 
 			ImGui::EndChild();
 			ImGui::TableNextColumn();
-			ImGui::BeginChild("viewer");
-			ImGui::SetNextItemWidth(100);
-			ImGui::Combo("Channel", &_channel, "Default\0RGB\0Red\0Green\0Blue\0Alpha\0");
-			ImGui::SameLine();
-			ImGui::SetNextItemWidth(110);
-			ImGui::SliderFloat("Depth range", &_depthRange, 100, 20000, "%.0f cm", ImGuiSliderFlags_Logarithmic);
+			ImGui::BeginChild("viewer", {}, ImGuiChildFlags_Borders);
 			const int count = static_cast<int>(_selected.size());
-			if (count > 1)
+			const int toolbarColumns = (std::clamp)(int(ImGui::GetContentRegionAvail().x / (8.f * em)), 1, count > 1 ? 3 : 2);
+			if (ImGui::BeginTable("Preview controls", toolbarColumns, ImGuiTableFlags_SizingStretchSame))
 			{
-				ImGui::SetNextItemWidth(100);
-				ImGui::SliderInt("Columns", &_columns, 1, 3);
+				ImGui::TableNextColumn();
+				ImGui::TextUnformatted("Channel");
+				ImGui::SetNextItemWidth(-FLT_MIN);
+				ImGui::Combo("##channel", &_channel, "Default\0RGB\0Red\0Green\0Blue\0Alpha\0");
+				ImGui::TableNextColumn();
+				ImGui::TextUnformatted("Depth range");
+				ImGui::SetNextItemWidth(-FLT_MIN);
+				ImGui::SliderFloat("##depthRange", &_depthRange, 100, 20000, "%.0f cm", ImGuiSliderFlags_Logarithmic);
+				if (count > 1)
+				{
+					ImGui::TableNextColumn();
+					ImGui::TextUnformatted("Columns");
+					ImGui::SetNextItemWidth(-FLT_MIN);
+					ImGui::SliderInt("##columns", &_columns, 1, 3);
+				}
+				ImGui::EndTable();
 			}
+			ImGui::Separator();
 			if (!count) ImGui::TextDisabled("Select a texture to preview.");
 			const float availableHeight = ImGui::GetContentRegionAvail().y;
-			if (count && ImGui::BeginTable("previews", (std::min)(_columns, count), ImGuiTableFlags_SizingStretchSame))
+			if (count && ImGui::BeginTable("previews", (std::min)(_columns, count),
+			    ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_BordersInnerV))
 			{
 				for (const auto& name : _selected)
 				{
 					ImGui::TableNextColumn();
-					ImGui::TextUnformatted(name.c_str());
+					ImGui::PushFont(Theme::HeadingFont(), 0.f);
+					ImGui::TextWrapped("%s", name.c_str());
+					ImGui::PopFont();
 					const auto source = std::find_if(catalog.begin(), catalog.end(),
 					                                 [&name](const auto& item) { return item.Name == name; });
 					if (source == catalog.end())
@@ -364,10 +404,9 @@ SceneTextureInspector::Atlases SceneTextureInspector::Append(const Input& scene,
 						continue;
 					}
 					const auto desc = source->Resource->GetDesc();
-					ImGui::TextDisabled("%llu x %u", static_cast<unsigned long long>(desc.Width), desc.Height);
 					float width = (std::max)(1.f, ImGui::GetContentRegionAvail().x);
 					if (count == 1)
-						width = (std::min)(width, (std::max)(1.f, availableHeight - 2 * ImGui::GetTextLineHeightWithSpacing() - 8) * float(desc.Width) / float(desc.Height));
+						width = (std::min)(width, (std::max)(1.f, availableHeight - 3 * ImGui::GetTextLineHeightWithSpacing()) * float(desc.Width) / float(desc.Height));
 					const float height = width * float(desc.Height) / float(desc.Width);
 					auto& atlas = previews[source->Atlas];
 					const UINT tile = static_cast<UINT>(atlas.size());
@@ -376,6 +415,8 @@ SceneTextureInspector::Atlases SceneTextureInspector::Append(const Input& scene,
 					ImGui::Image(static_cast<ImTextureID>(AtlasId(source->Atlas)), {width, height},
 					             {(x + 0.5f / Tile) / TilesAcross, (y + 0.5f / Tile) / 2},
 					             {(x + 1 - 0.5f / Tile) / TilesAcross, (y + 1 - 0.5f / Tile) / 2});
+					ImGui::TextWrapped(u8"%llu × %u    %s", static_cast<unsigned long long>(desc.Width), desc.Height,
+					    PreviewFormatName(source->Format));
 					atlas.push_back(*source);
 				}
 				ImGui::EndTable();
@@ -385,6 +426,9 @@ SceneTextureInspector::Atlases SceneTextureInspector::Append(const Input& scene,
 		}
 	}
 	ImGui::End();
+	ImGui::PopStyleVar(3);
+	Theme::Pop();
+	ImGui::PopFont();
 	if (!open) SetVisible(false);
 	return {AppendAtlas(scene, index, previews[0], nearPlane, farPlane, _channel, _depthRange),
 	        post ? post->Inspector.AppendAtlas(*post, index, previews[1], nearPlane, farPlane, _channel, _depthRange) : nullptr};

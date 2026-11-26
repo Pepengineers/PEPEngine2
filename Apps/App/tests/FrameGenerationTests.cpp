@@ -178,7 +178,7 @@ int main(int argc, char** argv)
         Require(wait == WAIT_OBJECT_0 || wait == WAIT_ABANDONED, "Cannot acquire GPU mutex");
         WNDCLASSW cls{}; cls.lpfnWndProc = DefWindowProcW; cls.hInstance = GetModuleHandleW(nullptr); cls.lpszClassName = L"PEPEngine2FGTests";
         Require(RegisterClassW(&cls) != 0, "Cannot register test window");
-        window = CreateWindowW(cls.lpszClassName, L"PEPEngine2 frame generation validation", WS_OVERLAPPEDWINDOW,
+        window = CreateWindowW(cls.lpszClassName, L"Pepengine2 frame generation validation", WS_OVERLAPPEDWINDOW,
             CW_USEDEFAULT, CW_USEDEFAULT, 1300, 760, nullptr, nullptr, cls.hInstance, nullptr);
         Require(window != nullptr, "Cannot create test window"); ShowWindow(window, SW_SHOWNOACTIVATE);
         GPU(window);

@@ -24,12 +24,19 @@ class BistroComparePanel
         double Begin = -1, End = -1;
         std::string Section;
     };
+    struct FrameTiming
+    {
+        double Fps = -1, P95 = -1;
+        // Reports store aggregate FPS as sample count divided by total present-interval time.
+        double MeanMs() const { return Fps > 0 ? 1000. / Fps : -1.; }
+    };
     struct Pass
     {
         std::filesystem::path Path;
         std::string Label, Mask;
         Window Range;
         std::streamoff InlineOffset = -1;
+        FrameTiming Timing;
     };
     using Values = std::map<std::string, std::string>;
     struct PlacementResult
@@ -72,7 +79,8 @@ class BistroComparePanel
         };
         std::vector<Sample> Samples;
         std::vector<size_t> Trace;
-        double Fps = 0, P95 = 0, MaxMs = 0, MaxFps = 0;
+        FrameTiming Timing;
+        double MaxMs = 0, MaxFps = 0;
         double ScopeMeanMs = -1, ScopeP95Ms = -1;
     };
     void Refresh(bool force);
@@ -81,6 +89,8 @@ class BistroComparePanel
     void Select(Selection &, int run, int pass);
     void DrawSelection(Selection &, size_t index);
     static void DrawPlot(const Selection* series, size_t count, bool fps, double target = 0);
+    static void DrawRouteMetrics(const FrameTiming& timing, ImFont* headingFont);
+    static void DrawComparedTimings(const FrameTiming& a, const FrameTiming& b, const char* left, const char* right, bool comparable);
     static void DrawPlacementComparison(const Winner& winner);
     static void DrawTechniques(const PlacementResult& before, const PlacementResult& after,
         const char* title, const char* left, const char* right);

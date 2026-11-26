@@ -1,6 +1,7 @@
 #include "Engine.RendererDX12/GDX12LocalLights.h"
 #include "Engine.UI/UI_test.h"
 #include "Engine.UI/OffscreenUI.h"
+#include "Engine.UI/PepengineTheme.h"
 #include "FontAtlasCache.h"
 #include "SettingsCache.h"
 #include "Engine.Core/ConsoleModule.h"
@@ -161,17 +162,18 @@ namespace Engine::UI
                 const auto name = std::filesystem::path(Name).u8string();
                 const auto description = std::filesystem::path(variable.GetDescription()).u8string();
                 const bool worldCanvas = Name.rfind(L"Render.WorldCanvas.", 0) == 0;
-                const bool canvasAdapter = worldCanvas && Name.substr(Name.find_last_of(L'.') + 1) == L"Adapter";
                 const bool localShadowPage = LocalShadowPageAdapterIndex(Name).has_value();
                 const bool localShadowSync = LocalShadowPageCrossSyncIndex(Name).has_value();
-                const bool namedSetting = canvasAdapter || localShadowPage || localShadowSync;
                 const auto active = variable.GetString();
                 if (Draft == Current) Draft = active;
                 Current = active;
 
                 ImGui::PushID(name.c_str());
-                ImGui::TextWrapped("%s", namedSetting ? description.c_str() : name.c_str());
-                if (!description.empty() && !namedSetting) ImGui::TextWrapped("%s", description.c_str());
+                ImGui::PushFont(PepengineTheme::HeadingFont(), ImGui::GetStyle().FontSizeBase * 1.35f);
+                ImGui::TextWrapped("%s", name.c_str());
+                ImGui::PopFont();
+                ImGui::Spacing();
+                if (!description.empty()) ImGui::TextWrapped("%s", description.c_str());
                 ImGui::Spacing();
                 if (variable.GetFlags() == EConsoleVariableFlags::ReadOnly)
                 {
@@ -264,8 +266,15 @@ namespace Engine::UI
                         format | ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
                     if (ImGui::IsItemEdited()) Error.clear();
                     ImGui::BeginDisabled(Draft == Current);
-                    const bool apply = ImGui::Button("Apply");
-                    ImGui::SameLine();
+                    const float em = ImGui::GetFontSize();
+                    const bool wide = ImGui::GetContentRegionAvail().x >= 12.f * em;
+                    ImGui::PushStyleColor(ImGuiCol_Text, PepengineTheme::Ink);
+                    ImGui::PushStyleColor(ImGuiCol_Button, PepengineTheme::Lime);
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, IM_COL32(199, 244, 150, 255));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive, IM_COL32(152, 207, 102, 255));
+                    const bool apply = ImGui::Button("Apply", {wide ? 4.6f * em : -FLT_MIN, 0});
+                    ImGui::PopStyleColor(4);
+                    if (wide) ImGui::SameLine();
                     const bool reset = ImGui::Button("Revert edit");
                     ImGui::EndDisabled();
                     if (reset) Select(variable);
@@ -281,13 +290,25 @@ namespace Engine::UI
         {
             if (!Visible || !SettingsEditingEnabled) return;
             if (FocusSettings) { ImGui::SetNextWindowFocus(); FocusSettings = false; }
-            ImGui::SetNextWindowPos(ImVec2(16, 16), ImGuiCond_FirstUseEver);
-            ImGui::SetNextWindowSize(ImVec2(720, 580), ImGuiCond_FirstUseEver);
-            if (ImGui::Begin("Settings (F1)", &Visible))
+            const auto* vp = ImGui::GetMainViewport();
+            ImGui::SetNextWindowPos(vp->GetWorkCenter(), ImGuiCond_FirstUseEver, {.5f, .5f});
+            ImGui::SetNextWindowSize({vp->WorkSize.x * .88f, vp->WorkSize.y * .82f}, ImGuiCond_FirstUseEver);
+            const float size = std::clamp(std::round(vp->WorkSize.y / 34.f), 18.f, 34.f);
+            ImGui::PushFont(PepengineTheme::BodyFont(), size);
+            PepengineTheme::Push();
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {.66f * size, .52f * size});
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, {.44f * size, .26f * size});
+            ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {.5f * size, .32f * size});
+            if (ImGui::Begin("Console variables   [F1]###Settings (F1)", &Visible))
             {
+                PepengineTheme::DrawToolHeading("Console variables");
+                ImGui::Separator();
                 DrawSettingsEditor(true);
             }
             ImGui::End();
+            ImGui::PopStyleVar(3);
+            PepengineTheme::Pop();
+            ImGui::PopFont();
         }
         ImDrawData* FinalizeScreenFrame()
         {
@@ -744,17 +765,9 @@ namespace Engine::UI
     void DrawSettingsEditor(bool sceneTools)
     {
         if (!SettingsEditingEnabled) return;
-        ImGui::TextWrapped("For changes across Bistro launches, edit Configs/Startup.ini.");
         ConsoleModule console;
         IConsoleVariable* inspector = nullptr;
-        if (sceneTools && console.TryFindConsoleVariable(L"Render.Debug.SceneTextures", inspector))
-        {
-            bool enabled = inspector->GetBool();
-            static std::string visibilityError;
-            if (ImGui::Checkbox("Scene textures", &enabled))
-                visibilityError = SetSceneTexturesVisible(enabled);
-            if (!visibilityError.empty()) ImGui::TextWrapped("%s", visibilityError.c_str());
-        }
+        const bool hasInspector = sceneTools && console.TryFindConsoleVariable(L"Render.Debug.SceneTextures", inspector);
         struct Browser
         {
             ImGuiTextFilter Filter;
@@ -764,9 +777,17 @@ namespace Engine::UI
         static Browser launcher, scene;
         auto& browser = sceneTools ? scene : launcher;
         auto& filter = browser.Filter;
-        filter.Draw("Search", -90);
         auto& settings = browser.Settings;
         auto& editor = browser.Editor;
+        const auto area = ImGui::GetContentRegionAvail();
+        const float em = ImGui::GetFontSize();
+        const bool sideBySide = area.x >= 29.f * em;
+        const float panels = (std::max)(7.f * em, area.y - (hasInspector ? ImGui::GetFrameHeightWithSpacing() : 0.f));
+        ImGui::BeginChild("Variables", {sideBySide ? area.x * .38f : 0.f, sideBySide ? panels : panels * .42f},
+            ImGuiChildFlags_Borders);
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        if (ImGui::InputTextWithHint("##filter", "Search variables", filter.InputBuf, IM_ARRAYSIZE(filter.InputBuf)))
+            filter.Build();
         const UINT shadowPages = console.FindConsoleVariable(L"Render.Shadows.Local.Resolution").GetUInt()
             ? console.FindConsoleVariable(L"Render.Shadows.Local.AtlasCount").GetUInt() : 0u;
         const auto hidden = [shadowPages, sceneTools](std::wstring_view name)
@@ -783,9 +804,10 @@ namespace Engine::UI
             variables.erase(std::remove_if(variables.begin(), variables.end(), [&](const auto* variable)
             { return hidden(variable->GetName()); }), variables.end());
             settings.Update(variables, revision, filter, shadowPages);
+            if (editor.Name.empty() && !variables.empty() && !filter.IsActive()) editor.Select(*variables.front());
         }
 
-        const auto drawGroup = [&](auto&& self, const SettingsCache::Group& group) -> void
+        const auto drawGroup = [&](auto&& self, const SettingsCache::Group& group, std::string_view selectedPath) -> void
         {
             for (const auto& setting : group.Variables)
             {
@@ -800,26 +822,29 @@ namespace Engine::UI
             }
             for (const auto& [name, child] : group.Children)
             {
+                const auto dot = selectedPath.find('.');
+                const bool ancestor = dot != std::string_view::npos && selectedPath.substr(0, dot) == name;
+                const auto flags = ImGuiTreeNodeFlags_SpanAvailWidth | (ancestor ? ImGuiTreeNodeFlags_DefaultOpen : 0);
                 if (filter.IsActive()) ImGui::SetNextItemOpen(true, ImGuiCond_Always);
-                if (ImGui::TreeNodeEx(name.c_str(), ImGuiTreeNodeFlags_SpanAvailWidth))
+                if (ImGui::TreeNodeEx(name.c_str(), flags))
                 {
-                    self(self, child);
+                    self(self, child, ancestor ? selectedPath.substr(dot + 1) : std::string_view{});
                     ImGui::TreePop();
                 }
             }
         };
-        if (ImGui::BeginChild("Variables", ImVec2(ImGui::GetContentRegionAvail().x * 0.42f, 0),
-            ImGuiChildFlags_Borders))
+        if (ImGui::BeginChild("Settings list"))
         {
             ImGui::PushID(filter.IsActive() ? "FilteredSettings" : "SettingsTree");
             const auto& root = settings.Root();
             if (root.Children.empty() && root.Variables.empty()) ImGui::TextDisabled("No matching settings");
-            drawGroup(drawGroup, root);
+            drawGroup(drawGroup, root, std::filesystem::path(editor.Name).u8string());
             ImGui::PopID();
         }
         ImGui::EndChild();
-        ImGui::SameLine();
-        if (ImGui::BeginChild("Editor", ImVec2(0, 0), ImGuiChildFlags_Borders))
+        ImGui::EndChild();
+        if (sideBySide) ImGui::SameLine();
+        if (ImGui::BeginChild("Editor", {0, sideBySide ? panels : panels * .58f - ImGui::GetStyle().ItemSpacing.y}, ImGuiChildFlags_Borders))
         {
             IConsoleVariable* variable = nullptr;
             if (!editor.Name.empty() && !hidden(editor.Name) &&
@@ -827,11 +852,22 @@ namespace Engine::UI
             {
                 editor.Draw(*variable);
                 if (editor.Name == L"App.Physics.Quality") DrawPhysicsQuality(console);
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::TextWrapped("For changes across launches, edit Configs/Startup.ini.");
             }
             else
                 ImGui::TextDisabled("Select a setting to edit");
         }
         ImGui::EndChild();
+        if (hasInspector)
+        {
+            bool enabled = inspector->GetBool();
+            static std::string visibilityError;
+            if (ImGui::Checkbox("Scene textures", &enabled))
+                visibilityError = SetSceneTexturesVisible(enabled);
+            if (!visibilityError.empty()) ImGui::TextWrapped("%s", visibilityError.c_str());
+        }
     }
 
     void BeginFrame()
@@ -975,6 +1011,7 @@ namespace Engine::UI
         if (!ImGui::GetCurrentContext()) return;
         if (ImGui::GetIO().BackendRendererUserData) ImGui_ImplDX12_Shutdown();
         if (ImGui::GetIO().BackendPlatformUserData) ImGui_ImplWin32_Shutdown();
+        PepengineTheme::Reset();
         ImGui::DestroyContext();
         FrameBegun = false;
         ScreenFrameReady = false;

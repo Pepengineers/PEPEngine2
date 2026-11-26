@@ -31,6 +31,7 @@ public:
 private:
     enum class Tab { Setup, Results };
     void DrawLaunchControls(BistroBenchmark& benchmark);
+    void DrawPresentChart(float height) const;
     void ApplyPreset(const std::filesystem::path& path);
 
     BistroRun::Launch _launch;
@@ -41,7 +42,6 @@ private:
     BistroComparePanel _compare;
     ImFont* _fullFont = nullptr;
     ImFont* _headingFont = nullptr;
-    int _engineMark = -1;
     Tab _tab = Tab::Setup;
     std::string _displayError;
     bool _initializedSize = false;
@@ -56,5 +56,7 @@ private:
     std::array<double, 180> _presentBeginMs{};
     std::array<float, 180> _presentMs{};
     size_t _count = 0, _next = 0;
+    float _hudMeanMs = 0.f, _hudP95Ms = 0.f;
+    std::chrono::steady_clock::time_point _hudStatsDue{};
     std::optional<std::chrono::steady_clock::time_point> _lastPresent;
 };

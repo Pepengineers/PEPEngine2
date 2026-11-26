@@ -20,12 +20,14 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\Engine.UI\UI_test.h" />
+    <ClInclude Include="Include\Engine.UI\PepengineTheme.h" />
     <ClInclude Include="Include\Engine.UI\OffscreenUI.h" />
     <ClInclude Include="Include\Engine.UI\WorldCanvas.h" />
     <ClInclude Include="Include\Engine.UI\UIScreenComposite.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\UI_test.cpp" />
+    <ClCompile Include="src\PepengineTheme.cpp" />
     <ClCompile Include="src\WorldCanvas.cpp" />
     <ClCompile Include="src\UIScreenComposite.cpp" />
   </ItemGroup>

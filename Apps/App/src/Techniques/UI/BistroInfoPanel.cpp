@@ -4,12 +4,15 @@
 #include "BistroBenchmark.h"
 #include "Engine.Core/BenchmarkEngine.h"
 #include "Engine.UI/UI_test.h"
+#include "Engine.UI/PepengineTheme.h"
 #include "../../../Resources/Resource.h"
-#include <directxtex/DirectXTex.h>
 #include <imgui/imgui.h>
 #include <algorithm>
 #include <cmath>
-#include <cstring>
+#include <cstdio>
+#include <numeric>
+
+namespace Theme = Engine::UI::PepengineTheme;
 
 namespace
 {
@@ -17,70 +20,14 @@ constexpr ImVec4 Rgb(unsigned rgb)
 {
     return {float((rgb >> 16) & 255) / 255.f, float((rgb >> 8) & 255) / 255.f, float(rgb & 255) / 255.f, 1.f};
 }
-constexpr ImVec4 Pond = Rgb(0x101b1a), Mint = Rgb(0x60dab4), Lime = Rgb(0xb5ed7d);
-constexpr std::pair<ImGuiCol, ImVec4> FullPalette[] = {
-    {ImGuiCol_WindowBg, Pond},                          {ImGuiCol_ChildBg, Rgb(0x182522)},
-    {ImGuiCol_PopupBg, Rgb(0x20302c)},                  {ImGuiCol_Border, Rgb(0x3c534b)},
-    {ImGuiCol_Separator, Rgb(0x344b43)},                {ImGuiCol_Text, Rgb(0xeff6f0)},
-    {ImGuiCol_TextDisabled, Rgb(0xacc1b7)},             {ImGuiCol_CheckMark, Mint},
-    {ImGuiCol_NavCursor, Lime},                         {ImGuiCol_Button, Rgb(0x283e35)},
-    {ImGuiCol_ButtonHovered, Rgb(0x385648)},            {ImGuiCol_ButtonActive, Rgb(0x416853)},
-    {ImGuiCol_FrameBg, Rgb(0x121f1b)},                  {ImGuiCol_FrameBgHovered, Rgb(0x263d32)},
-    {ImGuiCol_FrameBgActive, Rgb(0x304b3b)},            {ImGuiCol_Header, Rgb(0x24392e)},
-    {ImGuiCol_HeaderHovered, Rgb(0x334c3d)},            {ImGuiCol_HeaderActive, Rgb(0x294535)},
-    {ImGuiCol_Tab, Rgb(0x16231f)},                      {ImGuiCol_TabHovered, Rgb(0x334c3d)},
-    {ImGuiCol_TabSelected, Rgb(0x294535)},              {ImGuiCol_TabSelectedOverline, Mint},
-    {ImGuiCol_TableHeaderBg, Rgb(0x24352e)},            {ImGuiCol_SliderGrab, Mint},
-    {ImGuiCol_SliderGrabActive, Lime},
-};
-
-// The app's icon group contains transparent PNGs. Keep the header mark in the UI atlas
-// so the launcher can draw it before initializing the world renderer.
-ImFontAtlasRectId LoadEngineMark(ImFontAtlas& atlas)
-{
-    const auto module = GetModuleHandleW(nullptr);
-    const auto group = FindResourceW(module, MAKEINTRESOURCEW(IDI_PEPENGINE2), RT_GROUP_ICON);
-    if (!group) return ImFontAtlasRectId_Invalid;
-    auto* directory = static_cast<PBYTE>(LockResource(LoadResource(module, group)));
-    if (!directory) return ImFontAtlasRectId_Invalid;
-    const int id = LookupIconIdFromDirectoryEx(directory, TRUE, 128, 128, LR_DEFAULTCOLOR);
-    const auto icon = FindResourceW(module, MAKEINTRESOURCEW(id), RT_ICON);
-    if (!icon) return ImFontAtlasRectId_Invalid;
-    const auto* data = static_cast<const uint8_t*>(LockResource(LoadResource(module, icon)));
-    struct Apartment
-    {
-        HRESULT Status = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-        ~Apartment() { if (SUCCEEDED(Status)) CoUninitialize(); }
-    } apartment;
-    if (FAILED(apartment.Status) && apartment.Status != RPC_E_CHANGED_MODE) return ImFontAtlasRectId_Invalid;
-    DirectX::ScratchImage decoded;
-    if (!data || FAILED(DirectX::LoadFromWICMemory(data, SizeofResource(module, icon), DirectX::WIC_FLAGS_FORCE_RGB,
-        nullptr, decoded))) return ImFontAtlasRectId_Invalid;
-    const auto* bitmap = decoded.GetImage(0, 0, 0);
-    if (!bitmap || (bitmap->format != DXGI_FORMAT_R8G8B8A8_UNORM && bitmap->format != DXGI_FORMAT_R8G8B8A8_UNORM_SRGB))
-        return ImFontAtlasRectId_Invalid;
-    ImFontAtlasRect rect;
-    const auto rectId = atlas.AddCustomRect(int(bitmap->width), int(bitmap->height), &rect);
-    if (rectId == ImFontAtlasRectId_Invalid) return rectId;
-    if (atlas.TexData->Format != ImTextureFormat_RGBA32)
-    {
-        atlas.RemoveCustomRect(rectId);
-        return ImFontAtlasRectId_Invalid;
-    }
-    atlas.TexPixelsUseColors = atlas.TexData->UseColors = true;
-    for (int y = 0; y < rect.h; ++y)
-        std::memcpy(atlas.TexData->GetPixelsAt(rect.x, rect.y + y), bitmap->pixels + y * bitmap->rowPitch, rect.w * 4);
-    return rectId;
-}
-
 bool PageButton(const char* label, bool selected, ImVec2 size)
 {
     if (selected)
     {
-        ImGui::PushStyleColor(ImGuiCol_Text, Pond);
-        ImGui::PushStyleColor(ImGuiCol_Button, Mint);
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Rgb(0x8de8c9));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, Rgb(0x4cb995));
+        ImGui::PushStyleColor(ImGuiCol_Text, Theme::Ink);
+        ImGui::PushStyleColor(ImGuiCol_Button, Theme::Lime);
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Rgb(0xc7f496));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, Rgb(0x98cf66));
     }
     const bool pressed = ImGui::Button(label, size);
     if (selected) ImGui::PopStyleColor(4);
@@ -91,27 +38,16 @@ bool PageButton(const char* label, bool selected, ImVec2 size)
 
 void BistroInfoPanel::InitializeFont()
 {
-    auto* atlas = ImGui::GetIO().Fonts;
-    if (atlas->Fonts.empty()) atlas->AddFontDefault();
-    wchar_t windowsDir[MAX_PATH]{};
-    const auto length = GetWindowsDirectoryW(windowsDir, MAX_PATH);
-    if (length && length < MAX_PATH)
-    {
-        const auto fonts = std::filesystem::path(windowsDir) / L"Fonts";
-        ImFontConfig config;
-        config.Flags |= ImFontFlags_NoLoadError;
-        _fullFont = atlas->AddFontFromFileTTF((fonts / L"segoeui.ttf").u8string().c_str(), 18.f, &config);
-        _headingFont = atlas->AddFontFromFileTTF((fonts / L"seguisb.ttf").u8string().c_str(), 18.f, &config);
-    }
-    if (!_fullFont) _fullFont = atlas->AddFontDefaultVector();
-    if (!_headingFont) _headingFont = _fullFont;
-    _engineMark = LoadEngineMark(*atlas);
+    Theme::Initialize(*ImGui::GetIO().Fonts, IDI_PEPENGINE2);
+    _fullFont = Theme::BodyFont();
+    _headingFont = Theme::HeadingFont();
 }
 
 void BistroInfoPanel::ShowSettings(bool openResults, const std::string& error)
 {
     _count = _next = 0;
     _lastPresent.reset();
+    _hudStatsDue = {};
     _gpuWork.clear();
     _timingEpoch = _packetCursor = 0;
     _displayError = error;
@@ -141,9 +77,9 @@ struct RunMode
 };
 
 constexpr RunMode RunModes[] = {
-    {"Manual", "Fly the route once with your current settings.", BistroRun::Mode::Manual, BistroPlacement::Performance},
-    {"Performance", "Find the best settings targeting 60 FPS.", BistroRun::Mode::Profile, BistroPlacement::Performance},
-    {"Quality", "Prioritize visual quality targeting 30 FPS.", BistroRun::Mode::Profile, BistroPlacement::Quality},
+    {"Manual", "One run with current settings.", BistroRun::Mode::Manual, BistroPlacement::Performance},
+    {"Performance", "Search for settings targeting 60 FPS.", BistroRun::Mode::Profile, BistroPlacement::Performance},
+    {"Quality", "Prioritize image quality at 30 FPS.", BistroRun::Mode::Profile, BistroPlacement::Quality},
 };
 
 void DrawModeCard(const RunMode& mode, BistroRun::Launch& launch, ImFont* heading, float height)
@@ -168,7 +104,7 @@ void DrawModeCard(const RunMode& mode, BistroRun::Launch& launch, ImFont* headin
     }
     const auto a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
     auto* draw = ImGui::GetWindowDrawList();
-    const auto accent = ImGui::GetColorU32(selected ? Lime : Mint);
+    const auto accent = ImGui::GetColorU32(selected ? Theme::Lime : Theme::Mint);
     const bool hovered = ImGui::IsItemHovered();
     const bool focused = ImGui::GetIO().NavVisible && ImGui::IsItemFocused();
     const ImU32 fill = selected ? ImGui::GetColorU32(hovered ? ImGuiCol_HeaderHovered : ImGuiCol_HeaderActive) :
@@ -186,20 +122,21 @@ void DrawModeCard(const RunMode& mode, BistroRun::Launch& launch, ImFont* headin
         const float x = a.x + (wide ? width * .177f : 3.5f * em);
         const float iconScale = (wide ? 1.65f : 1.30f) * em;
         const auto p = [&](float dx, float dy) { return ImVec2{x + dx * iconScale, middle + dy * iconScale}; };
+        const ImU32 icon = ImGui::GetColorU32(Theme::Mint);
         const float stroke = .10f * iconScale;
         if (mode.Kind == BistroRun::Mode::Manual)
-            draw->AddTriangle(p(-.48f,-.68f), p(.65f, 0), p(-.48f,.68f), accent, stroke);
+            draw->AddTriangle(p(-.48f,-.68f), p(.65f, 0), p(-.48f,.68f), icon, stroke);
         else if (mode.Profile == BistroPlacement::Performance)
         {
             for (int i = 0; i < 3; ++i)
-                draw->AddRect(p(-.65f + .5f * i, .13f - .43f * i), p(-.36f + .5f * i, .61f), accent, 0, stroke);
+                draw->AddRect(p(-.65f + .5f * i, .13f - .43f * i), p(-.36f + .5f * i, .61f), icon, 0, stroke);
         }
         else
         {
             const ImVec2 layer[]{p(-.78f,-.25f), p(0,-.67f), p(.78f,-.25f), p(0,.17f)};
-            draw->AddPolyline(layer, 4, accent, stroke, ImDrawFlags_Closed);
-            draw->AddLine(p(-.78f,.18f), p(0,.62f), accent, stroke);
-            draw->AddLine(p(0,.62f), p(.78f,.18f), accent, stroke);
+            draw->AddPolyline(layer, 4, icon, stroke, ImDrawFlags_Closed);
+            draw->AddLine(p(-.78f,.18f), p(0,.62f), icon, stroke);
+            draw->AddLine(p(0,.62f), p(.78f,.18f), icon, stroke);
         }
     }
     if (wide)
@@ -250,11 +187,11 @@ void DrawRoutePreview(const BistroRun::Map& map, float height)
         return ImVec2{(a.x + b.x) * .5f + (point.Position.x - (high.x + low.x) * .5f) * scale,
             (a.y + b.y) * .5f - (point.Position.z - (high.y + low.y) * .5f) * scale};
     };
-    const auto accent = ImGui::GetColorU32(ImGuiCol_CheckMark);
+    const auto accent = ImGui::GetColorU32(Theme::Mint);
     for (const auto& leg : legs)
         for (size_t i = 1; i < leg.Count; ++i)
             draw->AddLine(project(leg.Points[i-1]), project(leg.Points[i]), accent, std::max(1.25f, .09f * em));
-    draw->AddCircleFilled(project(Red[0]), .23f * em, ImGui::GetColorU32(Lime));
+    draw->AddCircleFilled(project(Red[0]), .23f * em, ImGui::GetColorU32(Theme::Lime));
     draw->AddRect(a, b, ImGui::GetColorU32(ImGuiCol_Border), .35f * em);
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Camera route viewed from above");
 }
@@ -372,10 +309,10 @@ void BistroInfoPanel::DrawLaunchControls(BistroBenchmark& benchmark)
     ImGui::TextUnformatted(summary.c_str());
     ImGui::PopClipRect();
     ImGui::SetCursorScreenPos({start.x + area.x - buttonWidth, start.y + (narrowFooter ? em + gap : 0.f)});
-    ImGui::PushStyleColor(ImGuiCol_Button, Lime);
+    ImGui::PushStyleColor(ImGuiCol_Button, Theme::Lime);
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Rgb(0xc7f496));
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, Rgb(0x98cf66));
-    ImGui::PushStyleColor(ImGuiCol_Text, Pond);
+    ImGui::PushStyleColor(ImGuiCol_Text, Theme::Ink);
     ImGui::PushFont(_headingFont, 0.f);
     if (ImGui::Button(action, {buttonWidth, actionHeight}))
         benchmark.Launch(_launch, *BenchmarkEngine::GetLocator().GetModule<ConsoleModule>());
@@ -401,10 +338,7 @@ void BistroInfoPanel::DrawSettings(RenderModule& render, BistroBenchmark& benchm
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {.95f * em, .68f * em});
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, {.6f * em, .30f * em});
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {.65f * em, .40f * em});
-    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, .45f * em);
-    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, .30f * em);
-    ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, .30f * em);
-    for (const auto& [color, value] : FullPalette) ImGui::PushStyleColor(color, value);
+    Theme::Push();
     ImGui::SetNextWindowViewport(vp->ID);
     ImGui::SetNextWindowPos(vp->WorkPos);
     ImGui::SetNextWindowSize(vp->WorkSize);
@@ -416,23 +350,18 @@ void BistroInfoPanel::DrawSettings(RenderModule& render, BistroBenchmark& benchm
         const float navHeight = 2.60f * em;
         const float baseSize = ImGui::GetStyle().FontSizeBase;
         ImGui::BeginGroup();
-        ImFontAtlasRect mark;
-        auto* atlas = ImGui::GetIO().Fonts;
-        if (atlas->GetCustomRect(_engineMark, &mark))
+        Theme::DrawBrand(2.55f * em);
+        if (width >= 29.f * em)
         {
-            ImGui::Image(atlas->TexRef, {2.85f * em, 2.85f * em}, mark.uv0, mark.uv1);
-            ImGui::SameLine(0.f, .68f * em);
+            ImGui::SameLine(0.f, .8f * em);
+            const auto line = ImGui::GetCursorScreenPos();
+            ImGui::GetWindowDrawList()->AddLine({line.x, line.y + .3f * em}, {line.x, line.y + 2.25f * em},
+                ImGui::GetColorU32(ImGuiCol_Separator));
+            ImGui::SetCursorScreenPos({line.x + .82f * em, line.y + .65f * em});
+            ImGui::PushFont(_fullFont, 1.1f * baseSize);
+            ImGui::TextUnformatted("Benchmark");
+            ImGui::PopFont();
         }
-        ImGui::BeginGroup();
-        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {0.f, 0.f});
-        ImGui::PushFont(_headingFont, 1.65f * baseSize);
-        ImGui::TextColored(Lime, "PEPENGINE2");
-        ImGui::PopFont();
-        ImGui::PushFont(_fullFont, baseSize);
-        ImGui::TextUnformatted("Benchmark");
-        ImGui::PopFont();
-        ImGui::PopStyleVar();
-        ImGui::EndGroup();
         ImGui::EndGroup();
         const ImVec2 titleSize = ImGui::GetItemRectSize();
         const float navWidth = std::clamp(width * .125f, 5.1f * em, 8.f * em);
@@ -462,8 +391,8 @@ void BistroInfoPanel::DrawSettings(RenderModule& render, BistroBenchmark& benchm
         }
     }
     ImGui::End();
-    ImGui::PopStyleColor(int(std::size(FullPalette)));
-    ImGui::PopStyleVar(6);
+    Theme::Pop();
+    ImGui::PopStyleVar(3);
     ImGui::PopFont();
 }
 
@@ -480,6 +409,16 @@ void BistroInfoPanel::RecordPresent(std::chrono::steady_clock::time_point now,
     }
     _lastPresent = now;
     if (!_count) return;
+    if (now >= _hudStatsDue)
+    {
+        auto samples = _presentMs;
+        const auto end = samples.begin() + _count;
+        _hudMeanMs = float(std::accumulate(samples.begin(), end, 0.0) / _count);
+        const auto p95 = samples.begin() + (_count * 95 - 1) / 100;
+        std::nth_element(samples.begin(), p95, end);
+        _hudP95Ms = *p95;
+        _hudStatsDue = now + std::chrono::milliseconds(250);
+    }
     const double first = _presentBeginMs[_count == _presentMs.size() ? _next : 0];
     for (const auto& packet : submissions.ReadBenchmarkIntervals(_timingEpoch, _packetCursor, manualGpuTimings))
     {
@@ -515,65 +454,125 @@ void BistroInfoPanel::RecordPresent(std::chrono::steady_clock::time_point now,
     }
 }
 
+void BistroInfoPanel::DrawPresentChart(float height) const
+{
+    const auto first = _count == _presentMs.size() ? _next : 0;
+    const float peak = std::max(5.f, 5.f * std::ceil(*std::max_element(_presentMs.begin(), _presentMs.begin() + _count) / 5.f));
+    const float em = ImGui::GetFontSize();
+    const ImVec2 start = ImGui::GetCursorScreenPos();
+    const float width = std::max(1.f, ImGui::GetContentRegionAvail().x);
+    char scale[48];
+    std::snprintf(scale, sizeof(scale), "%.0f ms", peak);
+    const float labelWidth = std::min(width * .3f, ImGui::CalcTextSize(scale).x + .45f * em);
+    const ImVec2 origin{start.x + labelWidth, start.y}, end{start.x + width, start.y + height};
+    auto* draw = ImGui::GetWindowDrawList();
+    draw->AddRectFilled(origin, end, ImGui::GetColorU32(ImGuiCol_FrameBg));
+    const auto grid = ImGui::GetColorU32(ImGuiCol_Border);
+    for (int i = 0; i <= 6; ++i)
+    {
+        float x = origin.x + (end.x - origin.x) * (i / 6.f);
+        draw->AddLine({x, origin.y}, {x, end.y}, grid);
+    }
+    for (int i = 0; i <= 2; ++i)
+    {
+        float y = origin.y + (end.y - origin.y) * (i / 2.f);
+        draw->AddLine({origin.x, y}, {end.x, y}, grid);
+    }
+    const auto muted = ImGui::GetColorU32(ImGuiCol_TextDisabled);
+    draw->AddText(start, muted, scale);
+    draw->AddText({start.x, end.y - em}, muted, "0 ms");
+    const auto point = [&](size_t i, double ms) {
+        return ImVec2{origin.x + (end.x - origin.x) * float(i) / float(std::max<size_t>(1, _count - 1)),
+            end.y - height * std::clamp(float(ms) / peak, 0.f, 1.f)};
+    };
+    const auto presentColor = ImGui::GetColorU32(Theme::Paper);
+    for (size_t i = 1; i < _count; ++i)
+        draw->AddLine(point(i - 1, _presentMs[(first + i - 1) % _presentMs.size()]),
+            point(i, _presentMs[(first + i) % _presentMs.size()]), presentColor, 1.5f);
+    ImGui::Dummy({width, height});
+    ImGui::TextUnformatted("Present interval");
+    for (const auto& [id, gpu] : _gpuWork)
+    {
+        if (gpu.Intervals.empty()) continue;
+        const ImColor color = id == 0 ? ImColor(Theme::Mint) : ImColor::HSV(std::fmod(.12f + .382f * (id - 1), 1.f), .58f, .98f);
+        const char* label = " GPU work incl. background";
+        BistroPlot::ContinueRowIfFits(ImGui::CalcTextSize(gpu.Adapter.c_str()).x + ImGui::CalcTextSize(label).x);
+        ImGui::TextColored(color, "%s%s", gpu.Adapter.c_str(), label);
+        auto interval = gpu.Intervals.begin();
+        std::optional<ImVec2> previous;
+        for (size_t i = 0; i < _count; ++i)
+        {
+            const auto frame = (first + i) % _presentMs.size();
+            const double begin = _presentBeginMs[frame], frameEnd = begin + _presentMs[frame];
+            while (interval != gpu.Intervals.end() && interval->second <= begin) ++interval;
+            double work = 0;
+            for (auto it = interval; it != gpu.Intervals.end() && it->first < frameEnd; ++it)
+                work += std::min(frameEnd, it->second) - std::max(begin, it->first);
+            if (work <= 0) { previous.reset(); continue; }
+            const auto p = point(i, work);
+            if (previous) draw->AddLine(*previous, p, color, 1.7f);
+            else draw->AddCircleFilled(p, 1.5f, color);
+            previous = p;
+        }
+    }
+}
+
 void BistroInfoPanel::DrawMeasurement(const BistroBenchmark& benchmark) const
 {
     if (!ImGui::GetCurrentContext()) return;
     const auto* vp = ImGui::GetMainViewport();
-    const float size = std::clamp(std::round(vp->Size.y / 36.f), 16.f, 40.f);
+    const float size = std::clamp(std::round(vp->Size.y / 40.f), 14.f, 36.f);
     ImGui::PushFont(_fullFont, size);
+    Theme::Push();
+    const float em = ImGui::GetFontSize();
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {.9f * em, .4f * em});
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {.7f * em, .22f * em});
     ImGui::SetNextWindowViewport(vp->ID);
     ImGui::SetNextWindowPos({vp->Pos.x, vp->Pos.y + vp->Size.y}, ImGuiCond_Always, {0,1});
     ImGui::SetNextWindowSize({vp->Size.x, 0});
-    ImGui::SetNextWindowBgAlpha(.9f);
+    ImGui::SetNextWindowBgAlpha(.96f);
     if (ImGui::Begin("##Measurement", nullptr, ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoDecoration |
         ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoSavedSettings))
     {
-        const int seconds = int(std::ceil(std::max(0., benchmark.HudRemainingSeconds())));
-        ImGui::Text("%s   |   %d:%02d remaining   |   Esc to cancel", benchmark.HudPhase(), seconds / 60, seconds % 60);
-        if (_count)
+        const float left = ImGui::GetCursorScreenPos().x, right = left + ImGui::GetContentRegionAvail().x;
+        const auto top = ImGui::GetCursorScreenPos().y;
+        const bool wide = right - left >= 37.f * em;
+        Theme::DrawBrand(1.65f * em);
+        const char* phase = benchmark.HudPhase();
+        if (wide && ImGui::GetItemRectMax().x + ImGui::CalcTextSize(phase).x + em < right)
         {
-            const auto last = (_next + _presentMs.size() - 1) % _presentMs.size();
-            BistroPlot::ContinueRowIfFits(ImGui::CalcTextSize("Present interval   1000.0 ms").x);
-            ImGui::Text("Present interval   %.1f ms", _presentMs[last]);
-            const auto first = _count == _presentMs.size() ? _next : 0;
-            const float peak = std::max(1.f, *std::max_element(_presentMs.begin(), _presentMs.begin() + _count));
-            const ImVec2 origin = ImGui::GetCursorScreenPos();
-            const ImVec2 size{std::max(1.f, ImGui::GetContentRegionAvail().x), 2.f * ImGui::GetFontSize()};
-            auto* draw = ImGui::GetWindowDrawList();
-            draw->AddRectFilled(origin, {origin.x + size.x, origin.y + size.y}, ImGui::GetColorU32(ImGuiCol_FrameBg));
-            const auto point = [&](size_t i, double ms) {
-                return ImVec2{origin.x + size.x * float(i) / float(std::max<size_t>(1, _count - 1)),
-                    origin.y + size.y * (1.f - std::clamp(float(ms) / peak, 0.f, 1.f))};
-            };
-            const auto presentColor = IM_COL32(235, 239, 242, 255);
-            for (size_t i = 1; i < _count; ++i)
-                draw->AddLine(point(i - 1, _presentMs[(first + i - 1) % _presentMs.size()]),
-                    point(i, _presentMs[(first + i) % _presentMs.size()]), presentColor, 1.5f);
-            ImGui::Dummy(size);
-            for (const auto& [id, gpu] : _gpuWork)
-            {
-                if (gpu.Intervals.empty()) continue;
-                const auto color = ImColor::HSV(std::fmod(.46f + .382f * float(id), 1.f), .65f, .98f);
-                ImGui::TextColored(color, "%s: timed GPU work (incl. background)", gpu.Adapter.c_str());
-                auto interval = gpu.Intervals.begin();
-                std::optional<ImVec2> previous;
-                for (size_t i = 0; i < _count; ++i)
-                {
-                    const auto frame = (first + i) % _presentMs.size();
-                    const double begin = _presentBeginMs[frame], end = begin + _presentMs[frame];
-                    while (interval != gpu.Intervals.end() && interval->second <= begin) ++interval;
-                    double work = 0;
-                    for (auto it = interval; it != gpu.Intervals.end() && it->first < end; ++it)
-                        work += std::min(end, it->second) - std::max(begin, it->first);
-                    if (work <= 0) { previous.reset(); continue; }
-                    const auto p = point(i, work);
-                    if (previous) draw->AddLine(*previous, p, color, 1.7f);
-                    else draw->AddCircleFilled(p, 1.5f, color);
-                    previous = p;
-                }
-            }
+            ImGui::SameLine();
+            ImGui::SetCursorScreenPos({ImGui::GetCursorScreenPos().x, top + .30f * em});
+        }
+        ImGui::TextWrapped("%s", phase);
+        const int seconds = int(std::ceil(std::max(0., benchmark.HudRemainingSeconds())));
+        char clock[64];
+        std::snprintf(clock, sizeof(clock), "%d:%02d remaining    |    Esc to cancel", seconds / 60, seconds % 60);
+        const float clockWidth = ImGui::CalcTextSize(clock).x;
+        if (ImGui::GetItemRectMax().x + clockWidth + em < right)
+        {
+            ImGui::SameLine();
+            ImGui::SetCursorScreenPos({right - clockWidth, ImGui::GetItemRectMin().y});
+        }
+        ImGui::TextUnformatted(clock);
+        ImGui::Separator();
+        if (_count && _hudMeanMs > 0)
+        {
+            ImGui::BeginGroup();
+            ImGui::TextDisabled("Mean frame time");
+            ImGui::PushFont(_headingFont, 1.35f * ImGui::GetStyle().FontSizeBase);
+            ImGui::TextColored(Theme::Lime, "%.1f ms", _hudMeanMs);
+            ImGui::PopFont();
+            ImGui::Text("FPS  %.1f     P95  %.1f ms", 1000.f / _hudMeanMs, _hudP95Ms);
+            ImGui::EndGroup();
+            if (wide) ImGui::SameLine(0.f, 1.2f * em);
+            ImGui::BeginGroup();
+            DrawPresentChart(2.65f * em);
+            ImGui::EndGroup();
         }
     }
     ImGui::End();
+    ImGui::PopStyleVar(2);
+    Theme::Pop();
     ImGui::PopFont();
 }
