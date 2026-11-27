@@ -48,6 +48,15 @@ GDX12ShaderCompiler::GDX12ShaderCompiler()
     Initialize();
 }
 
+ComPtr<ID3DBlob> GDX12ShaderCompiler::CompileRayTracingLibrary(GDX12Device* device, const std::wstring& filename,
+    const D3D_SHADER_MACRO* defines)
+{
+    if (!device || device->GetDeviceFeatures().Features.RaytracingTier() == D3D12_RAYTRACING_TIER_NOT_SUPPORTED
+        || device->GetDeviceFeatures().Features.HighestShaderModel() < D3D_SHADER_MODEL_6_3)
+    { throw std::invalid_argument("ERROR: Ray tracing library requires DXR and Shader Model 6.3 or newer."); }
+    return CompileShaderDXC(filename, defines, "", GetShaderTargetForModel(device, "lib"));
+}
+
 void GDX12ShaderCompiler::Shutdown()
 {
     if (_instance == nullptr) return;
@@ -106,9 +115,12 @@ ComPtr<ID3DBlob> GDX12ShaderCompiler::CompileShaderDXC(const std::wstring& filen
     arguments.push_back(L"-I");
     arguments.push_back(sourceDirectory.c_str());
 
-    arguments.push_back(L"-E");
     std::wstring entrypointW(entrypoint.begin(), entrypoint.end());
-    arguments.push_back(entrypointW.c_str());
+    if (!entrypoint.empty())
+    {
+        arguments.push_back(L"-E");
+        arguments.push_back(entrypointW.c_str());
+    }
 
     arguments.push_back(L"-T");
     std::wstring targetW(shaderType.begin(), shaderType.end());

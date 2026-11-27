@@ -7,6 +7,8 @@
 #include "Engine.RendererDX12/GDX12Descriptor.h"
 #include "Engine.RendererDX12/GDX12Texture.h"
 #include "Engine.RendererDX12/GDX12GeometryBuffer.h"
+#include "Engine.RendererDX12/GDX12RayTracingPipelineState.h"
+#include "Engine.RendererDX12/GDX12ShaderTable.h"
 
 #include <pix/pix3.h>
 #include <limits>
@@ -99,6 +101,14 @@ void GDX12CommandList::SetPipelineState(ComPtr<ID3D12PipelineState> pso)
 void GDX12CommandList::SetPipelineState1(ComPtr<ID3D12StateObject> stateObject)
 {
 	_commandList->SetPipelineState1(stateObject.Get());
+	_currentPSO.Reset();
+}
+
+void GDX12CommandList::SetRayTracingPipeline(const GDX12RayTracingPipelineState& pipeline)
+{
+	if (pipeline.GetDevice() != _device)
+	{ throw std::invalid_argument("ERROR: Ray tracing pipeline and command list must belong to the same GPU."); }
+	SetPipelineState1(pipeline.GetStateObject());
 }
 
 void GDX12CommandList::SetGraphicsRootSignature(GDX12RootSignature* rootSignature)
@@ -307,6 +317,16 @@ void GDX12CommandList::Dispatch(UINT threadGroupCountX, UINT threadGroupCountY, 
 void GDX12CommandList::DispatchRays(const D3D12_DISPATCH_RAYS_DESC* pDesc)
 {
 	_commandList->DispatchRays(pDesc);
+}
+
+void GDX12CommandList::DispatchRays(const GDX12ShaderTable& table, UINT width, UINT height, UINT depth)
+{
+	if (table.GetDevice() != _device || (_type != D3D12_COMMAND_LIST_TYPE_DIRECT && _type != D3D12_COMMAND_LIST_TYPE_COMPUTE)
+		|| FenceValue != (std::numeric_limits<UINT64>::max)())
+	{ throw std::invalid_argument("ERROR: Ray dispatch requires a recording DIRECT or COMPUTE list on the shader table's GPU."); }
+	const auto description = table.GetDispatchDescription(width, height, depth);
+	KeepResourceAlive(table.GetResource().D3DResource.Get());
+	DispatchRays(&description);
 }
 
 void GDX12CommandList::ExecuteIndirect(ID3D12CommandSignature* pCommandSignature, UINT MaxCommandCount, ID3D12Resource* pArgumentBuffer, UINT64 ArgumentBufferOffset, ID3D12Resource* pCountBuffer, UINT64 CountBufferOffset)

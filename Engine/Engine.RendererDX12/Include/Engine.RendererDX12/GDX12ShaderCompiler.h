@@ -23,6 +23,10 @@ public:
 	ComPtr<ID3DBlob> CompileShader(GDX12Device* device, const std::wstring& filename, const D3D_SHADER_MACRO* defines, 
 		const std::string& entrypoint, const std::string& shaderType);
 
+	// Compiles all exported RT entry points as one DXIL library.
+	ComPtr<ID3DBlob> CompileRayTracingLibrary(GDX12Device* device, const std::wstring& filename,
+		const D3D_SHADER_MACRO* defines = nullptr);
+
 private:
 	GDX12ShaderCompiler();
 

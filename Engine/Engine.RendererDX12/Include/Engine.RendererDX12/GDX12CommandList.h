@@ -8,6 +8,8 @@ class GDX12RootSignature;
 class GDX12DescriptorHeap;
 class GDX12Texture;
 class GDX12GeometryBuffer;
+class GDX12RayTracingPipelineState;
+class GDX12ShaderTable;
 
 class GDX12CommandList
 {
@@ -35,6 +37,8 @@ public:
 	// State Management
 	void SetPipelineState(ComPtr<ID3D12PipelineState> pso);
 	void SetPipelineState1(ComPtr<ID3D12StateObject> stateObject);
+	// Binds the DXR state object, its global layout is set through SetComputeRootSignature.
+	void SetRayTracingPipeline(const GDX12RayTracingPipelineState& pipeline);
 	void SetGraphicsRootSignature(GDX12RootSignature* rootSignature);
 	void SetComputeRootSignature(GDX12RootSignature* rootSignature);
 	void SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY topology);
@@ -107,6 +111,8 @@ public:
 		UINT startIndexLocation, INT baseVertexLocation, UINT startInstanceLocation);
 	void Dispatch(UINT threadGroupCountX, UINT threadGroupCountY, UINT threadGroupCountZ);
 	void DispatchRays(const D3D12_DISPATCH_RAYS_DESC* pDesc);
+	// Retains the immutable shader table until this command list's fence completes.
+	void DispatchRays(const GDX12ShaderTable& table, UINT width, UINT height = 1, UINT depth = 1);
 	void ExecuteIndirect(ID3D12CommandSignature* pCommandSignature, UINT MaxCommandCount,
 		ID3D12Resource* pArgumentBuffer, UINT64 ArgumentBufferOffset, ID3D12Resource* pCountBuffer,
 		UINT64 CountBufferOffset = 0);

@@ -1,5 +1,5 @@
-#ifndef RAY_TRACING_GEOMETRY_HLSLI
-#define RAY_TRACING_GEOMETRY_HLSLI
+#ifndef RAY_TRACING_HLSLI
+#define RAY_TRACING_HLSLI
 
 #include "CBufferStructures.hlsli"
 

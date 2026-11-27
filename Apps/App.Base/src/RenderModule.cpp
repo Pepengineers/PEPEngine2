@@ -21,7 +21,7 @@ namespace
         auto shadows = graph.AddPrimaryGPUPass<GDX12ShadowMapPass>("Shadow Maps");
         auto opaque = graph.AddPrimaryGPUPass<GDX12DeferredGeometryPass>("Opaque");
         auto ibl = graph.AddPrimaryGPUPass<GDX12IBLPrecomputePass>("IBL Precompute");
-        auto rtao = graph.AddPrimaryGPUPass<GDX12RTAOPass>("Ray Traced Ambient Occlusion");
+        auto cacao = graph.AddPrimaryGPUPass<GDX12FFXCACAOPass>("FidelityFX CACAO");
         auto lighting = graph.AddPrimaryGPUPass<GDX12DeferredLightingPass>("Deferred Lighting");
         auto skyBox = graph.AddPrimaryGPUPass<GDX12SkyBoxPass>("SkyBox");
         auto transparency = graph.AddPrimaryGPUPass<GDX12WBOITTransparencyPass>("Transparency");
@@ -55,10 +55,9 @@ namespace
         graph.ConnectNodes(opaque.GetOutput("OutF0Baked"), lighting.GetInput("InF0Baked"));
         graph.ConnectNodes(opaque.GetOutput("OutEmissive"), lighting.GetInput("InEmissive"));
         graph.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), lighting.GetInput("InDepthBuffer"));
-        graph.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), rtao.GetInput("InDepthBuffer"));
-        graph.ConnectNodes(opaque.GetOutput("OutNormalRoughness"), rtao.GetInput("InNormalRoughness"));
-        graph.ConnectNodes(opaque.GetOutput("OutVelocityBuffer"), rtao.GetInput("InVelocityBuffer"));
-        graph.ConnectNodes(rtao.GetOutput("OutAmbientOcclusion"), lighting.GetInput("InAmbientOcclusion"));
+        graph.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), cacao.GetInput("InDepthBuffer"));
+        graph.ConnectNodes(opaque.GetOutput("OutNormalRoughness"), cacao.GetInput("InNormalRoughness"));
+        graph.ConnectNodes(cacao.GetOutput("OutAmbientOcclusion"), lighting.GetInput("InAmbientOcclusion"));
         graph.ConnectNodes(shadows.GetOutput("OutDirectionalMaps"), lighting.GetInput("InDirectionalMaps"));
         graph.ConnectNodes(shadows.GetOutput("OutPointSpotMaps"), lighting.GetInput("InPointSpotMaps"));
         graph.ConnectNodes(shadows.GetOutput("OutDirectionalMaps"), transparency.GetInput("InDirectionalMaps"));

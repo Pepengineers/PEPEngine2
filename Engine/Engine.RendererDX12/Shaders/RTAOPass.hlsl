@@ -1,4 +1,4 @@
-#include "RayTracingGeometry.hlsli"
+#include "RayTracing.hlsli"
 #include "../../../External/External.Libraries/nrd/Shaders/NRD.hlsli"
 
 cbuffer Parameters : register(b0)

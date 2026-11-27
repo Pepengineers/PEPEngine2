@@ -19,8 +19,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12AccelerationStructure.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12RayTracingPipelineState.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12ShaderTable.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12RayTracingScene.h"><Filter>Header Files</Filter></ClInclude>
     <ClCompile Include="src\GDX12AccelerationStructure.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="src\GDX12RayTracingPipelineState.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="src\GDX12ShaderTable.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="src\GDX12RayTracingScene.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClInclude Include="Include\Engine.RendererDX12\FrameGraph\FrameGraph.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="src\FrameGraph\FrameGraphDiagnostics.h"><Filter>Header Files</Filter></ClInclude>
@@ -318,7 +322,7 @@
   <ItemGroup>
     <None Include="Shaders\BufferClear.hlsl" />
     <None Include="Shaders\CBufferStructures.hlsli" />
-    <None Include="Shaders\RayTracingGeometry.hlsli" />
+    <None Include="Shaders\RayTracing.hlsli" />
     <None Include="Shaders\CompositionPass.hlsl" />
     <None Include="Shaders\FrustumCullingPass.hlsl" />
     <None Include="Shaders\ShadowMapCullingPass.hlsl" />

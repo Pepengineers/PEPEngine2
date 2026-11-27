@@ -20,6 +20,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12AccelerationStructure.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12RayTracingPipelineState.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12ShaderTable.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12RayTracingScene.h" />
     <ClInclude Include="Include\Engine.RendererDX12\FrameGraph\FrameGraph.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12OcclusionCullingPass.h" />
@@ -93,6 +95,8 @@
     <ClCompile Include="src\GDX12GeometryBuffer.cpp" />
     <ClCompile Include="src\GDX12Resource.cpp" />
     <ClCompile Include="src\GDX12AccelerationStructure.cpp" />
+    <ClCompile Include="src\GDX12RayTracingPipelineState.cpp" />
+    <ClCompile Include="src\GDX12ShaderTable.cpp" />
     <ClCompile Include="src\GDX12RayTracingScene.cpp" />
     <ClCompile Include="src\GDX12SwapChain.cpp" />
     <ClCompile Include="src\GDX12StreamlineSDK.cpp" />
@@ -137,7 +141,7 @@
     <None Include="Shaders\BufferClear.hlsl" />
     <None Include="Shaders\ComputeCopy.hlsl" />
     <None Include="Shaders\CBufferStructures.hlsli" />
-    <None Include="Shaders\RayTracingGeometry.hlsli" />
+    <None Include="Shaders\RayTracing.hlsli" />
     <None Include="Shaders\CompositionPass.hlsl" />
     <None Include="Shaders\FrustumCullingPass.hlsl" />
     <None Include="Shaders\ShadowMapCullingPass.hlsl" />
