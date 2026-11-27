@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <ios>
+#include <future>
 #include <map>
 #include <optional>
 #include <string>
@@ -45,6 +46,8 @@ class BistroComparePanel
     };
     struct Winner : PlacementResult
     {
+        bool Confirmed() const;
+        bool Available() const;
         Values Settings;
         std::vector<std::string> Improvements;
         std::array<PlacementResult, 2> Placements;
@@ -57,8 +60,10 @@ class BistroComparePanel
         std::string Label, Mode, Profile, MapId, RouteId, FinalStatus, SelectedImage;
         std::string MapName, DisplayMode, Output, Timestamp;
         std::optional<double> SummaryFps, MinimumFps;
+        double Target() const { return Profile == "Performance" ? 60. : Profile == "Quality" ? 30. : 0.; }
+        const char* TargetStatus(double fps, const Winner* winner) const;
         bool AfterRender = false;
-        Values Settings, Before, TrialPasses, MaskBits;
+        Values Settings, Before, TrialPasses, MaskBits, Adapters;
         std::array<Winner, 2> Winners;
         std::string FinalMask, StopReason;
         std::vector<Pass> Passes;
@@ -83,6 +88,13 @@ class BistroComparePanel
         double MaxMs = 0, MaxFps = 0;
         double ScopeMeanMs = -1, ScopeP95Ms = -1;
     };
+    FrameTiming SummaryTiming(const Winner* winner, const Selection& selection) const;
+    std::string ReportBody(const Run& run, const Winner* placement, const Selection& selection,
+        std::vector<std::filesystem::path>& measuredPasses);
+    void DrawExportStatus(const Run& run, const Winner* placement, const Selection& selection, bool requested);
+    std::future<std::filesystem::path> _exportJob;
+    std::filesystem::path _exportRun, _exportPath;
+    std::string _exportError;
     void Refresh(bool force);
     bool _upscaled = false;
     ImFont* _headingFont = nullptr;

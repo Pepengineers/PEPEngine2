@@ -145,9 +145,14 @@
     <ClCompile Include="src\Techniques\UI\BistroInfoPanel.cpp" />
     <ClCompile Include="src\Techniques\UI\BistroLoadingScreen.cpp" />
     <ClCompile Include="src\Techniques\UI\BistroComparePanel.cpp" />
+    <ClCompile Include="src\Techniques\UI\BistroHtmlReport.cpp" />
+    <ClCompile Include="src\Techniques\UI\BistroReportArchive.cpp" />
     <ClInclude Include="src\Techniques\UI\BistroInfoPanel.h" />
     <ClInclude Include="src\Techniques\UI\BistroLoadingScreen.h" />
     <ClInclude Include="src\Techniques\UI\BistroComparePanel.h" />
+    <ClInclude Include="src\Techniques\UI\BistroReportValues.h" />
+    <ClInclude Include="src\Techniques\UI\BistroReportArchive.h" />
+    <ClInclude Include="src\Techniques\UI\BistroReportCsvReader.h" />
     <ClInclude Include="src\Techniques\UI\BistroPlot.h" />
     <ClCompile Include="src\Techniques\UI\SceneTextureInspector.cpp" />
     <ClInclude Include="src\Techniques\UI\SceneTextureInspector.h" />
