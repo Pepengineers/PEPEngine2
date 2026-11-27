@@ -6,7 +6,7 @@ GDX12TemporalAntiAliasingPass::GDX12TemporalAntiAliasingPass()
 void GDX12TemporalAntiAliasingPass::Describe(PassDescription& description) const
 {
     auto& color = description.AddInputTexture("InColorTexture");
-    color.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
+    color.Formats = {DXGI_FORMAT_R16G16B16A16_FLOAT};
     color.Usages = ResourceUsage::PixelShaderRead;
 
     auto& depth = description.AddInputTexture("InDepthBuffer");
@@ -23,7 +23,7 @@ void GDX12TemporalAntiAliasingPass::Describe(PassDescription& description) const
     mask.IsOptionalInput = true;
 
     auto& output = description.AddOutputTexture("OutColorTexture");
-    output.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
+    output.Formats = {DXGI_FORMAT_R16G16B16A16_FLOAT};
     output.Size = Extent::SameAs("InColorTexture");
     output.Usages = ResourceUsage::RenderTarget;
     output.AllowShared = true;

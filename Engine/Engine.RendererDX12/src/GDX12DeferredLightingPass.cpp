@@ -61,7 +61,7 @@ void GDX12DeferredLightingPass::Describe(PassDescription& s) const
 
     s.RequireSameTextureSize({"InAlbedoMetallic", "InNormalRoughness", "InF0Baked", "InEmissive", "InDepthBuffer", "InAmbientOcclusion"});
     auto& output = s.AddOutputTexture("OutColorTexture");
-    output.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
+    output.Formats = {DXGI_FORMAT_R16G16B16A16_FLOAT};
     output.Size = Extent::SameAs("InAlbedoMetallic");
     output.Usages = ResourceUsage::UnorderedAccess;
     output.AllowShared = true;

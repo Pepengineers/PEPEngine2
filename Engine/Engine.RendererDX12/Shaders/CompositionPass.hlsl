@@ -1,4 +1,3 @@
-#include "PBRMath.hlsli"
 #include "FullScreenVS.hlsl"
 
 SamplerState samPointClamp : register(s1);
@@ -22,8 +21,7 @@ PS_OUTPUT PS(VSOutput input)
     float revealage = saturate(RevealageTexture.Sample(samPointClamp, uv));
     
     float3 transparentColor = accumColor.rgb / max(accumColor.a, 1e-5f);
-    // Deferred lighting has already tone-mapped the opaque background.
-    float3 finalColor = lerp(ToneMapToSRGB(transparentColor), opaqueColor, revealage);
+    float3 finalColor = lerp(transparentColor, opaqueColor, revealage);
     
     PS_OUTPUT output;
     output.Color = float4(finalColor, 1.0f);

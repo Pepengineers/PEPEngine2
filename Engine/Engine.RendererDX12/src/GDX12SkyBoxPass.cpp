@@ -12,7 +12,7 @@ void GDX12SkyBoxPass::Describe(PassDescription& description) const
     depth.Usages = ResourceUsage::PixelShaderRead;
 
     auto& color = description.AddInputTexture("InColorTexture");
-    color.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
+    color.Formats = {DXGI_FORMAT_R16G16B16A16_FLOAT};
     color.Access = DataAccess::ReadWrite;
     color.Usages = ResourceUsage::RenderTarget;
 

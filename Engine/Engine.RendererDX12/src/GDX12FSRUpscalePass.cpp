@@ -20,7 +20,7 @@ void GDX12FSRUpscalePass::Describe(PassDescription& s) const
 	s.AddParameter("Sharpness", 1.f);
 	const auto read = ResourceUsage::PixelShaderRead | ResourceUsage::NonPixelShaderRead;
 	auto& source = s.AddInputTexture(InColorTexture);
-	source.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
+	source.Formats = {DXGI_FORMAT_R16G16B16A16_FLOAT};
 	source.Usages = read;
 	auto& depth = s.AddInputTexture(InDepthBuffer);
 	depth.Formats = {DXGI_FORMAT_D32_FLOAT};
@@ -33,7 +33,7 @@ void GDX12FSRUpscalePass::Describe(PassDescription& s) const
 	mask.Usages = read;
 	mask.IsOptionalInput = true;
 	auto& color = s.AddOutputTexture(OutColorTexture);
-	color.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
+	color.Formats = {DXGI_FORMAT_R16G16B16A16_FLOAT};
 	color.Size = Extent::Display();
 	color.Usages = ResourceUsage::UnorderedAccess;
 	s.RequireSameTextureSize({InColorTexture, InDepthBuffer, InVelocityBuffer, InTransparencyMask});
@@ -57,7 +57,7 @@ void GDX12FSRUpscalePass::ResolveResourceRequirements(PassResourceRequirementsCo
 	upscale.header.pNext = &backend.header;
 	upscale.maxRenderSize = {displaySize.x, displaySize.y};
 	upscale.maxUpscaleSize = {displaySize.x, displaySize.y};
-	upscale.flags = FFX_UPSCALE_ENABLE_DEBUG_CHECKING | FFX_UPSCALE_ENABLE_DEPTH_INVERTED |
+	upscale.flags = FFX_UPSCALE_ENABLE_DEBUG_CHECKING | FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE | FFX_UPSCALE_ENABLE_DEPTH_INVERTED |
 		FFX_UPSCALE_ENABLE_AUTO_EXPOSURE;
 	Check(ffxCreateContext(&_context, &upscale.header, nullptr), "create context");
 	ffxQueryDescUpscaleGetRenderResolutionFromQualityMode query = {};

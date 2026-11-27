@@ -16,21 +16,31 @@ Texture2D<float4> History : register(t4);
 SamplerState samPointClamp : register(s1);
 SamplerState samLinearClamp : register(s3);
 
-float3 DecodeSRGB(float3 color)
+// Reversible luminance weighting keeps bright subpixel highlights from dominating
+// interpolation and history. Both stored output and history remain linear HDR.
+float3 ToAccumulationColor(float3 color)
 {
-    float3 low = color / 12.92f;
-    float3 high = pow((color + 0.055f) / 1.055f, 2.4f);
-    return float3(color.r <= 0.04045f ? low.r : high.r,
-        color.g <= 0.04045f ? low.g : high.g, color.b <= 0.04045f ? low.b : high.b);
+    return color / (1 + dot(color, float3(0.25f, 0.5f, 0.25f)));
 }
 
-float3 EncodeSRGB(float3 color)
+float3 FromAccumulationColor(float3 color)
 {
-    color = saturate(color);
-    float3 low = color * 12.92f;
-    float3 high = 1.055f * pow(color, 1.0f / 2.4f) - 0.055f;
-    return float3(color.r <= 0.0031308f ? low.r : high.r,
-        color.g <= 0.0031308f ? low.g : high.g, color.b <= 0.0031308f ? low.b : high.b);
+    return min(color / max(1 - dot(color, float3(0.25f, 0.5f, 0.25f)), 1e-6f), 65504.0f);
+}
+
+// Weight texels before interpolation; weighting an already filtered HDR sample
+// cannot undo the spread of a very bright neighbor into an otherwise dark pixel.
+float3 SampleAccumulationColor(Texture2D<float4> texture, float2 uv, float2 size)
+{
+    float2 position = uv * size - 0.5f;
+    int2 first = int2(floor(position));
+    float2 fraction = frac(position);
+    int2 limit = int2(size) - 1;
+    float3 a = ToAccumulationColor(texture.Load(int3(clamp(first, int2(0, 0), limit), 0)).rgb);
+    float3 b = ToAccumulationColor(texture.Load(int3(clamp(first + int2(1, 0), int2(0, 0), limit), 0)).rgb);
+    float3 c = ToAccumulationColor(texture.Load(int3(clamp(first + int2(0, 1), int2(0, 0), limit), 0)).rgb);
+    float3 d = ToAccumulationColor(texture.Load(int3(clamp(first + int2(1, 1), int2(0, 0), limit), 0)).rgb);
+    return lerp(lerp(a, b, fraction.x), lerp(c, d, fraction.x), fraction.y);
 }
 
 float3 ToYCoCg(float3 rgb)
@@ -57,7 +67,7 @@ PS_OUTPUT PS(VSOutput input)
     float2 uv = input.Position.xy * texel;
     // The projection offsets rasterized geometry by -Jitter pixels. History is unjittered.
     float2 currentUV = uv - Jitter * texel;
-    float3 current = DecodeSRGB(Color.SampleLevel(samLinearClamp, currentUV, 0).rgb);
+    float3 current = SampleAccumulationColor(Color, currentUV, size);
     int2 centerPixel = clamp(int2(currentUV * size), int2(0, 0), int2(width, height) - 1);
     int2 pixel = centerPixel;
     float depth = Depth.Load(int3(pixel, 0));
@@ -108,12 +118,12 @@ PS_OUTPUT PS(VSOutput input)
             {
                 [unroll] for (int x = -1; x <= 1; ++x)
                 {
-                    float3 neighbor = ToYCoCg(DecodeSRGB(Color.SampleLevel(samLinearClamp, currentUV + float2(x, y) * texel, 0).rgb));
+                    float3 neighbor = ToYCoCg(SampleAccumulationColor(Color, currentUV + float2(x, y) * texel, size));
                     minimum = min(minimum, neighbor);
                     maximum = max(maximum, neighbor);
                 }
             }
-            float3 history = History.SampleLevel(samLinearClamp, previousUV, 0).rgb;
+            float3 history = SampleAccumulationColor(History, previousUV, size);
             history = FromYCoCg(clamp(ToYCoCg(history), minimum, maximum));
             float coverage = saturate(TransparencyMask.SampleLevel(samLinearClamp, currentUV, 0));
             float motionPixels = length(velocity * size * float2(0.5f, -0.5f));
@@ -122,8 +132,9 @@ PS_OUTPUT PS(VSOutput input)
         }
     }
 
+    resolved = FromAccumulationColor(resolved);
     PS_OUTPUT output;
-    output.Color = float4(EncodeSRGB(resolved), 1);
+    output.Color = float4(resolved, 1);
     output.History = float4(resolved, normalizedDepth);
     return output;
 }

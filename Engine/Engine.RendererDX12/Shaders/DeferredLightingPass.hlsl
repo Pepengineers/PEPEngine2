@@ -24,7 +24,7 @@ Texture2DArray<float> DirectionalShadowMaps : register(t10);
 Texture2DArray<float> PointSpotShadowMaps : register(t11);
 StructuredBuffer<ShadowView> ShadowViews : register(t12);
 Texture2D<float> AmbientOcclusion : register(t13);
-RWTexture2D<unorm float4> SceneColor : register(u0);
+RWTexture2D<float4> SceneColor : register(u0);
 SamplerState samLinearClamp : register(s3);
 SamplerComparisonState samShadow : register(s6);
 
@@ -122,7 +122,7 @@ void CS(uint3 thread : SV_DispatchThreadID)
     float depth = Depth[pixel];
     if (depth <= 0) { SceneColor[pixel] = float4(0, 0, 0, 1); return; }
     float4 albedo = AlbedoMetallic[pixel], f0 = F0Baked[pixel];
-    if (f0.a > 0.5f) { SceneColor[pixel] = float4(ToneMapToSRGB(albedo.rgb), 1); return; }
+    if (f0.a > 0.5f) { SceneColor[pixel] = float4(albedo.rgb, 1); return; }
 
     float2 ndc = (float2(pixel) + 0.5f) / size * float2(2, -2) + float2(-1, 1);
     float4 world = mul(float4(ndc, depth, 1), Camera.InvViewProj);
@@ -136,5 +136,5 @@ void CS(uint3 thread : SV_DispatchThreadID)
     s.Roughness = normal.w;
     float viewDepth = max(-mul(float4(position, 1), Camera.View).z, Camera.NearPlane);
     float3 result = ShadeSurface(s, Emissive[pixel].rgb, position, pixel, Camera.CameraLocation, viewDepth);
-    SceneColor[pixel] = float4(ToneMapToSRGB(result), 1);
+    SceneColor[pixel] = float4(result, 1);
 }

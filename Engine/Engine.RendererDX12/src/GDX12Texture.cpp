@@ -171,7 +171,11 @@ void GDX12Texture::ValidateDescription()
             throw std::invalid_argument("ERROR: Given texture view format is unknown or typeless. Use a concrete typed view format instead of "
                 "DXGI_FORMAT_UNKNOWN or a typeless format.");
         }
-        if (format != _desc.ResourceFormat &&
+        // Fully typed UNORM backbuffers support a matching sRGB render-target
+        // view. Keep the native allocation format for copies and graph metadata.
+        const bool srgbRenderTarget = _desc.ExternalResource && required == D3D12_FORMAT_SUPPORT1_RENDER_TARGET &&
+            DirectX::IsSRGB(format) && DirectX::MakeLinear(format) == _desc.ResourceFormat;
+        if (format != _desc.ResourceFormat && !srgbRenderTarget &&
             (!DirectX::IsTypeless(_desc.ResourceFormat) || DirectX::MakeTypeless(format) != _desc.ResourceFormat))
         {
             throw std::invalid_argument("ERROR: Given texture view format is incompatible with its native resource format. Use a view format from the "

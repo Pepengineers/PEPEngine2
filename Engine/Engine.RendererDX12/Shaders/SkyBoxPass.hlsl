@@ -1,5 +1,4 @@
 #include "CBufferStructures.hlsli"
-#include "PBRMath.hlsli"
 #include "FullScreenVS.hlsl"
 
 ConstantBuffer<CameraCB> Camera : register(b0);
@@ -29,7 +28,7 @@ PS_OUTPUT PS(VSOutput input)
         ? previous.xy / previous.w - current.xy / current.w : 0;
 
     PS_OUTPUT output;
-    output.Color = float4(ToneMapToSRGB(SkyBoxMap.SampleLevel(samLinearClamp, SafeNormalize(ray.xyz), 0).rgb), 1);
+    output.Color = float4(SkyBoxMap.SampleLevel(samLinearClamp, SafeNormalize(ray.xyz), 0).rgb, 1);
     output.Velocity = all(isfinite(velocity)) ? velocity : 0;
     return output;
 }

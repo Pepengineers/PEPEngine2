@@ -70,7 +70,9 @@ void GDX12SwapChain::CreateBuffers()
         textureDesc.CreateRTV = true;
         textureDesc.RTVHeapIndex = _rtvHeap->GetAvailableIndex();
         textureDesc.RTVDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
-        textureDesc.RTVDesc.Format = _format;
+        // Keep the swapchain allocation UNORM; this view encodes linear shader
+        // output to sRGB once, when OutputToScreen writes the final frame.
+        textureDesc.RTVDesc.Format = DirectX::MakeSRGB(_format);
         textureDesc.RTVDesc.Texture2D.PlaneSlice = 0;
         textureDesc.RTVDesc.Texture2D.MipSlice = 0;
 

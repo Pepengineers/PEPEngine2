@@ -29,10 +29,10 @@ void GDX12NISUpscalePass::Describe(PassDescription& s) const
 	// Streamline is initialized against the primary device by RenderModule.
 	s.PrimaryOnly = true;
 	auto& source = s.AddInputTexture(InColorTexture);
-	source.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
+	source.Formats = {DXGI_FORMAT_R16G16B16A16_FLOAT};
 	source.Usages = ResourceUsage::NonPixelShaderRead;
 	auto& color = s.AddOutputTexture(OutColorTexture);
-	color.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
+	color.Formats = {DXGI_FORMAT_R16G16B16A16_FLOAT};
 	color.Size = Extent::Display();
 	color.Usages = ResourceUsage::UnorderedAccess;
 }
@@ -112,7 +112,7 @@ void GDX12NISUpscalePass::SetOptions(float sharpness)
 {
 	sl::NISOptions options = {};
 	options.mode = sl::NISMode::eScaler;
-	options.hdrMode = sl::NISHDR::eNone;
+	options.hdrMode = sl::NISHDR::eLinear;
 	options.sharpness = sharpness;
 	Check(GDX12StreamlineSDK::Get().NISSetOptions(_viewportHandle, options), "set options");
 	_appliedSharpness = sharpness;

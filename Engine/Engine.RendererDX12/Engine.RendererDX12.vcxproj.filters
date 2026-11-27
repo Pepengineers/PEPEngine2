@@ -323,6 +323,7 @@
     <None Include="Shaders\XeGTAOPass.hlsl" />
     <None Include="Shaders\SkyBoxPass.hlsl" />
     <None Include="Shaders\TemporalAntiAliasingPass.hlsl" />
+    <None Include="Shaders\OutputToScreenPass.hlsl" />
     <None Include="Shaders\IBLPrecomputePass.hlsl" />
     <None Include="Shaders\PBRMath.hlsli" />
     <None Include="Shaders\ShadowSampling.hlsli" />

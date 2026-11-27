@@ -16,7 +16,7 @@ void GDX12DLSSUpscalePass::Describe(PassDescription& s) const
 	// Streamline is initialized against the primary device by RenderModule.
 	s.PrimaryOnly = true;
 	auto& source = s.AddInputTexture(InColorTexture);
-	source.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
+	source.Formats = {DXGI_FORMAT_R16G16B16A16_FLOAT};
 	source.Usages = ResourceUsage::NonPixelShaderRead;
 	auto& depth = s.AddInputTexture(InDepthBuffer);
 	depth.Formats = {DXGI_FORMAT_D32_FLOAT};
@@ -29,7 +29,7 @@ void GDX12DLSSUpscalePass::Describe(PassDescription& s) const
 	mask.Usages = ResourceUsage::NonPixelShaderRead;
 	mask.IsOptionalInput = true;
 	auto& color = s.AddOutputTexture(OutColorTexture);
-	color.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
+	color.Formats = {DXGI_FORMAT_R16G16B16A16_FLOAT};
 	color.Size = Extent::Display();
 	color.Usages = ResourceUsage::UnorderedAccess;
 	s.RequireSameTextureSize({InColorTexture, InDepthBuffer, InVelocityBuffer, InTransparencyMask});
@@ -142,7 +142,7 @@ void GDX12DLSSUpscalePass::CreateFeature(UInt2 displaySize)
 	options.outputWidth = displaySize.x;
 	options.outputHeight = displaySize.y;
 	options.sharpness = 0.25f;
-	options.colorBuffersHDR = sl::Boolean::eFalse;
+	options.colorBuffersHDR = sl::Boolean::eTrue;
 	Check(GDX12StreamlineSDK::Get().DLSSSetOptions(_viewportHandle, options), "set options");
 	_configured = true;
 }

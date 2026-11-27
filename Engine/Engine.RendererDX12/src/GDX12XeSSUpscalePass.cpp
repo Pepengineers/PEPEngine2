@@ -15,7 +15,7 @@ void GDX12XeSSUpscalePass::Describe(PassDescription& s) const
 {
 	s.AddParameter("Quality", _defaultQuality);
 	auto& source = s.AddInputTexture(InColorTexture);
-	source.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
+	source.Formats = {DXGI_FORMAT_R16G16B16A16_FLOAT};
 	source.Usages = ResourceUsage::NonPixelShaderRead;
 	auto& depth = s.AddInputTexture(InDepthBuffer);
 	depth.Formats = {DXGI_FORMAT_D32_FLOAT};
@@ -28,7 +28,7 @@ void GDX12XeSSUpscalePass::Describe(PassDescription& s) const
 	mask.Usages = ResourceUsage::NonPixelShaderRead;
 	mask.IsOptionalInput = true;
 	auto& color = s.AddOutputTexture(OutColorTexture);
-	color.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
+	color.Formats = {DXGI_FORMAT_R16G16B16A16_FLOAT};
 	color.Size = Extent::Display();
 	color.Usages = ResourceUsage::UnorderedAccess;
 	s.RequireSameTextureSize({InColorTexture, InDepthBuffer, InVelocityBuffer, InTransparencyMask});
@@ -44,7 +44,7 @@ void GDX12XeSSUpscalePass::ResolveResourceRequirements(PassResourceRequirementsC
 	xess_d3d12_init_params_t params = {};
 	params.outputResolution = {displaySize.x, displaySize.y};
 	params.qualitySetting = quality;
-	params.initFlags = XESS_INIT_FLAG_INVERTED_DEPTH | XESS_INIT_FLAG_LDR_INPUT_COLOR |
+	params.initFlags = XESS_INIT_FLAG_INVERTED_DEPTH |
 		XESS_INIT_FLAG_USE_NDC_VELOCITY;
 	if (context.IsInputConnected(InTransparencyMask)) { params.initFlags |= XESS_INIT_FLAG_RESPONSIVE_PIXEL_MASK; }
 	Check(xessD3D12Init(_context, &params), "initialize context");

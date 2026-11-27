@@ -3,7 +3,7 @@
 void GDX12WBOITCompositionPass::Describe(PassDescription& s) const
 {
 	auto& opaque = s.AddInputTexture(InOpaqueTexture);
-	opaque.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
+	opaque.Formats = {DXGI_FORMAT_R16G16B16A16_FLOAT};
 	opaque.Usages = ResourceUsage::PixelShaderRead;
 	opaque.AllowShared = true;
 	auto& accum = s.AddInputTexture(InAccumulationTexture);
@@ -15,7 +15,7 @@ void GDX12WBOITCompositionPass::Describe(PassDescription& s) const
 	revealage.Usages = ResourceUsage::PixelShaderRead;
 	revealage.AllowShared = true;
 	auto& color = s.AddOutputTexture(OutColorTexture);
-	color.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
+	color.Formats = {DXGI_FORMAT_R16G16B16A16_FLOAT};
 	color.Size = Extent::SameAs(InOpaqueTexture);
 	color.Usages = ResourceUsage::RenderTarget;
 	color.AllowShared = true;

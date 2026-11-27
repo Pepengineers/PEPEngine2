@@ -43,16 +43,4 @@ float SplitSumVisibility(float nDotV, float nDotL, float nDotH, float vDotH, flo
     return 4.0f * nDotL * SmithGGXVisibility(nDotV, nDotL, roughness) * vDotH / max(nDotH, 1e-5f);
 }
 
-float ToneMapToSRGB(float value)
-{
-    value = max(value, 0.0f);
-    float mapped = value / (1.0f + value);
-    return mapped <= 0.0031308f ? 12.92f * mapped : 1.055f * pow(mapped, 1.0f / 2.4f) - 0.055f;
-}
-
-float3 ToneMapToSRGB(float3 color)
-{
-    return float3(ToneMapToSRGB(color.r), ToneMapToSRGB(color.g), ToneMapToSRGB(color.b));
-}
-
 #endif
