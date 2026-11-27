@@ -19,6 +19,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12AccelerationStructure.h" />
     <ClInclude Include="Include\Engine.RendererDX12\FrameGraph\FrameGraph.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12OcclusionCullingPass.h" />
     <ClInclude Include="src\FrameGraph\FrameGraphDiagnostics.h" />
@@ -89,6 +90,7 @@
     <ClCompile Include="src\GDX12GPUTimer.cpp" />
     <ClCompile Include="src\GDX12GeometryBuffer.cpp" />
     <ClCompile Include="src\GDX12Resource.cpp" />
+    <ClCompile Include="src\GDX12AccelerationStructure.cpp" />
     <ClCompile Include="src\GDX12SwapChain.cpp" />
     <ClCompile Include="src\GDX12StreamlineSDK.cpp" />
     <ClCompile Include="src\GDX12CommandList.cpp" />

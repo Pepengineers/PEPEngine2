@@ -13,6 +13,7 @@
 
 GDX12CommandList::GDX12CommandList(GDX12Device* device, D3D12_COMMAND_LIST_TYPE type) :
 	FenceValue((std::numeric_limits<UINT64>::max)()),
+	_device(device),
 	_type(type),
 	_currentTopology(D3D_PRIMITIVE_TOPOLOGY_UNDEFINED),
 	_currentScissorRect({}),
@@ -62,8 +63,19 @@ void GDX12CommandList::Reset()
 			nullptr, IID_PPV_ARGS(&_commandList)));
 	}
 	else { ThrowIfFailed(_commandList->Reset(_commandAllocator.Get(), nullptr)); }
+	ReleaseRetainedResources();
 	FenceValue = (std::numeric_limits<UINT64>::max)();
 	InvalidateCachedState();
+}
+
+void GDX12CommandList::KeepResourceAlive(ID3D12Resource* resource)
+{
+	if (resource) { _retainedResources.emplace_back(resource); }
+}
+
+void GDX12CommandList::ReleaseRetainedResources()
+{
+	_retainedResources.clear();
 }
 
 void GDX12CommandList::InvalidateCachedState()

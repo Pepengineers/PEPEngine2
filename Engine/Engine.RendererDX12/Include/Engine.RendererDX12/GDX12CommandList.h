@@ -18,6 +18,10 @@ public:
 	const ComPtr<ID3D12GraphicsCommandList10>& GetCommandList();
 	const ComPtr<ID3D12CommandAllocator>& GetCommandAllocator();
 	D3D12_COMMAND_LIST_TYPE GetType() const;
+	GDX12Device* GetDevice() const { return _device; }
+	// Keep resource alive until the queue retires this list's completion fence.
+	// This just holds the pointer until list completion so that ComPtr won't destroy it ahead of time.
+	void KeepResourceAlive(ID3D12Resource* resource);
 	// Called after the queue's completion fence. COPY reuses the allocator with a fresh native list:
 	// resetting the native COPY list caused NVIDIA import failures in mixed buffer/texture transfers.
 	void Reset();
@@ -120,6 +124,11 @@ public:
 
 
 private:
+	friend class GDX12CommandQueue;
+	// Called by the queue only after GPU completion, so idle pooled lists do not pin temporary buffers.
+	void ReleaseRetainedResources();
+	GDX12Device* _device;
+	std::vector<ComPtr<ID3D12Resource>> _retainedResources;
 	ComPtr<ID3D12GraphicsCommandList10> _commandList;
 	ComPtr<ID3D12CommandAllocator> _commandAllocator;
 	D3D12_COMMAND_LIST_TYPE _type;

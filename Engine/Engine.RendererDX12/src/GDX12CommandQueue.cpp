@@ -282,6 +282,7 @@ void GDX12CommandQueue::ClearCompletedLists()
     {
         if ((*it)->FenceValue != (std::numeric_limits<UINT64>::max)() && completed >= (*it)->FenceValue)
         {
+            (*it)->ReleaseRetainedResources();
             _availableCommandLists.push_back(std::move(*it));
             it = _workingCommandLists.erase(it);
         }
