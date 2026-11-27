@@ -529,6 +529,7 @@ void BistroComparePanel::Refresh(bool force)
         Run run;
         run.Path = file;
         run.Modified = modified;
+        Values adapterLabels;
         CsvReader csv(file);
         std::streamoff inlineOffset = csv.Position();
         bool inlineFrames = false;
@@ -567,6 +568,14 @@ void BistroComparePanel::Refresh(bool force)
                     run.Profile = value;
                 else if (key == "MapId") run.MapId = value;
                 else if (key == "RequestedOutput") run.Output = value;
+                else if (key == "PrimaryAdapter") adapterLabels["-1"] = value;
+                else if (key == "EligiblePeer")
+                {
+                    // The report labels each GPU as "[DXGI hardware index] model".
+                    const auto end = value.find(']');
+                    if (!value.empty() && value.front() == '[' && end != value.npos)
+                        adapterLabels[value.substr(1, end - 1)] = value;
+                }
                 else if (key == "MinimumFps") run.MinimumFps = Number(value);
                 else if (key == "RouteId") run.RouteId = value;
                 else if (key == "FinalStatus") run.FinalStatus = value;
@@ -602,8 +611,12 @@ void BistroComparePanel::Refresh(bool force)
                         const auto split = value.find('=');
                         if (split != value.npos) placement.Techniques[value.substr(0, split)] = value.substr(split + 1);
                     }
-                    else if (const auto dot = key.rfind('.'); dot != key.npos &&
-                        (key.compare(dot, key.npos, ".EffectiveOwner") == 0 || key.compare(dot, key.npos, ".Effective") == 0))
+                    else if (const auto dot = key.rfind('.'); dot != key.npos && key.compare(dot, key.npos, ".EffectiveOwner") == 0)
+                    {
+                        const auto& label = Value(adapterLabels, value);
+                        placement.GpuSettings[ReportSettingName(key.substr(0, dot))] = label.empty() ? value : label;
+                    }
+                    else if (dot != key.npos && key.compare(dot, key.npos, ".Effective") == 0)
                         placement.GpuSettings[ReportSettingName(key.substr(0, dot))] = value;
                     else if (!splitPlacement && key.rfind("Preset.", 0) == 0) winner.Settings[ReportSettingName(key.substr(7))] = value;
                     else if (key.find('.') == key.npos) placement.Fields[key] = value;
@@ -1205,19 +1218,32 @@ void BistroComparePanel::DrawPlacementComparison(const Winner& winner)
 {
     const auto& single = winner.Placements[0];
     const auto& multi = winner.Placements[1];
-    if (!Number(Value(multi.Fields, "FPS"))) return;
+    const auto& explanation = Value(winner.Fields, "Comparison");
+    if (multi.Fields.empty() && explanation.empty()) return;
     constexpr const char* left = "Single GPU reference";
     constexpr const char* right = "Multi-GPU candidate";
     ImGui::SeparatorText("Single GPU vs Multi-GPU");
+    if (const auto& gpu = Value(winner.Fields, "Winner"); !gpu.empty())
+        ImGui::Text("Winning placement   %s", gpu.c_str());
     const auto gain = Number(Value(winner.Fields, "SameImageFpsGainPct"));
     if (gain) ImGui::Text("Same-image FPS change    %+.1f%%", *gain);
-    if (const auto& explanation = Value(winner.Fields, "Comparison"); !explanation.empty())
+    if (!explanation.empty())
         ImGui::TextWrapped("%s", explanation.c_str());
+    if (!Number(Value(multi.Fields, "FPS")))
+    {
+        if (explanation.empty()) ImGui::TextDisabled("No confirmed multi-GPU candidate.");
+        return;
+    }
     if (!winner.Improvements.empty())
     {
-        ImGui::TextDisabled("Improved settings");
+        ImGui::TextUnformatted("Quality gains in the multi-GPU candidate");
         for (const auto& setting : winner.Improvements) ImGui::BulletText("%s", setting.c_str());
     }
+    else if (Number(Value(single.Fields, "FPS")))
+        ImGui::TextDisabled("No technique quality gains recorded.");
+
+    DrawTechniques(single, multi, "GPU placement and technique changes", left, right);
+    if (!ImGui::TreeNode("Placement metrics and configuration")) return;
     const auto timing = [](const PlacementResult& measured) {
         return FrameTiming{Number(Value(measured.Fields, "FPS")).value_or(-1.),
             Number(Value(measured.Fields, "P95ms")).value_or(-1.)};
@@ -1233,16 +1259,16 @@ void BistroComparePanel::DrawPlacementComparison(const Winner& winner)
         ImGui::EndTable();
     }
 
-    DrawTechniques(single, multi, "Placement and techniques", left, right);
+    ImGui::TreePop();
 }
 
 void BistroComparePanel::DrawTechniques(const PlacementResult& single, const PlacementResult& multi,
     const char* title, const char* left, const char* right)
 {
-    const bool bothMeasured = Number(Value(single.Fields, "FPS")).has_value() && Number(Value(multi.Fields, "FPS")).has_value();
-    const bool bothHaveTechniques = bothMeasured && !single.Techniques.empty() && !multi.Techniques.empty();
+    const bool bothHaveTechniques = !single.Techniques.empty() && !multi.Techniques.empty();
+    const bool bothHaveOwners = !single.GpuSettings.empty() && !multi.GpuSettings.empty();
     ImGui::PushID(title);
-    const bool all = ShowAllSettings(title, bothMeasured);
+    const bool all = ShowAllSettings(title, bothHaveTechniques || bothHaveOwners);
     if (BeginComparisonTable("Placement details", left, "Technique or setting", right))
     {
         unsigned rows = 0;
@@ -1261,7 +1287,8 @@ void BistroComparePanel::DrawTechniques(const PlacementResult& single, const Pla
                 };
                 const auto old = value(before), selected = value(after);
                 Change change = SettingChange(setting, before, after, old, selected);
-                if (!technique && change != Change::None && setting.substr(setting.rfind('.') + 1) == "Adapter")
+                if (!technique && change != Change::None &&
+                    (setting.substr(setting.rfind('.') + 1) == "Adapter" || (before.front() == '[' && after.front() == '[')))
                     change = Change::Moved; // These rows contain the reported effective owners.
                 if (technique && bothHaveTechniques && (before.empty() || after.empty()))
                     change = before.empty() ? Change::Enabled : Change::Disabled;
@@ -1403,6 +1430,8 @@ void BistroComparePanel::DrawRun(int index, fs::path& pendingPreset)
         ImGui::Text("Target   %.0f FPS   /   %s", target, met ? "Met" : withinTolerance ? "Within tolerance" : "Below target");
     }
 
+    DrawPlacementComparison(placement ? *placement : run.Winners[0]);
+
     if (hasTrace)
     {
         if (ImGui::CollapsingHeader("Frame timing", ImGuiTreeNodeFlags_DefaultOpen))
@@ -1425,12 +1454,9 @@ void BistroComparePanel::DrawRun(int index, fs::path& pendingPreset)
         ImGui::Spacing();
         ImGui::SeparatorText(winner == &run.Winners[0] ? "Selected preset / Native" : "Selected preset / Upscaled");
         DrawImageSummary(winner->Settings);
-        if (const auto& gpu = Value(winner->Fields, "Winner"); !gpu.empty())
-            ImGui::Text("Winning placement   %s", gpu.c_str());
     }
     if (placement)
     {
-        DrawPlacementComparison(*placement);
         if (placement == &run.Winners[1] && confirmed(run.Winners[0]) && confirmed(*placement))
             DrawTechniques(run.Winners[0], *placement, "Techniques compared with Native", "Native", "Upscaled");
         else if (!placement->Techniques.empty() && placement->Placements[1].Techniques.empty())
@@ -1697,6 +1723,10 @@ void BistroComparePanel::DrawComparison()
     _fps = BistroPlot::Choice("", "Frame time (ms)", "FPS", _fps);
     DrawPlot(_selected.data(), _selected.size(), _fps);
     const auto reference = "A / " + _selected[0].Mode, comparison = "B / " + _selected[1].Mode;
+    const auto& a = _selected[0].Observed;
+    const auto& b = _selected[1].Observed;
+    if (!a.Techniques.empty() || !b.Techniques.empty() || !a.GpuSettings.empty() || !b.GpuSettings.empty())
+        DrawTechniques(a, b, "Measured GPU placement and techniques", reference.c_str(), comparison.c_str());
     DrawSettings(_selected[1].Settings, _selected[0].Settings, "Recorded pass settings",
         comparison.c_str(), reference.c_str(), true);
 }

@@ -249,11 +249,8 @@ void BistroInfoPanel::DrawLaunchControls(BistroBenchmark& benchmark)
                 ImGuiChildFlags_Borders))
             {
                 heading("Run mode", 1.52f);
-                const bool profile = _launch.Kind == BistroRun::Mode::Profile;
-                const float policy = profile ? ImGui::GetFrameHeightWithSpacing() : 0.f;
-                const float rowHeight = std::max(3.65f * em, std::floor((ImGui::GetContentRegionAvail().y - policy - 2 * gap) / 3));
+                const float rowHeight = std::max(3.65f * em, std::floor((ImGui::GetContentRegionAvail().y - 2 * gap) / 3));
                 for (const auto& mode : RunModes) DrawModeCard(mode, _launch, _headingFont, rowHeight);
-                if (profile) ImGui::Checkbox("Include upscalers in search", &_launch.AllowUpscalers);
             }
             ImGui::EndChild();
             if (columns) ImGui::SameLine();
@@ -272,13 +269,16 @@ void BistroInfoPanel::DrawLaunchControls(BistroBenchmark& benchmark)
                     }
                     ImGui::EndCombo();
                 }
+                const bool profile = _launch.Kind == BistroRun::Mode::Profile;
                 float bottom = 1.08f * em + ImGui::GetFrameHeight() + 2 * gap;
+                if (profile) bottom += ImGui::GetFrameHeightWithSpacing();
 #if defined(_DEBUG) || defined(DEBUG)
                 bottom += ImGui::GetFrameHeightWithSpacing();
 #endif
                 DrawRoutePreview(*_launch.Level, std::max(2.8f * em, ImGui::GetContentRegionAvail().y - bottom));
                 heading("Output resolution", 1.08f);
                 DrawOutputPicker(_launch.Output);
+                if (profile) ImGui::Checkbox("Include upscalers in search", &_launch.AllowUpscalers);
 #if defined(_DEBUG) || defined(DEBUG)
                 if (ImGui::Button("Explore map (Debug)", {-FLT_MIN, 0})) _requestedDebugMap = _launch.Level;
 #endif
