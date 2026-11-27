@@ -67,7 +67,9 @@ PS_OUTPUT PS(VSOutput input)
     float2 uv = input.Position.xy * texel;
     // The projection offsets rasterized geometry by -Jitter pixels. History is unjittered.
     float2 currentUV = uv - Jitter * texel;
-    float3 current = SampleAccumulationColor(Color, currentUV, size);
+    float3 current = 0;
+    float totalWeight = 0;
+    float3 minimum = 1e20f, maximum = -1e20f;
     int2 centerPixel = clamp(int2(currentUV * size), int2(0, 0), int2(width, height) - 1);
     int2 pixel = centerPixel;
     float depth = Depth.Load(int3(pixel, 0));
@@ -79,6 +81,18 @@ PS_OUTPUT PS(VSOutput input)
         [unroll] for (int x = -1; x <= 1; ++x)
         {
             int2 neighbor = clamp(centerPixel + int2(x, y), int2(0, 0), int2(width, height) - 1);
+            float3 color = ToAccumulationColor(Color.Load(int3(neighbor, 0)).rgb);
+            // A fixed reconstruction footprint avoids the sharp/soft alternation
+            // of bilinear unjittering as the projection jitter changes each frame.
+            float2 offset = float2(x, y) + Jitter;
+            float weight = exp(-2.0f * dot(offset, offset));
+            current += color * weight;
+            totalWeight += weight;
+            // Filtered bounds shrink with jitter and unnecessarily clip stable
+            // edge history. Keep the original neighborhood's color range instead.
+            float3 neighborhoodColor = ToYCoCg(color);
+            minimum = min(minimum, neighborhoodColor);
+            maximum = max(maximum, neighborhoodColor);
             float neighborDepth = Depth.Load(int3(neighbor, 0));
             if (neighborDepth > depth)
             {
@@ -87,6 +101,7 @@ PS_OUTPUT PS(VSOutput input)
             }
         }
     }
+    current /= totalWeight;
     float normalizedDepth = depth > 0 ? NormalizedLinearDepth(depth) : 0;
     float2 velocity = Velocity.Load(int3(pixel, 0));
     // Existing motion vectors are previous minus current in unjittered NDC.
@@ -113,16 +128,6 @@ PS_OUTPUT PS(VSOutput input)
         }
         if (validDepth)
         {
-            float3 minimum = ToYCoCg(current), maximum = minimum;
-            [unroll] for (int y = -1; y <= 1; ++y)
-            {
-                [unroll] for (int x = -1; x <= 1; ++x)
-                {
-                    float3 neighbor = ToYCoCg(SampleAccumulationColor(Color, currentUV + float2(x, y) * texel, size));
-                    minimum = min(minimum, neighbor);
-                    maximum = max(maximum, neighbor);
-                }
-            }
             float3 history = SampleAccumulationColor(History, previousUV, size);
             history = FromYCoCg(clamp(ToYCoCg(history), minimum, maximum));
             float coverage = saturate(TransparencyMask.SampleLevel(samLinearClamp, currentUV, 0));
