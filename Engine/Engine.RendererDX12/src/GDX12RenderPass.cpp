@@ -50,8 +50,8 @@ std::vector<ExternalResourceUse> GDX12RenderPass::GetExternalResources(PassExecu
         uses.push_back({&resources->IndirectCommandsCache->GetResource(), D3D12_RESOURCE_STATE_GENERIC_READ, {}});
         _vertexResource.D3DResource = resources->GeometryBuffer->_vertexBuffer;
         _indexResource.D3DResource = resources->GeometryBuffer->_indexBuffer;
-        uses.push_back({&_vertexResource, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER, {}});
-        uses.push_back({&_indexResource, D3D12_RESOURCE_STATE_INDEX_BUFFER, {}});
+        uses.push_back({&_vertexResource, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER | D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE, {}});
+        uses.push_back({&_indexResource, D3D12_RESOURCE_STATE_INDEX_BUFFER | D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE, {}});
     }
     return uses;
 }

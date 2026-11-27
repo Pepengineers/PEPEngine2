@@ -650,6 +650,7 @@ void RenderModule::BindMesh(StaticMeshRenderComponent& component)
     if (_frameGraph) { _frameGraph->WaitForGPUCompletion(); }
     DisableMeshInstanceDrawCommands(component._CBufferIndices);
     component._CBufferIndices.clear();
+    // Keep submesh indices contiguous and in mesh order for DXR InstanceID + GeometryIndex lookup.
     for (size_t i = 0; i < mesh->GetSubMeshCount(); ++i)
         component._CBufferIndices.push_back(_instanceCount++);
     ResizeSceneBuffers(_primaryResources, GetDevicePassFlags(DEVICE_ROLE_PRIMARY));

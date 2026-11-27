@@ -2,6 +2,7 @@
 
 #include "Engine.RendererDX12/GDX12CommandQueue.h"
 #include "Engine.RendererDX12/GDX12CommandList.h"
+#include "Engine.RendererDX12/GDX12DescriptorHeap.h"
 
 GDX12GeometryBuffer::GDX12GeometryBuffer(GDX12Device* device) : _device(device), _vertexBufferView({}), _indexBufferView({}),
 _totalVertices(0), _totalIndices(0)
@@ -9,13 +10,11 @@ _totalVertices(0), _totalIndices(0)
 
 }
 
-GDX12GeometryBuffer::~GDX12GeometryBuffer()
-{
-    Clear();
-}
+GDX12GeometryBuffer::~GDX12GeometryBuffer() = default;
 
 void GDX12GeometryBuffer::Clear()
 {
+    _meshCache.clear();
     _vertexDataCPU.clear();
     _indexDataCPU.clear();
     _vertexBuffer.Reset();
@@ -24,6 +23,8 @@ void GDX12GeometryBuffer::Clear()
     _indexBufferView = {};
     _totalIndices = 0;
     _totalVertices = 0;
+    if (_vertexSRV._heap) { UpdateVertexSRV(_vertexSRV._heap); }
+    if (_indexSRV._heap) { UpdateIndexSRV(_indexSRV._heap); }
 }
 
 void GDX12GeometryBuffer::ResizeVertexBuffer(UINT newSize)
@@ -70,6 +71,7 @@ void GDX12GeometryBuffer::ResizeVertexBuffer(UINT newSize)
     _vertexBufferView.BufferLocation = _vertexBuffer->GetGPUVirtualAddress();
     _vertexBufferView.SizeInBytes = static_cast<UINT>(_totalVertices * VERTEX_SIZE);
     _vertexBufferView.StrideInBytes = static_cast<UINT>(VERTEX_SIZE);
+    if (_vertexSRV._heap) { UpdateVertexSRV(_vertexSRV._heap); }
 }
 
 void GDX12GeometryBuffer::ResizeIndexBuffer(UINT newSize)
@@ -116,6 +118,7 @@ void GDX12GeometryBuffer::ResizeIndexBuffer(UINT newSize)
     _indexBufferView.BufferLocation = _indexBuffer->GetGPUVirtualAddress();
     _indexBufferView.SizeInBytes = static_cast<UINT>(_totalIndices * INDEX_SIZE);
     _indexBufferView.Format = DXGI_FORMAT_R32_UINT;
+    if (_indexSRV._heap) { UpdateIndexSRV(_indexSRV._heap); }
 }
 
 void GDX12GeometryBuffer::AddMesh(const Mesh* mesh, MeshHandle handle)
@@ -175,4 +178,58 @@ void GDX12GeometryBuffer::AddMesh(const Mesh* mesh, MeshHandle handle)
 const GPUMesh* GDX12GeometryBuffer::GetGPUMeshByHandle(MeshHandle handle)
 {
     return _meshCache[handle.GetValue()].get();
+}
+
+void GDX12GeometryBuffer::CreateSRVs(GDX12DescriptorHeap* heap)
+{
+    if (!heap || (_vertexSRV._heap && _vertexSRV._heap != heap))
+    { throw std::invalid_argument("ERROR: Geometry SRVs require the same renderer heap for their lifetime."); }
+    UpdateVertexSRV(heap);
+    UpdateIndexSRV(heap);
+}
+
+void GDX12GeometryBuffer::UpdateVertexSRV(GDX12DescriptorHeap* heap)
+{
+    D3D12_SHADER_RESOURCE_VIEW_DESC view{};
+    view.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    view.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+    view.Buffer.NumElements = (std::max)(1u, _totalVertices);
+    view.Buffer.StructureByteStride = sizeof(Vertex);
+    const auto index = _vertexSRV.HeapIndex == UINT_MAX ? heap->GetAvailableIndex(RendererResources_StartIndex) : _vertexSRV.HeapIndex;
+    _vertexSRV.InitAsSRV(_vertexBuffer.Get(), &view, heap, index);
+}
+
+void GDX12GeometryBuffer::UpdateIndexSRV(GDX12DescriptorHeap* heap)
+{
+    D3D12_SHADER_RESOURCE_VIEW_DESC view{};
+    view.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    view.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+    view.Format = DXGI_FORMAT_R32_UINT;
+    view.Buffer.NumElements = (std::max)(1u, _totalIndices);
+    const auto index = _indexSRV.HeapIndex == UINT_MAX ? heap->GetAvailableIndex(RendererResources_StartIndex) : _indexSRV.HeapIndex;
+    _indexSRV.InitAsSRV(_indexBuffer.Get(), &view, heap, index);
+}
+
+std::vector<D3D12_RAYTRACING_GEOMETRY_DESC> GDX12GeometryBuffer::GetRayTracingGeometryDescriptions(MeshHandle handle) const
+{
+    const auto found = _meshCache.find(handle.GetValue());
+    if (found == _meshCache.end() || !found->second || !_vertexBuffer || !_indexBuffer)
+    { throw std::invalid_argument("ERROR: Ray tracing geometry requires an uploaded mesh: " + std::to_string(handle.GetValue())); }
+    std::vector<D3D12_RAYTRACING_GEOMETRY_DESC> descriptions;
+    descriptions.reserve(found->second->SubMeshes.size());
+    for (const auto& subMesh : found->second->SubMeshes)
+    {
+        D3D12_RAYTRACING_GEOMETRY_DESC description{};
+        description.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
+        description.Triangles.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
+        description.Triangles.IndexFormat = DXGI_FORMAT_R32_UINT;
+        description.Triangles.VertexBuffer.StartAddress = _vertexBuffer->GetGPUVirtualAddress()
+            + UINT64(subMesh.StartVertexLocation) * sizeof(Vertex);
+        description.Triangles.VertexBuffer.StrideInBytes = sizeof(Vertex);
+        description.Triangles.VertexCount = static_cast<UINT>(subMesh.CPUSubmesh->GetVertexCount());
+        description.Triangles.IndexBuffer = _indexBuffer->GetGPUVirtualAddress() + UINT64(subMesh.StartIndexLocation) * sizeof(UINT);
+        description.Triangles.IndexCount = subMesh.IndexCount;
+        descriptions.push_back(description);
+    }
+    return descriptions;
 }

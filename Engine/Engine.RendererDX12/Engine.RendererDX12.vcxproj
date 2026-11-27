@@ -133,6 +133,7 @@
     <None Include="Shaders\BufferClear.hlsl" />
     <None Include="Shaders\ComputeCopy.hlsl" />
     <None Include="Shaders\CBufferStructures.hlsli" />
+    <None Include="Shaders\RayTracingGeometry.hlsli" />
     <None Include="Shaders\CompositionPass.hlsl" />
     <None Include="Shaders\FrustumCullingPass.hlsl" />
     <None Include="Shaders\ShadowMapCullingPass.hlsl" />

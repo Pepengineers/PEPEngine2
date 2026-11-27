@@ -16,12 +16,13 @@ public:
     GDX12DeviceResources() : CurrFrameConstantsIndex(0), Device(nullptr) {}
 
     std::unordered_map<std::string, std::vector<D3D12_INPUT_ELEMENT_DESC>> InputLayouts;
-    std::unique_ptr<GDX12GeometryBuffer> GeometryBuffer;
 
     // All heaps created in one high-capacity instance
     std::unique_ptr<GDX12DescriptorHeap> RTVHeap;
     std::unique_ptr<GDX12DescriptorHeap> SRV_UAV_Heap;
     std::unique_ptr<GDX12DescriptorHeap> DSVHeap;
+
+    std::unique_ptr<GDX12GeometryBuffer> GeometryBuffer;
 
     // Null SRVs for floating-point texture inputs, shared by passes on this device.
     // These descriptors allocate no texture memory and outlive pipeline rebuilds.

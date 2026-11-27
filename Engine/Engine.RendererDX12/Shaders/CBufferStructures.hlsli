@@ -12,6 +12,15 @@
 #define RENDER_LAYER_MASKED 1u
 #define RENDER_LAYER_TRANSPARENT 2u
 
+// Matches Engine::Core::Vertex in MeshTypes.h, the structured-buffer stride is 44 bytes.
+struct GeometryBufferVertex
+{
+    float3 Position;
+    float3 Normal;
+    float2 TexCoord;
+    float3 Tangent;
+};
+
 struct MainCB
 {
     float2 RenderTargetSize;
