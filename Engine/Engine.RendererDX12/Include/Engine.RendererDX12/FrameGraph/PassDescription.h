@@ -1,6 +1,6 @@
 #pragma once
 
-#include <dxgiformat.h>
+#include <directx-headers/directx/d3d12.h>
 #include <any>
 #include <array>
 #include <cstdint>
@@ -95,6 +95,10 @@ struct PortDescription
 struct PassDescription
 {
     bool PrimaryOnly = false;
+    // Declare device requirements in Describe(). Non-RT passes need no DXR support.
+    // DXR 1.0 also requires SM 6.3; DXR 1.1 (including RayQuery) requires SM 6.5.
+    D3D12_RAYTRACING_TIER MinimumRayTracingTier = D3D12_RAYTRACING_TIER_NOT_SUPPORTED;
+    D3D_SHADER_MODEL MinimumShaderModel = D3D_SHADER_MODEL_5_1;
     // Run during graph setup, outside frame timings. All slots read the same immutable outputs.
     bool RunOnceDuringSetup = false;
     std::map<PinId, PortDescription> Inputs;

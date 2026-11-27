@@ -1000,11 +1000,39 @@ struct CompiledFrameGraph::Runtime
     }
 };
 
+void FrameGraph::ValidateDeviceRequirements() const
+{
+    for (const auto& [id, pass] : _passes)
+    {
+        const auto& node = _definition->Nodes.at(id);
+        const auto& description = node.Description;
+        const auto* device = node.DeviceRole == DEVICE_ROLE_PRIMARY ? _primary : _secondary;
+        const auto& specs = device->GetDeviceFeatures();
+        const auto rayTracingTier = specs.Features.RaytracingTier();
+        const auto shaderModel = specs.Features.HighestShaderModel();
+        auto minimumShaderModel = description.MinimumShaderModel;
+        if (description.MinimumRayTracingTier >= D3D12_RAYTRACING_TIER_1_1)
+        { minimumShaderModel = (std::max)(minimumShaderModel, D3D_SHADER_MODEL_6_5); }
+        else if (description.MinimumRayTracingTier >= D3D12_RAYTRACING_TIER_1_0)
+        { minimumShaderModel = (std::max)(minimumShaderModel, D3D_SHADER_MODEL_6_3); }
+
+        if (rayTracingTier >= description.MinimumRayTracingTier && shaderModel >= minimumShaderModel) { continue; }
+        const auto requiredDXR = description.MinimumRayTracingTier == D3D12_RAYTRACING_TIER_NOT_SUPPORTED
+            ? std::string{} : "DXR " + RayTracingTierToString(description.MinimumRayTracingTier) + " and ";
+        throw std::invalid_argument("ERROR: " + id + " [" + GetDeviceRoleName(node.DeviceRole) + ", " + specs.Name
+            + "]: requires " + requiredDXR + "Shader Model " + ShaderModelToString(minimumShaderModel)
+            + "; selected adapter supports DXR " + RayTracingTierToString(rayTracingTier)
+            + " and Shader Model " + ShaderModelToString(shaderModel)
+            + ". Assign this pass to a compatible GPU or remove it from the pipeline.");
+    }
+}
+
 // Resolve external metadata, create the runtime's allocation plan and initialize each pass.
 // The builder freezes only after success; pass ownership is transferred before allocation starts.
 std::unique_ptr<CompiledFrameGraph> FrameGraph::Compile()
 {
     if (_definition->IsCompiled) { throw std::logic_error("ERROR: Given FrameGraph has already been compiled."); }
+    ValidateDeviceRequirements();
 
     auto runtime = std::make_unique<CompiledFrameGraph::Runtime>();
     runtime->Primary = _primaryResources;

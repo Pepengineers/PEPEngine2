@@ -97,6 +97,12 @@ inline std::string FeatureLevelToString(D3D_FEATURE_LEVEL level)
     }
 }
 
+inline std::string RayTracingTierToString(D3D12_RAYTRACING_TIER tier)
+{
+    if (tier == D3D12_RAYTRACING_TIER_NOT_SUPPORTED) { return "not supported"; }
+    return std::to_string(UINT(tier) / 10) + "." + std::to_string(UINT(tier) % 10);
+}
+
 inline std::string ShaderModelToString(D3D_SHADER_MODEL model)
 {
     switch (model)

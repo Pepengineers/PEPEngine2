@@ -125,6 +125,9 @@ public:
     // Resolve requirements, allocate resources and initialize passes.
     std::unique_ptr<CompiledFrameGraph> Compile();
 private:
+    // Reject unsupported placement before calling providers or initializing passes.
+    // Reads cached DeviceSpecs; never moves a pass to another GPU implicitly.
+    void ValidateDeviceRequirements() const;
     template<class T, class... Args> NodeHandle AddPass(NodeId id, EDeviceRole role, Args&&... args)
     {
         static_assert(std::is_base_of_v<GDX12RenderPass, T>, "FrameGraph passes must implement GDX12RenderPass");
