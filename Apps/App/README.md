@@ -30,7 +30,7 @@ Use `Render.Water` for the SPH simulation, `Render.ReflectionProbes` for local p
 
 ### Skeletal deformation placement
 
-`Render.Skinning.NPC.Adapter` and `Render.Skinning.Fox.Adapter` select a DXGI hardware
+In Debug, `Render.Skinning.NPC.Adapter` and `Render.Skinning.Fox.Adapter` select a DXGI hardware
 index in Startup.ini. Both default to `-1` (GPU0). Each skeletal component can
 also change its own owner with `SetSkinningAdapter`. Instancing batches draws
 while each independently animated pose keeps its own deformation order.
@@ -251,7 +251,7 @@ producers start when the first external input completes and use the newest
 complete input at each step.
 Repeats and gaps reset particle position, age and rotation history when
 there is no immediately preceding displayed step. Camera motion remains.
-`Render.Particles.LogSnapshots = true` enables a short readback
+In Debug, `Render.Particles.LogSnapshots = true` enables a short readback
 of remote draw elements that passed the GPU0 particle cull.
 
 ### Read back a scene texture by name
@@ -284,14 +284,14 @@ Frame generation defaults to Off (`Render.FrameGeneration.Provider=0`); FSR FG
 and XeFG remain available through the same presentation integration.
 
 Use WASD/QE to move, Shift to accelerate and right mouse drag to look. F1 toggles the
-settings UI. Scene bounds can be enabled with `App.Bounds.Show`.
+settings UI. Debug builds expose the scene bounds controls under `App.Bounds`.
 
 At the default Medium reflection quality, two mirror spheres sit on the terrace
 tables. Low starts with one sphere, and each higher level adds a sphere on the
 next table. Off removes them all. Both preset searches use this layout.
 
 The scene also starts with one grass patch, one water basin, ten NPCs and five
-foxes. Character counts apply at startup. The default
+foxes. Debug builds can override those counts at startup. The default
 physics count scale is 1, preserving the original props without tableware copies.
 
 Independent allocator, physics, content and GPU-kernel checks remain standalone.

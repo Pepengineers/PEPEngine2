@@ -1,6 +1,6 @@
 #include "Engine.RendererDX12/GDX12ShaderCompiler.h"
 #include "Engine.Core/Logging/Logger.h"
-#include "Common/ConsoleVariables.h"
+#include "Common/DebugConsoleVariable.h"
 
 #include "Engine.RendererDX12/GDX12Device.h"
 
@@ -12,7 +12,7 @@
 
 namespace
 {
-    AutoConsoleVariable<bool> OptimizeShaders(L"Render.Shaders.Optimize", true,
+    DebugConsoleVariable<bool> OptimizeShaders(L"Render.Shaders.Optimize", true,
         L"Optimize runtime DXC shaders. Set to 0 before startup for shader debugging.",
         EConsoleVariableFlags::ReadOnly);
 }

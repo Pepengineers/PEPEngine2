@@ -154,7 +154,7 @@ std::vector<DeviceDesc> PrepareStartup()
 		ValidateStartupAdapters(console, startup, adapters);
 	}, [](std::wstring& key)
 	{
-		MigrateBistroIniKey(key);
+		MigrateBistroConfigKey(key);
 		if (const auto page = LocalShadowPageSettingsIndex(key))
 		{
 			RegisterLocalShadowPageSettings(*page);

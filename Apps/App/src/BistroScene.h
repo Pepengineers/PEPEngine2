@@ -8,7 +8,7 @@
 #include "App.Base/Modules/SceneManagerModule.h"
 #include "App.Base/Modules/RenderModule.h"
 #include "Engine.Core/AssetManager.h"
-#include "Common/ConsoleVariables.h"
+#include "Common/DebugConsoleVariable.h"
 
 namespace BistroParticles
 {
@@ -30,18 +30,18 @@ inline AutoConsoleVariable<float> MinPixelSize(L"Render.Particles.MinPixelSize",
 inline AutoConsoleVariable<ParticleSimulation> Simulation(
     L"Render.Particles.Integrator", ParticleSimulation::SemiImplicitEuler,
     L"0 analytic drag + trapezoidal position, 1 MGPU semi-implicit Euler (default)");
-inline AutoConsoleVariable<bool> VolumeEnabled(L"Render.Particles.Volume.Enabled", false,
+inline DebugConsoleVariable<bool> VolumeEnabled(L"Render.Particles.Volume.Enabled", false,
                                                L"Override unbound emitters with box spawn and a reflecting "
                                                L"emitter-local simulation volume; Dust/Steam use App.Bounds");
-inline AutoConsoleVariable<float> VolumeHalfExtentX(L"Render.Particles.Volume.HalfExtentX", 100.0f,
+inline DebugConsoleVariable<float> VolumeHalfExtentX(L"Render.Particles.Volume.HalfExtentX", 100.0f,
                                                     L"Particle box half-size X in emitter-local cm, 0.01..1000000",
                                                     EConsoleVariableFlags::Default,
                                                     [](float value) { return value >= 0.01f && value <= 1000000; });
-inline AutoConsoleVariable<float> VolumeHalfExtentY(L"Render.Particles.Volume.HalfExtentY", 100.0f,
+inline DebugConsoleVariable<float> VolumeHalfExtentY(L"Render.Particles.Volume.HalfExtentY", 100.0f,
                                                     L"Particle box half-size Y in emitter-local cm, 0.01..1000000",
                                                     EConsoleVariableFlags::Default,
                                                     [](float value) { return value >= 0.01f && value <= 1000000; });
-inline AutoConsoleVariable<float> VolumeHalfExtentZ(L"Render.Particles.Volume.HalfExtentZ", 100.0f,
+inline DebugConsoleVariable<float> VolumeHalfExtentZ(L"Render.Particles.Volume.HalfExtentZ", 100.0f,
                                                     L"Particle box half-size Z in emitter-local cm, 0.01..1000000",
                                                     EConsoleVariableFlags::Default,
                                                     [](float value) { return value >= 0.01f && value <= 1000000; });

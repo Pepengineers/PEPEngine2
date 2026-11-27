@@ -1,6 +1,6 @@
 #include "SceneTextureInspector.h"
 #include "BistroPlot.h"
-#include "Common/ConsoleVariables.h"
+#include "Common/DebugConsoleVariable.h"
 #include "Common/RuntimePaths.h"
 #include "Engine.Core/Logging/Logger.h"
 #include "Engine.RendererDX12/GDX12Descriptor.h"
@@ -21,7 +21,7 @@ namespace BistroRender
 {
 namespace
 {
-AutoConsoleVariable<bool> Enabled(L"Render.Debug.SceneTextures", false, L"Show the scene texture inspector (F8).");
+DebugConsoleVariable<bool> Enabled(L"Render.Debug.SceneTextures", false, L"Show the scene texture inspector (F8).");
 constexpr UINT Tile = 512;
 constexpr UINT TilesAcross = 3;
 constexpr UINT Capacity = 6;
@@ -71,9 +71,11 @@ bool SceneTextureInspector::Visible() { return Enabled.GetValue(); }
 
 void SceneTextureInspector::SetVisible(bool visible)
 {
+#if defined(_DEBUG) || defined(DEBUG)
 	if (Visible() == visible) return;
 	const auto error = Engine::UI::SetSceneTexturesVisible(visible);
 	if (!error.empty()) Log::Warning("RenderGraph", "Cannot change scene texture inspector visibility: ", error);
+#endif
 }
 
 SceneTextureInspector::SceneTextureInspector(UINT slots) : _slots(slots)

@@ -82,3 +82,16 @@ inline void MigrateBistroIniKey(std::wstring& key)
                                 L"Render.ReflectionProbes.Reset"})
         if (_wcsicmp(key.c_str(), retired) == 0) { key.clear(); return; }
 }
+
+inline void MigrateBistroConfigKey(std::wstring& key)
+{
+    MigrateBistroIniKey(key);
+#if !defined(_DEBUG) && !defined(DEBUG)
+    // Older presets and Debug INIs may also contain per-entity bounds.
+    for (std::wstring_view group : {L"App.NPC.", L"App.Fox.", L"App.Bounds.", L"Render.Skinning.NPC.",
+                                    L"Render.Skinning.Fox.", L"Render.Particles.Volume.", L"Render.Debug."})
+        if (_wcsnicmp(key.c_str(), group.data(), group.size()) == 0) { key.clear(); return; }
+    for (const auto* name : {L"Render.ReflectionProbes.ShowBounds", L"Render.Particles.LogSnapshots", L"Render.Shaders.Optimize"})
+        if (_wcsicmp(key.c_str(), name) == 0) { key.clear(); return; }
+#endif
+}

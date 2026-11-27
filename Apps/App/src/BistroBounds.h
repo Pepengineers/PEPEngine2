@@ -16,8 +16,10 @@
 
 namespace BistroBounds
 {
+#if defined(_DEBUG) || defined(DEBUG)
     inline AutoConsoleVariable<bool> Show(L"App.Bounds.Show", false,
         L"Show current scene bounds; authored confined effects retain editable layout volumes. Session only.");
+#endif
     inline constexpr float InteriorYawDegrees = -28.5f;
 
     struct Box
@@ -31,19 +33,26 @@ namespace BistroBounds
         Box(const std::string& name, const BoundingBox& bounds, unsigned color, float yawDegrees = 0, bool tracked = false)
             : _bounds(bounds.Center, Vector3::Max(Vector3(0.01f), Vector3(bounds.Extents))), _localBounds(Vector3::Zero, bounds.Extents),
               _tracked(tracked), Name(name), Color(color),
+#if defined(_DEBUG) || defined(DEBUG)
               CenterX(Prefix() + L"CenterX", _bounds.Center.x, L"Bounds centre X, world cm", tracked ? EConsoleVariableFlags::ReadOnly : EConsoleVariableFlags::Default),
               CenterY(Prefix() + L"CenterY", _bounds.Center.y, L"Bounds centre Y, world cm", tracked ? EConsoleVariableFlags::ReadOnly : EConsoleVariableFlags::Default),
               CenterZ(Prefix() + L"CenterZ", _bounds.Center.z, L"Bounds centre Z, world cm", tracked ? EConsoleVariableFlags::ReadOnly : EConsoleVariableFlags::Default),
               HalfExtentX(Prefix() + L"HalfExtentX", _bounds.Extents.x, L"Bounds half-size X, cm", tracked ? EConsoleVariableFlags::ReadOnly : EConsoleVariableFlags::Default, Positive),
               HalfExtentY(Prefix() + L"HalfExtentY", _bounds.Extents.y, L"Bounds half-size Y, cm", tracked ? EConsoleVariableFlags::ReadOnly : EConsoleVariableFlags::Default, Positive),
               HalfExtentZ(Prefix() + L"HalfExtentZ", _bounds.Extents.z, L"Bounds half-size Z, cm", tracked ? EConsoleVariableFlags::ReadOnly : EConsoleVariableFlags::Default, Positive),
-              Visible(Prefix() + L"Visible", true, L"Show this bounds box; does not disable its object"), _yawDegrees(yawDegrees)
+              Visible(Prefix() + L"Visible", true, L"Show this bounds box; does not disable its object"),
+#endif
+              _yawDegrees(yawDegrees)
         {}
 
         BoundingBox GetBounds() const
         {
+#if defined(_DEBUG) || defined(DEBUG)
             return {{CenterX.GetValue(), CenterY.GetValue(), CenterZ.GetValue()},
                 {HalfExtentX.GetValue(), HalfExtentY.GetValue(), HalfExtentZ.GetValue()}};
+#else
+            return _bounds;
+#endif
         }
         float GetYawDegrees() const { return _yawDegrees; }
 
@@ -66,13 +75,17 @@ namespace BistroBounds
 
         const std::string Name;
         const unsigned Color;
+#if defined(_DEBUG) || defined(DEBUG)
         AutoConsoleVariableRef<float> CenterX, CenterY, CenterZ, HalfExtentX, HalfExtentY, HalfExtentZ;
         AutoConsoleVariable<bool> Visible;
+#endif
 
     private:
         float _yawDegrees;
+#if defined(_DEBUG) || defined(DEBUG)
         std::wstring Prefix() const { return L"App.Bounds." + std::wstring(Name.begin(), Name.end()) + L"."; }
         static bool Positive(float value) { return value >= 0.01f && value <= 1000000; }
+#endif
     };
 
     class Scene
@@ -83,6 +96,7 @@ namespace BistroBounds
             RegisterBistroGrassComponents(world);
             RegisterBistroWaterComponents(world);
             auto& ecs = world.GetECS();
+#if defined(_DEBUG) || defined(DEBUG)
             const auto add = [&](Entity entity, const BoundingBox& local, unsigned color)
             {
                 BoundingBox bounds;
@@ -92,6 +106,7 @@ namespace BistroBounds
                 _tracked.emplace_back(entity, box.get());
                 _boxes.push_back(std::move(box));
             };
+#endif
             ecs.ForEach<ParticleEmitterComponent, TransformComponent, NameComponent>(
                 [&](Entity entity, const ParticleEmitterComponent& emitter, const TransformComponent&, const NameComponent& name)
                 {
@@ -105,11 +120,14 @@ namespace BistroBounds
                         _boxes.push_back(std::move(box));
                         return;
                     }
+#if defined(_DEBUG) || defined(DEBUG)
                     const auto& settings = emitter.GetSettings();
                     const auto extents = settings.VolumeEnabled ? settings.VolumeHalfExtents :
                         settings.Shape == ParticleShape::Point ? Vector3::Zero : settings.ShapeExtents;
                     add(entity, {Vector3::Zero, extents}, 0xff40e8ff);
+#endif
                 });
+#if defined(_DEBUG) || defined(DEBUG)
             ecs.ForEach<GrassRenderComponent, TransformComponent, NameComponent>(
                 [&](Entity entity, const GrassRenderComponent& grass, const TransformComponent&, const NameComponent&)
                 { add(entity, GrassLocalBounds(grass), 0xff60ff60); });
@@ -119,6 +137,7 @@ namespace BistroBounds
             ecs.ForEach<SkeletalMeshRenderComponent, TransformComponent, NameComponent>(
                 [&](Entity entity, const SkeletalMeshRenderComponent& mesh, const TransformComponent&, const NameComponent&)
                 { add(entity, CharacterBounds(mesh), 0xffff70ff); });
+#endif
         }
 
         void UpdateEmitters(World& world)
@@ -163,6 +182,7 @@ namespace BistroBounds
             }
         }
 
+#if defined(_DEBUG) || defined(DEBUG)
         void DrawBounds(World& world, RenderModule& render)
         {
             auto& ecs = world.GetECS();
@@ -200,6 +220,7 @@ namespace BistroBounds
                     volume.Bounds->Visible.GetValue())
                     volume.Bounds->Draw(viewProjection, WorldMatrix(ecs.Get<TransformComponent>(volume.Owner)));
         }
+#endif
 
     private:
         static bool IsOwner(WorldECS& ecs, Entity entity, const Box& box)

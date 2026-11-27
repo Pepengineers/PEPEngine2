@@ -2,7 +2,7 @@
 
 #include "App.Base/ECS/World.h"
 #include "BistroProbeSettings.h"
-#include "Common/ConsoleVariables.h"
+#include "Common/DebugConsoleVariable.h"
 #include "App.Base/Modules/RenderModule.h"
 #include "Engine.UI/UI_test.h"
 #include "Engine.Core/AssetManager.h"
@@ -15,7 +15,7 @@
 
 namespace BistroReflections
 {
-    inline AutoConsoleVariable<bool> ShowBounds(L"Render.ReflectionProbes.ShowBounds", false,
+    inline DebugConsoleVariable<bool> ShowBounds(L"Render.ReflectionProbes.ShowBounds", false,
         L"Show colored table-sized reflection boxes and capture labels above Bistro tables");
     inline AutoConsoleVariable<UINT> Resolution(L"Render.ReflectionProbes.Resolution", 128,
         L"Capture face size, a power of two in 16..512", EConsoleVariableFlags::Default,

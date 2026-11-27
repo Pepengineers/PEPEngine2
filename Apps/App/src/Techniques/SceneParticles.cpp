@@ -1,6 +1,6 @@
 #include "SceneParticles.h"
 #include "SceneGeometry.h"
-#include "Common/ConsoleVariables.h"
+#include "Common/DebugConsoleVariable.h"
 #include "Engine.RendererDX12/GDX12CommandList.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
 #include "Engine.RendererDX12/GDX12MotionBlurSettings.h"
@@ -23,7 +23,7 @@ AutoConsoleVariable<int> Adapter(L"Render.Particles.Adapter", -1,
 AutoConsoleVariable<int> CrossSync(L"Render.Particles.CrossSync", 1,
     L"Remote particles: 1 exact current, 0 exact previous (first uses current), 2 independent and 3 frame-driven (newest completed, empty until ready).",
     EConsoleVariableFlags::Default, [](int value) { return value >= 0 && value <= 3; });
-AutoConsoleVariable<bool> LogSnapshots(L"Render.Particles.LogSnapshots", false,
+DebugConsoleVariable<bool> LogSnapshots(L"Render.Particles.LogSnapshots", false,
     L"Read back visible remote particle counts for short MGPU diagnostics.");
 
 constexpr State CopySource = D3D12_RESOURCE_STATE_COPY_SOURCE;

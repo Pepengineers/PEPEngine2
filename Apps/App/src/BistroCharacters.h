@@ -6,7 +6,7 @@
 #include "Components/BistroInteractionSource.h"
 #include "Engine.Core/AssetManager.h"
 #include "Engine.Core/Jobs/JobSystem.h"
-#include "Common/ConsoleVariables.h"
+#include "Common/DebugConsoleVariable.h"
 #include <cmath>
 #include <vector>
 #include <numeric>
@@ -14,22 +14,22 @@
 
 namespace BistroCharacters
 {
-    inline AutoConsoleVariable<int> NPCCount(L"App.NPC.Count", 10,
+    inline DebugConsoleVariable<int> NPCCount(L"App.NPC.Count", 10,
         L"Initial people count; crowded groups follow in single file, 0 disables, applies on startup",
         EConsoleVariableFlags::ReadOnly, [](int value) { return value >= 0; });
-    inline AutoConsoleVariable<int> FoxCount(L"App.Fox.Count", 5,
+    inline DebugConsoleVariable<int> FoxCount(L"App.Fox.Count", 5,
         L"Initial single-file fox count; spawn positions repeat when crowded, 0 disables, applies on startup",
         EConsoleVariableFlags::ReadOnly, [](int value) { return value >= 0; });
-    inline AutoConsoleVariable<int> PresetNPCCount(L"App.NPC.PresetCount", -1,
+    inline DebugConsoleVariable<int> PresetNPCCount(L"App.NPC.PresetCount", -1,
         L"People count override, -1 inherits startup count. Restart Bistro to apply.",
         EConsoleVariableFlags::Default, [](int value) { return value >= -1 && value <= 10; });
-    inline AutoConsoleVariable<int> PresetFoxCount(L"App.Fox.PresetCount", -1,
+    inline DebugConsoleVariable<int> PresetFoxCount(L"App.Fox.PresetCount", -1,
         L"Fox count override, -1 inherits startup count. Restart Bistro to apply.",
         EConsoleVariableFlags::Default, [](int value) { return value >= -1 && value <= 5; });
-    inline AutoConsoleVariable<int> NPCSkinningAdapter(L"Render.Skinning.NPC.Adapter", -1,
+    inline DebugConsoleVariable<int> NPCSkinningAdapter(L"Render.Skinning.NPC.Adapter", -1,
         L"DXGI skinning adapter for Bistro people at spawn. -1 uses GPU0.",
         EConsoleVariableFlags::ReadOnly, [](int value) { return value >= -1; });
-    inline AutoConsoleVariable<int> FoxSkinningAdapter(L"Render.Skinning.Fox.Adapter", -1,
+    inline DebugConsoleVariable<int> FoxSkinningAdapter(L"Render.Skinning.Fox.Adapter", -1,
         L"DXGI skinning adapter for Bistro foxes at spawn. -1 uses GPU0.",
         EConsoleVariableFlags::ReadOnly, [](int value) { return value >= -1; });
 

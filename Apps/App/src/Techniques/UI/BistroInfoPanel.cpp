@@ -58,7 +58,7 @@ void BistroInfoPanel::ApplyPreset(const std::filesystem::path& path)
 {
     ConsoleVariablePatch patch;
     auto result = ConsoleModule::ReadPatchIni(path, patch, [](std::wstring& key) {
-        MigrateBistroIniKey(key);
+        MigrateBistroConfigKey(key);
         if (const auto page = LocalShadowPageSettingsIndex(key)) RegisterLocalShadowPageSettings(*page);
     });
     if (result.Error.empty())
