@@ -4,6 +4,10 @@
 #include "Engine.RendererDX12/GDX12CommandList.h"
 #include "Engine.RendererDX12/GDX12DescriptorHeap.h"
 
+#include <map>
+#include <limits>
+#include <stdexcept>
+
 GDX12GeometryBuffer::GDX12GeometryBuffer(GDX12Device* device) : _device(device), _vertexBufferView({}), _indexBufferView({}),
 _totalVertices(0), _totalIndices(0)
 {
@@ -232,4 +236,88 @@ std::vector<D3D12_RAYTRACING_GEOMETRY_DESC> GDX12GeometryBuffer::GetRayTracingGe
         descriptions.push_back(description);
     }
     return descriptions;
+}
+
+void GDX12GeometryBuffer::BuildBLAS(const std::vector<MeshHandle>& meshes)
+{
+    std::map<UINT, std::unique_ptr<GDX12AccelerationStructure>> pending;
+    for (const auto handle : meshes)
+    {
+        const auto found = _meshCache.find(handle.GetValue());
+        if (found == _meshCache.end() || !found->second || !_vertexBuffer || !_indexBuffer)
+        { throw std::invalid_argument("ERROR: BLAS preparation requires an uploaded mesh: " + std::to_string(handle.GetValue())); }
+        if (!found->second->BLAS && !pending.count(handle.GetValue()))
+        { pending.emplace(handle.GetValue(), std::make_unique<GDX12AccelerationStructure>(_device)); }
+    }
+    if (pending.empty()) { return; }
+    if (pending.size() > (std::numeric_limits<UINT>::max)())
+    { throw std::length_error("ERROR: Too many BLAS in one build batch."); }
+
+    const auto sizeBytes = UINT64(pending.size()) * sizeof(D3D12_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO_COMPACTED_SIZE_DESC);
+    const auto description = CD3DX12_RESOURCE_DESC::Buffer(sizeBytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+    const auto gpuHeap = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+    GDX12Resource sizes;
+    ThrowIfFailed(_device->GetDevice()->CreateCommittedResource(&gpuHeap, D3D12_HEAP_FLAG_NONE, &description,
+        D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&sizes.D3DResource)));
+    sizes.SetCurrentState(D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    const auto readbackDescription = CD3DX12_RESOURCE_DESC::Buffer(sizeBytes);
+    const auto readbackHeap = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_READBACK);
+    ComPtr<ID3D12Resource> readback;
+    ThrowIfFailed(_device->GetDevice()->CreateCommittedResource(&readbackHeap, D3D12_HEAP_FLAG_NONE, &readbackDescription,
+        D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&readback)));
+
+    auto* queue = _device->GetCommandQueue();
+    auto* commands = queue->GetCommandList();
+    GDX12Resource vertices, indices;
+    vertices.D3DResource = _vertexBuffer;
+    indices.D3DResource = _indexBuffer;
+    const auto vertexState = vertices.GetCurrentState();
+    const auto indexState = indices.GetCurrentState();
+    commands->ResourceBarrier({vertices.GetNonPixelShaderResourceBarrier(), indices.GetNonPixelShaderResourceBarrier()});
+    commands->KeepResourceAlive(_vertexBuffer.Get());
+    commands->KeepResourceAlive(_indexBuffer.Get());
+    commands->KeepResourceAlive(sizes.D3DResource.Get());
+    commands->KeepResourceAlive(readback.Get());
+    GDX12RayTracingScratchBuffer scratch(_device);
+    std::vector<D3D12_GPU_VIRTUAL_ADDRESS> addresses;
+    addresses.reserve(pending.size());
+    commands->BeginPixEvent("Build Static BLAS Batch", Colors::Orange);
+    for (auto& [handle, structure] : pending)
+    {
+        const auto geometries = GetRayTracingGeometryDescriptions(MeshHandle(handle));
+        D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS inputs{};
+        inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
+        inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+        inputs.NumDescs = static_cast<UINT>(geometries.size());
+        inputs.pGeometryDescs = geometries.data();
+        inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE
+            | D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_COMPACTION;
+        structure->Build(commands, inputs, scratch);
+        addresses.push_back(structure->GetGPUVirtualAddress());
+    }
+    D3D12_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO_DESC postbuild{};
+    postbuild.InfoType = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO_COMPACTED_SIZE;
+    postbuild.DestBuffer = sizes.D3DResource->GetGPUVirtualAddress();
+    commands->EmitRaytracingAccelerationStructurePostbuildInfo(&postbuild, static_cast<UINT>(addresses.size()), addresses.data());
+    commands->ResourceBarrier({sizes.GetCopySourceBarrier(), vertices.GetTransitionBarrier(vertexState), indices.GetTransitionBarrier(indexState)});
+    commands->CopyResource(readback.Get(), sizes.D3DResource.Get());
+    commands->EndPixEvent();
+    queue->ExecuteCommandList(commands);
+    GDX12CommandQueue::CPUwait(queue->GetCompletionPoint());
+
+    std::vector<UINT64> compactedSizes(pending.size());
+    void* mapped;
+    const D3D12_RANGE readRange{0, static_cast<SIZE_T>(sizeBytes)};
+    ThrowIfFailed(readback->Map(0, &readRange, &mapped));
+    memcpy(compactedSizes.data(), mapped, static_cast<SIZE_T>(sizeBytes));
+    const D3D12_RANGE noWrites{0, 0};
+    readback->Unmap(0, &noWrites);
+
+    commands = queue->GetCommandList();
+    commands->BeginPixEvent("Compact Static BLAS Batch", Colors::Orange);
+    size_t index = 0;
+    for (auto& [handle, structure] : pending) { structure->Compact(commands, compactedSizes[index++]); }
+    commands->EndPixEvent();
+    queue->ExecuteCommandList(commands);
+    for (auto& [handle, structure] : pending) { _meshCache.at(handle)->BLAS = std::move(structure); }
 }

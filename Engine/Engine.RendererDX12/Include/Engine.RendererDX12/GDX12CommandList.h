@@ -121,6 +121,10 @@ public:
 	void EndPixEvent();
 	void CopyResource(ID3D12Resource* destResource, ID3D12Resource* sourceResource);
 	void BuildRaytracingAccelerationStructure(const D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC* pDesc);
+	void EmitRaytracingAccelerationStructurePostbuildInfo(const D3D12_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO_DESC* description,
+		UINT count, const D3D12_GPU_VIRTUAL_ADDRESS* structures);
+	void CopyRaytracingAccelerationStructure(D3D12_GPU_VIRTUAL_ADDRESS destination, D3D12_GPU_VIRTUAL_ADDRESS source,
+		D3D12_RAYTRACING_ACCELERATION_STRUCTURE_COPY_MODE mode);
 
 
 private:

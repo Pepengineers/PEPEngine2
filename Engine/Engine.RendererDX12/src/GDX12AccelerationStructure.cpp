@@ -85,13 +85,21 @@ void GDX12AccelerationStructure::Build(GDX12CommandList* commands,
 
     const auto scratchSize = update ? prebuildInfo.UpdateScratchDataSizeInBytes : prebuildInfo.ScratchDataSizeInBytes;
     scratch.Reserve(scratchSize);
+    const auto updateSource = update ? GetGPUVirtualAddress() : 0;
     if (!_buffer.D3DResource || _buffer.D3DResource->GetDesc().Width < prebuildInfo.ResultDataMaxSizeInBytes)
-    { _buffer = CreateASBuffer(_device, prebuildInfo.ResultDataMaxSizeInBytes, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE); }
+    {
+        if (update)
+        {
+            commands->KeepResourceAlive(_buffer.D3DResource.Get());
+            commands->ResourceBarrier({_buffer.GetUAVBarrier()});
+        }
+        _buffer = CreateASBuffer(_device, prebuildInfo.ResultDataMaxSizeInBytes, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE);
+    }
 
     D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC description{};
     description.Inputs = buildInputs;
     description.DestAccelerationStructureData = GetGPUVirtualAddress();
-    description.SourceAccelerationStructureData = update ? description.DestAccelerationStructureData : 0;
+    description.SourceAccelerationStructureData = updateSource;
     commands->KeepResourceAlive(_buffer.D3DResource.Get());
     if (scratchSize)
     {
@@ -111,4 +119,26 @@ void GDX12AccelerationStructure::Build(GDX12CommandList* commands,
         _layout = inputs.DescsLayout;
         _numDescs = inputs.NumDescs;
     }
+}
+
+void GDX12AccelerationStructure::Compact(GDX12CommandList* commands, UINT64 compactedSizeInBytes)
+{
+    if (!commands || commands->GetDevice() != _device
+        || (commands->GetType() != D3D12_COMMAND_LIST_TYPE_DIRECT && commands->GetType() != D3D12_COMMAND_LIST_TYPE_COMPUTE)
+        || commands->FenceValue != (std::numeric_limits<UINT64>::max)())
+    { throw std::invalid_argument("ERROR: AS compaction requires a recording DIRECT or COMPUTE command list on the structure's GPU."); }
+    if (!_buffer.D3DResource || !(_buildFlags & D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_COMPACTION))
+    { throw std::logic_error("ERROR: AS compaction requires a prior ALLOW_COMPACTION build."); }
+    if (!compactedSizeInBytes || compactedSizeInBytes > _buffer.D3DResource->GetDesc().Width)
+    { throw std::invalid_argument("ERROR: Invalid GPU-reported compacted acceleration structure size."); }
+    if (AlignASSize(compactedSizeInBytes) >= _buffer.D3DResource->GetDesc().Width) { return; }
+
+    auto compacted = CreateASBuffer(_device, compactedSizeInBytes, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE);
+    commands->KeepResourceAlive(_buffer.D3DResource.Get());
+    commands->KeepResourceAlive(compacted.D3DResource.Get());
+    commands->ResourceBarrier({_buffer.GetUAVBarrier()});
+    commands->CopyRaytracingAccelerationStructure(compacted.D3DResource->GetGPUVirtualAddress(),
+        GetGPUVirtualAddress(), D3D12_RAYTRACING_ACCELERATION_STRUCTURE_COPY_MODE_COMPACT);
+    commands->ResourceBarrier({compacted.GetUAVBarrier()});
+    _buffer = std::move(compacted);
 }

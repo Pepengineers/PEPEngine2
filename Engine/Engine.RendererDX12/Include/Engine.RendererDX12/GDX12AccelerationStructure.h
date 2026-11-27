@@ -33,16 +33,21 @@ public:
     GDX12AccelerationStructure(const GDX12AccelerationStructure&) = delete;
     GDX12AccelerationStructure& operator=(const GDX12AccelerationStructure&) = delete;
 
-    // Record a full build or an in-place refit when Inputs.Flags includes PERFORM_UPDATE.
+    // Record a full build or a refit when Inputs.Flags includes PERFORM_UPDATE.
     // Refit requires a prior ALLOW_UPDATE build with compatible geometry and instance layout.
+    // Reuses the allocation when it fits, a refit after compaction can grow storage while retaining its source.
     // Input buffers must be readable by non-pixel shaders and remain alive until GPU completion.
     // The caller retains referenced BLAS for TLAS traversal, and orders uses on different queues.
     // Scratch reuse and AS reads/writes are ordered with UAV barriers, no CPU wait is performed.
     void Build(GDX12CommandList* commands, const D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS& inputs,
         GDX12RayTracingScratchBuffer& scratch);
 
+    // Record compaction into a smaller allocation using the GPU-reported compacted size.
+    // Requires ALLOW_COMPACTION on the original build, source and destination live until completion.
+    void Compact(GDX12CommandList* commands, UINT64 compactedSizeInBytes);
+
     // Before recording a later use, retain this resource through commands->KeepResourceAlive().
-    // Rebuilding may change this address, dependent TLAS instance data must then be updated.
+    // Building or compaction may change this address, dependent TLAS instance data must then be updated.
     D3D12_GPU_VIRTUAL_ADDRESS GetGPUVirtualAddress() const;
     GDX12Resource& GetResource() { return _buffer; }
     const D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO& GetPrebuildInfo() const { return _prebuildInfo; }

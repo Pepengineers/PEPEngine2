@@ -3,6 +3,7 @@
 #include "Engine.RendererDX12/D3DHelpers.h"
 #include "Engine.RendererDX12/GDX12Device.h"
 #include "Engine.RendererDX12/GDX12Descriptor.h"
+#include "Engine.RendererDX12/GDX12AccelerationStructure.h"
 
 #include "Engine.Core/Types/MeshTypes.h"
 #include "Engine.Core/AssetHandles.h"
@@ -30,6 +31,8 @@ struct GPUMesh
 {
 	std::vector<GPUSubMesh> SubMeshes;
 	const Mesh* CPUMesh;
+	// One immutable BLAS per mesh on this GPU, shared by all instances and preserved across graph rebuilds.
+	std::unique_ptr<GDX12AccelerationStructure> BLAS;
 
 	GPUMesh(const Mesh* mesh) : CPUMesh(mesh)
 	{
@@ -60,6 +63,9 @@ public:
 	// Flags remain NONE so instance material overrides can use alpha-test, callers may mark proven opaque geometries.
 	// Request descriptors again after buffer growth, their GPU addresses are not permanent.
 	std::vector<D3D12_RAYTRACING_GEOMETRY_DESC> GetRayTracingGeometryDescriptions(MeshHandle handle) const;
+
+	// Only missing meshes are built.
+	void BuildBLAS(const std::vector<MeshHandle>& meshes);
 
 private:
 	friend class RenderModule;
