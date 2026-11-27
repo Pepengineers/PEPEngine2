@@ -227,19 +227,16 @@ void DrawOutputPicker(BistroPlacement::Size& output)
 void BistroInfoPanel::DrawLaunchControls(BistroBenchmark& benchmark)
 {
     const float em = ImGui::GetFontSize(), gap = ImGui::GetStyle().ItemSpacing.y;
-    const auto area = ImGui::GetContentRegionAvail();
-    const bool narrowFooter = area.x < 25.f * em;
     const float actionHeight = 2.4f * em;
-    const float footerHeight = actionHeight + (narrowFooter ? em + gap : 0.f);
     ImGui::BeginDisabled(!benchmark.CanStart());
-    if (ImGui::BeginChild("Setup choices", {0, std::max(1.f, area.y - footerHeight - 2 * gap - 1.f)},
-        ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground))
+    if (ImGui::BeginChild("Setup choices", {}, ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground))
     {
         const float width = ImGui::GetContentRegionAvail().x;
         const bool columns = width >= 40.f * em;
         if (!_parametersOpen)
         {
-            const float panelHeight = std::max(17.7f * em, ImGui::GetContentRegionAvail().y - ImGui::GetFrameHeight() - gap);
+            const float mapHeight = 17.7f * em + actionHeight + gap;
+            const float panelHeight = std::max(mapHeight, ImGui::GetContentRegionAvail().y - ImGui::GetFrameHeight() - gap);
             const auto heading = [&](const char* name, float scale) {
                 ImGui::PushFont(_headingFont, scale * ImGui::GetStyle().FontSizeBase);
                 ImGui::TextUnformatted(name);
@@ -254,7 +251,7 @@ void BistroInfoPanel::DrawLaunchControls(BistroBenchmark& benchmark)
             }
             ImGui::EndChild();
             if (columns) ImGui::SameLine();
-            if (ImGui::BeginChild("Map and output", {0, columns ? panelHeight : 17.7f * em}, ImGuiChildFlags_Borders))
+            if (ImGui::BeginChild("Map and output", {0, columns ? panelHeight : mapHeight}, ImGuiChildFlags_Borders))
             {
                 heading("Map and output", 1.52f);
                 heading("Map", 1.08f);
@@ -270,7 +267,7 @@ void BistroInfoPanel::DrawLaunchControls(BistroBenchmark& benchmark)
                     ImGui::EndCombo();
                 }
                 const bool profile = _launch.Kind == BistroRun::Mode::Profile;
-                float bottom = 1.08f * em + ImGui::GetFrameHeight() + 2 * gap;
+                float bottom = 1.08f * em + ImGui::GetFrameHeight() + actionHeight + 3 * gap;
                 if (profile) bottom += ImGui::GetFrameHeightWithSpacing();
 #if defined(_DEBUG) || defined(DEBUG)
                 bottom += ImGui::GetFrameHeightWithSpacing();
@@ -279,6 +276,17 @@ void BistroInfoPanel::DrawLaunchControls(BistroBenchmark& benchmark)
                 heading("Output resolution", 1.08f);
                 DrawOutputPicker(_launch.Output);
                 if (profile) ImGui::Checkbox("Include upscalers in search", &_launch.AllowUpscalers);
+                const char* action = !profile ? "Start benchmark" :
+                    (_launch.Profile == BistroPlacement::Performance ? "Find Performance" : "Find Quality");
+                ImGui::PushStyleColor(ImGuiCol_Button, Theme::Lime);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Rgb(0xc7f496));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, Rgb(0x98cf66));
+                ImGui::PushStyleColor(ImGuiCol_Text, Theme::Ink);
+                ImGui::PushFont(_headingFont, 0.f);
+                if (ImGui::Button(action, {-FLT_MIN, actionHeight}))
+                    benchmark.Launch(_launch, *BenchmarkEngine::GetLocator().GetModule<ConsoleModule>());
+                ImGui::PopFont();
+                ImGui::PopStyleColor(4);
 #if defined(_DEBUG) || defined(DEBUG)
                 if (ImGui::Button("Explore map (Debug)", {-FLT_MIN, 0})) _requestedDebugMap = _launch.Level;
 #endif
@@ -296,28 +304,6 @@ void BistroInfoPanel::DrawLaunchControls(BistroBenchmark& benchmark)
         }
     }
     ImGui::EndChild();
-    ImGui::Separator();
-    const bool manual = _launch.Kind == BistroRun::Mode::Manual;
-    const char* mode = manual ? "Manual" : (_launch.Profile == BistroPlacement::Performance ? "Performance" : "Quality");
-    const char* action = manual ? "Start benchmark" :
-        (_launch.Profile == BistroPlacement::Performance ? "Find Performance" : "Find Quality");
-    const std::string summary = std::string(mode) + u8"   ·   " + _launch.Level->Name + u8"   ·   " + OutputLabel(_launch.Output);
-    const auto start = ImGui::GetCursorScreenPos();
-    const float buttonWidth = narrowFooter ? area.x : std::max(10.f * em, ImGui::CalcTextSize(action).x + 2 * em);
-    ImGui::SetCursorScreenPos({start.x, start.y + (narrowFooter ? 0.f : (actionHeight - em) * .5f)});
-    ImGui::PushClipRect(start, {start.x + (narrowFooter ? area.x : area.x - buttonWidth - em), start.y + actionHeight}, true);
-    ImGui::TextUnformatted(summary.c_str());
-    ImGui::PopClipRect();
-    ImGui::SetCursorScreenPos({start.x + area.x - buttonWidth, start.y + (narrowFooter ? em + gap : 0.f)});
-    ImGui::PushStyleColor(ImGuiCol_Button, Theme::Lime);
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Rgb(0xc7f496));
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive, Rgb(0x98cf66));
-    ImGui::PushStyleColor(ImGuiCol_Text, Theme::Ink);
-    ImGui::PushFont(_headingFont, 0.f);
-    if (ImGui::Button(action, {buttonWidth, actionHeight}))
-        benchmark.Launch(_launch, *BenchmarkEngine::GetLocator().GetModule<ConsoleModule>());
-    ImGui::PopFont();
-    ImGui::PopStyleColor(4);
     ImGui::EndDisabled();
 }
 
