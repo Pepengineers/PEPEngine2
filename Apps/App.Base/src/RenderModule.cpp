@@ -764,8 +764,6 @@ void RenderModule::UpdateMaterials()
 
 void RenderModule::PreRender()
 {
-    for (const auto role : {DEVICE_ROLE_PRIMARY, DEVICE_ROLE_SECONDARY})
-        if (PipelineHasFlag(role, RENDER_PASS_FLAG_USE_RAYTRACING)) { GetRayTracingScene(role).PrepareGeometry(); }
     auto& shadows = _RPcommonData.ShadowSystem;
     const auto directionalArraySize = shadows.DirectionalArraySize;
     const auto pointSpotArraySize = shadows.PointSpotArraySize;
@@ -984,12 +982,7 @@ void RenderModule::UploadSceneResources(GDX12DeviceResources& resources, uint32_
             if (!gpuTexture) { gpuTexture = CreateDX12Texture(entry.first, &resources, &texture.Source, texture.Source.GetType()); }
         }
     }
-    if (flags & RENDER_PASS_FLAG_USE_RAYTRACING)
-    {
-        resources.GeometryBuffer->CreateSRVs(resources.SRV_UAV_Heap.get());
-        if (!resources.RayTracingScene) { resources.RayTracingScene = std::make_unique<GDX12RayTracingScene>(resources); }
-    }
-    else { resources.RayTracingScene.reset(); }
+    if (!(flags & RENDER_PASS_FLAG_USE_RAYTRACING)) { resources.RayTracingScene.reset(); }
 }
 
 void RenderModule::MarkSceneDataDirty()

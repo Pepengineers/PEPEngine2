@@ -239,6 +239,7 @@ struct CompiledFrameGraph::Runtime
     struct FrameSlotResources
     {
         bool MeasureFrame = true;
+        std::array<bool, 2> RayTracingPrepared{};
         std::map<PinAddress, Materialization> Resources;
         std::vector<std::variant<PreparedPass, PreparedImport>> Execution;
         std::vector<GDX12CompletionPoint> Completions;
@@ -262,6 +263,7 @@ struct CompiledFrameGraph::Runtime
     std::map<NodeId, std::unique_ptr<GDX12RenderPass>> Passes;
     std::array<std::vector<GDX12RenderPass*>, 2> PassesByDevice;
     std::array<bool, 2> ActiveDevices{};
+    std::array<bool, 2> RayTracingDevices{};
     FrameGraphDiagnostics Diagnostics;
     std::map<NodeId, std::function<GDX12Texture*()>> Imports;
     std::map<PinAddress, PinAddress> Sources;
@@ -850,6 +852,7 @@ struct CompiledFrameGraph::Runtime
     // Keep allocation contents while clearing this frame's producer/export/import readiness.
     void ResetFrameSlotReadiness(FrameSlotResources& frameResources)
     {
+        frameResources.RayTracingPrepared = {};
         auto reset = [](auto& materials)
         {
             for (auto& [id, material] : materials)
@@ -925,6 +928,15 @@ struct CompiledFrameGraph::Runtime
             for (const auto& port : pass.Ports) { commandQueue->GPUWait(GetLastUse(*port.Resource)); }
         }
         auto* commandList = GetFrameCommandList(commandQueue, frameResources);
+        const auto role = pass.Node->DeviceRole;
+        if (pass.Pass->GetFlagValue(RENDER_PASS_FLAG_USE_RAYTRACING) && !frameResources.RayTracingPrepared[role])
+        {
+            auto& scene = *deviceResources->RayTracingScene;
+            scene.Build(commandList, GetCurrentFrameSlotResourcesIndex());
+            // Retain the old allocation through every consumer of this frame if TLAS grows later.
+            frameResources.ExternalResources.push_back(scene.GetTLAS().GetResource().D3DResource);
+            frameResources.RayTracingPrepared[role] = true;
+        }
         auto* passTimer = pass.Timer;
         const auto timingSlot = GetPassTimingSlot(Frame);
 
@@ -959,9 +971,17 @@ struct CompiledFrameGraph::Runtime
         for (auto* output : pass.Outputs) { output->ProducerReady = pass.Completion; }
     }
 
+    // BLAS compaction owns submissions, finish its cold preparation before recording frame lists.
+    void PrepareRayTracingGeometry()
+    {
+        for (const auto role : {DEVICE_ROLE_PRIMARY, DEVICE_ROLE_SECONDARY})
+            if (RayTracingDevices[role]) { GetDeviceResources(role)->RayTracingScene->PrepareGeometry(); }
+    }
+
     void RunSetupPasses()
     {
         if (SetupComplete) { return; }
+        PrepareRayTracingGeometry();
         FrameSlotResources setup;
         setup.MeasureFrame = false;
         try
@@ -986,6 +1006,7 @@ struct CompiledFrameGraph::Runtime
     {
         WaitForCurrentFrameSlotResources();
         if (ResourceRebuildRequested) { RebuildFrameSlotResources(); }
+        PrepareRayTracingGeometry();
         auto& frameResources = FrameSlots[GetCurrentFrameSlotResourcesIndex()];
         ResetFrameSlotReadiness(frameResources);
 
@@ -1011,14 +1032,17 @@ void FrameGraph::ValidateDeviceRequirements() const
         const auto rayTracingTier = specs.Features.RaytracingTier();
         const auto shaderModel = specs.Features.HighestShaderModel();
         auto minimumShaderModel = description.MinimumShaderModel;
-        if (description.MinimumRayTracingTier >= D3D12_RAYTRACING_TIER_1_1)
+        auto minimumRayTracingTier = description.MinimumRayTracingTier;
+        if (pass->GetFlagValue(RENDER_PASS_FLAG_USE_RAYTRACING))
+        { minimumRayTracingTier = (std::max)(minimumRayTracingTier, D3D12_RAYTRACING_TIER_1_0); }
+        if (minimumRayTracingTier >= D3D12_RAYTRACING_TIER_1_1)
         { minimumShaderModel = (std::max)(minimumShaderModel, D3D_SHADER_MODEL_6_5); }
-        else if (description.MinimumRayTracingTier >= D3D12_RAYTRACING_TIER_1_0)
+        else if (minimumRayTracingTier >= D3D12_RAYTRACING_TIER_1_0)
         { minimumShaderModel = (std::max)(minimumShaderModel, D3D_SHADER_MODEL_6_3); }
 
-        if (rayTracingTier >= description.MinimumRayTracingTier && shaderModel >= minimumShaderModel) { continue; }
-        const auto requiredDXR = description.MinimumRayTracingTier == D3D12_RAYTRACING_TIER_NOT_SUPPORTED
-            ? std::string{} : "DXR " + RayTracingTierToString(description.MinimumRayTracingTier) + " and ";
+        if (rayTracingTier >= minimumRayTracingTier && shaderModel >= minimumShaderModel) { continue; }
+        const auto requiredDXR = minimumRayTracingTier == D3D12_RAYTRACING_TIER_NOT_SUPPORTED
+            ? std::string{} : "DXR " + RayTracingTierToString(minimumRayTracingTier) + " and ";
         throw std::invalid_argument("ERROR: " + id + " [" + GetDeviceRoleName(node.DeviceRole) + ", " + specs.Name
             + "]: requires " + requiredDXR + "Shader Model " + ShaderModelToString(minimumShaderModel)
             + "; selected adapter supports DXR " + RayTracingTierToString(rayTracingTier)
@@ -1101,6 +1125,16 @@ std::unique_ptr<CompiledFrameGraph> FrameGraph::Compile()
     runtime->MergeDuplicateTextureImports();
     for (const auto& [id, node] : runtime->Definition.Nodes) { runtime->ActiveDevices[node.DeviceRole] = true; }
     for (const auto& edge : runtime->Definition.Connections) { runtime->Sources[edge.Target] = edge.Source; }
+    for (const auto& [id, pass] : runtime->Passes)
+        if (pass->GetFlagValue(RENDER_PASS_FLAG_USE_RAYTRACING))
+            runtime->RayTracingDevices[runtime->Definition.Nodes.at(id).DeviceRole] = true;
+    for (const auto role : {DEVICE_ROLE_PRIMARY, DEVICE_ROLE_SECONDARY})
+    {
+        if (!runtime->RayTracingDevices[role]) { continue; }
+        auto* resources = runtime->GetDeviceResources(role);
+        resources->GeometryBuffer->CreateSRVs(resources->SRV_UAV_Heap.get());
+        if (!resources->RayTracingScene) { resources->RayTracingScene = std::make_unique<GDX12RayTracingScene>(*resources); }
+    }
     runtime->ResolveResourceRequirements();
     for (const auto& [id, pass] : runtime->Passes)
     {
