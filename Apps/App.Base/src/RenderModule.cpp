@@ -57,6 +57,7 @@ namespace
         graph.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), lighting.GetInput("InDepthBuffer"));
         graph.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), rtao.GetInput("InDepthBuffer"));
         graph.ConnectNodes(opaque.GetOutput("OutNormalRoughness"), rtao.GetInput("InNormalRoughness"));
+        graph.ConnectNodes(opaque.GetOutput("OutVelocityBuffer"), rtao.GetInput("InVelocityBuffer"));
         graph.ConnectNodes(rtao.GetOutput("OutAmbientOcclusion"), lighting.GetInput("InAmbientOcclusion"));
         graph.ConnectNodes(shadows.GetOutput("OutDirectionalMaps"), lighting.GetInput("InDirectionalMaps"));
         graph.ConnectNodes(shadows.GetOutput("OutPointSpotMaps"), lighting.GetInput("InPointSpotMaps"));

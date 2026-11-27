@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildThisFileDirectory)PEPEngine.External.Paths.props" />
+  <PropertyGroup>
+    <PEPNRDSource>$(PEPExternalRoot)nrd\</PEPNRDSource>
+    <PEPNRDOutput>$(PEPRepoRoot)Build\External\NRD\$(Platform)\$(Configuration)\</PEPNRDOutput>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Platform)'=='x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(PEPNRDSource)Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>NRD_SHADERS_FOLDER=LR"($(PEPNRDOutput)Shaders\\)";%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <AdditionalLibraryDirectories>$(PEPNRDOutput)lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>NRD.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup Condition="'$(MSBuildProjectName)'=='Engine.RendererDX12'">
+    <_NRDInput Include="$(PEPNRDSource)CMakeLists.txt;$(PEPNRDSource)Include\**\*;$(PEPNRDSource)Source\**\*;$(PEPNRDSource)Shaders\**\*;$(PEPRepoRoot)MSBuild\BuildNRD.ps1;$(MSBuildThisFileFullPath)"
+               Exclude="$(PEPNRDSource)Shaders\NRDConfig.hlsli" />
+  </ItemGroup>
+  <Target Name="BuildNRD" BeforeTargets="ClCompile" Condition="'$(Platform)'=='x64' and '$(MSBuildProjectName)'=='Engine.RendererDX12'"
+          Inputs="@(_NRDInput)"
+          Outputs="$(PEPNRDOutput)lib\NRD.lib;$(PEPNRDOutput)Shaders\NRD.hlsli;$(PEPNRDOutput)Shaders\NRDConfig.hlsli;$(PEPNRDOutput)Shaders\ml.hlsli;$(PEPNRDOutput)$(VCToolsVersion).stamp;$(PEPNRDSource)Shaders\NRDConfig.hlsli">
+    <Error Condition="!Exists('$(PEPNRDSource)Include\NRD.h')" Text="NRD submodule is missing. Run git submodule update --init --recursive." />
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(PEPRepoRoot)MSBuild\BuildNRD.ps1&quot; -Source &quot;$(PEPNRDSource).&quot; -Output &quot;$(PEPNRDOutput).&quot; -Configuration &quot;$(Configuration)&quot; -VSInstallDir &quot;$(VSInstallDir).&quot; -VCToolsVersion &quot;$(VCToolsVersion)&quot;" />
+  </Target>
+</Project>

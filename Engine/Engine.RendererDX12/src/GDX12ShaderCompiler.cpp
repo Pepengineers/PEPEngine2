@@ -96,6 +96,15 @@ ComPtr<ID3DBlob> GDX12ShaderCompiler::CompileShaderDXC(const std::wstring& filen
 
     std::vector<LPCWSTR> arguments;
     std::vector<std::wstring> storage;
+    if (defines)
+    {
+        size_t count = 0;
+        while (defines[count].Name && defines[count].Definition) { ++count; }
+        storage.reserve(count);
+    }
+    const auto sourceDirectory = std::filesystem::path(filename).parent_path().wstring();
+    arguments.push_back(L"-I");
+    arguments.push_back(sourceDirectory.c_str());
 
     arguments.push_back(L"-E");
     std::wstring entrypointW(entrypoint.begin(), entrypoint.end());

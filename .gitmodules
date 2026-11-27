@@ -1,3 +1,6 @@
 [submodule "External/External.Libraries/rapidyaml"]
 	path = External/External.Libraries/rapidyaml
 	url = https://github.com/biojppm/rapidyaml.git
+[submodule "External/External.Libraries/nrd"]
+	path = External/External.Libraries/nrd
+	url = https://github.com/NVIDIA-RTX/NRD.git

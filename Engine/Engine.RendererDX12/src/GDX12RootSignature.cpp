@@ -12,19 +12,19 @@ GDX12RootSignature::GDX12RootSignature(GDX12Device* device, const GDX12RootSigna
 {
     std::vector<CD3DX12_ROOT_PARAMETER1> rootParameters;
     std::vector<CD3DX12_DESCRIPTOR_RANGE1> ranges;
-    ranges.reserve(desc.NumSingleSRVSlots + desc.NumSingleUAVSlots + desc.SRVRanges.size() + desc.UAVRanges.size());
+    ranges.reserve(desc.NumSingleSRVSlots + desc.NumSingleUAVSlots + desc.CBVRanges.size() + desc.SRVRanges.size() + desc.UAVRanges.size());
 
     UINT currentParamIndex = 0;
 
     if (desc.NumSingleCBVSlots > 0 || !desc.CBVRanges.empty() || !desc.Constants.empty())
     {
         _cbv0ParamIndex = currentParamIndex;
-        UINT currentRegister = 0;
+        UINT currentRegister = desc.CBVBaseRegister;
 
         for (const auto& constant : desc.Constants)
         {
             CD3DX12_ROOT_PARAMETER1 param;
-            param.InitAsConstants(constant, currentRegister);
+            param.InitAsConstants(constant, currentRegister, desc.CBVRegisterSpace);
             rootParameters.push_back(param);
             currentParamIndex++;
             currentRegister++;
@@ -33,7 +33,7 @@ GDX12RootSignature::GDX12RootSignature(GDX12Device* device, const GDX12RootSigna
         for (UINT i = 0; i < desc.NumSingleCBVSlots; i++)
         {
             CD3DX12_ROOT_PARAMETER1 param;
-            param.InitAsConstantBufferView(currentRegister);
+            param.InitAsConstantBufferView(currentRegister, desc.CBVRegisterSpace);
             rootParameters.push_back(param);
             currentParamIndex++;
             currentRegister++;
@@ -43,7 +43,7 @@ GDX12RootSignature::GDX12RootSignature(GDX12Device* device, const GDX12RootSigna
         {
             CD3DX12_DESCRIPTOR_RANGE1 range;
             range.Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, cbvRange.NumDescriptors, currentRegister,
-                0, D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE);
+                desc.CBVRegisterSpace, desc.CBVRangeFlags);
             ranges.push_back(range);
 
             CD3DX12_ROOT_PARAMETER1 param;
@@ -57,12 +57,13 @@ GDX12RootSignature::GDX12RootSignature(GDX12Device* device, const GDX12RootSigna
     if (desc.NumSingleSRVSlots > 0 || !desc.SRVRanges.empty())
     {
         _srv0ParamIndex = currentParamIndex;
-        UINT currentRegister = 0;
+        UINT currentRegister = desc.SRVBaseRegister;
 
         for (UINT i = 0; i < desc.NumSingleSRVSlots; i++)
         {
             CD3DX12_DESCRIPTOR_RANGE1 range;
-            range.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, currentRegister);
+            range.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, currentRegister,
+                desc.SRVRegisterSpace, desc.SingleSRVRangeFlags);
             ranges.push_back(range);
 
             CD3DX12_ROOT_PARAMETER1 param;
@@ -76,7 +77,7 @@ GDX12RootSignature::GDX12RootSignature(GDX12Device* device, const GDX12RootSigna
         {
             CD3DX12_DESCRIPTOR_RANGE1 range;
             range.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, srvRange.NumDescriptors, currentRegister,
-                0, D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE);
+                desc.SRVRegisterSpace, desc.SRVRangeFlags);
             ranges.push_back(range);
 
             CD3DX12_ROOT_PARAMETER1 param;
@@ -90,13 +91,13 @@ GDX12RootSignature::GDX12RootSignature(GDX12Device* device, const GDX12RootSigna
     if (desc.NumSingleUAVSlots > 0 || !desc.UAVRanges.empty())
     {
         _uav0ParamIndex = currentParamIndex;
-        UINT currentRegister = 0;
+        UINT currentRegister = desc.UAVBaseRegister;
 
         for (UINT i = 0; i < desc.NumSingleUAVSlots; i++)
         {
             CD3DX12_DESCRIPTOR_RANGE1 range;
             range.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, currentRegister,
-                0, D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE);
+                desc.UAVRegisterSpace, desc.SingleUAVRangeFlags);
             ranges.push_back(range);
 
             CD3DX12_ROOT_PARAMETER1 param;
@@ -109,7 +110,8 @@ GDX12RootSignature::GDX12RootSignature(GDX12Device* device, const GDX12RootSigna
         for (const auto& uavRange : desc.UAVRanges)
         {
             CD3DX12_DESCRIPTOR_RANGE1 range;
-            range.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, uavRange.NumDescriptors, currentRegister);
+            range.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, uavRange.NumDescriptors, currentRegister,
+                desc.UAVRegisterSpace, desc.UAVRangeFlags);
             ranges.push_back(range);
 
             CD3DX12_ROOT_PARAMETER1 param;
@@ -126,7 +128,7 @@ GDX12RootSignature::GDX12RootSignature(GDX12Device* device, const GDX12RootSigna
         rootParameters.data(),
         static_cast<UINT>(desc.StaticSamplers.size()),
         desc.StaticSamplers.empty() ? nullptr : desc.StaticSamplers.data(),
-        D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
+        desc.Flags);
 
     ComPtr<ID3DBlob> signatureBlob, errorBlob;
     HRESULT hr = D3D12SerializeVersionedRootSignature(&rootSignatureDesc, &signatureBlob, &errorBlob);
@@ -148,15 +150,15 @@ GDX12RootSignature::~GDX12RootSignature()
 
 int GDX12RootSignature::GetTRootParamIndex(int registerIndex)
 {
-    return registerIndex + _srv0ParamIndex;
+    return registerIndex - static_cast<int>(_desc.SRVBaseRegister) + _srv0ParamIndex;
 }
 
 int GDX12RootSignature::GetBRootParamIndex(int registerIndex)
 {
-    return registerIndex + _cbv0ParamIndex;
+    return registerIndex - static_cast<int>(_desc.CBVBaseRegister) + _cbv0ParamIndex;
 }
 
 int GDX12RootSignature::GetURootParamIndex(int registerIndex)
 {
-    return registerIndex + _uav0ParamIndex;
+    return registerIndex - static_cast<int>(_desc.UAVBaseRegister) + _uav0ParamIndex;
 }

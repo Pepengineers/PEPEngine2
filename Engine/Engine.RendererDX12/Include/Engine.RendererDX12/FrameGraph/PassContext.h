@@ -86,6 +86,7 @@ public:
     GDX12Device* GetDevice() const { return _resources->Device; }
     GDX12DeviceResources* GetDeviceResources() const { return _resources; }
     const RenderPipelineCommonData* GetFrameData() const { return _common; }
+    uint32_t GetFrameSlotResourcesCount() const { return _plan.FrameSlotCount; }
     template<class T> T GetParameter(const std::string& name) const { return _node.Description.GetParameter<T>(name); }
     const ResourceDescription& GetInputResourceDescription(const PinId& id) const
     {
