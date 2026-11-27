@@ -22,7 +22,7 @@ enum ERenderPassFlags : uint32_t
     RENDER_PASS_FLAG_USE_CAMERAS = 1 << 2,
     RENDER_PASS_FLAG_USE_LIGHTING = 1 << 3,
     RENDER_PASS_FLAG_USE_INSTANCES = 1 << 4,
-    // Includes the geometry, instance and material caches used by ray tracing.
+    // Requires DXR 1.1 and Shader Model 6.5 on the executing GPU.
     RENDER_PASS_FLAG_USE_RAYTRACING = 1 << 5,
     RENDER_PASS_FLAG_UPSCALER = 1 << 6,
     RENDER_PASS_FLAG_USE_JITTER = 1 << 8,

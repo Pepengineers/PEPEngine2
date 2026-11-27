@@ -126,7 +126,6 @@ public:
     std::unique_ptr<CompiledFrameGraph> Compile();
 private:
     // Reject unsupported placement before calling providers or initializing passes.
-    // Reads cached DeviceSpecs; never moves a pass to another GPU implicitly.
     void ValidateDeviceRequirements() const;
     template<class T, class... Args> NodeHandle AddPass(NodeId id, EDeviceRole role, Args&&... args)
     {

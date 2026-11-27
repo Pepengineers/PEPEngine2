@@ -135,6 +135,9 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12SSAOPass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12RTAOPass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12HBAOPass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -239,6 +242,9 @@
     <ClCompile Include="src\GDX12SSAOPass.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\GDX12RTAOPass.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="src\GDX12HBAOPass.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -324,6 +330,7 @@
     <None Include="Shaders\DeferredGeometryPass.hlsl" />
     <None Include="Shaders\DeferredLightingPass.hlsl" />
     <None Include="Shaders\SSAOPass.hlsl" />
+    <None Include="Shaders\RTAOPass.hlsl" />
     <None Include="Shaders\HBAOPass.hlsl" />
     <None Include="Shaders\XeGTAOPass.hlsl" />
     <None Include="Shaders\SkyBoxPass.hlsl" />

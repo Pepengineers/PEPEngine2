@@ -1025,26 +1025,15 @@ void FrameGraph::ValidateDeviceRequirements() const
 {
     for (const auto& [id, pass] : _passes)
     {
+        if (!pass->GetFlagValue(RENDER_PASS_FLAG_USE_RAYTRACING)) { continue; }
         const auto& node = _definition->Nodes.at(id);
-        const auto& description = node.Description;
         const auto* device = node.DeviceRole == DEVICE_ROLE_PRIMARY ? _primary : _secondary;
         const auto& specs = device->GetDeviceFeatures();
         const auto rayTracingTier = specs.Features.RaytracingTier();
         const auto shaderModel = specs.Features.HighestShaderModel();
-        auto minimumShaderModel = description.MinimumShaderModel;
-        auto minimumRayTracingTier = description.MinimumRayTracingTier;
-        if (pass->GetFlagValue(RENDER_PASS_FLAG_USE_RAYTRACING))
-        { minimumRayTracingTier = (std::max)(minimumRayTracingTier, D3D12_RAYTRACING_TIER_1_0); }
-        if (minimumRayTracingTier >= D3D12_RAYTRACING_TIER_1_1)
-        { minimumShaderModel = (std::max)(minimumShaderModel, D3D_SHADER_MODEL_6_5); }
-        else if (minimumRayTracingTier >= D3D12_RAYTRACING_TIER_1_0)
-        { minimumShaderModel = (std::max)(minimumShaderModel, D3D_SHADER_MODEL_6_3); }
-
-        if (rayTracingTier >= minimumRayTracingTier && shaderModel >= minimumShaderModel) { continue; }
-        const auto requiredDXR = minimumRayTracingTier == D3D12_RAYTRACING_TIER_NOT_SUPPORTED
-            ? std::string{} : "DXR " + RayTracingTierToString(minimumRayTracingTier) + " and ";
+        if (rayTracingTier >= D3D12_RAYTRACING_TIER_1_1 && shaderModel >= D3D_SHADER_MODEL_6_5) { continue; }
         throw std::invalid_argument("ERROR: " + id + " [" + GetDeviceRoleName(node.DeviceRole) + ", " + specs.Name
-            + "]: requires " + requiredDXR + "Shader Model " + ShaderModelToString(minimumShaderModel)
+            + "]: requires DXR 1.1 and Shader Model 6.5"
             + "; selected adapter supports DXR " + RayTracingTierToString(rayTracingTier)
             + " and Shader Model " + ShaderModelToString(shaderModel)
             + ". Assign this pass to a compatible GPU or remove it from the pipeline.");
