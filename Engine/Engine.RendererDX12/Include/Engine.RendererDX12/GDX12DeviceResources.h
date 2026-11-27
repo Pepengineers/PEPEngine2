@@ -6,6 +6,7 @@
 #include "Engine.RendererDX12/GDX12Texture.h"
 #include "Engine.RendererDX12/GDX12Material.h"
 #include "Engine.RendererDX12/GDX12GeometryBuffer.h"
+#include "Engine.RendererDX12/GDX12RayTracingScene.h"
 
 class GDX12Device;
 class GameTimer;
@@ -23,6 +24,7 @@ public:
     std::unique_ptr<GDX12DescriptorHeap> DSVHeap;
 
     std::unique_ptr<GDX12GeometryBuffer> GeometryBuffer;
+    std::unique_ptr<GDX12RayTracingScene> RayTracingScene;
 
     // Null SRVs for floating-point texture inputs, shared by passes on this device.
     // These descriptors allocate no texture memory and outlive pipeline rebuilds.

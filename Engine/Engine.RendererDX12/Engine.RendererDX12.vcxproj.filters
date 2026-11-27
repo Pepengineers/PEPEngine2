@@ -19,7 +19,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12AccelerationStructure.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12RayTracingScene.h"><Filter>Header Files</Filter></ClInclude>
     <ClCompile Include="src\GDX12AccelerationStructure.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="src\GDX12RayTracingScene.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClInclude Include="Include\Engine.RendererDX12\FrameGraph\FrameGraph.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="src\FrameGraph\FrameGraphDiagnostics.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\FrameGraph\FrameGraphResources.h"><Filter>Header Files</Filter></ClInclude>

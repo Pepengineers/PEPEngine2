@@ -16,6 +16,7 @@ class SceneManagerModule;
 class World;
 class GDX12SwapChain;
 class GDX12Device;
+class GDX12RayTracingScene;
 
 struct TransformComponent;
 struct CameraComponent;
@@ -94,8 +95,11 @@ public:
         ListenerHandle RenderCompUpdated = 0;
     };
 
-    TransformCompGPUData& GetTransformGPUData(Entity entity);
+    TransformCompGPUData& GetTransformGPUData(World& world, Entity entity);
     ClusteredLightingGrid& GetLightingGrid() { return _lightingGrid; }
+
+    GDX12RayTracingScene& GetRayTracingScene(EDeviceRole role);
+    void UpdateRayTracingInstance(const StaticMeshRenderComponent& component, const Matrix& transform);
 
     // this function adds listeners to new world
     void SubscribeToWorld(World& world);
@@ -133,6 +137,7 @@ protected:
     bool ShouldRender() override;
 
 private:
+    void RemoveRayTracingInstance(const StaticMeshRenderComponent& component);
     // Install the selected mesh on component creation or when its mesh-change event arrives.
     // Requires submitted geometry and a valid material slot for every submesh.
     // Waits for GPU work, disables the previous commands, and allocates fresh instance slots.
@@ -163,7 +168,7 @@ private:
     ListenerHandle _worldCreatedListener = 0;
     ListenerHandle _worldDestroyedListener = 0;
     
-    std::unordered_map<Entity, TransformCompGPUData> _transformGPUData;
+    std::unordered_map<World*, std::unordered_map<Entity, TransformCompGPUData>> _transformGPUData;
     std::unordered_map<World*, WorldRenderSubscriptions> _worldSubscriptions;
     uint32_t _transformCount = 1; // Index zero belongs to the shared identity transform.
     uint32_t _cameraCount = 0;

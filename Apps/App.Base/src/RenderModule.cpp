@@ -9,6 +9,7 @@
 
 #include "Engine.RendererDX12/GDX12SwapChain.h"
 #include "Engine.RendererDX12/GDX12StreamlineSDK.h"
+#include "Engine.RendererDX12/GDX12RayTracingScene.h"
 #include <algorithm>
 
 namespace
@@ -383,9 +384,33 @@ void RenderModule::SetActiveCamera(CameraComponent* camera)
     _RPcommonData.ActiveCameraFarPlane = camera->FarPlane;
 }
 
-TransformCompGPUData& RenderModule::GetTransformGPUData(Entity entity)
+TransformCompGPUData& RenderModule::GetTransformGPUData(World& world, Entity entity)
 {
-    return _transformGPUData.at(entity);
+    return _transformGPUData.at(&world).at(entity);
+}
+
+GDX12RayTracingScene& RenderModule::GetRayTracingScene(EDeviceRole role)
+{
+    auto& resources = GetDeviceResources(role);
+    if (!resources.RayTracingScene)
+    { throw std::logic_error("ERROR: The pipeline must declare RENDER_PASS_FLAG_USE_RAYTRACING on this GPU."); }
+    return *resources.RayTracingScene;
+}
+
+void RenderModule::UpdateRayTracingInstance(const StaticMeshRenderComponent& component, const Matrix& transform)
+{
+    if (component._CBufferIndices.empty()) { return; }
+    for (const auto role : {DEVICE_ROLE_PRIMARY, DEVICE_ROLE_SECONDARY})
+        if (PipelineHasFlag(role, RENDER_PASS_FLAG_USE_RAYTRACING))
+            GetRayTracingScene(role).SetInstance(component._CBufferIndices.front(), component._boundMeshHandler, transform);
+}
+
+void RenderModule::RemoveRayTracingInstance(const StaticMeshRenderComponent& component)
+{
+    if (component._CBufferIndices.empty()) { return; }
+    for (auto* resources : {&_primaryResources, &_secondaryResources})
+        if (resources->RayTracingScene)
+            resources->RayTracingScene->RemoveInstance(component._CBufferIndices.front());
 }
 
 void RenderModule::SubscribeToWorld(World& world)
@@ -471,6 +496,10 @@ void RenderModule::SubscribeToWorld(World& world)
             });
 
     _worldSubscriptions[&world] = subscriptions;
+    ecs.ForEach<TransformComponent>([&](Entity entity, TransformComponent& transform)
+    {
+        if (!_transformGPUData[&world].count(entity)) { OnTransformComponentCreated(world, entity, transform); }
+    });
     ecs.ForEach<StaticMeshRenderComponent>([&](Entity entity, StaticMeshRenderComponent& mesh)
     {
         if (mesh._CBufferIndices.empty()) OnRenderComponentCreated(world, entity, mesh);
@@ -505,6 +534,7 @@ void RenderModule::UnsubscribeFromWorld(World& world)
     std::vector<UINT> instances;
     ecs.ForEach<StaticMeshRenderComponent>([&](Entity, const StaticMeshRenderComponent& mesh)
     {
+        RemoveRayTracingInstance(mesh);
         instances.insert(instances.end(), mesh._CBufferIndices.begin(), mesh._CBufferIndices.end());
     });
     DisableMeshInstanceDrawCommands(instances);
@@ -522,6 +552,7 @@ void RenderModule::UnsubscribeFromWorld(World& world)
     lightPool.OnComponentCreated.RemoveListener(subscriptions.LightCreated);
     lightPool.OnComponentUpdated.RemoveListener(subscriptions.LightUpdated);
 
+    _transformGPUData.erase(&world);
     _worldSubscriptions.erase(it);
 }
 
@@ -562,7 +593,7 @@ void RenderModule::OnTransformComponentCreated(World& world, Entity entity, Tran
 {
     component.DirtyFlag = true;
     if (_frameGraph) { _frameGraph->WaitForGPUCompletion(); }
-    auto& data = _transformGPUData[entity];
+    auto& data = _transformGPUData[&world][entity];
     data.CBufferIndex = _transformCount++;
     data.NumFramesDirty = GetFrameSlotCount();
     ResizeSceneBuffers(_primaryResources, GetDevicePassFlags(DEVICE_ROLE_PRIMARY));
@@ -580,11 +611,11 @@ void RenderModule::OnTransformComponentDestroyed(World& world, Entity entity, Tr
     if (world.GetECS().Has<StaticMeshRenderComponent>(entity))
     {
         auto& mesh = world.GetECS().Get<StaticMeshRenderComponent>(entity);
-        if (mesh._shadowCasterInitialized && _transformGPUData.at(entity).World != Matrix::Identity)
+        if (mesh._shadowCasterInitialized && GetTransformGPUData(world, entity).World != Matrix::Identity)
             mesh._shadowCasterDynamic = true;
         mesh.DirtyFlag = true;
     }
-    _transformGPUData.erase(entity);
+    _transformGPUData.at(&world).erase(entity);
     if (world.GetECS().Has<CameraComponent>(entity))
         world.GetECS().Get<CameraComponent>(entity).DirtyFlag = true;
     if (world.GetECS().Has<LightComponent>(entity))
@@ -626,13 +657,17 @@ void RenderModule::OnRenderComponentCreated(World& world, Entity entity, StaticM
 
 void RenderModule::OnRenderComponentDestroyed(World& world, Entity entity, StaticMeshRenderComponent& component)
 {
+    RemoveRayTracingInstance(component);
     DisableMeshInstanceDrawCommands(component._CBufferIndices);
 }
 
 void RenderModule::OnRenderComponentUpdated(World& world, Entity entity, StaticMeshRenderComponent& component)
 {
     if (component.MeshHandler != component._boundMeshHandler)
+    {
+        RemoveRayTracingInstance(component);
         BindMesh(component);
+    }
     component.DirtyFlag = true;
 }
 
@@ -729,6 +764,8 @@ void RenderModule::UpdateMaterials()
 
 void RenderModule::PreRender()
 {
+    for (const auto role : {DEVICE_ROLE_PRIMARY, DEVICE_ROLE_SECONDARY})
+        if (PipelineHasFlag(role, RENDER_PASS_FLAG_USE_RAYTRACING)) { GetRayTracingScene(role).PrepareGeometry(); }
     auto& shadows = _RPcommonData.ShadowSystem;
     const auto directionalArraySize = shadows.DirectionalArraySize;
     const auto pointSpotArraySize = shadows.PointSpotArraySize;
@@ -877,6 +914,7 @@ void RenderModule::CompileFrameGraph(FrameGraph& graph)
 
     UploadSceneResources(_primaryResources, primaryFlags);
     if (dualGPUMode) { UploadSceneResources(_secondaryResources, secondaryFlags); }
+    else { _secondaryResources.RayTracingScene.reset(); }
     graph.SetDeviceResources(&_primaryResources, dualGPUMode ? &_secondaryResources : nullptr, &_RPcommonData);
 
     _RPcommonData.ShadowSystem.DirectionalLightShadowMapResolution = directionalResolution;
@@ -946,12 +984,19 @@ void RenderModule::UploadSceneResources(GDX12DeviceResources& resources, uint32_
             if (!gpuTexture) { gpuTexture = CreateDX12Texture(entry.first, &resources, &texture.Source, texture.Source.GetType()); }
         }
     }
+    if (flags & RENDER_PASS_FLAG_USE_RAYTRACING)
+    {
+        resources.GeometryBuffer->CreateSRVs(resources.SRV_UAV_Heap.get());
+        if (!resources.RayTracingScene) { resources.RayTracingScene = std::make_unique<GDX12RayTracingScene>(resources); }
+    }
+    else { resources.RayTracingScene.reset(); }
 }
 
 void RenderModule::MarkSceneDataDirty()
 {
     for (auto& material : _materials) { material.second->DirtyFlag = true; }
-    for (auto& transform : _transformGPUData) { transform.second.NumFramesDirty = GetFrameSlotCount(); }
+    for (auto& [world, transforms] : _transformGPUData)
+        for (auto& [entity, transform] : transforms) { transform.NumFramesDirty = GetFrameSlotCount(); }
     for (const auto& subscription : _worldSubscriptions)
     {
         auto& ecs = subscription.first->GetECS();

@@ -132,9 +132,9 @@ public:
             });
 
         ecs.ForEach<TransformComponent>(
-            [&ecs, &renderModule, &numFrames, &devices](Entity entity, TransformComponent& transform)
+            [&ecs, &world, &renderModule, &numFrames, &devices](Entity entity, TransformComponent& transform)
             {
-                auto& GPUData = renderModule->GetTransformGPUData(entity);
+                auto& GPUData = renderModule->GetTransformGPUData(world, entity);
                 const bool transformUpdated = transform.DirtyFlag;
                 if (transform.DirtyFlag)
                 {
@@ -180,7 +180,7 @@ public:
             });
 
         ecs.ForEach<StaticMeshRenderComponent>(
-            [&ecs, &renderModule, &numFrames, &devices, &shadows, pipelineFlags, primaryFlags](Entity entity, StaticMeshRenderComponent& renderer)
+            [&ecs, &world, &renderModule, &numFrames, &devices, &shadows, pipelineFlags, primaryFlags](Entity entity, StaticMeshRenderComponent& renderer)
             {
                 if (renderer.DirtyFlag)
                 {
@@ -188,13 +188,14 @@ public:
                 }
                 if (!renderer._numFramesDirty) return;
                 const auto* transform = ecs.Has<TransformComponent>(entity)
-                    ? &renderModule->GetTransformGPUData(entity) : nullptr;
+                    ? &renderModule->GetTransformGPUData(world, entity) : nullptr;
                 const Matrix worldMatrix = transform ? transform->World :
                     Matrix::CreateScale(DefaultTransform.Scale) *
                     Matrix::CreateFromYawPitchRoll(XMConvertToRadians(DefaultTransform.Rotation.y),
                         XMConvertToRadians(DefaultTransform.Rotation.x), XMConvertToRadians(DefaultTransform.Rotation.z)) *
                     Matrix::CreateTranslation(DefaultTransform.Location);
                 const UINT transformIndex = transform ? transform->CBufferIndex : 0;
+                if (renderer.DirtyFlag) { renderModule->UpdateRayTracingInstance(renderer, worldMatrix); }
                 if (renderer.DirtyFlag && (pipelineFlags & RENDER_PASS_FLAG_USE_GEOMETRY))
                 {
                     const auto role = (primaryFlags & RENDER_PASS_FLAG_USE_GEOMETRY) ? DEVICE_ROLE_PRIMARY : DEVICE_ROLE_SECONDARY;
