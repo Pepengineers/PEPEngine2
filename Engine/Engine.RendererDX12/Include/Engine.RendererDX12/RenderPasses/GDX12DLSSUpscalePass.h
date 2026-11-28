@@ -5,7 +5,7 @@
 class GDX12DLSSUpscalePass final : public GDX12RenderPass
 {
 public:
-    explicit GDX12DLSSUpscalePass(NVSDK_NGX_PerfQuality_Value quality);
+    explicit GDX12DLSSUpscalePass(NVSDK_NGX_PerfQuality_Value quality = NVSDK_NGX_PerfQuality_Value_MaxQuality);
     ~GDX12DLSSUpscalePass() override;
 
     void Setup(GDX12DeviceResources* resources, RenderPipelineCommonData* common) override;

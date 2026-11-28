@@ -113,11 +113,13 @@ void GDX12CommandQueue::ValidateCommandList(GDX12CommandList* list) const
         throw std::invalid_argument("Command list must be recording and owned by the submitting queue");
 }
 
-void GDX12CommandQueue::DiscardCommandList(GDX12CommandList* list) noexcept
+bool GDX12CommandQueue::DiscardCommandList(GDX12CommandList* list) noexcept
 {
     const auto entry = std::find_if(_workingCommandLists.begin(), _workingCommandLists.end(),
         [list](const auto& candidate) { return candidate.get() == list; });
-    if (entry != _workingCommandLists.end() && !(*entry)->_submitted) _workingCommandLists.erase(entry);
+    if (entry == _workingCommandLists.end() || (*entry)->_submitted) return false;
+    _workingCommandLists.erase(entry);
+    return true;
 }
 
 void GDX12CommandQueue::ExecuteCommandList(GDX12CommandList* commandList)

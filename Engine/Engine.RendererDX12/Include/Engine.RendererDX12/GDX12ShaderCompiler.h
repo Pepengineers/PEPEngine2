@@ -17,6 +17,7 @@ public:
 	static GDX12ShaderCompiler& GetInstance();
 
 	static void Shutdown();
+	static std::string GetShaderTargetForModel(GDX12Device* device, const std::string& shaderType);
 
 	void Initialize();
 
@@ -26,7 +27,6 @@ public:
 private:
 	GDX12ShaderCompiler();
 
-	std::string GetShaderTargetForModel(GDX12Device* device, const std::string& shaderType);
 
 	ComPtr<ID3DBlob> CompileShaderDXC(const std::wstring& filename, const D3D_SHADER_MACRO* defines,
 		const std::string& entrypoint, const std::string& shaderType);

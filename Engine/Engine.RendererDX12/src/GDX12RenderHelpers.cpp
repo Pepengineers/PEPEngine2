@@ -56,9 +56,14 @@ ComPtr<ID3D12PipelineState> GDX12RenderHelpers::CreateComputePipeline(GDX12Devic
     const wchar_t* file, const char* entry, const D3D_SHADER_MACRO* defines)
 {
     auto shader = GDX12ShaderCompiler::GetInstance().CompileShader(device, file, defines, entry, "cs");
+    return CreateComputePipeline(device, root, *shader.Get());
+}
+
+ComPtr<ID3D12PipelineState> GDX12RenderHelpers::CreateComputePipeline(GDX12Device* device, GDX12RootSignature* root, ID3DBlob& shader)
+{
     D3D12_COMPUTE_PIPELINE_STATE_DESC desc = {};
     desc.pRootSignature = root->GetRootSignature().Get();
-    desc.CS = { shader->GetBufferPointer(), shader->GetBufferSize() };
+    desc.CS = { shader.GetBufferPointer(), shader.GetBufferSize() };
     ComPtr<ID3D12PipelineState> result;
     ThrowIfFailed(device->GetDevice()->CreateComputePipelineState(&desc, IID_PPV_ARGS(&result)));
     return result;

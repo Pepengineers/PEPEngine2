@@ -2,7 +2,10 @@
 #include "Common/RuntimePaths.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include <nis/NIS_Config.h>
+#include <map>
+#include <mutex>
 #include <stdexcept>
+#include <tuple>
 
 namespace
 {
@@ -10,6 +13,32 @@ namespace
     constexpr auto CoefficientFormat = DXGI_FORMAT_R32G32B32A32_FLOAT;
     constexpr UINT ConfigWords = offsetof(NISConfig, reserved1) / sizeof(UINT) + 1;
     constexpr float Sharpness = 0.1f;
+
+    ComPtr<ID3DBlob> GetScalerShader(GDX12Device* device, UINT blockWidth, UINT blockHeight, UINT threads)
+    {
+        // Quality changes the input grid, while the DXC variant depends on the dispatch shape and target.
+        using Variant = std::tuple<std::string, UINT, UINT, UINT>;
+        static std::map<Variant, ComPtr<ID3DBlob>> shaders;
+        static std::mutex mutex;
+        const Variant variant{GDX12ShaderCompiler::GetShaderTargetForModel(device, "cs"), blockWidth, blockHeight, threads};
+        std::scoped_lock lock(mutex);
+        const auto cached = shaders.find(variant);
+        if (cached != shaders.end()) return cached->second;
+
+        const auto width = std::to_string(blockWidth);
+        const auto height = std::to_string(blockHeight);
+        const auto groupSize = std::to_string(threads);
+        const D3D_SHADER_MACRO defines[] = {
+            {"NIS_HDR_MODE", "1"},
+            {"NIS_BLOCK_WIDTH", width.c_str()},
+            {"NIS_BLOCK_HEIGHT", height.c_str()},
+            {"NIS_THREAD_GROUP_SIZE", groupSize.c_str()},
+            {nullptr, nullptr}
+        };
+        const auto shader = Engine::Core::GetExecutableDirectory() / L"Shaders" / L"NIS" / L"NIS_Main.hlsl";
+        auto bytecode = GDX12ShaderCompiler::GetInstance().CompileShader(device, shader.wstring(), defines, "main", "cs");
+        return shaders.emplace(variant, std::move(bytecode)).first->second;
+    }
 }
 
 GDX12NISUpscalePass::GDX12NISUpscalePass(float ratio) : _ratio(ratio)
@@ -60,16 +89,6 @@ void GDX12NISUpscalePass::CreateScaler()
     NISOptimizer optimizer(true, architecture);
     _blockWidth = optimizer.GetOptimalBlockWidth();
     _blockHeight = optimizer.GetOptimalBlockHeight();
-    const auto blockWidth = std::to_string(_blockWidth);
-    const auto blockHeight = std::to_string(_blockHeight);
-    const auto threads = std::to_string(optimizer.GetOptimalThreadGroupSize());
-    const D3D_SHADER_MACRO defines[] = {
-        {"NIS_HDR_MODE", "1"},
-        {"NIS_BLOCK_WIDTH", blockWidth.c_str()},
-        {"NIS_BLOCK_HEIGHT", blockHeight.c_str()},
-        {"NIS_THREAD_GROUP_SIZE", threads.c_str()},
-        {nullptr, nullptr}
-    };
 
     GDX12RootSignatureDesc root;
     root.Constants = {ConfigWords};
@@ -78,8 +97,8 @@ void GDX12NISUpscalePass::CreateScaler()
     root.StaticSamplers = {CD3DX12_STATIC_SAMPLER_DESC(0, D3D12_FILTER_MIN_MAG_MIP_LINEAR,
         D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP)};
     _root = std::make_unique<GDX12RootSignature>(device, root);
-    const auto shader = Engine::Core::GetExecutableDirectory() / L"Shaders" / L"NIS" / L"NIS_Main.hlsl";
-    _pipeline = GDX12RenderHelpers::CreateComputePipeline(device, _root.get(), shader.c_str(), "main", defines);
+    const auto shader = GetScalerShader(device, _blockWidth, _blockHeight, optimizer.GetOptimalThreadGroupSize());
+    _pipeline = GDX12RenderHelpers::CreateComputePipeline(device, _root.get(), *shader.Get());
 
     constexpr UINT width = kFilterSize / 4;
     constexpr UINT height = kPhaseCount;

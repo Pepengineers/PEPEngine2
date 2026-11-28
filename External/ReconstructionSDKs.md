@@ -20,7 +20,7 @@ Intel archive: `XeSS_SDK_3.0.2.zip`, SHA256 `88b8a373f30e33f3558a77a93e634f11b81
 
 Intel `inc` maps to `External.Libraries/xess/Include`, and `lib` to its `lib` directory. NVIDIA `include` maps to `External.Libraries/nvidia-sdk/Include/nvidia-sdk`. Their selected runtime DLLs map to `External/Runtime`.
 
-DLSS SDK 310.9.16, commit `9981c6350dc58c0ce21f024fd65e31e851c31689`, supplies the NGX headers in `External.Libraries/ngx/Include/ngx`. The DLL CRT libraries from `lib/Windows_x86_64/x64` map to `ngx/lib/Release/nvsdk_ngx_d.lib` and `ngx/lib/Debug/nvsdk_ngx_d_dbg.lib`. The NVIDIA driver supplies the NGX core. The application ships the signed `lib/Windows_x86_64/rel/nvngx_dlss.dll` with `Licenses/NVIDIA/nvngx_dlss.license.txt`.
+DLSS SDK 310.9.16, commit `9981c6350dc58c0ce21f024fd65e31e851c31689`, supplies the NGX headers in `External.Libraries/ngx/Include/ngx`. The DLL CRT libraries from `lib/Windows_x86_64/x64` map to `ngx/lib/Release/nvsdk_ngx_d.lib` and `ngx/lib/Debug/nvsdk_ngx_d_dbg.lib`. The NVIDIA driver supplies the NGX core. The application ships the signed `lib/Windows_x86_64/rel/nvngx_dlss.dll` with `Licenses/NVIDIA/nvngx_dlss.license.txt`. Direct NGX loads the DLL beside the executable and uses `%LOCALAPPDATA%\PEPEngine2\NGX` for SDK data.
 
 NIS SDK 1.0.3 supplies `NIS_Config.h`, `NIS_Main.hlsl` and `NIS_Scaler.h` in `External.Libraries/nis`. The two shader files and `Licenses/NVIDIA/nis.license.txt` accompany the executable.
 

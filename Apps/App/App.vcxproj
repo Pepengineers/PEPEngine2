@@ -215,6 +215,7 @@
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Target Name="CopyRuntimeSDKFiles" AfterTargets="Build">
+    <Delete Files="$(TargetDir)sl.dlss.dll;$(TargetDir)sl.nis.dll;$(TargetDir)sl.directsr.dll" />
     <ItemGroup>
       <SDKRuntime Include="$(PEPRepoRoot)External\Runtime\*.dll" />
       <ReconstructionSDKNotice Include="$(PEPRepoRoot)External\Runtime\Licenses\**\*" />

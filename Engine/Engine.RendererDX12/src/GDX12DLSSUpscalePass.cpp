@@ -3,8 +3,14 @@
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.RendererDX12/GDX12StreamlineSDK.h"
 #include <ngx/nvsdk_ngx_helpers.h>
+#include <ShlObj.h>
+#include <memory>
 #include <mutex>
 #include <stdexcept>
+
+#pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "ole32.lib")
+#pragma comment(lib, "uuid.lib")
 
 namespace
 {
@@ -13,6 +19,20 @@ namespace
     std::unordered_map<ID3D12Device*, size_t> NgxDevices;
     constexpr auto EngineVersion = "1.0.0";
     constexpr auto EngineType = NVSDK_NGX_ENGINE_TYPE_CUSTOM;
+
+    std::wstring GetNGXDataDirectory()
+    {
+        PWSTR path = nullptr;
+        const HRESULT result = SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_DEFAULT, nullptr, &path);
+        const std::unique_ptr<wchar_t, decltype(&CoTaskMemFree)> localAppData(path, CoTaskMemFree);
+        if (FAILED(result))
+            throw std::runtime_error("DLSS NGX could not locate LocalAppData (HRESULT " +
+                std::to_string(static_cast<unsigned>(result)) + ")");
+
+        const auto directory = std::filesystem::path(localAppData.get()) / L"PEPEngine2" / L"NGX";
+        std::filesystem::create_directories(directory);
+        return directory.wstring();
+    }
 
     void CheckNGX(NVSDK_NGX_Result result, const char* operation)
     {
@@ -36,8 +56,9 @@ void GDX12DLSSUpscalePass::Setup(GDX12DeviceResources* resources, RenderPipeline
 {
     GDX12RenderPass::Setup(resources, common);
     auto* device = resources->Device->GetDevice().Get();
-    const auto directory = Engine::Core::GetExecutableDirectory().wstring();
-    const wchar_t* paths[] = {directory.c_str()};
+    const auto runtimeDirectory = Engine::Core::GetExecutableDirectory().wstring();
+    const auto dataDirectory = GetNGXDataDirectory();
+    const wchar_t* paths[] = {runtimeDirectory.c_str()};
     NVSDK_NGX_FeatureCommonInfo info = {};
     info.PathListInfo.Length = _countof(paths);
     info.PathListInfo.Path = paths;
@@ -46,7 +67,7 @@ void GDX12DLSSUpscalePass::Setup(GDX12DeviceResources* resources, RenderPipeline
     discovery.FeatureID = NVSDK_NGX_Feature_SuperSampling;
     discovery.Identifier.IdentifierType = NVSDK_NGX_Application_Identifier_Type_Project_Id;
     discovery.Identifier.v.ProjectDesc = {GDX12StreamlineSDK::ProjectId, EngineType, EngineVersion};
-    discovery.ApplicationDataPath = directory.c_str();
+    discovery.ApplicationDataPath = dataDirectory.c_str();
     discovery.FeatureInfo = &info;
 
     auto* adapter = resources->Device->GetAdapter();
@@ -62,7 +83,7 @@ void GDX12DLSSUpscalePass::Setup(GDX12DeviceResources* resources, RenderPipeline
         if (inserted)
         {
             const auto result = NVSDK_NGX_D3D12_Init_with_ProjectID(GDX12StreamlineSDK::ProjectId,
-                EngineType, EngineVersion, directory.c_str(), device, &info, NVSDK_NGX_Version_API);
+                EngineType, EngineVersion, dataDirectory.c_str(), device, &info, NVSDK_NGX_Version_API);
             if (NVSDK_NGX_FAILED(result)) NgxDevices.erase(entry);
             CheckNGX(result, "device initialization");
         }
@@ -91,8 +112,14 @@ void GDX12DLSSUpscalePass::Initialize()
     const auto format = _inputs[2]->GetTexture()->GetFormat();
     if (format != DXGI_FORMAT_R16G16B16A16_FLOAT)
         throw std::invalid_argument("DLSS requires linear RGBA16F HDR input");
-    GDX12RenderHelpers::InitializeComputeTexture(_output, *_resources,
-        _commonData->WindowWidth, _commonData->WindowHeight, format);
+    const auto width = _commonData->WindowWidth, height = _commonData->WindowHeight;
+    if (!_output.IsInitialized())
+        GDX12RenderHelpers::InitializeComputeTexture(_output, *_resources, width, height, format);
+    else
+    {
+        const auto allocated = _output.GetResource()->D3DResource->GetDesc();
+        if (allocated.Width != width || allocated.Height != height) _output.Resize(width, height);
+    }
     CreateFeature();
 }
 
@@ -109,17 +136,36 @@ void GDX12DLSSUpscalePass::CreateFeature()
         NVSDK_NGX_DLSS_Feature_Flags_AutoExposure;
 
     auto* queue = _resources->Device->GetCommandQueue();
-    auto* commands = queue->GetCommandList();
-    NVSDK_NGX_Handle* feature = nullptr;
-    NVSDK_NGX_Result result;
+    GDX12CommandList* commands = nullptr;
+    try
     {
-        std::scoped_lock lock(NgxMutex);
-        result = NGX_D3D12_CREATE_DLSS_EXT(commands->GetCommandList().Get(), 1, 1, &feature, _parameters, &params);
+        commands = queue->GetCommandList();
+        NVSDK_NGX_Handle* feature = nullptr;
+        NVSDK_NGX_Result result;
+        {
+            std::scoped_lock lock(NgxMutex);
+            result = NGX_D3D12_CREATE_DLSS_EXT(commands->GetCommandList().Get(), 1, 1, &feature, _parameters, &params);
+        }
+        if (NVSDK_NGX_FAILED(result)) ThrowIfFailed(_device->GetDeviceRemovedReason());
+        CheckNGX(result, "feature creation");
+        _feature = feature;
+        queue->ExecuteCommandList(commands);
     }
-    if (NVSDK_NGX_FAILED(result)) queue->DiscardCommandList(commands);
-    CheckNGX(result, "feature creation");
-    _feature = feature;
-    queue->ExecuteCommandList(commands);
+    catch (const DxException& error)
+    {
+        if (commands && !queue->DiscardCommandList(commands)) throw;
+        ReleaseFeature();
+        if (error.ErrorCode == DXGI_ERROR_DEVICE_REMOVED || error.ErrorCode == DXGI_ERROR_DEVICE_RESET ||
+            error.ErrorCode == DXGI_ERROR_DEVICE_HUNG || error.ErrorCode == DXGI_ERROR_DRIVER_INTERNAL_ERROR)
+            throw;
+        ThrowIfFailed(_device->GetDeviceRemovedReason());
+        throw std::runtime_error("DLSS feature preparation failed: " + WStringToString(error.ToString()));
+    }
+    catch (...)
+    {
+        if (commands && queue->DiscardCommandList(commands)) ReleaseFeature();
+        throw;
+    }
     queue->CPUWaitForFenceValue(commands->FenceValue);
     _historyRevision = UINT64_MAX;
 }
