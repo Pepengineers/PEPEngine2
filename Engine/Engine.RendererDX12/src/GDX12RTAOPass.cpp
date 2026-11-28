@@ -44,6 +44,8 @@ void GDX12RTAOPass::Describe(PassDescription& description) const
     description.AddParameter("Intensity", 1.0f);
     description.AddParameter("Bias", 0.5f);
     description.AddParameter("SamplesPerPixel", 2);
+    description.AddParameter("CheckerboardTracing", true);
+    description.AddParameter("ResolutionScale", 0.5f);
     description.AddParameter("FadeStart", 5000.0f);
     description.AddParameter("FadeEnd", 15000.0f);
     description.AddParameter("MaxAccumulatedFrames", 30);
@@ -79,6 +81,10 @@ void GDX12RTAOPass::Initialize(PassInitContext& context)
     _fadeStart = context.GetParameter<float>("FadeStart");
     _fadeEnd = context.GetParameter<float>("FadeEnd");
     const auto samplesPerPixel = context.GetParameter<int>("SamplesPerPixel");
+    _checkerboardTracing = context.GetParameter<bool>("CheckerboardTracing");
+    _resolutionScale = context.GetParameter<float>("ResolutionScale");
+    if (!std::isfinite(_resolutionScale) || _resolutionScale <= 0 || _resolutionScale > 1)
+    { throw std::invalid_argument("ERROR: RTAO requires ResolutionScale in (0,1]."); }
     if (!std::isfinite(_radius) || _radius <= 0 || !std::isfinite(_intensity) || _intensity < 0
         || !std::isfinite(_bias) || _bias < 0 || samplesPerPixel < 1 || samplesPerPixel > 64
         || !std::isfinite(_fadeStart) || _fadeStart < 0 || !std::isfinite(_fadeEnd) || _fadeEnd <= _fadeStart)
@@ -87,10 +93,10 @@ void GDX12RTAOPass::Initialize(PassInitContext& context)
 
     auto* resources = context.GetDeviceResources();
     GDX12RootSignatureDesc root;
-    root.Constants = {7};
+    root.Constants = {8};
     root.NumSingleCBVSlots = 1;
-    root.NumSingleSRVSlots = 10;
-    root.NumSingleUAVSlots = 4;
+    root.NumSingleSRVSlots = 11;
+    root.NumSingleUAVSlots = 5;
     root.SRVRanges.emplace_back(Texture2D_RangeLength);
     root.StaticSamplers = GetStaticSamplers();
     _rootSignature = std::make_unique<GDX12RootSignature>(resources->Device, root);
@@ -113,8 +119,8 @@ void GDX12RTAOPass::Execute(PassExecutionContext& context)
     auto* resources = context.GetDeviceResources();
     auto& frame = *resources->FrameConstants[context.GetFrameSlotResourcesIndex()];
     const auto size = context.GetOutputResourceDescription("OutAmbientOcclusion").GetSize();
-    const struct { float Radius, Intensity, Bias; UINT SamplesPerPixel; float FadeStart, FadeEnd; UINT FrameIndex; }
-        parameters = {_radius, _intensity, _bias, _samplesPerPixel, _fadeStart, _fadeEnd, _denoisingSettings.frameIndex};
+    const struct { float Radius, Intensity, Bias; UINT SamplesPerPixel; float FadeStart, FadeEnd; UINT FrameIndex, CheckerboardTracing; }
+        parameters = {_radius, _intensity, _bias, _samplesPerPixel, _fadeStart, _fadeEnd, _denoisingSettings.frameIndex, _checkerboardTracing ? 1u : 0u};
 
     commands->BeginPixEvent("Ray Traced Ambient Occlusion", Colors::DarkSlateBlue);
     commands->SetComputeRootSignature(_rootSignature.get());
@@ -131,11 +137,13 @@ void GDX12RTAOPass::Execute(PassExecutionContext& context)
     commands->SetComputeSRV(6, frame.InstanceCache->GetSRV()->GPUHandle);
     commands->SetComputeSRV(7, frame.TransformCache->GetSRV()->GPUHandle);
     commands->SetComputeSRV(8, frame.MaterialCache->GetSRV()->GPUHandle);
-    commands->SetComputeSRV(10, resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
+    commands->SetComputeSRV(10, context.GetInputTexture("InVelocityBuffer")->GetSRV()->GPUHandle);
+    commands->SetComputeSRV(11, resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
     commands->SetComputeUAV(0, _hitDistance->GetUAV()->GPUHandle);
     commands->SetComputeUAV(1, _packedNormals->GetUAV()->GPUHandle);
     commands->SetComputeUAV(2, _viewDepth->GetUAV()->GPUHandle);
-    commands->Dispatch((size.x + 7) / 8, (size.y + 7) / 8, 1);
+    commands->SetComputeUAV(4, _motionVectors->GetUAV()->GPUHandle);
+    commands->Dispatch((_hitDistance->GetWidth() + 7) / 8, (_hitDistance->GetHeight() + 7) / 8, 1);
     Denoise(context);
     commands->ResourceBarrier({_denoisedOcclusion->GetResource()->GetNonPixelShaderResourceBarrier()});
     commands->SetComputeRootSignature(_rootSignature.get());
@@ -151,7 +159,8 @@ void GDX12RTAOPass::Execute(PassExecutionContext& context)
     for (const auto& texture : _permanentTextures) { commands->ResourceBarrier({texture->GetResource()->GetUnorderedAccessBarrier()}); }
     for (const auto& texture : _transientTextures) { commands->ResourceBarrier({texture->GetResource()->GetUnorderedAccessBarrier()}); }
     commands->ResourceBarrier({_hitDistance->GetResource()->GetUnorderedAccessBarrier(), _packedNormals->GetResource()->GetUnorderedAccessBarrier(),
-        _viewDepth->GetResource()->GetUnorderedAccessBarrier(), _denoisedOcclusion->GetResource()->GetUnorderedAccessBarrier()});
+        _viewDepth->GetResource()->GetUnorderedAccessBarrier(), _motionVectors->GetResource()->GetUnorderedAccessBarrier(),
+        _denoisedOcclusion->GetResource()->GetUnorderedAccessBarrier()});
     commands->EndPixEvent();
 }
 
@@ -175,6 +184,8 @@ void GDX12RTAOPass::InitializeDenoiser(PassInitContext& context)
     settings.maxFastAccumulatedFrameNum = (std::min)(6u, UINT(historyFrames));
     settings.historyFixFrameNum = (std::min)(3u, settings.maxFastAccumulatedFrameNum - 1);
     settings.maxBlurRadius = blurRadius;
+    // NRD's BLACK mode selects diffuse pixels with even (x ^ y ^ frameIndex) parity.
+    settings.checkerboardMode = _checkerboardTracing ? nrd::CheckerboardMode::BLACK : nrd::CheckerboardMode::OFF;
     CheckNRD(nrd::SetDenoiserSettings(*_denoiser, DenoiserId, &settings));
 
     const auto* description = nrd::GetInstanceDesc(*_denoiser);
@@ -234,7 +245,10 @@ void GDX12RTAOPass::InitializeDenoiser(PassInitContext& context)
 
 void GDX12RTAOPass::CreateDenoisingTextures(PassInitContext& context)
 {
-    const auto size = context.GetOutputResourceDescription("OutAmbientOcclusion").GetSize();
+    const auto outputSize = context.GetOutputResourceDescription("OutAmbientOcclusion").GetSize();
+    const UInt2 size{
+        (std::max)(1u, static_cast<UINT>(std::ceil(outputSize.x * _resolutionScale))),
+        (std::max)(1u, static_cast<UINT>(std::ceil(outputSize.y * _resolutionScale)))};
     if (size.x > UINT16_MAX || size.y > UINT16_MAX) { throw std::invalid_argument("ERROR: NRD texture dimensions exceed 65535."); }
     auto* resources = context.GetDeviceResources();
     auto create = [&](std::unique_ptr<GDX12Texture>& texture, DXGI_FORMAT format, UINT downsample = 1)
@@ -260,6 +274,7 @@ void GDX12RTAOPass::CreateDenoisingTextures(PassInitContext& context)
     create(_hitDistance, DXGI_FORMAT_R16_FLOAT);
     create(_packedNormals, DXGI_FORMAT_R16G16B16A16_FLOAT);
     create(_viewDepth, DXGI_FORMAT_R32_FLOAT);
+    create(_motionVectors, DXGI_FORMAT_R16G16_FLOAT);
     create(_denoisedOcclusion, DXGI_FORMAT_R16_FLOAT);
     const auto* description = nrd::GetInstanceDesc(*_denoiser);
     _permanentTextures.resize(description->permanentPoolSize);
@@ -283,6 +298,7 @@ std::vector<ExternalResourceUse> GDX12RTAOPass::GetExternalResources(PassExecuti
     uses.push_back({_hitDistance->GetResource(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, {}});
     uses.push_back({_packedNormals->GetResource(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, {}});
     uses.push_back({_viewDepth->GetResource(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, {}});
+    uses.push_back({_motionVectors->GetResource(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, {}});
     uses.push_back({_denoisedOcclusion->GetResource(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, {}});
     for (const auto& texture : _permanentTextures) { uses.push_back({texture->GetResource(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, {}}); }
     for (const auto& texture : _transientTextures) { uses.push_back({texture->GetResource(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, {}}); }
@@ -293,7 +309,8 @@ std::vector<ExternalResourceUse> GDX12RTAOPass::GetExternalResources(PassExecuti
 void GDX12RTAOPass::Denoise(PassExecutionContext& context)
 {
     const auto* common = context.GetFrameData();
-    const auto size = context.GetOutputResourceDescription("OutAmbientOcclusion").GetSize();
+    const auto outputSize = context.GetOutputResourceDescription("OutAmbientOcclusion").GetSize();
+    const UInt2 size{_hitDistance->GetWidth(), _hitDistance->GetHeight()};
     nrd::CommonSettings settings{};
     // Row-vector SimpleMath matrices already have NRD's column-vector, column-major byte layout.
     memcpy(settings.viewToClipMatrix, &common->CameraViewToClip, sizeof(Matrix));
@@ -304,8 +321,8 @@ void GDX12RTAOPass::Denoise(PassExecutionContext& context)
     memcpy(settings.worldToViewMatrixPrev, reset ? settings.worldToViewMatrix : _denoisingSettings.worldToViewMatrix, sizeof(Matrix));
     settings.motionVectorScale[0] = 0.5f;
     settings.motionVectorScale[1] = -0.5f;
-    settings.cameraJitter[0] = common->ActiveCameraJitterOffsetX;
-    settings.cameraJitter[1] = common->ActiveCameraJitterOffsetY;
+    settings.cameraJitter[0] = common->ActiveCameraJitterOffsetX * size.x / outputSize.x;
+    settings.cameraJitter[1] = common->ActiveCameraJitterOffsetY * size.y / outputSize.y;
     settings.cameraJitterPrev[0] = reset ? settings.cameraJitter[0] : _denoisingSettings.cameraJitter[0];
     settings.cameraJitterPrev[1] = reset ? settings.cameraJitter[1] : _denoisingSettings.cameraJitter[1];
     settings.resourceSize[0] = settings.resourceSizePrev[0] = settings.rectSize[0] = settings.rectSizePrev[0] = static_cast<uint16_t>(size.x);
@@ -338,7 +355,7 @@ void GDX12RTAOPass::Denoise(PassExecutionContext& context)
             GDX12Texture* texture = nullptr;
             switch (resource.type)
             {
-            case nrd::ResourceType::IN_MV: texture = context.GetInputTexture("InVelocityBuffer")->GetTexture(); break;
+            case nrd::ResourceType::IN_MV: texture = _motionVectors.get(); break;
             case nrd::ResourceType::IN_NORMAL_ROUGHNESS: texture = _packedNormals.get(); break;
             case nrd::ResourceType::IN_VIEWZ: texture = _viewDepth.get(); break;
             case nrd::ResourceType::IN_DIFF_HITDIST: texture = _hitDistance.get(); break;
@@ -348,12 +365,9 @@ void GDX12RTAOPass::Denoise(PassExecutionContext& context)
             default: throw std::runtime_error("ERROR: Unsupported NRD AO binding.");
             }
             const bool storage = resource.descriptorType == nrd::DescriptorType::STORAGE_TEXTURE;
-            if (resource.type != nrd::ResourceType::IN_MV)
-            {
-                const auto state = storage ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS : D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-                if (texture->GetResource()->GetCurrentState() != state) { barriers.push_back(texture->GetResource()->GetTransitionBarrier(state)); }
-                else if (storage) { barriers.push_back(texture->GetResource()->GetUAVBarrier()); }
-            }
+            const auto state = storage ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS : D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+            if (texture->GetResource()->GetCurrentState() != state) { barriers.push_back(texture->GetResource()->GetTransitionBarrier(state)); }
+            else if (storage) { barriers.push_back(texture->GetResource()->GetUAVBarrier()); }
             const auto rootIndex = storage ? 1 + description->descriptorPoolDesc.perSetTexturesMaxNum + storageIndex++ : 1 + textureIndex++;
             bindings.emplace_back(rootIndex, storage ? texture->GetUAV()->GPUHandle : texture->GetSRV()->GPUHandle);
         }

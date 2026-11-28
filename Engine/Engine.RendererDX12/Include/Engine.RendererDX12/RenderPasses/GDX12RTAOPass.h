@@ -34,11 +34,15 @@ private:
     std::unique_ptr<GDX12Texture> _hitDistance;
     std::unique_ptr<GDX12Texture> _packedNormals;
     std::unique_ptr<GDX12Texture> _viewDepth;
+    // Motion vectors use AO resolution, the full-resolution input stays read-only.
+    std::unique_ptr<GDX12Texture> _motionVectors;
     std::unique_ptr<GDX12Texture> _denoisedOcclusion;
     // Each frame slot owns a separate region until FrameGraph waits for its fence.
     std::unique_ptr<GDX12UploadBuffer<BYTE>> _denoisingConstants;
     nrd::CommonSettings _denoisingSettings{};
     UINT _historyCameraIndex = UINT_MAX;
+    float _resolutionScale = 0.5f;
+    bool _checkerboardTracing = true;
     float _radius = 0;
     float _intensity = 0;
     float _bias = 0;

@@ -6,7 +6,7 @@ cbuffer Parameters : register(b0)
     float Radius, Intensity, Bias;
     uint SamplesPerPixel;
     float FadeStart, FadeEnd;
-    uint FrameIndex;
+    uint FrameIndex, CheckerboardTracing;
 };
 ConstantBuffer<CameraCB> Camera : register(b1);
 Texture2D<float> Depth : register(t0);
@@ -19,12 +19,19 @@ StructuredBuffer<InstanceData> Instances : register(t6);
 StructuredBuffer<Transform> Transforms : register(t7);
 StructuredBuffer<Material> Materials : register(t8);
 Texture2D<float> DenoisedOcclusion : register(t9);
-Texture2D<float4> Texture2DCache[TEXTURE2D_RANGE_LENGTH] : register(t10);
+Texture2D<float2> Velocity : register(t10);
+Texture2D<float4> Texture2DCache[TEXTURE2D_RANGE_LENGTH] : register(t11);
 RWTexture2D<float> HitDistance : register(u0);
 RWTexture2D<float4> PackedNormals : register(u1);
 RWTexture2D<float> ViewDepth : register(u2);
 RWTexture2D<float> OutputAO : register(u3);
+RWTexture2D<float2> MotionVectors : register(u4);
 SamplerState samLinearWrap : register(s2);
+
+uint2 GetSourcePixel(uint2 occlusionPixel, uint2 occlusionSize, uint2 sourceSize)
+{
+    return min(uint2((float2(occlusionPixel) + 0.5f) * sourceSize / occlusionSize), sourceSize - 1);
+}
 
 float TraceOccluder(float3 origin, float3 direction)
 {
@@ -57,18 +64,32 @@ float TraceOccluder(float3 origin, float3 direction)
 [numthreads(8, 8, 1)]
 void CS(uint3 thread : SV_DispatchThreadID)
 {
-    uint2 size, pixel = thread.xy;
+    uint2 occlusionSize, occlusionPixel = thread.xy, size;
+    HitDistance.GetDimensions(occlusionSize.x, occlusionSize.y);
+    if (any(occlusionPixel >= occlusionSize)) return;
     Depth.GetDimensions(size.x, size.y);
-    if (any(pixel >= size)) return;
+    uint2 pixel = GetSourcePixel(occlusionPixel, occlusionSize, size);
+    MotionVectors[occlusionPixel] = Velocity[pixel];
     const float depth = Depth[pixel];
     const float viewDepth = Camera.NearPlane * Camera.FarPlane / (Camera.NearPlane + depth * (Camera.FarPlane - Camera.NearPlane));
     const float3 normal = SafeNormalize(Normals[pixel].xyz);
     const bool valid = depth > 0 && viewDepth < FadeEnd && dot(normal, normal) > 0.5f;
-    PackedNormals[pixel] = NRD_FrontEnd_PackNormalAndRoughness(valid ? normal : float3(0, 0, 1), 1, 0);
-    ViewDepth[pixel] = valid ? viewDepth : FadeEnd + 1;
+    PackedNormals[occlusionPixel] = NRD_FrontEnd_PackNormalAndRoughness(valid ? normal : float3(0, 0, 1), 1, 0);
+    ViewDepth[occlusionPixel] = valid ? viewDepth : FadeEnd + 1;
+    uint2 signalPixel = occlusionPixel;
+    if (CheckerboardTracing)
+    {
+        signalPixel.x >>= 1;
+        if ((occlusionPixel.x ^ occlusionPixel.y ^ FrameIndex) & 1)
+        {
+            // Odd widths leave one packed cell without a sample on alternating rows.
+            if ((occlusionSize.x & 1) && occlusionPixel.x == occlusionSize.x - 1) HitDistance[signalPixel] = 0;
+            return;
+        }
+    }
     if (!valid || Intensity == 0)
     {
-        HitDistance[pixel] = 1;
+        HitDistance[signalPixel] = 1;
         return;
     }
     const float2 ndc = (float2(pixel) + 0.5f) / size * float2(2, -2) + float2(-1, 1);
@@ -94,7 +115,35 @@ void CS(uint3 thread : SV_DispatchThreadID)
         const float3 direction = tangent * (cos(angle) * sqrt(radial)) + bitangent * (sin(angle) * sqrt(radial)) + normal * sqrt(1 - radial);
         hitDistance += REBLUR_FrontEnd_GetNormHitDist(TraceOccluder(origin, direction), viewDepth, float3(Radius, 0, 1), 1);
     }
-    HitDistance[pixel] = max(hitDistance / SamplesPerPixel, 1e-5f);
+    HitDistance[signalPixel] = max(hitDistance / SamplesPerPixel, 1e-5f);
+}
+
+float ResolveOcclusion(uint2 pixel, uint2 size, float viewDepth, float3 normal)
+{
+    uint2 occlusionSize;
+    DenoisedOcclusion.GetDimensions(occlusionSize.x, occlusionSize.y);
+    if (all(occlusionSize == size)) return DenoisedOcclusion[pixel];
+    float2 position = (float2(pixel) + 0.5f) * occlusionSize / size - 0.5f;
+    int2 origin = int2(floor(position));
+    float2 fraction = frac(position);
+    float occlusion = 0, totalWeight = 0;
+    // Reject samples from other surfaces when restoring full-resolution AO.
+    [unroll] for (int y = 0; y < 2; ++y)
+    [unroll] for (int x = 0; x < 2; ++x)
+    {
+        uint2 samplePixel = uint2(clamp(origin + int2(x, y), int2(0, 0), int2(occlusionSize) - 1));
+        uint2 sourcePixel = GetSourcePixel(samplePixel, occlusionSize, size);
+        float sampleDepth = Depth[sourcePixel];
+        float sampleViewDepth = Camera.NearPlane * Camera.FarPlane / (Camera.NearPlane + sampleDepth * (Camera.FarPlane - Camera.NearPlane));
+        float3 sampleNormal = Normals[sourcePixel].xyz;
+        if (sampleDepth <= 0 || sampleViewDepth >= FadeEnd || dot(sampleNormal, sampleNormal) < 0.5f) continue;
+        float weight = (x ? fraction.x : 1 - fraction.x) * (y ? fraction.y : 1 - fraction.y);
+        weight *= exp2(-abs(viewDepth - sampleViewDepth) / max(viewDepth * 0.02f, 1e-3f));
+        weight *= pow(saturate(dot(normal, SafeNormalize(sampleNormal))), 32);
+        occlusion += weight * DenoisedOcclusion[samplePixel];
+        totalWeight += weight;
+    }
+    return totalWeight > 1e-4f ? occlusion / totalWeight : 1;
 }
 
 [numthreads(8, 8, 1)]
@@ -110,7 +159,7 @@ void ResolveCS(uint3 thread : SV_DispatchThreadID)
         OutputAO[pixel] = 1;
         return;
     }
-    const float visibility = pow(saturate(DenoisedOcclusion[pixel]), Intensity);
+    const float visibility = pow(saturate(ResolveOcclusion(pixel, size, viewDepth, SafeNormalize(Normals[pixel].xyz))), Intensity);
     const float fade = saturate((viewDepth - FadeStart) / (FadeEnd - FadeStart));
     OutputAO[pixel] = lerp(visibility, 1, fade);
 }
