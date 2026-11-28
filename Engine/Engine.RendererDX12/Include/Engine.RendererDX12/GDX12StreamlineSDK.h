@@ -33,13 +33,13 @@ public:
 
     ComPtr<IDXGIFactory7> CreateProxyFactory(const ComPtr<IDXGIFactory7>& nativeFactory) const;
     ComPtr<IDXGISwapChain4> CreateProxySwapChain(const ComPtr<IDXGISwapChain4>& swapChain) const;
-    ComPtr<ID3D12Device14> CreateProxyDevice(const ComPtr<ID3D12Device14>& nativeDevice, bool setAsMainDevice) const;
+    ComPtr<ID3D12Device14> CreateProxyDevice(const ComPtr<ID3D12Device14>& nativeDevice, bool setAsMainDevice);
     ComPtr<IDXGIFactory7> GetNativeFactory(const ComPtr<IDXGIFactory7>& factory) const;
     ComPtr<ID3D12Device14> GetNativeDevice(const ComPtr<ID3D12Device14>& device) const;
     ComPtr<ID3D12CommandQueue> GetNativeCommandQueue(const ComPtr<ID3D12CommandQueue>& commandQueue) const;
     ComPtr<IDXGISwapChain4> GetNativeSwapChain(const ComPtr<IDXGISwapChain4>& swapChain) const;
     ComPtr<ID3D12Resource> GetNativeResource(const ComPtr<ID3D12Resource>& resource) const;
-    sl::Result IsFeatureSupported(sl::Feature feature, const sl::AdapterInfo& adapterInfo) const;
+    sl::Result IsFeatureSupported(sl::Feature feature, ID3D12Device14& device) const;
     sl::Result GetFeatureFunction(sl::Feature feature, const char* name, void*& function) const;
     sl::Result SetFeatureLoaded(sl::Feature feature, bool loaded) const;
     sl::Result GetNewFrameToken(sl::FrameToken*& token, const uint32_t* frameIndex = nullptr) const;
@@ -116,7 +116,7 @@ private:
 
     HMODULE _interposerModule = nullptr;
     bool _initialized = false;
-    bool _mainDeviceWasSet = false;
+    ComPtr<ID3D12Device14> _mainDevice;
     std::wstring _runtimeDirectory;
 
     PFun_slInit* _slInit = nullptr;

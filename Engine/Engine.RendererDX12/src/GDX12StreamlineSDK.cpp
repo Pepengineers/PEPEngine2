@@ -75,7 +75,7 @@ void GDX12StreamlineSDK::Shutdown()
     }
 
     _initialized = false;
-    _mainDeviceWasSet = false;
+    _mainDevice.Reset();
 
     _slInit = nullptr;
     _slShutdown = nullptr;
@@ -122,7 +122,7 @@ ComPtr<IDXGISwapChain4> GDX12StreamlineSDK::CreateProxySwapChain(const ComPtr<ID
     return UpgradeInterface(swapChain, "slUpgradeInterface(IDXGISwapChain4)");
 }
 
-ComPtr<ID3D12Device14> GDX12StreamlineSDK::CreateProxyDevice(const ComPtr<ID3D12Device14>& nativeDevice, const bool setAsMainDevice) const
+ComPtr<ID3D12Device14> GDX12StreamlineSDK::CreateProxyDevice(const ComPtr<ID3D12Device14>& nativeDevice, const bool setAsMainDevice)
 {
     if (!_initialized || !nativeDevice)
     {
@@ -133,7 +133,7 @@ ComPtr<ID3D12Device14> GDX12StreamlineSDK::CreateProxyDevice(const ComPtr<ID3D12
     const bool inputAlreadyProxy = resolvedNativeDevice && resolvedNativeDevice.Get() != nativeDevice.Get();
     const ComPtr<ID3D12Device14>& deviceToRegister = inputAlreadyProxy ? resolvedNativeDevice : nativeDevice;
 
-    if (setAsMainDevice && !_mainDeviceWasSet)
+    if (setAsMainDevice && !_mainDevice)
     {
         const sl::Result setDeviceResult = _slSetD3DDevice(deviceToRegister.Get());
         if (setDeviceResult != sl::Result::eOk)
@@ -142,7 +142,7 @@ ComPtr<ID3D12Device14> GDX12StreamlineSDK::CreateProxyDevice(const ComPtr<ID3D12
             return nativeDevice;
         }
 
-        const_cast<GDX12StreamlineSDK*>(this)->_mainDeviceWasSet = true;
+        _mainDevice = deviceToRegister;
         // Loading state changes require a device and must precede swapchain creation.
         SetFeatureLoaded(sl::kFeatureDLSS_G, false);
     }
@@ -180,9 +180,16 @@ ComPtr<ID3D12Resource> GDX12StreamlineSDK::GetNativeResource(const ComPtr<ID3D12
     return UnwrapInterface(resource);
 }
 
-sl::Result GDX12StreamlineSDK::IsFeatureSupported(const sl::Feature feature, const sl::AdapterInfo& adapterInfo) const
+sl::Result GDX12StreamlineSDK::IsFeatureSupported(const sl::Feature feature, ID3D12Device14& device) const
 {
-    return _initialized && _slIsFeatureSupported ? _slIsFeatureSupported(feature, adapterInfo) : sl::Result::eErrorInvalidState;
+    if (!_mainDevice) return sl::Result::eErrorInvalidState;
+    // Streamline evaluates features on the device registered with slSetD3DDevice.
+    if (_mainDevice.Get() != &device) return sl::Result::eErrorAdapterNotSupported;
+    auto luid = device.GetAdapterLuid();
+    sl::AdapterInfo adapter{};
+    adapter.deviceLUID = reinterpret_cast<uint8_t*>(&luid);
+    adapter.deviceLUIDSizeInBytes = sizeof(luid);
+    return _slIsFeatureSupported(feature, adapter);
 }
 
 sl::Result GDX12StreamlineSDK::GetFeatureFunction(const sl::Feature feature, const char* name, void*& function) const

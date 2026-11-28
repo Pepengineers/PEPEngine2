@@ -191,12 +191,7 @@ private:
 	{
 		using namespace sl;
 
-		LUID adapterLuid = _resources->Device->GetDevice()->GetAdapterLuid();
-		AdapterInfo adapterInfo = {};
-		adapterInfo.deviceLUID = reinterpret_cast<uint8_t*>(&adapterLuid);
-		adapterInfo.deviceLUIDSizeInBytes = sizeof(adapterLuid);
-
-		Result result = GDX12StreamlineSDK::Get().IsFeatureSupported(kFeatureNIS, adapterInfo);
+		Result result = GDX12StreamlineSDK::Get().IsFeatureSupported(kFeatureNIS, *_resources->Device->GetDevice().Get());
 		if (result == Result::eOk) { return; }
 
 		std::string errorMsg = "ERROR: NIS Feature is not supported on the current adapter: " + SLResultToString(result) + "\n";

@@ -135,11 +135,7 @@ struct GDX12FrameGeneration::Impl
 
     sl::Result Supported(const sl::Feature feature) const
     {
-        auto luid = Device->GetAdapterLuid();
-        sl::AdapterInfo adapter{};
-        adapter.deviceLUID = reinterpret_cast<uint8_t*>(&luid);
-        adapter.deviceLUIDSizeInBytes = sizeof(luid);
-        return GDX12StreamlineSDK::Get().IsFeatureSupported(feature, adapter);
+        return GDX12StreamlineSDK::Get().IsFeatureSupported(feature, *Device->GetDevice().Get());
     }
 
     void InitReflex()
