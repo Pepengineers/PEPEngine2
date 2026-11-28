@@ -3,10 +3,12 @@
   <Import Project="$(MSBuildThisFileDirectory)PEPEngine.External.Paths.props" Condition="'$(PEPExternalPathsImported)' != 'true' and Exists('$(MSBuildThisFileDirectory)PEPEngine.External.Paths.props')" />
   <ItemDefinitionGroup Condition="'$(Platform)'=='x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(PEPExternalNvidiaSDKInclude);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(PEPExternalNvidiaSDKInclude);$(PEPExternalRoot)ngx\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>$(PEPRepoRoot)External\External.Libraries\nvidia-sdk\lib\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies Condition="'$(Configuration)'=='Debug'">$(PEPExternalRoot)ngx\lib\Debug\nvsdk_ngx_d_dbg.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies Condition="'$(Configuration)'=='Release'">$(PEPExternalRoot)ngx\lib\Release\nvsdk_ngx_d.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
 </Project>

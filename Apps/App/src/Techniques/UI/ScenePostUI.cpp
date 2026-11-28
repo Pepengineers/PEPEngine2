@@ -287,6 +287,7 @@ struct ScenePostUI::RemotePost
 		std::vector<ID3D12Resource*> Bindings;
 		Id Export = Invalid, Import = Invalid, SceneImport = Invalid, HudImport = Invalid, InspectorImport = Invalid;
 		bool PeerHud = false, Presented = false;
+		bool ReconstructionRecorded = false;
 		CompletionToken SceneReady, Produced;
 		std::array<UINT64, 4> Bytes{};
 		UINT64 Number = 0, BundleBytes = 0, HudBytes = 0, UiBytes = 0;
@@ -681,23 +682,33 @@ Id ScenePostUI::AppendReconstruction(Graph& graph, std::vector<ID3D12Resource*>&
 	const bool temporal = _reconstruction.GetFlags() & RENDER_PASS_FLAG_USE_JITTER;
 	_reconstruction.SetInputs({temporal ? depth : color, temporal ? completeMotion : color, color});
 	_reconstructionRecorded = false;
-	_reconstructionFailure.clear();
-	const auto provider = _reconstruction.GetStatus().Effective;
+	const auto& status = _reconstruction.GetStatus();
+	const auto provider = status.Effective;
 	const bool native = provider == GDX12UpscalerProvider::Native;
 	const bool sdk = !native && provider != GDX12UpscalerProvider::TAA;
-	try
+	if (_resize || _reconstructionPreparationGeneration != status.Generation)
 	{
-		if (_reconstruction._needsInitialize) _reconstruction.Initialize();
-		else if (_resize) _reconstruction.Resize();
-		_reconstruction.PrepareRecording();
-		_reconstruction.LinkOutput();
-		_resize = false;
+		_reconstructionPreparationFailure.clear();
+		_reconstructionPreparationGeneration = status.Generation;
 	}
-	catch (const std::exception& error)
+	if (_reconstructionPreparationFailure.empty())
 	{
-		if (!sdk) throw;
-		_reconstructionFailure = error.what();
+		try
+		{
+			if (_reconstruction._needsInitialize) _reconstruction.Initialize();
+			else if (_resize) _reconstruction.Resize();
+			_reconstruction.PrepareRecording();
+			_reconstruction.LinkOutput();
+		}
+		catch (const std::exception& error)
+		{
+			if (!sdk) throw;
+			_reconstructionPreparationFailure = error.what();
+			Log::Warning("Reconstruction", "Post reconstruction setup failed: ", _reconstructionPreparationFailure);
+		}
 	}
+	_resize = false;
+	_reconstructionFailure = _reconstructionPreparationFailure;
 	auto* image = _reconstructionFailure.empty() ? _reconstruction.GetOutput(0) : _blur.GetOutput(0);
 	_output.SetInputs({image, target});
 	if (!_outputInitialized)
@@ -1063,7 +1074,7 @@ void ScenePostUI::AppendRemotePost(Graph& scene, std::vector<ID3D12Resource*>& s
 	frame.Plan.Device = owner.Owner;
 	frame.Bindings.clear();
 	frame.Export = frame.Import = frame.SceneImport = frame.HudImport = frame.InspectorImport = Invalid;
-	frame.PeerHud = frame.Presented = false;
+	frame.PeerHud = frame.Presented = frame.ReconstructionRecorded = false;
 	frame.Number = _hudFrame;
 	frame.SceneReady = frame.Produced = {};
 	frame.Bytes = {};
@@ -1255,6 +1266,7 @@ void ScenePostUI::AddPostExchange(const Schedule& primary, std::vector<Executor:
 		    owner.GPU.Execute(schedule, frame.Bindings, [&stack](Id operation, UINT, auto* cmd) {
 			    if (!stack.Record(operation, cmd)) throw std::logic_error("Missing Bistro owner post work");
 		    }, nullptr, nullptr, nullptr, waits);
+		    frame.ReconstructionRecorded = stack._reconstructionRecorded;
 		    _inspector.ReadbackSubmitted(owner.Owner, slot);
 		    stack.Submitted(slot);
 		    frame.SceneReady = ready;
@@ -1266,15 +1278,16 @@ void ScenePostUI::PostPresented()
 {
 	if (!_remotePost || _remotePost->Reported) return;
 	auto& owner = *_remotePost;
+	const auto& status = owner.Stack->_reconstruction.GetStatus();
 	owner.Frames.at(_resources.CurrFrameConstantsIndex).Presented = true;
 	const auto& submit = *owner.GPU.Submissions();
 	const auto presented = std::find_if(owner.Frames.begin(), owner.Frames.end(), [&](const auto& frame) {
-		return frame.Presented && frame.Produced && submit.Complete(frame.Produced);
+		return frame.Presented && frame.Produced && submit.Complete(frame.Produced) &&
+		    (status.Effective == GDX12UpscalerProvider::Native || frame.ReconstructionRecorded);
 	});
 	if (presented == owner.Frames.end()) return;
 	auto& frame = *presented;
 	owner.Reported = true;
-	const auto& status = owner.Stack->_reconstruction.GetStatus();
 	Log::Info("RenderGraph", "Bistro post Present S_OK frame=", frame.Number,
 	    " scene=", submit.AdapterLabel(0), " post=", submit.AdapterLabel(owner.Owner),
 	    " HUD=", frame.HudOwner == Invalid ? "disabled" : submit.AdapterLabel(frame.HudOwner),

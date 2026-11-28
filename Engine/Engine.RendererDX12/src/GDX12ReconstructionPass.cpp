@@ -44,9 +44,9 @@ namespace
         case GDX12UpscalerProvider::DLSS:
         {
             if (q == GDX12UpscalerQuality::UltraQualityPlus) throw std::invalid_argument("DLSS does not expose UltraQualityPlus");
-            const sl::DLSSMode modes[] = { sl::DLSSMode::eMaxQuality, sl::DLSSMode::eDLAA,
-                sl::DLSSMode::eMaxQuality, sl::DLSSMode::eBalanced, sl::DLSSMode::eMaxPerformance,
-                sl::DLSSMode::eUltraPerformance, sl::DLSSMode::eUltraQuality };
+            const NVSDK_NGX_PerfQuality_Value modes[] = { NVSDK_NGX_PerfQuality_Value_MaxQuality, NVSDK_NGX_PerfQuality_Value_DLAA,
+                NVSDK_NGX_PerfQuality_Value_MaxQuality, NVSDK_NGX_PerfQuality_Value_Balanced, NVSDK_NGX_PerfQuality_Value_MaxPerf,
+                NVSDK_NGX_PerfQuality_Value_UltraPerformance, NVSDK_NGX_PerfQuality_Value_UltraQuality };
             return std::make_unique<GDX12DLSSUpscalePass>(modes[static_cast<int>(q)]);
         }
         case GDX12UpscalerProvider::NIS:

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine.RendererDX12\D3DHelpers.h"
+#include "Engine.RendererDX12/GDX12ResourceHandle.h"
 
 #if defined(DEBUG) || defined(_DEBUG) || defined(PROFILE_BUILD)
 #include <pix/pix3.h>
@@ -32,6 +33,7 @@ public:
 	UINT64 FenceValue;
     // Cross-device consumers may observe these signals only after this list executes.
     void SignalOnSubmit(ComPtr<ID3D12Fence> fence, uint64_t value);
+    void RetainResource(GDX12ResourceHandle resource) { _retainedResources.push_back(std::move(resource)); }
     bool HasSubmissionSignals() const { return !_signals.empty(); }
 
 	// State Management
@@ -125,6 +127,7 @@ private:
     ComPtr<ID3D12Fence> _retirementFence;
     bool _submitted = false;
     std::vector<std::pair<ComPtr<ID3D12Fence>, uint64_t>> _signals;
+    std::vector<GDX12ResourceHandle> _retainedResources;
     void RequireDirect() const;
     void RequireCompute() const;
     D3D12_COMMAND_LIST_TYPE _type;

@@ -1,4 +1,5 @@
 #include "Engine.RendererDX12/GDX12StreamlineSDK.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12DLSSUpscalePass.h"
 
 #include <filesystem>
 
@@ -28,8 +29,8 @@ bool GDX12StreamlineSDK::Initialize()
     if (!_interposerModule) return false;
     LoadFunctions();
     if (!_slInit || !_slShutdown || !_slUpgradeInterface || !_slGetNativeInterface || !_slSetD3DDevice ||
-        !_slIsFeatureSupported || !_slGetFeatureFunction || !_slSetFeatureLoaded || !_slEvaluateFeature ||
-        !_slFreeResources || !_slSetTagForFrame || !_slSetConstants || !_slGetNewFrameToken) return false;
+        !_slIsFeatureSupported || !_slGetFeatureFunction || !_slSetFeatureLoaded ||
+        !_slSetTagForFrame || !_slSetConstants || !_slGetNewFrameToken) return false;
 
     const wchar_t* pluginPaths[] = { _runtimeDirectory.c_str() };
 
@@ -45,12 +46,12 @@ bool GDX12StreamlineSDK::Initialize()
         | sl::PreferenceFlags::eUseDXGIFactoryProxy
         | sl::PreferenceFlags::eUseFrameBasedResourceTagging;
 
-    sl::Feature FeaturestoLoad[] = { sl::kFeatureDLSS, sl::kFeatureNIS, sl::kFeatureDLSS_G, sl::kFeatureReflex, sl::kFeaturePCL };
-    preferences.featuresToLoad = FeaturestoLoad;
-    preferences.numFeaturesToLoad = _countof(FeaturestoLoad);
+    const sl::Feature features[] = { sl::kFeatureDLSS_G, sl::kFeatureReflex, sl::kFeaturePCL };
+    preferences.featuresToLoad = features;
+    preferences.numFeaturesToLoad = _countof(features);
     preferences.engine = sl::EngineType::eCustom;
     preferences.engineVersion = "1.0.0";
-    preferences.projectId = "c9202a3c-8f89-4cf2-952d-65427c52041d";
+    preferences.projectId = ProjectId;
     preferences.renderAPI = sl::RenderAPI::eD3D12;
 
     const sl::Result initResult = _slInit(preferences, sl::kSDKVersion);
@@ -74,6 +75,7 @@ void GDX12StreamlineSDK::Shutdown()
         if (shutdownResult != sl::Result::eOk) { LogFailure("slShutdown", shutdownResult); }
     }
 
+    if (_mainDevice) GDX12DLSSUpscalePass::ShutdownStreamlineDevice(_mainDevice.Get());
     _initialized = false;
     _mainDevice.Reset();
 
@@ -85,14 +87,9 @@ void GDX12StreamlineSDK::Shutdown()
     _slIsFeatureSupported = nullptr;
     _slGetFeatureFunction = nullptr;
     _slSetFeatureLoaded = nullptr;
-    _slEvaluateFeature = nullptr;
-    _slFreeResources = nullptr;
     _slSetTagForFrame = nullptr;
     _slSetConstants = nullptr;
     _slGetNewFrameToken = nullptr;
-    _slDLSSGetOptimalSettings = nullptr;
-    _slDLSSSetOptions = nullptr;
-    _slNISSetOptions = nullptr;
 
     // Proxy COM objects can outlive slShutdown; keep their implementation loaded until process exit.
 }
@@ -214,61 +211,9 @@ sl::Result GDX12StreamlineSDK::SetTagForFrame(const sl::FrameToken& frame, const
     return _initialized && _slSetTagForFrame ? _slSetTagForFrame(frame, viewport, tags, numTags, cmdBuffer) : sl::Result::eErrorInvalidState;
 }
 
-sl::Result GDX12StreamlineSDK::EvaluateFeature(const sl::Feature feature, const sl::FrameToken& frame, const sl::BaseStructure** inputs, const uint32_t numInputs, sl::CommandBuffer* cmdBuffer) const
-{
-    if (!_initialized || !_slEvaluateFeature) return sl::Result::eErrorInvalidState;
-    const auto result = _slEvaluateFeature(feature, frame, inputs, numInputs, cmdBuffer);
-    // Streamline reports budget pressure after a successful dispatch. Its output is valid.
-    if (result == sl::Result::eWarnOutOfVRAM)
-    {
-        static const bool warned = [this] { LogWarning("GPU memory budget exceeded during evaluation."); return true; }();
-        (void)warned;
-        return sl::Result::eOk;
-    }
-    return result;
-}
-
-sl::Result GDX12StreamlineSDK::FreeResources(const sl::Feature feature, const sl::ViewportHandle& viewport) const
-{
-    return _initialized && _slFreeResources ? _slFreeResources(feature, viewport) : sl::Result::eErrorInvalidState;
-}
-
 sl::Result GDX12StreamlineSDK::SetConstants(const sl::Constants& values, const sl::FrameToken& frame, const sl::ViewportHandle& viewport) const
 {
     return _initialized && _slSetConstants ? _slSetConstants(values, frame, viewport) : sl::Result::eErrorInvalidState;
-}
-
-sl::Result GDX12StreamlineSDK::DLSSGetOptimalSettings(const sl::DLSSOptions& options, sl::DLSSOptimalSettings& settings) const
-{
-    const sl::Result loadResult = LoadDLSSFunctions();
-    if (loadResult != sl::Result::eOk || !_slDLSSGetOptimalSettings)
-    {
-        return loadResult;
-    }
-
-    return _slDLSSGetOptimalSettings(options, settings);
-}
-
-sl::Result GDX12StreamlineSDK::DLSSSetOptions(const sl::ViewportHandle& viewport, const sl::DLSSOptions& options) const
-{
-    const sl::Result loadResult = LoadDLSSFunctions();
-    if (loadResult != sl::Result::eOk || !_slDLSSSetOptions)
-    {
-        return loadResult;
-    }
-
-    return _slDLSSSetOptions(viewport, options);
-}
-
-sl::Result GDX12StreamlineSDK::NISSetOptions(const sl::ViewportHandle& viewport, const sl::NISOptions& options) const
-{
-    const sl::Result loadResult = LoadNISFunctions();
-    if (loadResult != sl::Result::eOk || !_slNISSetOptions)
-    {
-        return loadResult;
-    }
-
-    return _slNISSetOptions(viewport, options);
 }
 
 void GDX12StreamlineSDK::StreamlineLog(const sl::LogType type, const char* message)
@@ -310,31 +255,15 @@ void GDX12StreamlineSDK::LoadFunctions()
     _slIsFeatureSupported = reinterpret_cast<PFun_slIsFeatureSupported*>(GetProcAddress(_interposerModule, "slIsFeatureSupported"));
     _slGetFeatureFunction = reinterpret_cast<PFun_slGetFeatureFunction*>(GetProcAddress(_interposerModule, "slGetFeatureFunction"));
     _slSetFeatureLoaded = reinterpret_cast<PFun_slSetFeatureLoaded*>(GetProcAddress(_interposerModule, "slSetFeatureLoaded"));
-    _slEvaluateFeature = reinterpret_cast<PFun_slEvaluateFeature*>(GetProcAddress(_interposerModule, "slEvaluateFeature"));
-    _slFreeResources = reinterpret_cast<PFun_slFreeResources*>(GetProcAddress(_interposerModule, "slFreeResources"));
     _slSetTagForFrame = reinterpret_cast<PFun_slSetTagForFrame*>(GetProcAddress(_interposerModule, "slSetTagForFrame"));
     _slSetConstants = reinterpret_cast<PFun_slSetConstants*>(GetProcAddress(_interposerModule, "slSetConstants"));
     _slGetNewFrameToken = reinterpret_cast<PFun_slGetNewFrameToken*>(GetProcAddress(_interposerModule, "slGetNewFrameToken"));
 
     if (!_slInit || !_slShutdown || !_slUpgradeInterface || !_slGetNativeInterface || !_slSetD3DDevice
         || !_slIsFeatureSupported
-        || !_slGetFeatureFunction || !_slEvaluateFeature || !_slFreeResources || !_slSetTagForFrame
+        || !_slGetFeatureFunction || !_slSetFeatureLoaded || !_slSetTagForFrame
         || !_slSetConstants || !_slGetNewFrameToken)
     { LogFailure("Required Streamline exports are missing, Streamline is disabled.", sl::Result::eErrorMissingOrInvalidAPI); }
-}
-
-sl::Result GDX12StreamlineSDK::LoadDLSSFunctions() const
-{
-    sl::Result result = LoadFeatureFunction(sl::kFeatureDLSS, "slDLSSGetOptimalSettings", _slDLSSGetOptimalSettings);
-    if (result != sl::Result::eOk) { return result; }
-
-    result = LoadFeatureFunction(sl::kFeatureDLSS, "slDLSSSetOptions", _slDLSSSetOptions);
-    return result;
-}
-
-sl::Result GDX12StreamlineSDK::LoadNISFunctions() const
-{
-    return LoadFeatureFunction(sl::kFeatureNIS, "slNISSetOptions", _slNISSetOptions);
 }
 
 void GDX12StreamlineSDK::Log(const std::string& message) const

@@ -23,6 +23,8 @@ public:
 	// Returns a CommandList that you can work with.
 	// If all previously created lists are busy - a new one will be created.
 	GDX12CommandList* GetCommandList();
+    // Releases an unsubmitted list and its allocator without executing recorded commands.
+    void DiscardCommandList(GDX12CommandList* commandList) noexcept;
     // Releases resources from retired lists without waiting or allocating another list.
     void CollectCompletedLists();
 	void ExecuteCommandList(GDX12CommandList* commandList);

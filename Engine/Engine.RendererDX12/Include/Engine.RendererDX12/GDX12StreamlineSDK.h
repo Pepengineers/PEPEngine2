@@ -11,8 +11,6 @@
 #endif
 #include "nvidia-sdk/sl.h"
 #include "nvidia-sdk/sl_consts.h"
-#include "nvidia-sdk/sl_dlss.h"
-#include "nvidia-sdk/sl_nis.h"
 #include "nvidia-sdk/sl_helpers.h"
 #ifdef PEP_RESTORE_FREE_MACRO_STREAMLINE
 #pragma pop_macro("free")
@@ -22,12 +20,14 @@
 class GDX12StreamlineSDK
 {
 public:
+    static constexpr const char* ProjectId = "c9202a3c-8f89-4cf2-952d-65427c52041d";
     static GDX12StreamlineSDK& Get();
 
     bool Initialize();
     void Shutdown();
 
     bool IsEnabled() const;
+    bool IsRegisteredDevice(const ID3D12Device* device) const { return _mainDevice.Get() == device; }
 
     static std::string ResultToString(sl::Result result);
 
@@ -44,12 +44,7 @@ public:
     sl::Result SetFeatureLoaded(sl::Feature feature, bool loaded) const;
     sl::Result GetNewFrameToken(sl::FrameToken*& token, const uint32_t* frameIndex = nullptr) const;
     sl::Result SetTagForFrame(const sl::FrameToken& frame, const sl::ViewportHandle& viewport, const sl::ResourceTag* tags, uint32_t numTags, sl::CommandBuffer* cmdBuffer) const;
-    sl::Result EvaluateFeature(sl::Feature feature, const sl::FrameToken& frame, const sl::BaseStructure** inputs, uint32_t numInputs, sl::CommandBuffer* cmdBuffer) const;
-    sl::Result FreeResources(sl::Feature feature, const sl::ViewportHandle& viewport) const;
     sl::Result SetConstants(const sl::Constants& values, const sl::FrameToken& frame, const sl::ViewportHandle& viewport) const;
-    sl::Result DLSSGetOptimalSettings(const sl::DLSSOptions& options, sl::DLSSOptimalSettings& settings) const;
-    sl::Result DLSSSetOptions(const sl::ViewportHandle& viewport, const sl::DLSSOptions& options) const;
-    sl::Result NISSetOptions(const sl::ViewportHandle& viewport, const sl::NISOptions& options) const;
 
 private:
     GDX12StreamlineSDK() = default;
@@ -59,25 +54,10 @@ private:
     std::wstring GetRuntimeDirectory() const;
     void LoadInterposer();
     void LoadFunctions();
-    sl::Result LoadDLSSFunctions() const;
-    sl::Result LoadNISFunctions() const;
 
     void Log(const std::string& message) const;
     void LogWarning(const std::string& message) const;
     void LogFailure(const char* operation, sl::Result result) const;
-
-    template <typename T>
-    sl::Result LoadFeatureFunction(sl::Feature feature, const char* functionName, T*& function) const
-    {
-        if (function) { return sl::Result::eOk; }
-        if (!_initialized || !_slGetFeatureFunction) { return sl::Result::eErrorInvalidState; }
-
-        void* rawFunction = nullptr;
-        const sl::Result result = _slGetFeatureFunction(feature, functionName, rawFunction);
-        if (result == sl::Result::eOk) { function = reinterpret_cast<T*>(rawFunction); }
-
-        return result;
-    }
 
     template <typename T>
     ComPtr<T> UpgradeInterface(const ComPtr<T>& baseInterface, const char* interfaceName) const
@@ -127,12 +107,7 @@ private:
     PFun_slIsFeatureSupported* _slIsFeatureSupported = nullptr;
     PFun_slGetFeatureFunction* _slGetFeatureFunction = nullptr;
     PFun_slSetFeatureLoaded* _slSetFeatureLoaded = nullptr;
-    PFun_slEvaluateFeature* _slEvaluateFeature = nullptr;
-    PFun_slFreeResources* _slFreeResources = nullptr;
     PFun_slSetTagForFrame* _slSetTagForFrame = nullptr;
     PFun_slSetConstants* _slSetConstants = nullptr;
     PFun_slGetNewFrameToken* _slGetNewFrameToken = nullptr;
-    mutable PFun_slDLSSGetOptimalSettings* _slDLSSGetOptimalSettings = nullptr;
-    mutable PFun_slDLSSSetOptions* _slDLSSSetOptions = nullptr;
-    mutable PFun_slNISSetOptions* _slNISSetOptions = nullptr;
 };

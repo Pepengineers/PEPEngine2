@@ -134,6 +134,8 @@
     <ClCompile Include="src\GDX12Reconstruction.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="src\GDX12FrameGeneration.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="src\GDX12ReconstructionPass.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="src\GDX12DLSSUpscalePass.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="src\GDX12NISUpscalePass.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="src\GDX12TAAPass.cpp"><Filter>Source Files</Filter></ClCompile>
     <None Include="Shaders\NativeTAA.hlsl"><Filter>Resource Files</Filter></None>
     <ClCompile Include="src\D3DHelpers.cpp">

@@ -90,6 +90,8 @@
     <ClCompile Include="src\GDX12LightGrid.cpp" />
     <ClCompile Include="src\GDX12Reconstruction.cpp" />
     <ClCompile Include="src\GDX12ReconstructionPass.cpp" />
+    <ClCompile Include="src\GDX12DLSSUpscalePass.cpp" />
+    <ClCompile Include="src\GDX12NISUpscalePass.cpp" />
     <ClCompile Include="src\GDX12TAAPass.cpp" />
     <ClCompile Include="src\GDX12Sky.cpp" />
     <ClCompile Include="src\GDX12FrameGeneration.cpp" />
@@ -244,6 +246,11 @@
     <Import Project="..\..\MSBuild\Props\PEPEngine.External.Pix.props" />
   </ImportGroup>
   <Import Project="..\..\MSBuild\Props\PEPEngine.External.FidelityFX.props" Condition="'$(PEPFidelityFXImported)'!='true'" />
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(PEPExternalRoot);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+  </ItemDefinitionGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" />
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">

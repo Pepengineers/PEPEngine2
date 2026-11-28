@@ -1,0 +1,7 @@
+# DLSS SR и NIS на устройстве постобработки
+
+DLSS Super Resolution использует NVIDIA NGX, а NIS выполняет шейдер NVIDIA Image Scaling SDK на устройстве исполнителя постобработки. Это единый путь для основной и дополнительной GPU, как у XeSS. При переносе post-стека поиск может измерить тот же провайдер на каждой пригодной карте и сравнить итоговое время кадра с учётом передачи между GPU.
+
+Streamline 2.14.16 работает с одним зарегистрированным D3D-устройством. Он обслуживает DLSS Frame Generation и Reflex. Для DLSS SR NGX поддерживает независимые D3D12-устройства, а для NIS ресурсы и команды принадлежат устройству прохода. [Streamline §2.5](https://github.com/NVIDIA-RTX/Streamline/blob/v2.14.16/docs/ProgrammingGuide.md#25-how-to-provide-correct-device) · [DLSS Programming Guide §7.2](https://raw.githubusercontent.com/NVIDIA/DLSS/main/doc/DLSS_Programming_Guide_Release.pdf#page=57) · [NVIDIA Image Scaling SDK](https://github.com/NVIDIAGameWorks/NVIDIAImageScaling)
+
+После завершения работы GPU каждый проход освобождает свою DLSS feature и карту параметров. Инициализация NGX на дополнительном устройстве завершается при освобождении последнего прохода на нём. На устройстве, зарегистрированном в Streamline, инициализация живёт до завершения работы Streamline. К этому моменту постобработка и swapchain уже освобождены, поэтому глобальный shutdown из `sl.common` безопасен. [Код завершения sl.common](https://github.com/NVIDIA-RTX/Streamline/blob/v2.14.16/source/plugins/sl.common/commonEntry.cpp)

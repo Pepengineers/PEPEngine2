@@ -39,6 +39,7 @@ public:
     // Lazily created on opt-in. Queue creation failure keeps the DIRECT path available.
     GDX12CommandQueue* TryGetComputeQueue();
 	const DeviceSpecs& GetDeviceFeatures();
+	IDXGIAdapter4* GetAdapter() const { return _adapter.Get(); }
 	LUID GetAdapterLuid() const;
 	const bool IsInitialized();
 

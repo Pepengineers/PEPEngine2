@@ -218,9 +218,11 @@
     <ItemGroup>
       <SDKRuntime Include="$(PEPRepoRoot)External\Runtime\*.dll" />
       <ReconstructionSDKNotice Include="$(PEPRepoRoot)External\Runtime\Licenses\**\*" />
+      <NISShader Include="$(PEPExternalRoot)nis\NIS_Main.hlsl;$(PEPExternalRoot)nis\NIS_Scaler.h" />
     </ItemGroup>
     <Copy SourceFiles="@(SDKRuntime)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(ReconstructionSDKNotice)" DestinationFiles="@(ReconstructionSDKNotice->'$(TargetDir)Licenses\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(NISShader)" DestinationFolder="$(TargetDir)Shaders\NIS" SkipUnchangedFiles="true" />
   </Target>
   <Target Name="CopyAppStartup" AfterTargets="Build">
     <MakeDir Directories="$(TargetDir)Configs" />

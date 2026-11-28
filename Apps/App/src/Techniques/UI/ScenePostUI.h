@@ -148,6 +148,8 @@ class ScenePostUI
 	Id _requestedPost = Invalid;
 	GDX12ReconstructionSettings _postRequest{};
 	std::string _postFallback, _reconstructionFailure;
+	std::string _reconstructionPreparationFailure;
+	uint64_t _reconstructionPreparationGeneration = 0;
 	bool _reconstructionRecorded = false;
 	int _postFgRequest = -1;
 	NativeWork _work;

@@ -109,6 +109,7 @@ RenderModule::~RenderModule()
     _pipeline.reset();
     GDX12ShaderCompiler::Shutdown();
     GDX12DeviceFactory::Reset();
+    // sl.common can shut down all NGX devices. All post passes and swapchains are retired above.
     GDX12StreamlineSDK::Get().Shutdown();
 }
 
@@ -116,7 +117,7 @@ void RenderModule::Initialize()
 {
     Log::Info("Renderer", "Initializing rendering devices and frame resources");
     if (!GDX12StreamlineSDK::Get().Initialize())
-        Log::Warning("Renderer", "Streamline unavailable; NVIDIA features will report unsupported and fall back");
+        Log::Warning("Renderer", "Streamline unavailable. DLSS Frame Generation and Reflex are unavailable");
 
     int argumentCount = 0;
     auto arguments = CommandLineToArgvW(GetCommandLineW(), &argumentCount);

@@ -17,7 +17,6 @@
 #include <cwchar>
 #include <string>
 
-#include "Engine.RendererDX12/GDX12StreamlineSDK.h"
 
 using Microsoft::WRL::ComPtr;
 using namespace std;
@@ -140,9 +139,6 @@ App::~App()
     Locator.UnregisterModule<SceneManagerModule>();
     Locator.UnregisterModule<PhysicsModule>();
     Locator.UnregisterModule<RenderModule>();
-    // can't be put into RenderModule since it is required
-    // to call it after all module entities are destroyed
-    GDX12StreamlineSDK::Get().Shutdown();
     Log::Info("Application", "Application resources released");
 }
 
