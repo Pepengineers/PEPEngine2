@@ -511,7 +511,7 @@ void BistroInfoPanel::DrawMeasurement(const BistroBenchmark& benchmark) const
     ImGui::PushFont(_fullFont, size);
     Theme::Push();
     const float em = ImGui::GetFontSize();
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {.9f * em, .4f * em});
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {.9f * em, .6f * em});
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {.7f * em, .22f * em});
     ImGui::SetNextWindowViewport(vp->ID);
     ImGui::SetNextWindowPos({vp->Pos.x, vp->Pos.y + vp->Size.y}, ImGuiCond_Always, {0,1});
@@ -553,7 +553,7 @@ void BistroInfoPanel::DrawMeasurement(const BistroBenchmark& benchmark) const
             ImGui::EndGroup();
             if (wide) ImGui::SameLine(0.f, 1.2f * em);
             ImGui::BeginGroup();
-            DrawPresentChart(2.65f * em);
+            DrawPresentChart(std::min(8.5f * em, .25f * vp->Size.y));
             ImGui::EndGroup();
         }
     }
