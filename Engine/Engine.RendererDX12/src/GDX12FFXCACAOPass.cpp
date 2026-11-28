@@ -72,7 +72,6 @@ void GDX12FFXCACAOPass::Initialize(PassInitContext& context)
         blurPasses < 0 || blurPasses > 8)
     { throw std::invalid_argument("ERROR: CACAO requires positive Radius, 0 <= FadeStart < FadeEnd, Intensity/DetailShadowStrength in [0,5], Sharpness/ShadowClamp/AdaptiveQualityLimit in [0,1], HorizonBias in [0,0.2], ShadowPower in [0.5,5], Quality Lowest..Highest and BlurPasses in [0,8]. Distances use scene centimetres."); }
 
-    // As in Bistro, use metres for CACAO's FP16 internal view depths.
     settings.radius = radius * 0.01f;
     settings.fadeOutFrom = fadeStart * 0.01f;
     settings.fadeOutTo = fadeEnd * 0.01f;

@@ -43,7 +43,7 @@ void GDX12RTAOPass::Describe(PassDescription& description) const
     description.AddParameter("Radius", 50.0f);
     description.AddParameter("Intensity", 1.0f);
     description.AddParameter("Bias", 0.5f);
-    description.AddParameter("Samples", 2);
+    description.AddParameter("SamplesPerPixel", 2);
     description.AddParameter("FadeStart", 5000.0f);
     description.AddParameter("FadeEnd", 15000.0f);
     description.AddParameter("MaxAccumulatedFrames", 30);
@@ -78,12 +78,12 @@ void GDX12RTAOPass::Initialize(PassInitContext& context)
     _bias = context.GetParameter<float>("Bias");
     _fadeStart = context.GetParameter<float>("FadeStart");
     _fadeEnd = context.GetParameter<float>("FadeEnd");
-    const auto samples = context.GetParameter<int>("Samples");
+    const auto samplesPerPixel = context.GetParameter<int>("SamplesPerPixel");
     if (!std::isfinite(_radius) || _radius <= 0 || !std::isfinite(_intensity) || _intensity < 0
-        || !std::isfinite(_bias) || _bias < 0 || samples < 1 || samples > 64
+        || !std::isfinite(_bias) || _bias < 0 || samplesPerPixel < 1 || samplesPerPixel > 64
         || !std::isfinite(_fadeStart) || _fadeStart < 0 || !std::isfinite(_fadeEnd) || _fadeEnd <= _fadeStart)
-    { throw std::invalid_argument("ERROR: RTAO requires positive Radius, nonnegative Intensity/Bias, Samples in [1,64], and 0 <= FadeStart < FadeEnd. Distances are in scene centimetres."); }
-    _samples = static_cast<UINT>(samples);
+    { throw std::invalid_argument("ERROR: RTAO requires positive Radius, nonnegative Intensity/Bias, SamplesPerPixel in [1,64], and 0 <= FadeStart < FadeEnd. Distances are in scene centimetres."); }
+    _samplesPerPixel = static_cast<UINT>(samplesPerPixel);
 
     auto* resources = context.GetDeviceResources();
     GDX12RootSignatureDesc root;
@@ -113,8 +113,8 @@ void GDX12RTAOPass::Execute(PassExecutionContext& context)
     auto* resources = context.GetDeviceResources();
     auto& frame = *resources->FrameConstants[context.GetFrameSlotResourcesIndex()];
     const auto size = context.GetOutputResourceDescription("OutAmbientOcclusion").GetSize();
-    const struct { float Radius, Intensity, Bias; UINT Samples; float FadeStart, FadeEnd; UINT FrameIndex; }
-        parameters = {_radius, _intensity, _bias, _samples, _fadeStart, _fadeEnd, _denoisingSettings.frameIndex};
+    const struct { float Radius, Intensity, Bias; UINT SamplesPerPixel; float FadeStart, FadeEnd; UINT FrameIndex; }
+        parameters = {_radius, _intensity, _bias, _samplesPerPixel, _fadeStart, _fadeEnd, _denoisingSettings.frameIndex};
 
     commands->BeginPixEvent("Ray Traced Ambient Occlusion", Colors::DarkSlateBlue);
     commands->SetComputeRootSignature(_rootSignature.get());

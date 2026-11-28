@@ -23,6 +23,7 @@ namespace
         auto ibl = graph.AddPrimaryGPUPass<GDX12IBLPrecomputePass>("IBL Precompute");
         auto cacao = graph.AddPrimaryGPUPass<GDX12FFXCACAOPass>("FidelityFX CACAO");
         auto lighting = graph.AddPrimaryGPUPass<GDX12DeferredLightingPass>("Deferred Lighting");
+        auto reflections = graph.AddPrimaryGPUPass<GDX12RTReflectionsPass>("Ray Traced Reflections");
         auto skyBox = graph.AddPrimaryGPUPass<GDX12SkyBoxPass>("SkyBox");
         auto transparency = graph.AddPrimaryGPUPass<GDX12WBOITTransparencyPass>("Transparency");
         auto composition = graph.AddPrimaryGPUPass<GDX12WBOITCompositionPass>("Composition");
@@ -41,7 +42,18 @@ namespace
         graph.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), transparency.GetInput("InDepthBuffer"));
         graph.ConnectNodes(inputs.SkyBoxMap, ibl.GetInput("InSkyBoxMap"));
         graph.ConnectNodes(inputs.SkyBoxMap, skyBox.GetInput("InSkyBoxMap"));
-        graph.ConnectNodes(lighting.GetOutput("OutColorTexture"), skyBox.GetInput("InColorTexture"));
+        graph.ConnectNodes(lighting.GetOutput("OutColorTexture"), reflections.GetInput("InColorTexture"));
+        graph.ConnectNodes(reflections.GetOutput("OutColorTexture"), skyBox.GetInput("InColorTexture"));
+        graph.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), reflections.GetInput("InDepthBuffer"));
+        graph.ConnectNodes(opaque.GetOutput("OutNormalRoughness"), reflections.GetInput("InNormalRoughness"));
+        graph.ConnectNodes(opaque.GetOutput("OutF0Baked"), reflections.GetInput("InF0Baked"));
+        graph.ConnectNodes(inputs.SkyBoxMap, reflections.GetInput("InSkyBoxMap"));
+        graph.ConnectNodes(ibl.GetOutput("OutIrradiance"), reflections.GetInput("InIrradiance"));
+        graph.ConnectNodes(ibl.GetOutput("OutPrefilteredEnvironment"), reflections.GetInput("InPrefilteredEnvironment"));
+        graph.ConnectNodes(ibl.GetOutput("OutBRDFLut"), reflections.GetInput("InBRDFLut"));
+        graph.ConnectNodes(shadows.GetOutput("OutDirectionalMaps"), reflections.GetInput("InDirectionalMaps"));
+        graph.ConnectNodes(shadows.GetOutput("OutPointSpotMaps"), reflections.GetInput("InPointSpotMaps"));
+        graph.ConnectNodes(cacao.GetOutput("OutAmbientOcclusion"), reflections.GetInput("InAmbientOcclusion"));
         graph.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), skyBox.GetInput("InDepthBuffer"));
         graph.ConnectNodes(opaque.GetOutput("OutVelocityBuffer"), skyBox.GetInput("InVelocityBuffer"));
         graph.ConnectNodes(ibl.GetOutput("OutIrradiance"), lighting.GetInput("InIrradiance"));
@@ -77,6 +89,7 @@ RenderModule::RenderModule(Window* window, GameTimer* timer) :
     _timer(timer), _window(window)
 {
     _RPcommonData.GameTimer = _timer;
+    _RPcommonData.ShadowSystem = &_shadowSystem;
 }
 
 RenderModule::~RenderModule()
@@ -707,7 +720,7 @@ void RenderModule::WriteMeshDrawCommands(const StaticMeshRenderComponent& compon
 
 void RenderModule::DisableMeshInstanceDrawCommands(const std::vector<UINT>& instances)
 {
-    for (UINT instance : instances) _RPcommonData.ShadowSystem.RemoveCaster(instance);
+    for (UINT instance : instances) _shadowSystem.RemoveCaster(instance);
     for (auto* resources : {&_primaryResources, &_secondaryResources})
         resources->SetMeshDrawCommands(instances, nullptr);
 }
@@ -764,7 +777,8 @@ void RenderModule::UpdateMaterials()
 
 void RenderModule::PreRender()
 {
-    auto& shadows = _RPcommonData.ShadowSystem;
+    _RPcommonData.LightCount = static_cast<UINT>(_lightingGrid.Lights.size());
+    auto& shadows = _shadowSystem;
     const auto directionalArraySize = shadows.DirectionalArraySize;
     const auto pointSpotArraySize = shadows.PointSpotArraySize;
     shadows.BuildViews(_lightingGrid.Lights);
@@ -915,8 +929,8 @@ void RenderModule::CompileFrameGraph(FrameGraph& graph)
     else { _secondaryResources.RayTracingScene.reset(); }
     graph.SetDeviceResources(&_primaryResources, dualGPUMode ? &_secondaryResources : nullptr, &_RPcommonData);
 
-    _RPcommonData.ShadowSystem.DirectionalLightShadowMapResolution = directionalResolution;
-    _RPcommonData.ShadowSystem.PointSpotLightShadowMapResolution = pointSpotResolution;
+    _shadowSystem.DirectionalLightShadowMapResolution = directionalResolution;
+    _shadowSystem.PointSpotLightShadowMapResolution = pointSpotResolution;
     _frameGraph = graph.Compile();
     MarkSceneDataDirty();
 }

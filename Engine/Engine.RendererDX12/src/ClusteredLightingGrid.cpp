@@ -34,7 +34,7 @@ void ClusteredLightingGrid::BuildClusterLightMasks(const Matrix& view, const Mat
         return static_cast<unsigned>(std::clamp(std::floor(pixel / LightTileSize), 0.0f, float(tileCount - 1)));
     };
 
-    for (const UINT lightIndex : ActiveLightIndices)
+    for (UINT lightIndex = 0; lightIndex < Lights.size(); ++lightIndex)
     {
         const auto& light = Lights[lightIndex];
         if (light.Intensity <= 0) { continue; }

@@ -7,12 +7,12 @@
 #include "Engine.RendererDX12/GDX12CommandQueue.h"
 #include "Engine.RendererDX12/GDX12DeviceFactory.h"
 #include "Engine.RendererDX12/GDX12ShaderCompiler.h"
-#include "Engine.RendererDX12/ShadowMapSystem.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
 #include "Engine.RendererDX12/GDX12Descriptor.h"
 #include "Engine.RendererDX12/FrameGraph/PassContext.h"
 
 class GameTimer;
+class ShadowMapSystem;
 
 enum ERenderPassFlags : uint32_t
 {
@@ -29,7 +29,7 @@ enum ERenderPassFlags : uint32_t
     RENDER_PASS_FLAG_USE_STREAMLINE = 1 << 9
 };
 
-class RenderPipelineCommonData;
+struct RenderPipelineCommonData;
 
 class GDX12RenderPass
 {
@@ -56,10 +56,11 @@ private:
 
 static_assert(sizeof(GDX12IndirectDrawArgs) == DrawStreamStride, "FrameGraph DrawStream ABI must match indirect draw arguments");
 
-class RenderPipelineCommonData
+struct RenderPipelineCommonData
 {
-public:
-    ShadowMapSystem ShadowSystem;
+    // RenderModule owns the CPU system, passes only read its prepared data.
+    const ShadowMapSystem* ShadowSystem = nullptr;
+    UINT LightCount = 0;
     UINT ActiveCameraCBufferIndex = -1;
     float ActiveCameraFOV = 0;
     float ActiveCameraNearPlane = 0;

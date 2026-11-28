@@ -44,5 +44,5 @@ private:
     float _bias = 0;
     float _fadeStart = 0;
     float _fadeEnd = 0;
-    UINT _samples = 0;
+    UINT _samplesPerPixel = 0;
 };

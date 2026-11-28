@@ -1,4 +1,5 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12ShadowMapCullingPass.h"
+#include "Engine.RendererDX12/ShadowMapSystem.h"
 #include <algorithm>
 #include <cmath>
 
@@ -39,7 +40,7 @@ void GDX12ShadowMapCullingPass::Describe(PassDescription& description) const
 void GDX12ShadowMapCullingPass::ResolveResourceRequirements(PassResourceRequirementsContext& context)
 {
     const auto& sceneDrawCommands = context.GetDeviceResources()->IndirectCommandsCache;
-    const auto& shadowSystem = context.GetFrameData()->ShadowSystem;
+    const auto& shadowSystem = *context.GetFrameData()->ShadowSystem;
     const auto sceneDrawCount = sceneDrawCommands->GetElementCount();
     const uint64_t directionalDrawCapacity = uint64_t(sceneDrawCount) * shadowSystem.DirectionalArraySize;
     const uint64_t pointSpotDrawCapacity = uint64_t(sceneDrawCount) * shadowSystem.PointSpotArraySize;
@@ -112,9 +113,9 @@ void GDX12ShadowMapCullingPass::Execute(PassExecutionContext& context)
 
     commandList->SetPipelineState(_shadowCullingPipeline);
     const uint64_t sceneDrawCount = deviceResources->IndirectCommandsCache->GetElementCount();
-    const uint64_t shadowViewCount = context.GetFrameData()->ShadowSystem.Views.size();
+    const uint64_t shadowViewCount = context.GetFrameData()->ShadowSystem->Views.size();
     struct { UINT DrawOffset, ViewOffset, ForcedUpdates, ShadowMapResolution; XMFLOAT4 MinCasterSizeTexels; }
-        shadowCullingConstants = {0, 0, forcedShadowUpdates, context.GetFrameData()->ShadowSystem.DirectionalLightShadowMapResolution, _cascadeMinCasterSizeTexels};
+        shadowCullingConstants = {0, 0, forcedShadowUpdates, context.GetFrameData()->ShadowSystem->DirectionalLightShadowMapResolution, _cascadeMinCasterSizeTexels};
     constexpr UINT maxDispatchGroups = D3D12_CS_DISPATCH_MAX_THREAD_GROUPS_PER_DIMENSION;
     constexpr UINT maxDrawsPerDispatch = maxDispatchGroups * 64;
     for (uint64_t viewOffset = 0; viewOffset < shadowViewCount; viewOffset += maxDispatchGroups)

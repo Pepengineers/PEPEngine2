@@ -23,7 +23,7 @@ public:
             std::pair{DEVICE_ROLE_PRIMARY, primaryFlags},
             std::pair{DEVICE_ROLE_SECONDARY, secondaryFlags}};
         const auto pipelineFlags = primaryFlags | secondaryFlags;
-        auto& shadows = renderModule->GetRenderPipelineCommonData()->ShadowSystem;
+        auto& shadows = renderModule->GetShadowSystem();
 
         const CameraComponent* lightingCamera = nullptr;
         Matrix lightingView, lightingProjection;
@@ -252,7 +252,6 @@ public:
         const auto& lights = ecs.GetPool<LightComponent>();
         grid.Lights.resize(lights.Size());
 
-        grid.ActiveLightIndices.clear();
         for (const auto& [role, flags] : devices)
         {
             if (flags & RENDER_PASS_FLAG_USE_LIGHTING)
@@ -264,7 +263,6 @@ public:
         ecs.ForEach<LightComponent>([&](Entity entity, LightComponent& light)
         {
             const UINT index = nextLightIndex++;
-            if (light.Enabled) { grid.ActiveLightIndices.push_back(index); }
 
             auto& data = grid.Lights[index];
             // Removing a light can move the last component into its buffer slot.
@@ -274,7 +272,7 @@ public:
                 data = {};
                 data.Type = light.Type;
                 data.Color = light.Color;
-                data.Intensity = light.Intensity;
+                data.Intensity = light.Enabled ? light.Intensity : 0.0f;
                 data.Range = light.Range;
                 const float outer = std::clamp(light.OuterAngle, 1.0f, 89.0f);
                 data.OuterConeCos = std::cos(XMConvertToRadians(outer));

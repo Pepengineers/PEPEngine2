@@ -1,4 +1,5 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12ShadowMapPass.h"
+#include "Engine.RendererDX12/ShadowMapSystem.h"
 #include <algorithm>
 #include <cmath>
 
@@ -63,7 +64,7 @@ void GDX12ShadowMapPass::ResolveResourceRequirements(PassResourceRequirementsCon
     ValidateShadowMapResolutions(directionalResolution, pointSpotResolution);
     context.RequireTextureSize(OutDirectionalMaps, {directionalResolution, directionalResolution});
     context.RequireTextureSize(OutPointSpotMaps, {pointSpotResolution, pointSpotResolution});
-    const auto& shadowSystem = context.GetFrameData()->ShadowSystem;
+    const auto& shadowSystem = *context.GetFrameData()->ShadowSystem;
     context.SetOutputTextureArraySize(OutDirectionalMaps, (std::max)(1u, shadowSystem.DirectionalArraySize));
     context.SetOutputTextureArraySize(OutPointSpotMaps, (std::max)(1u, shadowSystem.PointSpotArraySize));
 }
@@ -192,7 +193,7 @@ void GDX12ShadowMapPass::Execute(PassExecutionContext& context)
     commandList->SetScissorRect(pointSpotShadowMaps->GetScissorRect());
     auto* pointSpotStaticDepthCache = _pointSpotStaticDepthCache.get();
     const UINT forcedShadowUpdates = _resetShadowCache ? SHADOW_UPDATE_STATIC | SHADOW_UPDATE_FINAL : 0;
-    const auto& shadowSystem = context.GetFrameData()->ShadowSystem;
+    const auto& shadowSystem = *context.GetFrameData()->ShadowSystem;
     const auto& shadowViews = shadowSystem.Views;
     if (_resetShadowCache)
     {

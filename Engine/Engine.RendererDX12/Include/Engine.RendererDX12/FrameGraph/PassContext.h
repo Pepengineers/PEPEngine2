@@ -7,7 +7,7 @@
 #include "Engine.RendererDX12/GDX12Resource.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
 
-class RenderPipelineCommonData;
+struct RenderPipelineCommonData;
 struct FrameGraphPhysicalResource;
 struct FrameGraphMaterialization;
 

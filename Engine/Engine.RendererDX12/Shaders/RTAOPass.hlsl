@@ -4,7 +4,7 @@
 cbuffer Parameters : register(b0)
 {
     float Radius, Intensity, Bias;
-    uint Samples;
+    uint SamplesPerPixel;
     float FadeStart, FadeEnd;
     uint FrameIndex;
 };
@@ -87,14 +87,14 @@ void CS(uint3 thread : SV_DispatchThreadID)
     pixelSeed ^= pixelSeed >> 16;
     const float radialOffset = float(pixelSeed & 0xffffffu) / 16777216.0f;
     float hitDistance = 0;
-    for (uint sampleIndex = 0; sampleIndex < Samples; ++sampleIndex)
+    for (uint sampleIndex = 0; sampleIndex < SamplesPerPixel; ++sampleIndex)
     {
-        const float radial = frac((sampleIndex + 0.5f) / Samples + temporalOffset.x + radialOffset);
+        const float radial = frac((sampleIndex + 0.5f) / SamplesPerPixel + temporalOffset.x + radialOffset);
         const float angle = sampleIndex * 2.39996323f + rotation + temporalOffset.y * 6.28318530718f;
         const float3 direction = tangent * (cos(angle) * sqrt(radial)) + bitangent * (sin(angle) * sqrt(radial)) + normal * sqrt(1 - radial);
         hitDistance += REBLUR_FrontEnd_GetNormHitDist(TraceOccluder(origin, direction), viewDepth, float3(Radius, 0, 1), 1);
     }
-    HitDistance[pixel] = max(hitDistance / Samples, 1e-5f);
+    HitDistance[pixel] = max(hitDistance / SamplesPerPixel, 1e-5f);
 }
 
 [numthreads(8, 8, 1)]

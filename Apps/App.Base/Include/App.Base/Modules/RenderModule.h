@@ -7,6 +7,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Engine.RendererDX12/FrameGraph/FrameGraph.h"
 #include "Engine.RendererDX12/ClusteredLightingGrid.h"
+#include "Engine.RendererDX12/ShadowMapSystem.h"
 #include "Engine.Core/ECS/Entity.h"
 #include "Engine.Core/ECS/Event.h"
 
@@ -97,6 +98,7 @@ public:
 
     TransformCompGPUData& GetTransformGPUData(World& world, Entity entity);
     ClusteredLightingGrid& GetLightingGrid() { return _lightingGrid; }
+    ShadowMapSystem& GetShadowSystem() { return _shadowSystem; }
 
     GDX12RayTracingScene& GetRayTracingScene(EDeviceRole role);
     void UpdateRayTracingInstance(const StaticMeshRenderComponent& component, const Matrix& transform);
@@ -179,6 +181,7 @@ private:
     std::unique_ptr<GDX12Device> _secondaryDevice;
 
     ClusteredLightingGrid _lightingGrid;
+    ShadowMapSystem _shadowSystem;
     GDX12DeviceResources _primaryResources;
     GDX12DeviceResources _secondaryResources;
     std::unordered_map<std::string, std::unique_ptr<GPUTexture>> _textures;
