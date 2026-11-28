@@ -510,6 +510,7 @@ void BistroComparePanel::Refresh(bool force)
         CsvReader csv(file);
         std::streamoff inlineOffset = csv.Position();
         bool inlineFrames = false;
+        std::vector<std::string> discoveryTrials;
         const auto appendPass = [&](fs::path path, std::string label, std::streamoff offset)
         {
             Window range{Number(csv.Get("window_start")).value_or(-1), Number(csv.Get("window_end")).value_or(-1),
@@ -605,7 +606,14 @@ void BistroComparePanel::Refresh(bool force)
                     const auto id = key.substr(6, dot - 6);
                     const auto field = key.substr(dot + 1);
                     if (field == "LastPassCSV") run.TrialPasses[id] = value;
+                    if (run.Mode == "Manual" && field == "ReconstructionFallback")
+                        run.ManualReconstructionFallback = value;
                     if (field == "ReconstructionComparison") run.ReconstructionTrials.try_emplace(id);
+                    if (field == "Scope" && value == "image mode discovery")
+                    {
+                        discoveryTrials.push_back(id);
+                        run.ReconstructionTrials.try_emplace(id);
+                    }
                     if (const auto trial = run.ReconstructionTrials.find(id); trial != run.ReconstructionTrials.end())
                         trial->second[field] = value;
                 }
@@ -657,7 +665,41 @@ void BistroComparePanel::Refresh(bool force)
                 appendPass(file.parent_path() / relative, relative.stem().string(), -1);
             }
         }
-        if (run.Passes.empty() && run.Winners[0].Fields.empty() && run.Winners[1].Fields.empty() && run.FinalStatus.empty()) continue;
+        for (const auto& id : discoveryTrials)
+        {
+            auto& fields = run.ReconstructionTrials.at(id);
+            constexpr auto quality = "Render.Upscaler.Quality";
+            // Earlier reports kept discovery settings and SDK failures in the trial CSV.
+            if (Value(fields, quality).empty() && !id.empty() && id.find_first_not_of("0123456789") == id.npos)
+            {
+                CsvReader trial(file.parent_path() / file.stem() / ("trial-" + id + ".csv"));
+                const auto prefix = "Trial." + id + ".";
+                while (trial.Next(true))
+                {
+                    const auto& key = trial.Get("name");
+                    if (trial.Get("type") == "config" && key.rfind(prefix, 0) == 0)
+                        fields.try_emplace(key.substr(prefix.size()), trial.Get("value"));
+                }
+                if (Value(fields, "Source") == "query effective reconstruction size" && Value(fields, "RequestedPostDevice").empty())
+                    fields["RequestedPostDevice"] = Value(adapterLabels, "-1");
+            }
+            const auto& device = Value(fields, "RequestedPostDevice");
+            const auto& preset = Value(fields, quality);
+            auto& group = run.ReconstructionDiscovery[{device, preset}];
+            group.Mode = (device.empty() ? "Post device unavailable" : device) + " / " +
+                (preset.empty() ? "Mode unavailable" : DisplayValue(quality, preset));
+            group.Participants.push_back(id);
+        }
+        for (auto& entry : run.ReconstructionDiscovery)
+        {
+            auto& group = entry.second;
+            const auto verified = std::count_if(group.Participants.begin(), group.Participants.end(), [&](const auto& id) {
+                return Value(run.ReconstructionTrials.at(id), "Status") == "available";
+            });
+            group.Status = std::to_string(verified) + " of " + std::to_string(group.Participants.size()) + " verified";
+        }
+        if (run.Passes.empty() && run.Winners[0].Fields.empty() && run.Winners[1].Fields.empty() &&
+            run.FinalStatus.empty() && run.ReconstructionDiscovery.empty()) continue;
         if (run.DisplayMode.empty()) run.DisplayMode = run.Profile.empty() ? run.Mode : run.Profile + " search";
         // Older searches changed resolution between trials. Show the chosen image's output
         // only when the winner is identifiable in this report.
@@ -1467,6 +1509,12 @@ void BistroComparePanel::DrawRun(int index, fs::path& pendingPreset)
         BistroPlot::ContinueRowIfFits(ImGui::CalcTextSize(label).x);
         ImGui::TextColored(ImGui::GetStyleColorVec4(outcome == "completed" ? ImGuiCol_NavCursor : ImGuiCol_Text), "%s", label);
     }
+    if (run.Mode == "Manual" && run.FinalStatus == "invalid measurement")
+    {
+        ImGui::TextWrapped("%s", run.StopReason.c_str());
+        if (!run.ManualReconstructionFallback.empty())
+            ImGui::TextWrapped("%s", run.ManualReconstructionFallback.c_str());
+    }
     ImGui::TextDisabled("%s", run.Timestamp.c_str());
     if (run.BaseBudget && run.AddedRoutes && run.Budget)
         ImGui::TextWrapped("Search budget %.1f s  /  base %.1f s  +  full reconstruction routes %.1f s",
@@ -1503,29 +1551,39 @@ void BistroComparePanel::DrawRun(int index, fs::path& pendingPreset)
         ImGui::Text("Target   %.0f FPS   /   %s", target, run.TargetStatus(timing.Fps, winner));
 
     DrawPlacementComparison(placement ? *placement : run.Winners[0]);
-    if (!run.Reconstructions.empty() && ImGui::CollapsingHeader("Reconstruction comparisons"))
-        for (const auto& [id, group] : run.Reconstructions)
+    const auto drawReconstruction = [&](const auto& groups, const auto& columns, const char* heading)
+    {
+        if (groups.empty() || !ImGui::CollapsingHeader(heading)) return;
+        ImGui::PushID(heading);
+        int index = 0;
+        for (const auto& entry : groups)
         {
-            const auto title = group.Mode + " / " + group.Status + "##Reconstruction" + std::to_string(id);
+            const auto& group = entry.second;
+            const auto title = group.Mode + " / " + group.Status + "##Reconstruction" + std::to_string(index++);
             if (!ImGui::TreeNode(title.c_str())) continue;
-            if (ImGui::BeginTable("Participants", int(ReconstructionColumns.size()), ImGuiTableFlags_BordersInnerH |
+            if (ImGui::BeginTable("Participants", int(columns.size()), ImGuiTableFlags_BordersInnerH |
                 ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp))
             {
-                for (const auto* column : ReconstructionColumns) ImGui::TableSetupColumn(column);
+                for (size_t col : columns) ImGui::TableSetupColumn(ReconstructionColumns[col]);
                 ImGui::TableHeadersRow();
                 for (const auto& trial : group.Participants)
                 {
                     ImGui::TableNextRow();
-                    for (const auto& cell : ReconstructionRow(run, group, trial))
+                    const auto row = ReconstructionRow(run, group, trial);
+                    for (size_t col : columns)
                     {
                         ImGui::TableNextColumn();
-                        ImGui::TextWrapped("%s", cell.c_str());
+                        ImGui::TextWrapped("%s", row[col].c_str());
                     }
                 }
                 ImGui::EndTable();
             }
             ImGui::TreePop();
         }
+        ImGui::PopID();
+    };
+    drawReconstruction(run.ReconstructionDiscovery, DiscoveryColumns, "Reconstruction availability");
+    drawReconstruction(run.Reconstructions, ComparisonColumns, "Reconstruction comparisons");
 
     if (hasTrace || (placement && (!placement->Placements[0].Fields.empty() || !placement->Placements[1].Fields.empty())))
     {

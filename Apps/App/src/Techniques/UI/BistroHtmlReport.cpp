@@ -123,6 +123,12 @@ std::string BistroComparePanel::ReportBody(const Run& run, const Winner* selecte
         const auto& outcome = run.FinalStatus.empty() ? run.StopReason : run.FinalStatus;
         if (!outcome.empty()) html << " <span class=\"status\">" << Escape(outcome) << "</span>";
         html << "</p>";
+        if (run.Mode == "Manual" && run.FinalStatus == "invalid measurement")
+        {
+            html << "<p>" << Escape(run.StopReason) << "</p>";
+            if (!run.ManualReconstructionFallback.empty())
+                html << "<p>" << Escape(run.ManualReconstructionFallback) << "</p>";
+        }
         if (placement && !winner) html << "<p>No confirmed preset for this image mode.</p>";
         if (!run.FinalMask.empty()) html << "<p>Final async queue mask &nbsp; " << Escape(run.FinalMask) << "</p>";
         const auto timing = SummaryTiming(winner, measurement);
@@ -259,21 +265,29 @@ std::string BistroComparePanel::ReportBody(const Run& run, const Winner* selecte
                  << "</td><td>" << (pass.Timing.P95 > 0 ? Decimal(pass.Timing.P95) : "&mdash;") << "</td></tr>";
         html << "</tbody></table></div></details>";
     }
-    if (!run.Reconstructions.empty()) html << "<h2>Reconstruction comparisons</h2>";
-    for (const auto& [id, group] : run.Reconstructions)
+    const auto writeReconstruction = [&](const auto& groups, const auto& columns, const char* heading)
     {
-        html << "<details><summary>" << Escape(group.Mode) << " / " << Escape(group.Status)
-             << "</summary><div class=\"scroll\"><table><thead><tr>";
-        for (const auto* column : ReconstructionColumns) html << "<th scope=\"col\">" << column << "</th>";
-        html << "</tr></thead><tbody>";
-        for (const auto& trial : group.Participants)
+        if (groups.empty()) return;
+        html << "<h2>" << heading << "</h2>";
+        for (const auto& entry : groups)
         {
-            html << "<tr>";
-            for (const auto& cell : ReconstructionRow(run, group, trial)) html << "<td>" << Escape(cell) << "</td>";
-            html << "</tr>";
+            const auto& group = entry.second;
+            html << "<details><summary>" << Escape(group.Mode) << " / " << Escape(group.Status)
+                 << "</summary><div class=\"scroll\"><table><thead><tr>";
+            for (size_t col : columns) html << "<th scope=\"col\">" << ReconstructionColumns[col] << "</th>";
+            html << "</tr></thead><tbody>";
+            for (const auto& trial : group.Participants)
+            {
+                html << "<tr>";
+                const auto row = ReconstructionRow(run, group, trial);
+                for (size_t col : columns) html << "<td>" << Escape(row[col]) << "</td>";
+                html << "</tr>";
+            }
+            html << "</tbody></table></div></details>";
         }
-        html << "</tbody></table></div></details>";
-    }
+    };
+    writeReconstruction(run.ReconstructionDiscovery, DiscoveryColumns, "Reconstruction availability");
+    writeReconstruction(run.Reconstructions, ComparisonColumns, "Reconstruction comparisons");
     return html.str();
 }
 

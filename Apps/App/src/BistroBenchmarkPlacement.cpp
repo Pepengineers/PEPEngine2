@@ -170,6 +170,7 @@ void BistroBenchmark::BeginPlacementTrial(World& world, ConsoleModule& console, 
     _trialWindowCount = _windows.size();
     _trialConfig.clear();
     _trialFallback.clear();
+    _trialReconstructionFailed = false;
     _preparationSeconds.reset();
     _trialReason.clear();
     _trialLastPass.clear();
@@ -401,7 +402,11 @@ void BistroBenchmark::ObservePlacementImage(RenderModule& render, BistroRenderPi
     const auto& status = render.GetReconstructionStatus();
     _trialProvider = status.Effective;
     _trialFrameGeneration = render.GetFrameGenerationStatus().Effective;
-    _trialFallback = status.FallbackReason;
+    if (!_trialReconstructionFailed)
+    {
+        const auto& postFallback = pipeline.BenchmarkPostFallback();
+        _trialFallback = postFallback.empty() ? status.FallbackReason : postFallback;
+    }
     _trialPostDevice = pipeline.BenchmarkPostDevice();
     if (_trialResult.Output != _launch.Output)
         _trialReason = "requested output size unavailable";
@@ -412,7 +417,6 @@ void BistroBenchmark::ObservePlacementImage(RenderModule& render, BistroRenderPi
         if (_trialPostDevice != requestedPost)
         {
             _trialReason = "requested post adapter unavailable";
-            _trialFallback = pipeline.BenchmarkReconstructionFailure();
             if (_trialFallback.empty()) _trialFallback = "post processing executed on another adapter";
         }
         else if (int(status.Requested.Provider) != _trial.Settings.Provider ||
@@ -427,17 +431,20 @@ void BistroBenchmark::ObservePlacementImage(RenderModule& render, BistroRenderPi
         else if (_trialFrameGeneration != GDX12FrameGenerationProvider::Off)
             _trialReason = "frame generation is active";
     }
-    if (const auto& failure = pipeline.BenchmarkReconstructionFailure(); !failure.empty())
-    {
+    CheckPlacementReconstruction(pipeline, _trialProvider);
+}
+
+void BistroBenchmark::CheckPlacementReconstruction(const BistroRenderPipeline& pipeline, GDX12UpscalerProvider provider)
+{
+    if (_trialReconstructionFailed || provider == GDX12UpscalerProvider::Native || pipeline.BenchmarkReconstructionRecorded()) return;
+    _trialReconstructionFailed = true;
+    const auto& failure = pipeline.BenchmarkReconstructionFailure();
+    if (!_trialFallback.empty() && !failure.empty() && _trialFallback != failure)
+        _trialFallback += " / " + failure;
+    else if (!failure.empty())
         _trialFallback = failure;
-        if (_trialReason.empty() && !_manualPlacement)
-            _trialReason = "reconstruction failed";
-    }
-    if (status.Effective != GDX12UpscalerProvider::Native && !pipeline.BenchmarkReconstructionRecorded())
-    {
-        _trialConfig.emplace_back("ReconstructionApplied", "Display transform fallback");
-        if (!_manualPlacement && _trialReason.empty()) _trialReason = "no successful reconstruction frame";
-    }
+    if (_trialReason.empty())
+        _trialReason = failure.empty() ? "no successful reconstruction frame" : "reconstruction failed";
 }
 
 void BistroBenchmark::RecordPlacementFrame(RenderModule& render, BistroRenderPipeline& pipeline, Clock::time_point now)
@@ -461,21 +468,15 @@ void BistroBenchmark::RecordPlacementFrame(RenderModule& render, BistroRenderPip
         }
     }
     const auto& common = *render.GetRenderPipelineCommonData();
-    if (render.GetReconstructionStatus().Effective != _trialProvider ||
+    const auto provider = render.GetReconstructionStatus().Effective;
+    if (provider != _trialProvider ||
         render.GetFrameGenerationStatus().Effective != _trialFrameGeneration ||
         _trialResult.Output != BistroPlacement::Size{common.WindowWidth, common.WindowHeight} ||
         _trialResult.Render != BistroPlacement::Size{common.DownscaledWidth, common.DownscaledHeight})
         _trialReason = "effective display, reconstruction or frame generation changed";
-    if (!_manualPlacement && pipeline.BenchmarkPostDevice() != _trialPostDevice)
+    if (pipeline.BenchmarkPostDevice() != _trialPostDevice)
         _trialReason = "post adapter changed during measurement";
-    if (const auto& failure = pipeline.BenchmarkReconstructionFailure(); !failure.empty())
-    {
-        _trialFallback = failure;
-        if (!pipeline.BenchmarkReconstructionRecorded())
-            _csv.Config(_trialPrefix + "ReconstructionApplied", "Display transform fallback");
-        if (_trialReason.empty() && !_manualPlacement)
-            _trialReason = "reconstruction failed";
-    }
+    CheckPlacementReconstruction(pipeline, provider);
     if (!_trialReason.empty() && !_calibrating)
     {
         _legDone = true;
@@ -519,6 +520,7 @@ void BistroBenchmark::CompletePlacementLeg(World& world, ConsoleModule& console,
             int(_trialProvider) == _trial.Settings.Provider ? "true" : "false");
         _csv.Config(_trialPrefix + "ReconstructionFrameVerified", _trialReason.empty() ? "true" : "false");
         for (const auto& [name, value] : _trialConfig) _csv.Config(_trialPrefix + name, value);
+        if (_trialReconstructionFailed) _csv.Config(_trialPrefix + "ReconstructionApplied", "Display transform fallback");
         if (!_trialFallback.empty()) _csv.Config(_trialPrefix + "ReconstructionFallback", _trialFallback);
         _csv.Config(_trialPrefix + "Status", _trialReason.empty() ? "available" : _trialReason);
         _trialPending = false;
@@ -752,10 +754,13 @@ void BistroBenchmark::CompletePlacementTrial(World& world, ConsoleModule& consol
         _csv.Config(_trialPrefix + "ComparisonEligibility", "effective placement differs from requested layout");
     _trialResult.Valid = _trialReason.empty();
     SettleComparisonPass();
-    _csv.Config(_trialPrefix + "FPS", Csv::Number(_trialResult.Fps));
-    if (_trialWindowCount > _windows.size())
-        _csv.Config(_trialPrefix + "FPSWithThresholdRecheck", Csv::Number(_trialResult.ThresholdFps));
-    _csv.Config(_trialPrefix + "P95ms", Csv::Number(_trialResult.P95));
+    if (!_manualPlacement || _trialResult.Valid)
+    {
+        _csv.Config(_trialPrefix + "FPS", Csv::Number(_trialResult.Fps));
+        if (_trialWindowCount > _windows.size())
+            _csv.Config(_trialPrefix + "FPSWithThresholdRecheck", Csv::Number(_trialResult.ThresholdFps));
+        _csv.Config(_trialPrefix + "P95ms", Csv::Number(_trialResult.P95));
+    }
     _csv.Config(_trialPrefix + "WallSeconds", Csv::Number(SecondsSince(_trialStarted)));
     WritePlacementTrialReport(pipeline, _trialResult.Valid ? "measured" : _trialReason);
     if (!_manualPlacement && (_placementSearch.LowFirst() || _placementSearch.HighFirst()))

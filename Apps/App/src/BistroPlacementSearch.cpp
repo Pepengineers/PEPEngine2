@@ -898,7 +898,7 @@ std::optional<Trial> Search::AdvanceQuality(BistroBenchmarkData::Csv& csv, bool 
             if (const auto* result = QualityFull(config); passes(result) && (!best || Better(*result, *best))) best = result;
         return best;
     };
-    while (StepCount() && progress.Stage != QualityStage::Done && _pending.empty())
+    while (StepCount(-1) && progress.Stage != QualityStage::Done && _pending.empty())
     {
         switch (progress.Stage)
         {
@@ -907,7 +907,7 @@ std::optional<Trial> Search::AdvanceQuality(BistroBenchmarkData::Csv& csv, bool 
         {
             const bool raising = progress.Stage == QualityStage::RaiseDetail;
             const auto& base = raising ? progress.Anchor : _high;
-            size_t step = StepCount() - 1, upper = StepCount();
+            size_t step = StepCount(-1) - 1, upper = StepCount(-1);
             std::optional<size_t> lower;
             for (;;)
             {
@@ -1202,7 +1202,7 @@ void Search::AdvancePerformance(BistroBenchmarkData::Csv& csv)
         }
         return best;
     };
-    if (!StepCount()) return;
+    if (!StepCount(-1)) return;
     while (_pending.empty() && progress.Full.empty())
     {
         auto next = progress.Anchor;
@@ -1249,8 +1249,8 @@ void Search::AdvancePerformance(BistroBenchmarkData::Csv& csv)
         case PerformanceStage::Raise:
         {
             const size_t current = Step(next);
-            if (current + 1 >= StepCount()) { progress.Stage = PerformanceStage::High; break; }
-            const size_t step = (std::min)(StepCount() - 1, current + (StepCount() - current) / 2);
+            if (current + 1 >= StepCount(-1)) { progress.Stage = PerformanceStage::High; break; }
+            const size_t step = (std::min)(StepCount(-1) - 1, current + (StepCount(-1) - current) / 2);
             const auto* result = measureStep(next, step, "increase internal size with the same active levels");
             if (!_pending.empty()) return;
             if (passes(result)) progress.Anchor = result->Settings;
@@ -1370,7 +1370,7 @@ void Search::AdvancePerformance(BistroBenchmarkData::Csv& csv)
         {
             const auto* quality = PerformanceMeasure(progress.Quality, true);
             const size_t step = Step(progress.Quality);
-            if (quality && step && step < StepCount() && !HighMajority(progress.Quality, quality->Activity))
+            if (quality && step && step < StepCount(-1) && !HighMajority(progress.Quality, quality->Activity))
             {
                 const auto* neighbor = measureStep(PerformanceHigh(progress.Anchor), step - 1,
                     "compare the adjacent smaller internal size with all active techniques at High");
@@ -2012,7 +2012,7 @@ void Search::Expand(const Trial& trial, const Result& result, BistroBenchmarkDat
     if (result.ThresholdFps < threshold)
     {
         const size_t step = Step(config);
-        if (step && step < StepCount())
+        if (step && step < StepCount(config.Owners[Post]))
         {
             for (const auto& smaller : AtStep(config, step - 1)) enqueue(smaller, "smaller internal size, same effects", true);
         }

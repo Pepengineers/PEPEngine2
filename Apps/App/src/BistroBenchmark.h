@@ -229,6 +229,7 @@ private:
 
     void StartPlacement(World& world, ConsoleModule& console, const RenderModule& render,
         BistroRenderPipeline& pipeline, const std::vector<int>& adapters, bool manual);
+    void CheckPlacementReconstruction(const BistroRenderPipeline&, GDX12UpscalerProvider);
     void ObservePlacementImage(RenderModule& render, BistroRenderPipeline& pipeline);
     void BeginPlacementTrial(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline,
         BistroPlacement::Trial trial, bool first = false);
@@ -440,5 +441,5 @@ private:
     GDX12FrameGenerationProvider _trialFrameGeneration{};
     std::string _trialPrefix, _trialReason, _trialLastPass;
     size_t _trialCompletedPasses = 0;
-    bool _trialPending = false;
+    bool _trialPending = false, _trialReconstructionFailed = false;
 };

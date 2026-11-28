@@ -219,7 +219,7 @@ private:
     void SeedRemotePhase();
     const ImageSteps& Steps(int owner) const;
     bool SupportsImage(const Config& config) const;
-    size_t StepCount(int owner = -1) const { return Upscaled() ? Steps(owner).size() : 1; }
+    size_t StepCount(int owner) const { return Upscaled() ? Steps(owner).size() : 1; }
     static Config ComparisonKey(Config config);
     void RecordComparison(const Trial& trial, const Result& result, BistroBenchmarkData::Csv& csv);
     size_t Step(const Config& settings) const;

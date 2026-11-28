@@ -318,7 +318,6 @@ GDX12ReconstructionPass& ScenePostUI::Reconstruction()
 
 const std::string& ScenePostUI::ReconstructionFailure() const
 {
-	if (!_postFallback.empty()) return _postFallback;
 	return _remotePost ? _remotePost->Stack->_reconstructionFailure : _reconstructionFailure;
 }
 

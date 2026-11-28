@@ -72,13 +72,14 @@ class BistroComparePanel
         };
         std::array<PhaseBudget, 4> Phases;
         std::map<unsigned, ReconstructionComparison> Reconstructions;
+        std::map<std::pair<std::string, std::string>, ReconstructionComparison> ReconstructionDiscovery;
         std::map<std::string, Values> ReconstructionTrials;
         double Target() const { return Profile == "Performance" ? 60. : Profile == "Quality" ? 30. : 0.; }
         const char* TargetStatus(double fps, const Winner* winner) const;
         bool AfterRender = false;
         Values Settings, Before, TrialPasses, MaskBits, Adapters;
         std::array<Winner, 2> Winners;
-        std::string FinalMask, StopReason;
+        std::string FinalMask, StopReason, ManualReconstructionFallback;
         std::vector<Pass> Passes;
     };
     struct Selection
@@ -126,6 +127,8 @@ class BistroComparePanel
     static std::array<std::string, 8> ReconstructionRow(const Run&, const ReconstructionComparison&, const std::string&);
     static constexpr std::array SearchPhaseLabels{"Single GPU / Native", "Single GPU / Upscaled",
         "Multi-GPU / Native", "Multi-GPU / Upscaled"};
+    static constexpr std::array<size_t, 6> DiscoveryColumns{0, 1, 2, 3, 4, 7};
+    static constexpr std::array<size_t, 8> ComparisonColumns{0, 1, 2, 3, 4, 5, 6, 7};
     static constexpr std::array ReconstructionColumns{"Trial", "Requested upscaler", "Effective upscaler", "Post device",
         "Internal resolution", "FPS", "P95 (ms)", "Result"};
     static void DrawPlacementComparison(const Winner& winner);

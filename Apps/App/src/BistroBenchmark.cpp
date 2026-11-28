@@ -963,6 +963,7 @@ void BistroBenchmark::WriteLeg(const char* status)
     }
     if (_stage == Stage::Placement)
     {
+        if (_trialReconstructionFailed) _csv.Config(_trialPrefix + "ReconstructionApplied", "Display transform fallback");
         if (!_trialFallback.empty())
         {
             _csv.Config(_trialPrefix + "ReconstructionFallback", _trialFallback);
@@ -1594,8 +1595,9 @@ void BistroBenchmark::Finish(World& world, ConsoleModule& console, BistroRenderP
             const char* finalStatus = "no confirmed result";
             if (outcome == Outcome::Cancelled) finalStatus = "cancelled";
             else if (winner) finalStatus = winner->Fps >= BistroPlacement::Threshold[_placementProfile] ? "target reached" : "reserve";
-            else if (_manualPlacement && outcome == Outcome::Completed && _trialResult.Valid && _trialCompletedPasses)
-                finalStatus = "completed";
+            else if (_manualPlacement)
+                finalStatus = outcome == Outcome::Completed && _trialResult.Valid && _trialCompletedPasses ?
+                    "completed" : "invalid measurement";
             _csv.Config("FinalStatus", finalStatus);
             if (winner) _csv.Config("WinningTrial", std::to_string(winner->Id));
             if (!winner && outcome == Outcome::Completed && !_manualPlacement) outcome = Outcome::Failed;

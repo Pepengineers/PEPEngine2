@@ -94,7 +94,8 @@ public:
                     field == "Render.Display.InternalResolution" || field == "LastPassCSV" ||
                     field == "Partial" || field == "CompletedPasses" || field == "ReconstructionApplied" ||
                     field == "ReconstructionComparison" || field == "RequestedPostDevice" || field == "EffectivePostDevice" ||
-                    field == "Render.Upscaler.Provider" || field == "Render.Upscaler.EffectiveProvider" ||
+                    field == "Render.Upscaler.Provider" || field == "Render.Upscaler.Quality" ||
+                    field == "Render.Upscaler.EffectiveProvider" ||
                     field == "Render.Upscaler.EffectiveQuality" || field == "InternalScale" ||
                     field == "ReconstructionFallback" || field == "ComparisonEligibility")
                     Write(_file, row);
