@@ -2,6 +2,8 @@
 #include "BistroReportCsvReader.h"
 #include "../../../Resources/Resource.h"
 #include <windows.h>
+#include <wincrypt.h>
+#pragma comment(lib, "crypt32.lib")
 #include <atomic>
 #include <fstream>
 #include <set>
@@ -146,6 +148,23 @@ std::string_view ResourceBytes(int id, LPCWSTR type)
     return {data, SizeofResource(module, resource)};
 }
 
+std::string IconDataUrl()
+{
+    const auto group = ResourceBytes(IDI_PEPENGINE2, RT_GROUP_ICON);
+    const auto id = LookupIconIdFromDirectoryEx(reinterpret_cast<PBYTE>(const_cast<char*>(group.data())), TRUE, 64, 64, LR_DEFAULTCOLOR);
+    const auto png = ResourceBytes(id, RT_ICON);
+    const auto data = reinterpret_cast<const BYTE*>(png.data());
+    constexpr DWORD flags = CRYPT_STRING_BASE64 | CRYPT_STRING_NOCRLF;
+    DWORD length = 0;
+    if (!CryptBinaryToStringA(data, DWORD(png.size()), flags, nullptr, &length))
+        throw std::system_error(GetLastError(), std::system_category(), "Cannot size the report icon");
+    std::string encoded(length, '\0');
+    if (!CryptBinaryToStringA(data, DWORD(png.size()), flags, encoded.data(), &length))
+        throw std::system_error(GetLastError(), std::system_category(), "Cannot encode the report icon");
+    encoded.resize(length);
+    return "data:image/png;base64," + encoded;
+}
+
 void WriteFileBytes(const fs::path& path, std::string_view bytes)
 {
     std::ofstream file(path, std::ios::binary);
@@ -170,7 +189,7 @@ fs::path WriteArchive(const fs::path& root, const fs::path& run, fs::file_time_t
     std::ofstream list(staging.Path / "files.list", std::ios::binary);
     list.exceptions(std::ios::failbit | std::ios::badbit);
     // bsdtar applies a directory change inside a file list to the following entries.
-    list << "index.html\npepengine.png\n-C\n" << sources.Root.lexically_relative(staging.Path).generic_u8string() << '\n';
+    list << "index.html\n-C\n" << sources.Root.lexically_relative(staging.Path).generic_u8string() << '\n';
     body += "<details id=\"sources\"><summary>Source files <small>" + std::to_string(sources.Files.size());
     if (!sources.Missing.empty()) body += " saved, " + std::to_string(sources.Missing.size()) + " unavailable";
     body += "</small></summary><ul class=\"files\">";
@@ -188,10 +207,9 @@ fs::path WriteArchive(const fs::path& root, const fs::path& run, fs::file_time_t
         body += "</ul>";
     }
     body += "</details>";
-    const auto group = ResourceBytes(IDI_PEPENGINE2, RT_GROUP_ICON);
-    const auto id = LookupIconIdFromDirectoryEx(reinterpret_cast<PBYTE>(const_cast<char*>(group.data())), TRUE, 64, 64, LR_DEFAULTCOLOR);
-    WriteFileBytes(staging.Path / "pepengine.png", ResourceBytes(id, RT_ICON));
     std::string page(ResourceBytes(IDR_BISTRO_REPORT, RT_RCDATA));
+    constexpr std::string_view icon = "@@ENGINE_ICON@@";
+    page.replace(page.find(icon), icon.size(), IconDataUrl());
     constexpr std::string_view marker = "<!--BENCHMARK-->";
     page.replace(page.find(marker), marker.size(), body);
     WriteFileBytes(staging.Path / "index.html", page);

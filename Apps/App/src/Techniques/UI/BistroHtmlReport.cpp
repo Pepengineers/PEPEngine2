@@ -1,15 +1,15 @@
 #include "BistroComparePanel.h"
 #include "BistroReportArchive.h"
 #include "BistroReportValues.h"
-#include "BistroPlacementSearch.h"
 #include "Common/RuntimePaths.h"
 #include <imgui/imgui.h>
 #include <windows.h>
 #include <shellapi.h>
 #include <chrono>
 #include <iomanip>
+#include <initializer_list>
 #include <locale>
-#include <set>
+#include <algorithm>
 #include <sstream>
 
 using namespace BistroReport;
@@ -25,32 +25,52 @@ std::string Decimal(double value)
     return out.str();
 }
 
-void Comparison(std::ostream& html, const char* title, const Settings& left, const Settings& right,
-    const char* leftLabel, const char* rightLabel, bool techniques = false)
+struct FieldGroup
 {
-    if (left.empty() && right.empty()) return;
-    html << "<details><summary>" << title << "</summary><div class=\"scroll\"><table><thead><tr><th>Setting</th>";
-    if (!left.empty()) html << "<th>" << leftLabel << "</th>";
-    html << "<th>" << rightLabel << "</th></tr></thead><tbody>";
-    std::set<std::string> keys;
-    for (const auto& item : left) keys.insert(item.first);
-    for (const auto& item : right) keys.insert(item.first);
-    for (const auto& key : keys)
+    const Settings& Before;
+    const Settings& After;
+    FieldKind Kind;
+};
+
+void Comparison(std::ostream& html, const char* title, const char* leftLabel, const char* rightLabel,
+    std::initializer_list<FieldGroup> groups, bool expanded = false)
+{
+    std::vector<ComparedField> rows;
+    bool comparable = false, hasBefore = false;
+    for (const auto& group : groups)
     {
-        std::string setting = key;
-        if (techniques)
-            for (const auto& entry : BistroPlacement::Techniques)
-                if (key == entry.Pass && entry.Quality) { setting = fs::path(entry.Quality).u8string(); break; }
-        const auto cell = [&](const Settings& values) {
-            const auto& raw = Value(values, key);
-            const auto label = techniques && !values.empty() && raw.empty() ? "Inactive" : DisplayValue(setting, raw);
-            html << "<td>" << Escape(label) << "</td>";
-        };
-        const bool changed = !left.empty() && !right.empty() && Value(left, key) != Value(right, key);
-        html << (changed ? "<tr class=\"change\">" : "<tr>") << "<th>" << Escape(techniques ? key : SettingLabel(key)) << "</th>";
-        if (!left.empty()) cell(left);
-        cell(right);
-        html << "</tr>";
+        const auto& a = group.Before;
+        const auto& b = group.After;
+        const bool both = !a.empty() && !b.empty();
+        comparable |= both && group.Kind != FieldKind::Metric;
+        hasBefore |= !a.empty();
+        for (const auto& [key, value] : a)
+            rows.push_back(CompareField(key, value, Value(b, key), group.Kind, both));
+        for (const auto& [key, value] : b)
+            if (!a.count(key)) rows.push_back(CompareField(key, {}, value, group.Kind, both));
+    }
+    if (rows.empty()) return;
+    const auto changes = std::count_if(rows.begin(), rows.end(), [](const auto& row) { return row.Delta != Change::None; });
+    html << "<details" << (expanded ? " open" : "") << (comparable ? " class=\"changes-only\"" : "") << "><summary>" << title;
+    if (comparable) html << " <small>" << changes << (changes == 1 ? " change" : " changes") << "</small>";
+    html << "</summary>";
+    if (comparable)
+    {
+        html << "<div class=\"switch filter\"><button aria-pressed=\"true\">Changes only</button>"
+             << "<button aria-pressed=\"false\">All settings</button></div>";
+        if (!changes) html << "<p class=\"no-changes muted\">No recorded differences.</p>";
+    }
+    html << "<div class=\"scroll\"><table><thead><tr>";
+    if (hasBefore) html << "<th>" << leftLabel << "</th>";
+    html << "<th>Technique or setting</th><th>" << rightLabel << "</th></tr></thead><tbody>";
+    for (const auto& row : rows)
+    {
+        html << (row.Delta == Change::None ? "<tr class=\"same\">" : "<tr>");
+        if (hasBefore) html << "<td>" << (row.Before.empty() ? "Not recorded" : Escape(row.Before)) << "</td>";
+        html << "<th>" << Escape(row.Label) << "</th><td>" << (row.After.empty() ? "Not recorded" : Escape(row.After));
+        if (row.Delta != Change::None)
+            html << " <span class=\"delta " << ChangeLabel(row.Delta) << "\">" << ChangeLabel(row.Delta) << "</span>";
+        html << "</td></tr>";
     }
     html << "</tbody></table></div></details>";
 }
@@ -61,6 +81,7 @@ std::string BistroComparePanel::ReportBody(const Run& run, const Winner* selecte
 {
     std::ostringstream html;
     html.imbue(std::locale::classic());
+    html << std::setprecision(12);
     html << "<header><div><h1>" << Escape(run.MapName) << "</h1><p class=\"muted\">" << Escape(run.Timestamp)
          << "</p></div><a class=\"action\" href=\"#sources\">Source files &darr;</a></header>";
     const bool both = run.Winners[0].Available() && run.Winners[1].Available();
@@ -73,9 +94,8 @@ std::string BistroComparePanel::ReportBody(const Run& run, const Winner* selecte
         html << "</div></nav>";
     }
 
-    const auto view = [&](const Winner* placement, const Selection& measurement) {
+    const auto view = [&](const Winner* placement, const Selection& measurement, std::array<Selection, 2>& cache) {
         const Winner* winner = placement && placement->Confirmed() ? placement : nullptr;
-        const bool trace = !measurement.Samples.empty() && measurement.Error.empty();
         const auto& settings = winner ? winner->Settings : measurement.Settings;
         const auto& measuredOutput = Value(settings, "Render.Display.OutputResolution");
         const char* mode = placement == &run.Winners[1] ? "Upscaled" : "Native";
@@ -133,56 +153,81 @@ std::string BistroComparePanel::ReportBody(const Run& run, const Winner* selecte
                     fields["Upscaler"] = DisplayValue("Render.Upscaler.EffectiveProvider", raw);
                 return fields;
             };
-            Comparison(html, "Placement metrics and configuration", metrics(a), metrics(b), "Single GPU", "Multi-GPU");
-            Comparison(html, "Technique quality", a.Techniques, b.Techniques, "Single GPU", "Multi-GPU", true);
-            Comparison(html, "GPU placement", a.GpuSettings, b.GpuSettings, "Single GPU", "Multi-GPU");
+            Comparison(html, "Placement metrics and configuration", "Single GPU", "Multi-GPU",
+                {{metrics(a), metrics(b), FieldKind::Metric}});
+            Comparison(html, "GPU placement and technique changes", "Single GPU", "Multi-GPU",
+                {{a.GpuSettings, b.GpuSettings, FieldKind::Placement}, {a.Techniques, b.Techniques, FieldKind::Technique}}, true);
         }
 
         html << "<h2>Frame timing</h2>";
-        if (trace)
+        const auto lines = RunLines(placement, measurement, cache);
+        html << "<figure data-target=\"" << run.Target() << "\">";
+        for (size_t i = 0; i < lines.size(); ++i)
         {
-            const auto& pass = _runs[measurement.RunIndex].Passes[measurement.PassIndex];
+            const auto& line = lines[i];
+            if (!line.Data)
+            {
+                if (!line.Label.empty()) html << "<p class=\"muted\">" << Escape(line.Label) << "</p>";
+                continue;
+            }
+            const auto& data = *line.Data;
+            const auto& pass = _runs[data.RunIndex].Passes[data.PassIndex];
             measuredPasses.push_back(pass.Path);
-            html << "<p class=\"muted\">" << Escape(pass.Label) << " &middot; " << measurement.Samples.size() << " frames</p>"
-                 << "<figure data-target=\"" << run.Target() << "\" data-begin=\"" << measurement.Samples.front().RouteSeconds
-                 << "\" data-end=\"" << measurement.Samples.back().RouteSeconds << "\" data-points=\"";
-            // Keep the same chronological extrema as the in-app plot. All raw samples are in the pass CSV.
-            for (size_t i : measurement.Trace)
-                html << measurement.Samples[i].RouteSeconds << ',' << measurement.Samples[i].IntervalMs << ' ';
-            html << "\"><div class=\"switch\"><button aria-pressed=\"true\">Frame time (ms)</button><button aria-pressed=\"false\">FPS</button></div>"
-                 << "<svg viewBox=\"0 0 800 196\" role=\"img\" aria-label=\"Frame timing along the benchmark route\"></svg>"
+            html << "<div class=\"series " << (i == 0 ? "first" : "second") << "\" data-trace=\"";
+            for (auto index : data.Trace) html << index << ' ';
+            html << "\" data-frames=\"";
+            std::map<std::string, size_t> sections;
+            for (const auto& frame : data.Samples)
+            {
+                const auto section = sections.try_emplace(frame.Section, sections.size()).first->second;
+                html << frame.RouteSeconds << ',' << frame.IntervalMs << ',' << frame.FrameMs << ',' << frame.Number << ',' << section << ' ';
+            }
+            html << "\"><b>" << Escape(line.Label.empty() ? data.Mode : line.Label) << "</b> <small>" << Escape(pass.Label)
+                 << " &middot; " << data.Samples.size() << " frames &middot; Interval measured "
+                 << (data.AfterRender ? "after Render / Present" : "before Present") << "</small>";
+            for (const auto& [name, index] : sections) html << "<span hidden data-section=\"" << index << "\">" << Escape(name) << "</span>";
+            html << "</div>";
+        }
+        if (lines[0].Data || lines[1].Data)
+        {
+            html << "<div class=\"switch\"><button aria-pressed=\"true\">Frame time (ms)</button><button aria-pressed=\"false\">FPS</button></div>"
+                 << "<svg viewBox=\"0 0 800 196\" tabindex=\"0\" role=\"group\" aria-label=\"Frame timing along the route. Use arrow keys to inspect frames.\"></svg>"
                  << "<figcaption>Route time (s)";
             if (run.Target() > 0) html << " &middot; Dashed target " << run.Target() << " FPS / " << Decimal(1000. / run.Target()) << " ms";
-            html << "</figcaption></figure><p class=\"muted\">Interval measured "
-                 << (measurement.AfterRender ? "after Render / Present" : "before Present") << "</p>";
-            if (measurement.Mode == "Async" && measurement.ScopeMeanMs > 0 && measurement.ScopeP95Ms > 0)
-                html << "<p>Timed CPU scope &nbsp; " << Decimal(measurement.ScopeMeanMs) << " ms mean &nbsp;/&nbsp; "
-                     << Decimal(measurement.ScopeP95Ms) << " ms P95</p>";
+            html << "</figcaption><div class=\"frame-readout\">Point at the chart or use the arrow keys to inspect a frame.</div>";
         }
-        else html << "<p class=\"muted\">" << (measurement.Error.empty() ? "Full-route frame trace unavailable." : Escape(measurement.Error)) << "</p>";
+        else if (lines[0].Label.empty() && lines[1].Label.empty())
+            html << "<p class=\"muted\">" << (measurement.Error.empty() ? "Full-route frame trace unavailable." : Escape(measurement.Error)) << "</p>";
+        html << "</figure>";
+        if (measurement.Mode == "Async" && measurement.ScopeMeanMs > 0 && measurement.ScopeP95Ms > 0)
+            html << "<p>Timed CPU scope &nbsp; " << Decimal(measurement.ScopeMeanMs) << " ms mean &nbsp;/&nbsp; "
+                 << Decimal(measurement.ScopeP95Ms) << " ms P95</p>";
         if (winner) html << "<h2>Selected preset / " << mode << "</h2>";
         const auto image = ImageSummary(settings);
         if (!image.empty()) html << "<p>" << Escape(image) << "</p>";
         if (placement == &run.Winners[1] && run.Winners[0].Confirmed() && winner)
-            Comparison(html, "Techniques compared with Native", run.Winners[0].Techniques, winner->Techniques, "Native", "Upscaled", true);
+            Comparison(html, "Techniques compared with Native", "Native", "Upscaled",
+                {{run.Winners[0].GpuSettings, winner->GpuSettings, FieldKind::Placement},
+                 {run.Winners[0].Techniques, winner->Techniques, FieldKind::Technique}}, true);
         const auto& observed = placement ? static_cast<const PlacementResult&>(*placement) : measurement.Observed;
         if (!placement || placement->Placements[1].Techniques.empty())
         {
-            Comparison(html, "Measured techniques", {}, observed.Techniques, "", "Measured value", true);
-            Comparison(html, "Measured owners", {}, observed.GpuSettings, "", "Measured value");
+            Comparison(html, "Measured techniques and owners", "", "Measured value",
+                {{{}, observed.GpuSettings, FieldKind::Placement}, {{}, observed.Techniques, FieldKind::Technique}});
         }
-        if (!settings.empty()) Comparison(html, winner ? "Preset settings" : "Pass settings", run.Before, settings,
-            "Before run", winner ? "Selected preset" : "Measured pass");
+        if (!settings.empty()) Comparison(html, winner ? "Preset settings" : "Pass settings", "Before run",
+            winner ? "Selected preset" : "Measured pass", {{run.Before, settings, FieldKind::Setting}});
         html << "</article>";
     };
 
-    view(selected, current);
+    view(selected, current, _placementPasses);
     if (both)
     {
         const auto& other = run.Winners[selected == &run.Winners[0] ? 1 : 0];
         Selection measurement;
         if (other.Confirmed()) Select(measurement, other.RunIndex, other.PassIndex);
-        view(&other, measurement);
+        std::array<Selection, 2> cache;
+        view(&other, measurement, cache);
     }
 
     html << "<h2>Run details</h2>";

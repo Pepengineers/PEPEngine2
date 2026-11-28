@@ -43,15 +43,15 @@ class BistroComparePanel
     struct PlacementResult
     {
         Values Fields, Techniques, GpuSettings;
+        bool Confirmed() const;
+        int RunIndex = -1, PassIndex = -1;
     };
     struct Winner : PlacementResult
     {
-        bool Confirmed() const;
         bool Available() const;
         Values Settings;
         std::vector<std::string> Improvements;
         std::array<PlacementResult, 2> Placements;
-        int RunIndex = -1, PassIndex = -1;
     };
     struct Run
     {
@@ -88,6 +88,13 @@ class BistroComparePanel
         double MaxMs = 0, MaxFps = 0;
         double ScopeMeanMs = -1, ScopeP95Ms = -1;
     };
+    struct PlotLine
+    {
+        const Selection* Data = nullptr;
+        std::string Label;
+    };
+    using PlotLines = std::array<PlotLine, 2>;
+    PlotLines RunLines(const Winner* placement, const Selection& current, std::array<Selection, 2>& cache);
     FrameTiming SummaryTiming(const Winner* winner, const Selection& selection) const;
     std::string ReportBody(const Run& run, const Winner* placement, const Selection& selection,
         std::vector<std::filesystem::path>& measuredPasses);
@@ -100,7 +107,7 @@ class BistroComparePanel
     ImFont* _headingFont = nullptr;
     void Select(Selection &, int run, int pass);
     void DrawSelection(Selection &, size_t index);
-    static void DrawPlot(const Selection* series, size_t count, bool fps, double target = 0);
+    static void DrawPlot(const PlotLines& lines, bool fps, double target = 0);
     static void DrawRouteMetrics(const FrameTiming& timing, ImFont* headingFont);
     static void DrawComparedTimings(const FrameTiming& a, const FrameTiming& b, const char* left, const char* right, bool comparable);
     static void DrawPlacementComparison(const Winner& winner);
@@ -110,6 +117,7 @@ class BistroComparePanel
     int DrawRunList(bool compact);
     void DrawComparison();
     Selection _lastPass;
+    std::array<Selection, 2> _placementPasses;
     std::filesystem::path _historyPath, _imageRun;
     bool _showComparison = false, _runFps = false;
     bool _loadComparison = false;
