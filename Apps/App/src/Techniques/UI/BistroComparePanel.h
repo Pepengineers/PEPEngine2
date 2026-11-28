@@ -7,6 +7,7 @@
 #include <future>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -66,7 +67,8 @@ class BistroComparePanel
         std::filesystem::path Path;
         std::filesystem::file_time_type Modified;
         std::string Label, Mode, Profile, MapId, RouteId, FinalStatus, SelectedImage;
-        std::string MapName, DisplayMode, Output, Timestamp;
+        std::string MapName, DisplayMode, Output, Timestamp, RunDate;
+        std::set<std::string> MeasuredPeers;
         std::optional<double> SummaryFps, MinimumFps;
         std::optional<double> BaseBudget, AddedRoutes, Budget, Elapsed;
         struct PhaseBudget
@@ -79,6 +81,7 @@ class BistroComparePanel
         std::map<std::string, Values> ReconstructionTrials;
         double Target() const { return Profile == "Performance" ? 60. : Profile == "Quality" ? 30. : 0.; }
         const char* TargetStatus(double fps, const Winner* winner) const;
+        std::filesystem::path ArchiveStem() const;
         bool AfterRender = false;
         Values Settings, Before, TrialPasses, MaskBits, Adapters;
         std::array<Winner, 2> Winners;

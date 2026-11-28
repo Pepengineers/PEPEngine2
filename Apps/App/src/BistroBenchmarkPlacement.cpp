@@ -14,6 +14,7 @@ void BistroBenchmark::StartPlacement(World& world, ConsoleModule& console, const
     _manualGpuTimings = manual && !pipeline.BenchmarkSubmissions().BenchmarkAdapterIndices().empty();
     _placementPhase = 0;
     _calibrating = !manual;
+    _reportedMeasuredPeers.clear();
     _placementPhysics = {};
     _placementSearch = BistroPlacement::Search(_placementProfile, _launch.Level->Techniques);
     _placementSetupReserve = 2;
@@ -538,6 +539,13 @@ void BistroBenchmark::CompletePlacementLeg(World& world, ConsoleModule& console,
     WritePlacementWaits(pipeline);
     if (_reusedPass.empty())
     {
+        if (_trialReason.empty() && !_frames.empty())
+        {
+            for (const auto& [role, owners] : _legMeasurements.ActiveOwners)
+                for (const auto owner : owners)
+                    if (owner != 0 && _reportedMeasuredPeers.insert(owner).second)
+                        _csv.Config("MeasuredPeer", pipeline.BenchmarkSubmissions().AdapterLabel(owner));
+        }
         WriteLeg(_trialReason.empty() ? "completed" : _trialReason.c_str());
         for (const auto& frame : _frames)
         {

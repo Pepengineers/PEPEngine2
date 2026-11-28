@@ -180,7 +180,7 @@ std::string PassSourceMarker(size_t index)
 }
 
 fs::path WriteArchive(const fs::path& root, const fs::path& run, fs::file_time_type indexedAt,
-    std::string body, std::vector<fs::path> measuredPasses, std::vector<fs::path> completedPasses)
+    fs::path archiveStem, std::string body, std::vector<fs::path> measuredPasses, std::vector<fs::path> completedPasses)
 {
     Sources sources{fs::canonical(root)};
     const auto selected = sources.Root / run.lexically_relative(root);
@@ -245,7 +245,7 @@ fs::path WriteArchive(const fs::path& root, const fs::path& run, fs::file_time_t
     for (const auto& [path, time] : sources.Files)
         if (fs::last_write_time(sources.Root / path) != time)
             throw std::runtime_error("A source file changed during export. Refresh the run history and retry.");
-    const auto base = run.stem().wstring();
+    const auto base = archiveStem.wstring();
     for (unsigned version = 1; ; ++version)
     {
         const auto output = directory / (base + (version == 1 ? L"" : L"-" + std::to_wstring(version)) + L".zip");

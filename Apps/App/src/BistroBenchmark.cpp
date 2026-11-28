@@ -8,6 +8,7 @@
 #include "Engine.Core/Logging/Logger.h"
 #include "Engine.RendererDX12/GDX12LocalLights.h"
 #include <cstdio>
+#include <ctime>
 #include <sstream>
 
 BistroBenchmark::Pose BistroBenchmark::Shot::Sample(float time) const
@@ -787,11 +788,17 @@ void BistroBenchmark::Start(World& world, ConsoleModule& console, RenderModule& 
     if (_stage == Stage::Placement)
         directory /= action == Action::PlacementRun ? "Manual" : _multiGPU ? "MultiGPU" : "SingleGPU";
     std::filesystem::create_directories(directory);
-    const auto stamp = std::chrono::system_clock::now().time_since_epoch().count();
+    const auto started = std::chrono::system_clock::now();
+    const auto stamp = started.time_since_epoch().count();
     const auto id = std::to_string(stamp) + "-" + std::to_string(GetCurrentProcessId()) + "-" + std::to_string(++_runId);
     _path = directory / ("bistro-" + id + ".csv");
     _csv.Open(_path);
     _csv.Config("RunId", id);
+    const auto time = std::chrono::system_clock::to_time_t(started);
+    std::tm local{};
+    char date[11];
+    if (localtime_s(&local, &time) == 0 && std::strftime(date, sizeof(date), "%d-%m-%Y", &local))
+        _csv.Config("RunDate", date);
     _csv.Config("MapId", _launch.Level->Id);
     _csv.Config("RouteId", _launch.Level->Route);
     _csv.Config("RequestedOutput", std::to_string(_launch.Output.first) + "x" + std::to_string(_launch.Output.second));

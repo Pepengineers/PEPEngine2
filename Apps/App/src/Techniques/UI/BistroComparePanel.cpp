@@ -24,6 +24,7 @@
 #include <cstdio>
 #include <fstream>
 #include <optional>
+#include <sstream>
 #include <tuple>
 
 namespace fs = std::filesystem;
@@ -458,6 +459,31 @@ std::string RunMode(const std::string &mode)
     if (mode.find("search") != mode.npos) return "Async";
     return "Unknown";
 }
+
+std::string CompactName(std::string_view name)
+{
+    std::string compact;
+    for (unsigned char c : name)
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c >= 0x80)
+            compact += char(c);
+    return compact;
+}
+
+std::string ShortGpuName(std::string label)
+{
+    if (const auto end = label.find("] "); !label.empty() && label.front() == '[' && end != label.npos)
+        label.erase(0, end + 2);
+    for (const std::string_view mark : {"(TM)", "(R)"})
+        if (const auto pos = label.find(mark); pos != label.npos) label.erase(pos, mark.size());
+    if (const auto pos = label.find("Radeon RX "); pos != label.npos) label.erase(pos, 7);
+    std::istringstream words(label);
+    std::string result;
+    for (std::string word; words >> word; )
+        if (word != "NVIDIA" && word != "GeForce" && word != "AMD" && word != "ATI" &&
+            word != "Intel" && word != "Qualcomm" && word != "GPU")
+            result += CompactName(word);
+    return result.empty() ? "GPU" : result;
+}
 }
 
 void BistroComparePanel::Refresh(bool force)
@@ -546,8 +572,10 @@ void BistroComparePanel::Refresh(bool force)
                 else if (key == "Profile")
                     run.Profile = value;
                 else if (key == "MapId") run.MapId = value;
+                else if (key == "RunDate") run.RunDate = value;
                 else if (key == "RequestedOutput") run.Output = value;
                 else if (key == "PrimaryAdapter") adapterLabels["-1"] = value;
+                else if (key == "MeasuredPeer" && !value.empty()) run.MeasuredPeers.insert(value);
                 else if (key == "EligiblePeer")
                 {
                     // The report labels each GPU as "[DXGI hardware index] model".
@@ -1931,6 +1959,17 @@ const char* BistroComparePanel::Run::TargetStatus(double fps, const Winner* winn
     return within ? "Within tolerance" : "Below target";
 }
 
+fs::path BistroComparePanel::Run::ArchiveStem() const
+{
+    const char mode = Mode == "Manual" ? 'M' : Profile == "Performance" ? 'P' : Profile == "Quality" ? 'Q' : '\0';
+    if (!mode || RunDate.size() != 10 || RunDate.find_first_not_of("0123456789-") != RunDate.npos)
+        return Path.stem();
+    auto name = std::string(1, mode) + "-" + CompactName(MapName) + "-" + RunDate + "-";
+    name += Passes.empty() ? "NoGPU" : ShortGpuName(Value(Adapters, "-1"));
+    for (const auto& peer : MeasuredPeers) name += "_" + ShortGpuName(peer);
+    return fs::u8path(name);
+}
+
 void BistroComparePanel::DrawExportStatus(const Run& run, const Winner* placement, const Selection& selection, bool requested)
 {
     try
@@ -1946,7 +1985,7 @@ void BistroComparePanel::DrawExportStatus(const Run& run, const Winner* placemen
             auto body = ReportBody(run, placement, selection, measured, completed);
             _exportJob = std::async(std::launch::async, BistroReport::WriteArchive,
                 Engine::Core::GetExecutableDirectory() / "BenchmarkResults", run.Path, run.Modified,
-                std::move(body), std::move(measured), std::move(completed));
+                run.ArchiveStem(), std::move(body), std::move(measured), std::move(completed));
         }
     }
     catch (const std::exception& e) { _exportError = e.what(); }

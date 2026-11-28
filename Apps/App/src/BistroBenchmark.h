@@ -399,6 +399,7 @@ private:
     std::array<bool, std::size(BistroPlacement::Techniques)> _placementSeenOnRoute{};
     std::vector<ScheduleEvidence> _scheduleEvidence;
     BistroRenderPipeline::FramePlacement _framePlacement;
+    std::set<BistroRender::Id> _reportedMeasuredPeers;
     struct TrialMeasurements
     {
         struct SimulationStats
