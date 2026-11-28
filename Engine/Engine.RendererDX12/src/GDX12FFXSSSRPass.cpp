@@ -35,7 +35,7 @@ void GDX12FFXSSSRPass::Describe(PassDescription& description) const
     description.AddParameter("Intensity", 1.0f);
     description.AddParameter("MaxRoughness", 0.6f);
     description.AddParameter("RoughnessFade", 0.1f);
-    description.AddParameter("SamplesPerQuad", 2);
+    description.AddParameter("SamplesPerQuad", 4);
     description.AddParameter("MaxTraversalIntersections", 128);
     description.AddParameter("MinTraversalOccupancy", 4);
     description.AddParameter("MostDetailedMip", 1);
