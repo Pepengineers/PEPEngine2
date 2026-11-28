@@ -20,6 +20,7 @@
 #include "BistroTaskbar.h"
 #include "Techniques/UI/BistroInfoPanel.h"
 #include "Techniques/UI/BistroLoadingScreen.h"
+#include "Techniques/UI/BistroWindowBounds.h"
 #include "Techniques/UI/BistroUICanvases.h"
 #include "Techniques/UI/SceneTextureInspector.h"
 #include "Components/BistroInteractionSource.h"
@@ -30,10 +31,51 @@
 #include <optional>
 #include <WindowsX.h>
 #include <shellapi.h>
+#include <tlhelp32.h>
 #include "Engine.UI/UI_test.h"
 
 namespace
 {
+bool LaunchedFromWindowsShell()
+{
+	STARTUPINFOW startup{};
+	GetStartupInfoW(&startup);
+	if ((startup.dwFlags & STARTF_USESHOWWINDOW) && startup.wShowWindow == SW_HIDE) return false;
+	if (startup.dwFlags & STARTF_TITLEISLINKNAME) return true;
+	const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+	if (snapshot == INVALID_HANDLE_VALUE) return false;
+	PROCESSENTRY32W process{sizeof(process)};
+	DWORD parent = 0;
+	for (BOOL found = Process32FirstW(snapshot, &process); found; found = Process32NextW(snapshot, &process))
+		if (process.th32ProcessID == GetCurrentProcessId())
+		{
+			parent = process.th32ParentProcessID;
+			break;
+		}
+	bool fromExplorer = false;
+	for (BOOL found = parent && Process32FirstW(snapshot, &process); found; found = Process32NextW(snapshot, &process))
+		if (process.th32ProcessID == parent)
+		{
+			fromExplorer = _wcsicmp(process.szExeFile, L"explorer.exe") == 0;
+			break;
+		}
+	CloseHandle(snapshot);
+	return fromExplorer;
+}
+
+void ShowStartupError(const std::wstring& reason)
+{
+	if (!LaunchedFromWindowsShell()) return;
+	const auto log = Engine::Core::GetExecutableDirectory() / L"Logs" / L"Engine.log";
+	std::error_code error;
+	const bool hasLog = std::filesystem::is_regular_file(log, error);
+	auto message = L"Pepengine2 could not prepare startup settings.\n\n" + reason;
+	if (hasLog) message += L"\n\nOpen the startup log?\n" + log.wstring();
+	if (MessageBoxW(nullptr, message.c_str(), L"Pepengine2 startup", MB_ICONERROR | (hasLog ? MB_YESNO : MB_OK) |
+		(hasLog ? MB_DEFBUTTON2 : 0)) == IDYES)
+		ShellExecuteW(nullptr, L"open", log.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+}
+
 #if !defined(_DEBUG) && !defined(DEBUG)
 bool SkipAutomaticBenchmark()
 {
@@ -288,6 +330,7 @@ class BistroApplication final : public App
 		if (_legNumber != _benchmark.LegNumber())
 		{
 			_legNumber = _benchmark.LegNumber();
+			_info.ResetMeasurementSeries();
 			RefreshWindowCaption();
 		}
 		_map->Reflections.Update(world, timer.DeltaTime());
@@ -300,7 +343,13 @@ class BistroApplication final : public App
 		BistroParticles::Update(world);
 		App::Update(timer);
 		_map->Reflections.DrawBounds(world, *render);
-		if (_measurementMap && !_loadingScreen) _info.DrawMeasurement(_benchmark);
+		if (_measurementMap && !_loadingScreen)
+		{
+			const auto window = GetWindow()->GetWindowHandle();
+			auto visible = VisibleClientOnMonitor(window, _measurementMonitor);
+			if (!IsRectEmpty(&visible)) MapWindowPoints(nullptr, window, reinterpret_cast<POINT*>(&visible), 2);
+			_info.DrawMeasurement(_benchmark, visible);
+		}
 	}
 	void Render(const GameTimer& timer) override
 	{
@@ -329,10 +378,9 @@ class BistroApplication final : public App
 		}
 		if (!_measurementMap) return;
 		const bool presented = _bistroPipeline->PresentedFrames() != framesBefore;
-		if (presented)
-			_info.RecordPresent(_bistroPipeline->PresentTime(), _bistroPipeline->BenchmarkSubmissions(), _benchmark.ManualGpuTimings());
-		_benchmark.FrameRendered(*Locator.GetModule<SceneManagerModule>()->GetWorld(), *Locator.GetModule<ConsoleModule>(),
-		    *render, *_bistroPipeline, presented);
+		if (const auto interval = _benchmark.FrameRendered(*Locator.GetModule<SceneManagerModule>()->GetWorld(),
+			*Locator.GetModule<ConsoleModule>(), *render, *_bistroPipeline, presented))
+			_info.RecordPresent(interval->Begin, interval->End, _bistroPipeline->BenchmarkSubmissions(), _benchmark.ManualGpuTimings());
 		if (_benchmark.Active()) _taskbar.Set(GetWindow()->GetWindowHandle(), BistroTaskbar::State::Running, _benchmark.RunPercent());
 	}
 	int Run()
@@ -362,6 +410,30 @@ class BistroApplication final : public App
 	LRESULT MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) override
 	{
 		if (_loadingScreen && msg == WM_KEYUP && wParam == VK_ESCAPE) _loadingScreen->RequestCancel();
+#if defined(_DEBUG) || defined(DEBUG)
+		if (_map && !_measurementMap && !_loadingScreen && wParam == VK_ESCAPE)
+		{
+			using BistroRender::SceneTextureInspector;
+			const bool settings = Engine::UI::SettingsVisible();
+			const bool textures = SceneTextureInspector::Visible();
+			if (msg == WM_KEYDOWN && !(lParam & (1L << 30)))
+				_escapeForWidget = (settings || textures) && Engine::UI::HasActiveToolInteraction();
+			if (msg == WM_KEYUP)
+			{
+				const bool widget = std::exchange(_escapeForWidget, false);
+				if (widget || settings || textures)
+				{
+					Engine::UI::HandleMessage(hwnd, msg, wParam, lParam);
+					if (!widget)
+					{
+						if (textures && (SceneTextureInspector::Focused() || !settings)) SceneTextureInspector::SetVisible(false);
+						else Engine::UI::HideSettings();
+					}
+					return 0;
+				}
+			}
+		}
+#endif
 		_taskbar.OnMessage(hwnd, msg, wParam);
 		return App::MsgProc(hwnd, msg, wParam, lParam);
 	}
@@ -374,7 +446,8 @@ class BistroApplication final : public App
 		_savedStyle = GetWindowLongPtrW(hwnd, GWL_STYLE);
 		_windowChanged = true;
 		MONITORINFO monitor{sizeof(monitor)};
-		Require(GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &monitor), "Cannot locate benchmark monitor");
+		_measurementMonitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+		Require(GetMonitorInfoW(_measurementMonitor, &monitor), "Cannot locate benchmark monitor");
 		if (IsZoomed(hwnd)) ShowWindow(hwnd, SW_RESTORE);
 		SetLastError(0);
 		const auto previous = SetWindowLongPtrW(hwnd, GWL_STYLE, (_savedStyle & ~(WS_OVERLAPPEDWINDOW | WS_MAXIMIZE)) | WS_POPUP);
@@ -397,7 +470,8 @@ class BistroApplication final : public App
 		{
 			if (measurementSize) SetMeasurementWindow(*measurementSize);
 			_loadingPhase = BistroLoadingScreen::Renderer;
-			_loadingScreen.emplace(GetWindow()->GetWindowHandle(), std::filesystem::u8path(map.Name).wstring());
+			_loadingScreen.emplace(GetWindow()->GetWindowHandle(), std::filesystem::u8path(map.Name).wstring(),
+				measurementSize ? _measurementMonitor : nullptr);
 			if (LoadWithProgress(L"Opening the map", [&] { LoadBistro(map); }))
 			{
 				// Loading pumps WM_SIZE without resizing a partially initialized scene.
@@ -486,7 +560,11 @@ class BistroApplication final : public App
 		return key == VK_F1 || key == VK_F6 || key == VK_F7 || key == VK_F8;
 	}
 	uint64_t _legNumber = 0;
+#if defined(_DEBUG) || defined(DEBUG)
+	bool _escapeForWidget = false;
+#endif
 	std::optional<BistroLoadingScreen> _loadingScreen;
+	HMONITOR _measurementMonitor = nullptr;
 	BistroLoadingScreen::Phase _loadingPhase = BistroLoadingScreen::Renderer;
 	bool _measurementMap = false;
 	bool _settingsPresented = false, _windowChanged = false;
@@ -679,20 +757,36 @@ int RunBistroApplication()
 {
 	SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 	SetErrorMode(SEM_NOGPFAULTERRORBOX | SEM_FAILCRITICALERRORS);
+	bool preparing = true;
+	std::wstring startupError;
 	try
 	{
-		BistroApplication app(PrepareStartup());
+		auto adapters = PrepareStartup();
+		preparing = false;
+		BistroApplication app(std::move(adapters));
 		Require(app.Initialize(), "Application initialization failed");
 		return app.Run();
 	}
 	catch (const DxException& error)
 	{
 		Log::Error("App", error.ToString());
+		if (preparing) startupError = error.ToString();
 	}
 	catch (const std::exception& error)
 	{
 		Log::Error("App", error.what());
+		if (preparing)
+		{
+			const auto size = MultiByteToWideChar(CP_UTF8, 0, error.what(), -1, nullptr, 0);
+			if (size > 0)
+			{
+				startupError.resize(size);
+				MultiByteToWideChar(CP_UTF8, 0, error.what(), -1, startupError.data(), size);
+				startupError.pop_back();
+			}
+		}
 	}
 	Log::Flush();
+	if (preparing) ShowStartupError(startupError.empty() ? L"Could not load the startup configuration or enumerate adapters." : startupError);
 	return 1;
 }

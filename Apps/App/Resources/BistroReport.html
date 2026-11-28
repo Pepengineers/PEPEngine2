@@ -46,10 +46,18 @@ summary { cursor:pointer; padding:.65em .9em; background:#20322b }
 summary small { margin-left:.55em; font-variant-numeric:tabular-nums }
 details > h3 { margin:1em }
 .scroll { overflow-x:auto }
+.scroll:focus-visible { outline:2px solid var(--lime); outline-offset:-2px }
 table { border-collapse:collapse; width:100%; font-size:.92rem }
 th, td { text-align:left; vertical-align:top; padding:.48em 1em; border-top:1px solid var(--border); overflow-wrap:anywhere }
 th { font-weight:500 }
 thead { color:var(--muted); background:#16251f }
+.settings-table { min-width:31rem }
+.reconstruction :is(th,td):not(.number) { min-width:7em; overflow-wrap:break-word }
+.passes th:first-child { min-width:9em }
+.passes a, .files a { color:var(--mint) }
+.number { min-width:4.5em; white-space:nowrap; text-align:right; font-variant-numeric:tabular-nums }
+.source-group { margin:.55em .8em }
+.source-group summary { overflow-wrap:anywhere }
 .filter { margin:.6em 1em }
 .changes-only tr.same, details:not(.changes-only) > .no-changes { display:none }
 .no-changes { margin:.5em 1em }

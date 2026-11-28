@@ -334,19 +334,22 @@ void BistroBenchmark::Update(World& world, ConsoleModule& console, RenderModule&
     catch (const std::exception& error) { Fail(world, console, pipeline, error.what()); }
 }
 
-void BistroBenchmark::FrameRendered(World& world, ConsoleModule& console, RenderModule& render, BistroRenderPipeline& pipeline,
+std::optional<BistroBenchmark::PresentInterval> BistroBenchmark::FrameRendered(
+    World& world, ConsoleModule& console, RenderModule& render, BistroRenderPipeline& pipeline,
     bool presented)
 {
-    if (!_active) return;
+    if (!_active) return {};
     const auto now = _stage == Stage::Placement ? pipeline.PresentTime() : Clock::now();
+    const PresentInterval interval{_lastPresent.value_or(now), now};
+    bool recorded = false;
     try
     {
         if (!presented)
         {
             Finish(world, console, pipeline, "interrupted: frame not presented", {}, 0, Outcome::Failed);
-            return;
+            return {};
         }
-        if (_stage == Stage::Placement && CheckPlacementDeadline(world, console, pipeline, pipeline.PresentCompletedAt())) return;
+        if (_stage == Stage::Placement && CheckPlacementDeadline(world, console, pipeline, pipeline.PresentCompletedAt())) return {};
         if (_stage == Stage::Placement && _trial.InspectImage)
         {
             ObservePlacementImage(render, pipeline);
@@ -357,7 +360,7 @@ void BistroBenchmark::FrameRendered(World& world, ConsoleModule& console, Render
                 else pipeline.BenchmarkSubmissions().Wait(fence);
             }
             _legDone = true;
-            return;
+            return {};
         }
         if (_stage == Stage::Placement && !_placementInitialProbesReady)
         {
@@ -368,7 +371,7 @@ void BistroBenchmark::FrameRendered(World& world, ConsoleModule& console, Render
                 {
                     _frameConfigPending = true;
                     _legDone = true;
-                    return;
+                    return {};
                 }
                 _trialConfig.clear();
             }
@@ -382,19 +385,20 @@ void BistroBenchmark::FrameRendered(World& world, ConsoleModule& console, Render
             }
             else _placementPreparationFence = {};
             // The first fully prepared GPU frame starts the warmup at the same route position.
-            _legStarted = _lastPresent = now;
+            _legStarted = now;
+            _lastPresent = now;
             _elapsed = 0;
-            return;
+            return {};
         }
-        if (Measuring() && _routeTime < _window.End)
+        if (_lastPresent && Measuring() && _routeTime < _window.End)
         {
             if (_stage == Stage::Placement)
             {
-                RecordPlacementFrame(render, pipeline, now);
+                recorded = RecordPlacementFrame(render, pipeline, now);
                 _lastPresent = now;
                 _elapsed = Seconds(_legStarted, now);
                 _legDone |= _elapsed >= LegWarmup() + _window.End - _preroll;
-                return;
+                return recorded ? std::optional{interval} : std::nullopt;
             }
             if (!_legConfigured)
             {
@@ -421,7 +425,8 @@ void BistroBenchmark::FrameRendered(World& world, ConsoleModule& console, Render
                 }
             }
             _frames.push_back({_routeTime, Seconds(_frameStart, now) * 1000,
-                Seconds(_lastPresent, now) * 1000, Section(_routeTime), groups});
+                Seconds(interval.Begin, interval.End) * 1000, Section(_routeTime), groups});
+            recorded = true;
         }
         _lastPresent = now;
         _elapsed = Seconds(_legStarted, now);
@@ -430,6 +435,7 @@ void BistroBenchmark::FrameRendered(World& world, ConsoleModule& console, Render
             Finish(world, console, pipeline, "gain unconfirmed: deadline", 0);
     }
     catch (const std::exception& error) { Fail(world, console, pipeline, error.what()); }
+    return recorded ? std::optional{interval} : std::nullopt;
 }
 
 float BistroBenchmark::Ease(float t)
@@ -900,7 +906,8 @@ void BistroBenchmark::BeginLeg(World& world, BistroRenderPipeline& pipeline, Win
         ecs.ForEach<FluidRenderComponent>([](Entity, FluidRenderComponent& fluid) { fluid.Reset(); });
         pipeline.ResetBenchmarkClouds();
     }
-    _lastPresent = _legStarted = Clock::now();
+    _legStarted = Clock::now();
+    _lastPresent.reset();
 }
 
 void BistroBenchmark::CaptureWindows(World& world, BistroRenderPipeline& pipeline, const Windows& windows, PhysicsStates& snapshots)

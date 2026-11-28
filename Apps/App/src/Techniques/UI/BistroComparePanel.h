@@ -118,7 +118,7 @@ class BistroComparePanel
     PlotLines RunLines(const Winner* placement, const Selection& current, std::array<Selection, 2>& cache);
     FrameTiming SummaryTiming(const Winner* winner, const Selection& selection) const;
     std::string ReportBody(const Run& run, const Winner* placement, const Selection& selection,
-        std::vector<std::filesystem::path>& measuredPasses);
+        std::vector<std::filesystem::path>& measuredPasses, std::vector<std::filesystem::path>& completedPasses);
     void DrawExportStatus(const Run& run, const Winner* placement, const Selection& selection, bool requested);
     std::future<std::filesystem::path> _exportJob;
     std::filesystem::path _exportRun, _exportPath;
@@ -128,6 +128,7 @@ class BistroComparePanel
     ImFont* _headingFont = nullptr;
     void Select(Selection &, int run, int pass);
     void DrawSelection(Selection &, size_t index);
+    Selection SuggestComparison(const Selection& reference);
     struct PlotView
     {
         struct Axis
@@ -163,13 +164,14 @@ class BistroComparePanel
     static void DrawTechniques(const PlacementResult& before, const PlacementResult& after,
         const char* title, const char* left, const char* right);
     void DrawRun(int index, std::filesystem::path& pendingPreset);
+    bool MatchesHistoryFilters(const Run& run) const;
     int DrawRunList(bool compact);
     void DrawComparison();
     Selection _lastPass;
     std::array<Selection, 2> _placementPasses;
     std::filesystem::path _historyPath, _imageRun;
     bool _showHistory = false, _showComparison = false, _runFps = false;
-    bool _loadComparison = false;
+    bool _loadComparison = false, _comparisonBChosen = false;
     std::string _openError;
     std::vector<Run> _runs;
     std::array<std::vector<std::string>, 3> _filterOptions;

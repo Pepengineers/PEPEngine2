@@ -14,6 +14,7 @@ public:
 
 	explicit SceneTextureInspector(UINT slots);
 	static bool Visible();
+	static bool Focused();
 	static void SetVisible(bool visible);
 	bool PreviewsVisible() const { return Visible() && !_collapsed; }
 	bool NeedsReadback() const { return !_readbackName.empty(); }

@@ -34,7 +34,7 @@ std::string Escape(std::string_view text)
 
 namespace
 {
-std::string Link(const fs::path& relative)
+std::string Link(const fs::path& relative, std::string_view label)
 {
     const auto name = relative.generic_u8string();
     std::string url = "./";
@@ -45,7 +45,7 @@ std::string Link(const fs::path& relative)
             c == '/' || c == '.' || c == '-' || c == '_') url += char(c);
         else { url += '%'; url += hex[c >> 4]; url += hex[c & 15]; }
     }
-    return "<li><a href=\"" + url + "\" download>" + Escape(name) + "</a></li>";
+    return "<a href=\"" + url + "\" download>" + Escape(label) + "</a>";
 }
 
 struct Sources
@@ -174,12 +174,22 @@ void WriteFileBytes(const fs::path& path, std::string_view bytes)
 }
 }
 
+std::string PassSourceMarker(size_t index)
+{
+    return "<!--BENCHMARK_PASS_SOURCE_" + std::to_string(index) + "-->";
+}
+
 fs::path WriteArchive(const fs::path& root, const fs::path& run, fs::file_time_type indexedAt,
-    std::string body, std::vector<fs::path> measuredPasses)
+    std::string body, std::vector<fs::path> measuredPasses, std::vector<fs::path> completedPasses)
 {
     Sources sources{fs::canonical(root)};
     const auto selected = sources.Root / run.lexically_relative(root);
     for (auto& path : measuredPasses) path = sources.Root / path.lexically_relative(root);
+    for (auto& path : completedPasses)
+    {
+        path = path.lexically_normal().lexically_relative(root);
+        measuredPasses.push_back(sources.Root / path);
+    }
     sources.Collect(selected, measuredPasses);
     if (sources.Files.at(selected.lexically_relative(sources.Root)) != indexedAt)
         throw std::runtime_error("This result has changed. Refresh the run history and export it again.");
@@ -190,16 +200,34 @@ fs::path WriteArchive(const fs::path& root, const fs::path& run, fs::file_time_t
     list.exceptions(std::ios::failbit | std::ios::badbit);
     // bsdtar applies a directory change inside a file list to the following entries.
     list << "index.html\n-C\n" << sources.Root.lexically_relative(staging.Path).generic_u8string() << '\n';
+    size_t markerOffset = 0;
+    for (size_t i = 0; i < completedPasses.size(); ++i)
+    {
+        const auto marker = PassSourceMarker(i);
+        const auto pos = body.find(marker, markerOffset);
+        if (pos == std::string::npos) throw std::runtime_error("Cannot locate a completed pass source in the report.");
+        const auto& path = completedPasses[i];
+        const auto link = sources.Files.count(path) ? Link(path, "CSV") : "<span class=\"muted\">Unavailable</span>";
+        body.replace(pos, marker.size(), link);
+        markerOffset = pos + link.size();
+    }
     body += "<details id=\"sources\"><summary>Source files <small>" + std::to_string(sources.Files.size());
     if (!sources.Missing.empty()) body += " saved, " + std::to_string(sources.Missing.size()) + " unavailable";
-    body += "</small></summary><ul class=\"files\">";
+    body += "</small></summary>";
+    std::map<fs::path, std::vector<fs::path>> groups;
     for (const auto& [path, time] : sources.Files)
     {
-        body += Link(path);
+        groups[path.parent_path()].push_back(path);
         list << path.generic_u8string() << '\n';
     }
     list.close();
-    body += "</ul>";
+    for (const auto& [folder, paths] : groups)
+    {
+        body += "<details class=\"source-group\"><summary>" + Escape(folder.empty() ? "Report directory" : folder.generic_u8string()) +
+            " <small>" + std::to_string(paths.size()) + "</small></summary><ul class=\"files\">";
+        for (const auto& path : paths) body += "<li>" + Link(path, path.filename().u8string()) + "</li>";
+        body += "</ul></details>";
+    }
     if (!sources.Missing.empty())
     {
         body += "<h3>Unavailable source files</h3><ul>";

@@ -39,6 +39,8 @@ namespace Engine::UI
     std::string SetSceneTexturesVisible(bool visible);
     void SetLocalShadowDistribution(std::function<std::string()> layout);
     void HideSettings();
+    bool SettingsVisible();
+    bool HasActiveToolInteraction();
     void OpenSettings();
     void DrawSettingsEditor(bool sceneTools = false);
     void EnableDebugUI(); // Startup opt-in for non-Debug builds.

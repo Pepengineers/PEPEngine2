@@ -21,6 +21,7 @@ namespace BistroRender
 {
 namespace
 {
+bool InspectorFocused = false;
 DebugConsoleVariable<bool> Enabled(L"Render.Debug.SceneTextures", false, L"Show the scene texture inspector (F8).");
 constexpr UINT Tile = 512;
 constexpr UINT TilesAcross = 3;
@@ -68,6 +69,7 @@ View DefaultView(const D3D12_RESOURCE_DESC& desc, DXGI_FORMAT format)
 }
 
 bool SceneTextureInspector::Visible() { return Enabled.GetValue(); }
+bool SceneTextureInspector::Focused() { return Visible() && InspectorFocused; }
 
 void SceneTextureInspector::SetVisible(bool visible)
 {
@@ -275,6 +277,7 @@ void SceneTextureInspector::RetireReadback(Id owner, UINT slot)
 SceneTextureInspector::Atlases SceneTextureInspector::Append(const Input& scene, const Input* post,
     UINT index, float nearPlane, float farPlane)
 {
+	InspectorFocused = false;
 	if (!Visible() || !ImGui::GetCurrentContext())
 		return {};
 	bool open = true;
@@ -289,11 +292,10 @@ SceneTextureInspector::Atlases SceneTextureInspector::Append(const Input& scene,
 	ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, {.42f * size, .25f * size});
 	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {.48f * size, .28f * size});
 	_collapsed = !ImGui::Begin("Scene textures   [F8]###Scene Textures", &open);
+	InspectorFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
 	if (!_collapsed && open)
 	{
 		const float em = ImGui::GetFontSize();
-		Theme::DrawToolHeading("Scene textures");
-		ImGui::Separator();
 		auto catalog = Collect(scene.Plan, scene.Bindings, scene.BackBuffer);
 		if (post)
 		{
@@ -366,34 +368,51 @@ SceneTextureInspector::Atlases SceneTextureInspector::Append(const Input& scene,
 			ImGui::TableNextColumn();
 			ImGui::BeginChild("viewer", {}, ImGuiChildFlags_Borders);
 			const int count = static_cast<int>(_selected.size());
-			const int toolbarColumns = (std::clamp)(int(ImGui::GetContentRegionAvail().x / (8.f * em)), 1, count > 1 ? 3 : 2);
-			if (ImGui::BeginTable("Preview controls", toolbarColumns, ImGuiTableFlags_SizingStretchSame))
+			const bool hasPreview = std::any_of(catalog.begin(), catalog.end(), [&](const Source& source) {
+				return std::find(_selected.begin(), _selected.end(), source.Name) != _selected.end();
+			});
+			const bool hasDepth = std::any_of(catalog.begin(), catalog.end(), [&](const Source& source) {
+				return source.Visualization == View::Depth && std::find(_selected.begin(), _selected.end(), source.Name) != _selected.end();
+			});
+			const bool showDepth = hasDepth && _channel == 0;
+			const int controls = 1 + int(showDepth) + int(count > 1);
+			const int toolbarColumns = (std::clamp)(int(ImGui::GetContentRegionAvail().x / (8.f * em)), 1, controls);
+			if (hasPreview && ImGui::BeginTable("Preview controls", toolbarColumns, ImGuiTableFlags_SizingStretchSame))
 			{
-				ImGui::TableNextColumn();
-				ImGui::TextUnformatted("Channel");
-				ImGui::SetNextItemWidth(-FLT_MIN);
+				const float fieldWidth = 6.5f * em;
+				const float longestLabel = ImGui::CalcTextSize(showDepth ? "Depth range" : "Channel").x;
+				const auto drawLabel = [&](const char* label) {
+					ImGui::TableNextColumn();
+					const bool inlineLabel = longestLabel + ImGui::GetStyle().ItemSpacing.x + fieldWidth <= ImGui::GetContentRegionAvail().x;
+					ImGui::AlignTextToFramePadding();
+					ImGui::TextUnformatted(label);
+					if (inlineLabel) ImGui::SameLine();
+					ImGui::SetNextItemWidth((std::clamp)(ImGui::GetContentRegionAvail().x, 1.f, fieldWidth));
+				};
+				drawLabel("Channel");
 				ImGui::Combo("##channel", &_channel, "Default\0RGB\0Red\0Green\0Blue\0Alpha\0");
-				ImGui::TableNextColumn();
-				ImGui::TextUnformatted("Depth range");
-				ImGui::SetNextItemWidth(-FLT_MIN);
-				ImGui::SliderFloat("##depthRange", &_depthRange, 100, 20000, "%.0f cm", ImGuiSliderFlags_Logarithmic);
+				if (showDepth)
+				{
+					drawLabel("Depth range");
+					ImGui::SliderFloat("##depthRange", &_depthRange, 100, 20000, "%.0f cm", ImGuiSliderFlags_Logarithmic);
+				}
 				if (count > 1)
 				{
-					ImGui::TableNextColumn();
-					ImGui::TextUnformatted("Columns");
-					ImGui::SetNextItemWidth(-FLT_MIN);
+					drawLabel("Columns");
 					ImGui::SliderInt("##columns", &_columns, 1, 3);
 				}
 				ImGui::EndTable();
+				ImGui::Separator();
 			}
-			ImGui::Separator();
 			if (!count) ImGui::TextDisabled("Select a texture to preview.");
 			const float availableHeight = ImGui::GetContentRegionAvail().y;
 			if (count && ImGui::BeginTable("previews", (std::min)(_columns, count),
 			    ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_BordersInnerV))
 			{
-				for (const auto& name : _selected)
+				auto remove = _selected.end();
+				for (auto current = _selected.begin(); current != _selected.end(); ++current)
 				{
+					const auto& name = *current;
 					ImGui::TableNextColumn();
 					ImGui::PushFont(Theme::HeadingFont(), 0.f);
 					ImGui::TextWrapped("%s", name.c_str());
@@ -402,6 +421,20 @@ SceneTextureInspector::Atlases SceneTextureInspector::Append(const Input& scene,
 					                                 [&name](const auto& item) { return item.Name == name; });
 					if (source == catalog.end())
 					{
+						ImGui::PushID(name.c_str());
+						const float button = ImGui::GetFrameHeight();
+						BistroPlot::ContinueRowIfFits(button);
+						if (ImGui::Button("##remove unavailable", {button, button})) remove = current;
+						const auto pos = ImGui::GetItemRectMin();
+						const ImVec2 center{pos.x + .5f * button, pos.y + .5f * button};
+						const float d = .15f * button;
+						auto* draw = ImGui::GetWindowDrawList();
+						const auto ink = ImGui::GetColorU32(ImGuiCol_CheckMark);
+						draw->AddLine({center.x - d, center.y - d}, {center.x + d, center.y + d}, ink, .055f * button);
+						draw->AddLine({center.x - d, center.y + d}, {center.x + d, center.y - d}, ink, .055f * button);
+						if (ImGui::IsItemFocused() && ImGui::GetIO().NavVisible) ImGui::SetTooltip("Remove texture");
+						else ImGui::SetItemTooltip("Remove texture");
+						ImGui::PopID();
 						ImGui::TextDisabled("Unavailable this frame");
 						continue;
 					}
@@ -421,6 +454,7 @@ SceneTextureInspector::Atlases SceneTextureInspector::Append(const Input& scene,
 					    PreviewFormatName(source->Format));
 					atlas.push_back(*source);
 				}
+				if (remove != _selected.end()) _selected.erase(remove);
 				ImGui::EndTable();
 			}
 			ImGui::EndChild();

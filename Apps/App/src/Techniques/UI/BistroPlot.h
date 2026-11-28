@@ -13,18 +13,24 @@ inline void ContinueRowIfFits(float width, float gap = -1.f)
         ImGui::SameLine(0.f, gap);
 }
 
-inline bool Choice(const char* label, const char* first, const char* second, bool secondSelected, bool continueRow = false)
+inline bool Choice(const char* label, const char* first, const char* second, bool secondSelected,
+    bool continueRow = false, bool inlineLabel = false)
 {
     const auto& style = ImGui::GetStyle();
     const float secondWidth = ImGui::CalcTextSize(second).x + 2.f * style.FramePadding.x;
+    const float choiceWidth = ImGui::CalcTextSize(first).x + 2.f * style.FramePadding.x + 1.f + secondWidth;
+    const float labelWidth = ImGui::CalcTextSize(label).x;
     if (continueRow)
-    {
-        const float firstWidth = ImGui::CalcTextSize(first).x + 2.f * style.FramePadding.x;
-        ContinueRowIfFits(std::max(ImGui::CalcTextSize(label).x, firstWidth + 1.f + secondWidth), 1.5f * ImGui::GetFontSize());
-    }
+        ContinueRowIfFits(std::max(labelWidth, choiceWidth), 1.5f * ImGui::GetFontSize());
     ImGui::PushID(label);
     ImGui::BeginGroup();
-    if (*label) ImGui::TextUnformatted(label);
+    if (*label)
+    {
+        const bool shareRow = inlineLabel && labelWidth + style.ItemSpacing.x + choiceWidth <= ImGui::GetContentRegionAvail().x;
+        if (shareRow) ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(label);
+        if (shareRow) ImGui::SameLine();
+    }
     const auto option = [&](const char* text, bool selected)
     {
         ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(selected ? ImGuiCol_ButtonActive : ImGuiCol_FrameBg));

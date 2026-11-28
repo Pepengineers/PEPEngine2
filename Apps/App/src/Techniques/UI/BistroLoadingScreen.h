@@ -9,7 +9,7 @@ class BistroLoadingScreen
 {
 public:
     enum Phase : unsigned { Renderer, SceneAssets, World, FirstFrame };
-    BistroLoadingScreen(HWND owner, const std::wstring& mapName);
+    BistroLoadingScreen(HWND owner, const std::wstring& mapName, HMONITOR monitor);
     ~BistroLoadingScreen();
     void Update(Phase phase, const std::wstring& detail, size_t completed = 0, size_t total = 0);
     bool Cancelled() const;

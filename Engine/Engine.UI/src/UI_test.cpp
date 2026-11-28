@@ -301,8 +301,6 @@ namespace Engine::UI
             ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {.5f * size, .32f * size});
             if (ImGui::Begin("Console variables   [F1]###Settings (F1)", &Visible))
             {
-                PepengineTheme::DrawToolHeading("Console variables");
-                ImGui::Separator();
                 DrawSettingsEditor(true);
             }
             ImGui::End();
@@ -773,6 +771,7 @@ namespace Engine::UI
             ImGuiTextFilter Filter;
             SettingsCache Settings;
             SettingEditor Editor;
+            bool EditorInFilter = false;
         };
         static Browser launcher, scene;
         auto& browser = sceneTools ? scene : launcher;
@@ -805,6 +804,7 @@ namespace Engine::UI
             { return hidden(variable->GetName()); }), variables.end());
             settings.Update(variables, revision, filter, shadowPages);
             if (editor.Name.empty() && !variables.empty() && !filter.IsActive()) editor.Select(*variables.front());
+            browser.EditorInFilter = !editor.Name.empty() && settings.Contains(editor.Name);
         }
 
         const auto drawGroup = [&](auto&& self, const SettingsCache::Group& group, std::string_view selectedPath) -> void
@@ -815,7 +815,11 @@ namespace Engine::UI
                 if (ImGui::Selectable(setting.Label.c_str(), setting.RegistryName == editor.Name))
                 {
                     IConsoleVariable* variable = nullptr;
-                    if (console.TryFindConsoleVariable(setting.RegistryName, variable)) editor.Select(*variable);
+                    if (console.TryFindConsoleVariable(setting.RegistryName, variable))
+                    {
+                        if (editor.Name != setting.RegistryName) editor.Select(*variable);
+                        browser.EditorInFilter = true;
+                    }
                 }
                 if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", setting.Name.c_str());
                 ImGui::PopID();
@@ -833,12 +837,13 @@ namespace Engine::UI
                 }
             }
         };
+        const auto& root = settings.Root();
+        const bool hasMatches = !root.Children.empty() || !root.Variables.empty();
         if (ImGui::BeginChild("Settings list"))
         {
             ImGui::PushID(filter.IsActive() ? "FilteredSettings" : "SettingsTree");
-            const auto& root = settings.Root();
-            if (root.Children.empty() && root.Variables.empty()) ImGui::TextDisabled("No matching settings");
-            drawGroup(drawGroup, root, std::filesystem::path(editor.Name).u8string());
+            if (!hasMatches) ImGui::TextDisabled("No matching settings");
+            drawGroup(drawGroup, root, browser.EditorInFilter ? std::filesystem::path(editor.Name).u8string() : std::string{});
             ImGui::PopID();
         }
         ImGui::EndChild();
@@ -847,7 +852,7 @@ namespace Engine::UI
         if (ImGui::BeginChild("Editor", {0, sideBySide ? panels : panels * .58f - ImGui::GetStyle().ItemSpacing.y}, ImGuiChildFlags_Borders))
         {
             IConsoleVariable* variable = nullptr;
-            if (!editor.Name.empty() && !hidden(editor.Name) &&
+            if (browser.EditorInFilter && !hidden(editor.Name) &&
                 console.TryFindConsoleVariable(editor.Name, variable))
             {
                 editor.Draw(*variable);
@@ -856,7 +861,7 @@ namespace Engine::UI
                 ImGui::Separator();
                 ImGui::TextWrapped("For changes across launches, edit Configs/Startup.ini.");
             }
-            else
+            else if (hasMatches)
                 ImGui::TextDisabled("Select a setting to edit");
         }
         ImGui::EndChild();
@@ -1047,6 +1052,12 @@ namespace Engine::UI
         return ConsoleModule{}.ApplyPatch({{L"Render.Debug.SceneTextures", visible ? "true" : "false"}}).Error;
     }
     void HideSettings() { Visible = FocusSettings = false; }
+    bool SettingsVisible() { return SettingsEditingEnabled && Visible; }
+    bool HasActiveToolInteraction()
+    {
+        return ImGui::GetCurrentContext() && (ImGui::IsAnyItemActive() ||
+            ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel));
+    }
     void OpenSettings() { Visible = FocusSettings = true; }
     void EnableDebugUI() { DebugEnabled = true; }
     bool DebugUIVisible() { return SettingsEditingEnabled && DebugEnabled && FrameBegun && Visible; }

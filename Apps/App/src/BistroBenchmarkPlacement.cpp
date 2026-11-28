@@ -447,9 +447,9 @@ void BistroBenchmark::CheckPlacementReconstruction(const BistroRenderPipeline& p
         _trialReason = failure.empty() ? "no successful reconstruction frame" : "reconstruction failed";
 }
 
-void BistroBenchmark::RecordPlacementFrame(RenderModule& render, BistroRenderPipeline& pipeline, Clock::time_point now)
+bool BistroBenchmark::RecordPlacementFrame(RenderModule& render, BistroRenderPipeline& pipeline, Clock::time_point now)
 {
-    if (_legDone && !_calibrating) return;
+    if (_legDone && !_calibrating) return false;
     if (!_legConfigured)
     {
         _legConfigured = true;
@@ -464,7 +464,7 @@ void BistroBenchmark::RecordPlacementFrame(RenderModule& render, BistroRenderPip
         {
             _elapsed = Seconds(_legStarted, now);
             _legDone = true;
-            return;
+            return false;
         }
     }
     const auto& common = *render.GetRenderPipelineCommonData();
@@ -480,7 +480,7 @@ void BistroBenchmark::RecordPlacementFrame(RenderModule& render, BistroRenderPip
     if (!_trialReason.empty() && !_calibrating)
     {
         _legDone = true;
-        return;
+        return false;
     }
     ObservePlacement(pipeline);
     if (!_manualPlacement)
@@ -492,7 +492,7 @@ void BistroBenchmark::RecordPlacementFrame(RenderModule& render, BistroRenderPip
             {
                 _trialResult.Reused = true;
                 _legDone = true;
-                return;
+                return false;
             }
         }
         if (_placementSearch.RemotePhase() && _placementWindowIndex == 0 && _frames.empty())
@@ -504,7 +504,8 @@ void BistroBenchmark::RecordPlacementFrame(RenderModule& render, BistroRenderPip
         for (size_t i = 0; i < bytes.size(); ++i) _legMeasurements.TransferBytes[i] += bytes[i];
     }
     _frames.push_back({_routeTime, Seconds(_frameStart, now) * 1000,
-        Seconds(_lastPresent, now) * 1000, Section(_routeTime)});
+        Seconds(*_lastPresent, now) * 1000, Section(_routeTime)});
+    return true;
 }
 
 void BistroBenchmark::CompletePlacementLeg(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline)

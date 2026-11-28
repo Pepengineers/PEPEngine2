@@ -1,11 +1,6 @@
 #include "BistroComparePanel.h"
 #include "BistroReportArchive.h"
 #include "BistroReportValues.h"
-#include "Common/RuntimePaths.h"
-#include <imgui/imgui.h>
-#include <windows.h>
-#include <shellapi.h>
-#include <chrono>
 #include <iomanip>
 #include <initializer_list>
 #include <locale>
@@ -60,7 +55,8 @@ void Comparison(std::ostream& html, const char* title, const char* leftLabel, co
              << "<button aria-pressed=\"false\">All settings</button></div>";
         if (!changes) html << "<p class=\"no-changes muted\">No recorded differences.</p>";
     }
-    html << "<div class=\"scroll\"><table><thead><tr>";
+    html << "<div class=\"scroll\" tabindex=\"0\" role=\"region\" aria-label=\"" << Escape(title)
+         << "\"><table class=\"settings-table\"><thead><tr>";
     if (hasBefore) html << "<th>" << leftLabel << "</th>";
     html << "<th>Technique or setting</th><th>" << rightLabel << "</th></tr></thead><tbody>";
     for (const auto& row : rows)
@@ -77,7 +73,7 @@ void Comparison(std::ostream& html, const char* title, const char* leftLabel, co
 }
 
 std::string BistroComparePanel::ReportBody(const Run& run, const Winner* selected, const Selection& current,
-    std::vector<fs::path>& measuredPasses)
+    std::vector<fs::path>& measuredPasses, std::vector<fs::path>& completedPasses)
 {
     std::ostringstream html;
     html.imbue(std::locale::classic());
@@ -288,10 +284,17 @@ std::string BistroComparePanel::ReportBody(const Run& run, const Winner* selecte
     if (!run.Passes.empty())
     {
         html << "<details><summary>Completed passes <small>" << run.Passes.size()
-             << "</small></summary><div class=\"scroll\"><table><thead><tr><th>Pass</th><th>Average FPS</th><th>P95 (ms)</th></tr></thead><tbody>";
+             << "</small></summary><div class=\"scroll\" tabindex=\"0\" role=\"region\" aria-label=\"Completed passes\">"
+             << "<table class=\"passes\"><thead><tr><th scope=\"col\">Pass</th><th scope=\"col\" class=\"number\">Average FPS</th>"
+             << "<th scope=\"col\" class=\"number\">P95 (ms)</th><th scope=\"col\">Source</th></tr></thead><tbody>";
         for (const auto& pass : run.Passes)
-            html << "<tr><th>" << Escape(pass.Label) << "</th><td>" << (pass.Timing.Fps > 0 ? Decimal(pass.Timing.Fps) : "&mdash;")
-                 << "</td><td>" << (pass.Timing.P95 > 0 ? Decimal(pass.Timing.P95) : "&mdash;") << "</td></tr>";
+        {
+            html << "<tr><th scope=\"row\">" << Escape(pass.Label) << "</th><td class=\"number\">"
+                 << (pass.Timing.Fps > 0 ? Decimal(pass.Timing.Fps) : "&mdash;") << "</td><td class=\"number\">"
+                 << (pass.Timing.P95 > 0 ? Decimal(pass.Timing.P95) : "&mdash;") << "</td><td>"
+                 << PassSourceMarker(completedPasses.size()) << "</td></tr>";
+            completedPasses.push_back(pass.Path);
+        }
         html << "</tbody></table></div></details>";
     }
     const auto writeReconstruction = [&](const auto& groups, const auto& columns, const char* heading)
@@ -302,14 +305,19 @@ std::string BistroComparePanel::ReportBody(const Run& run, const Winner* selecte
         {
             const auto& group = entry.second;
             html << "<details><summary>" << Escape(group.Mode) << " / " << Escape(group.Status)
-                 << "</summary><div class=\"scroll\"><table><thead><tr>";
-            for (size_t col : columns) html << "<th scope=\"col\">" << ReconstructionColumns[col] << "</th>";
+                 << "</summary><div class=\"scroll\" tabindex=\"0\" role=\"region\" aria-label=\"" << Escape(group.Mode)
+                 << "\"><table class=\"reconstruction\"><thead><tr>";
+            for (size_t col : columns)
+                html << "<th scope=\"col\"" << (col == 5 || col == 6 ? " class=\"number\"" : "") << ">"
+                     << ReconstructionColumns[col] << "</th>";
             html << "</tr></thead><tbody>";
             for (const auto& trial : group.Participants)
             {
                 html << "<tr>";
                 const auto row = ReconstructionRow(run, group, trial);
-                for (size_t col : columns) html << "<td>" << Escape(row[col]) << "</td>";
+                for (size_t col : columns)
+                    html << (col == 0 ? "<th scope=\"row\">" : col == 5 || col == 6 ? "<td class=\"number\">" : "<td>")
+                         << Escape(row[col]) << (col == 0 ? "</th>" : "</td>");
                 html << "</tr>";
             }
             html << "</tbody></table></div></details>";
@@ -318,34 +326,4 @@ std::string BistroComparePanel::ReportBody(const Run& run, const Winner* selecte
     writeReconstruction(run.ReconstructionDiscovery, DiscoveryColumns, "Reconstruction availability");
     writeReconstruction(run.Reconstructions, ComparisonColumns, "Reconstruction comparisons");
     return html.str();
-}
-
-void BistroComparePanel::DrawExportStatus(const Run& run, const Winner* placement, const Selection& selection, bool requested)
-{
-    try
-    {
-        if (_exportJob.valid() && _exportJob.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
-            _exportPath = _exportJob.get();
-        if (requested)
-        {
-            _exportPath.clear();
-            _exportError.clear();
-            _exportRun = run.Path;
-            std::vector<fs::path> measured;
-            auto body = ReportBody(run, placement, selection, measured);
-            _exportJob = std::async(std::launch::async, WriteArchive, Engine::Core::GetExecutableDirectory() / "BenchmarkResults",
-                run.Path, run.Modified, std::move(body), std::move(measured));
-        }
-    }
-    catch (const std::exception& e) { _exportError = e.what(); }
-    if (_exportRun != run.Path) return;
-    if (_exportJob.valid()) ImGui::TextDisabled("Exporting ZIP...");
-    if (!_exportError.empty()) ImGui::TextWrapped("Export: %s", _exportError.c_str());
-    if (!_exportPath.empty())
-    {
-        ImGui::TextWrapped("Saved ZIP: %s", _exportPath.u8string().c_str());
-        if (ImGui::SmallButton("Open export folder") &&
-            reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", _exportPath.parent_path().c_str(), nullptr, nullptr, SW_SHOWNORMAL)) <= 32)
-            _exportError = "Could not open the export folder.";
-    }
 }

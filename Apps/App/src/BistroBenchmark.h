@@ -166,6 +166,7 @@ public:
     double HudRemainingSeconds() const;
     std::optional<double> HudPhaseRemainingSeconds() const;
     std::string HudPhase() const;
+    bool HudShowsMeasurements() const { return _legOpen && !(_stage == Stage::Placement && _trial.InspectImage); }
     bool ManualGpuTimings() const { return _stage == Stage::Placement && _manualPlacement && _manualGpuTimings; }
     enum class Outcome { Completed, Failed, Cancelled };
     void AbortLaunch(std::string message, Outcome outcome);
@@ -188,7 +189,8 @@ public:
     std::wstring Caption() const;
 
     void Update(World& world, ConsoleModule& console, RenderModule& render, BistroRenderPipeline& pipeline, ::Window& window);
-    void FrameRendered(World& world, ConsoleModule& console, RenderModule& render, BistroRenderPipeline& pipeline,
+    struct PresentInterval { Clock::time_point Begin, End; };
+    std::optional<PresentInterval> FrameRendered(World& world, ConsoleModule& console, RenderModule& render, BistroRenderPipeline& pipeline,
         bool presented);
 private:
     static float Ease(float t);
@@ -248,7 +250,7 @@ private:
 
     ScheduleEvidence& ObserveSchedule(const BistroRenderPipeline& pipeline);
     void ObservePlacement(BistroRenderPipeline& pipeline);
-    void RecordPlacementFrame(RenderModule& render, BistroRenderPipeline& pipeline, Clock::time_point now);
+    bool RecordPlacementFrame(RenderModule& render, BistroRenderPipeline& pipeline, Clock::time_point now);
 
     void CompletePlacementLeg(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline);
     void WritePlacementWaits(BistroRenderPipeline& pipeline);
@@ -337,7 +339,8 @@ private:
     size_t _windowIndex = 0;
     double _elapsed = 0, _routeTime = 0, _preroll = 0, _finalReserve = 0, _probeScale = 1;
     double _meanThreshold = .01, _p95Threshold = .02;
-    Clock::time_point _started, _legStarted, _frameStart, _lastPresent, _probeStarted;
+    Clock::time_point _started, _legStarted, _frameStart, _probeStarted;
+    std::optional<Clock::time_point> _lastPresent;
     std::filesystem::path _path;
     Csv _csv;
     Window _window{};

@@ -16,6 +16,17 @@ namespace Engine::UI
             std::vector<Setting> Variables;
         };
         const Group& Root() const { return _root; }
+        bool Contains(std::wstring_view name) const
+        {
+            const auto contains = [&](auto&& self, const Group& group) -> bool {
+                for (const auto& setting : group.Variables)
+                    if (setting.RegistryName == name) return true;
+                for (const auto& child : group.Children)
+                    if (self(self, child.second)) return true;
+                return false;
+            };
+            return contains(contains, _root);
+        }
 
         bool IsCurrent(uint64_t revision, const ImGuiTextFilter& filter, unsigned viewVersion = 0) const
         {

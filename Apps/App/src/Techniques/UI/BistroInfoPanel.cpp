@@ -47,13 +47,18 @@ void BistroInfoPanel::InitializeFont()
 
 void BistroInfoPanel::ShowSettings(bool openResults, const std::string& error)
 {
+    ResetMeasurementSeries();
+    _displayError = error;
+    _tab = openResults ? Tab::Results : Tab::Setup;
+}
+
+void BistroInfoPanel::ResetMeasurementSeries()
+{
     _count = _next = 0;
-    _lastPresent.reset();
+    _hudMeanMs = _hudP95Ms = 0.f;
     _hudStatsDue = {};
     _gpuWork.clear();
     _timingEpoch = _packetCursor = 0;
-    _displayError = error;
-    _tab = openResults ? Tab::Results : Tab::Setup;
 }
 
 void BistroInfoPanel::ApplyPreset(const std::filesystem::path& path)
@@ -256,26 +261,44 @@ void BistroInfoPanel::DrawLaunchControls(BistroBenchmark& benchmark)
             if (ImGui::BeginChild("Map and output", {0, columns ? panelHeight : mapHeight}, ImGuiChildFlags_Borders))
             {
                 heading("Map and output", 1.52f);
-                heading("Map", 1.08f);
-                ImGui::SetNextItemWidth(-FLT_MIN);
-                if (ImGui::BeginCombo("##Map", _launch.Level->Name))
+                if constexpr (std::size(BistroRun::Maps) == 1)
+                    heading(_launch.Level->Name, 1.08f);
+                else
                 {
-                    for (const auto& map : BistroRun::Maps)
+                    heading("Map", 1.08f);
+                    ImGui::SetNextItemWidth(-FLT_MIN);
+                    if (ImGui::BeginCombo("##Map", _launch.Level->Name))
                     {
-                        const bool selected = &map == _launch.Level;
-                        if (ImGui::Selectable(map.Name, selected)) _launch.Level = &map;
-                        if (selected) ImGui::SetItemDefaultFocus();
+                        for (const auto& map : BistroRun::Maps)
+                        {
+                            const bool selected = &map == _launch.Level;
+                            if (ImGui::Selectable(map.Name, selected)) _launch.Level = &map;
+                            if (selected) ImGui::SetItemDefaultFocus();
+                        }
+                        ImGui::EndCombo();
                     }
-                    ImGui::EndCombo();
                 }
                 const bool profile = _launch.Kind == BistroRun::Mode::Profile;
-                float bottom = 1.08f * em + ImGui::GetFrameHeight() + actionHeight + 3 * gap;
+                constexpr auto outputLabel = "Output resolution";
+                const auto& style = ImGui::GetStyle();
+                const float pickerWidth = ImGui::CalcTextSize(OutputLabel(_launch.Output).c_str()).x +
+                    ImGui::GetFrameHeight() + 2.f * style.FramePadding.x;
+                const bool inlineOutput = ImGui::GetContentRegionAvail().x >= ImGui::CalcTextSize(outputLabel).x +
+                    style.ItemSpacing.x + pickerWidth;
+                float bottom = ImGui::GetFrameHeight() + actionHeight + 2 * gap;
+                if (!inlineOutput) bottom += 1.08f * em + gap;
                 if (profile) bottom += ImGui::GetFrameHeightWithSpacing();
 #if defined(_DEBUG) || defined(DEBUG)
                 bottom += ImGui::GetFrameHeightWithSpacing();
 #endif
                 DrawRoutePreview(*_launch.Level, std::max(2.8f * em, ImGui::GetContentRegionAvail().y - bottom));
-                heading("Output resolution", 1.08f);
+                if (inlineOutput)
+                {
+                    ImGui::AlignTextToFramePadding();
+                    ImGui::TextUnformatted(outputLabel);
+                    ImGui::SameLine();
+                }
+                else heading(outputLabel, 1.08f);
                 DrawOutputPicker(_launch.Output);
                 if (profile) ImGui::Checkbox("Include upscalers in search", &_launch.AllowUpscalers);
                 const char* action = !profile ? "Start benchmark" :
@@ -424,19 +447,16 @@ void BistroInfoPanel::DrawSettings(RenderModule& render, BistroBenchmark& benchm
     ImGui::PopFont();
 }
 
-void BistroInfoPanel::RecordPresent(std::chrono::steady_clock::time_point now,
+void BistroInfoPanel::RecordPresent(std::chrono::steady_clock::time_point begin, std::chrono::steady_clock::time_point now,
     BistroRender::QueueSubmission& submissions, bool manualGpuTimings)
 {
-    if (_lastPresent)
-    {
-        // The Windows steady clock and DX12 GetClockCalibration both use the QPC epoch.
-        _presentBeginMs[_next] = std::chrono::duration<double, std::milli>(_lastPresent->time_since_epoch()).count();
-        _presentMs[_next] = std::chrono::duration<float, std::milli>(now - *_lastPresent).count();
-        _next = (_next + 1) % _presentMs.size();
-        _count = std::min(_count + 1, _presentMs.size());
-    }
-    _lastPresent = now;
-    if (!_count) return;
+    // The Windows steady clock and DX12 GetClockCalibration both use the QPC epoch.
+    const double beginMs = std::chrono::duration<double, std::milli>(begin.time_since_epoch()).count();
+    if (!_count) _measurementBeginMs = beginMs;
+    _presentBeginMs[_next] = beginMs;
+    _presentMs[_next] = std::chrono::duration<float, std::milli>(now - begin).count();
+    _next = (_next + 1) % _presentMs.size();
+    _count = std::min(_count + 1, _presentMs.size());
     if (now >= _hudStatsDue)
     {
         auto samples = _presentMs;
@@ -450,7 +470,7 @@ void BistroInfoPanel::RecordPresent(std::chrono::steady_clock::time_point now,
     const double first = _presentBeginMs[_count == _presentMs.size() ? _next : 0];
     for (const auto& packet : submissions.ReadBenchmarkIntervals(_timingEpoch, _packetCursor, manualGpuTimings))
     {
-        if (packet.EndMs <= first) continue;
+        if (packet.BeginMs < _measurementBeginMs || packet.EndMs <= first) continue;
         auto [device, added] = _gpuWork.try_emplace(packet.Device);
         if (added) device->second.Adapter = submissions.AdapterLabel(packet.Device);
         auto& intervals = device->second.Intervals;
@@ -518,12 +538,12 @@ void BistroInfoPanel::DrawPresentChart(float height) const
         draw->AddLine(point(i - 1, _presentMs[(first + i - 1) % _presentMs.size()]),
             point(i, _presentMs[(first + i) % _presentMs.size()]), presentColor, 1.5f);
     ImGui::Dummy({width, height});
-    ImGui::TextUnformatted("Present interval");
+    ImGui::Text("Present interval  /  last %zu frames", _count);
     for (const auto& [id, gpu] : _gpuWork)
     {
         if (gpu.Intervals.empty()) continue;
         const ImColor color = id == 0 ? ImColor(Theme::Mint) : ImColor::HSV(std::fmod(.12f + .382f * (id - 1), 1.f), .58f, .98f);
-        const char* label = " GPU work incl. background";
+        constexpr const char* label = "  /  work";
         BistroPlot::ContinueRowIfFits(ImGui::CalcTextSize(gpu.Adapter.c_str()).x + ImGui::CalcTextSize(label).x);
         ImGui::TextColored(color, "%s%s", gpu.Adapter.c_str(), label);
         auto interval = gpu.Intervals.begin();
@@ -545,19 +565,21 @@ void BistroInfoPanel::DrawPresentChart(float height) const
     }
 }
 
-void BistroInfoPanel::DrawMeasurement(const BistroBenchmark& benchmark) const
+void BistroInfoPanel::DrawMeasurement(const BistroBenchmark& benchmark, RECT visibleClient) const
 {
-    if (!ImGui::GetCurrentContext()) return;
+    if (!ImGui::GetCurrentContext() || IsRectEmpty(&visibleClient)) return;
     const auto* vp = ImGui::GetMainViewport();
-    const float size = std::clamp(std::round(vp->Size.y / 40.f), 14.f, 36.f);
+    const float visibleWidth = float(visibleClient.right - visibleClient.left);
+    const float visibleHeight = float(visibleClient.bottom - visibleClient.top);
+    const float size = std::clamp(std::round(visibleHeight / 40.f), 14.f, 36.f);
     ImGui::PushFont(_fullFont, size);
     Theme::Push();
     const float em = ImGui::GetFontSize();
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {.9f * em, .6f * em});
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {.7f * em, .22f * em});
     ImGui::SetNextWindowViewport(vp->ID);
-    ImGui::SetNextWindowPos({vp->Pos.x, vp->Pos.y + vp->Size.y}, ImGuiCond_Always, {0,1});
-    ImGui::SetNextWindowSize({vp->Size.x, 0});
+    ImGui::SetNextWindowPos({vp->Pos.x + visibleClient.left, vp->Pos.y + visibleClient.bottom}, ImGuiCond_Always, {0,1});
+    ImGui::SetNextWindowSize({visibleWidth, 0});
     ImGui::SetNextWindowBgAlpha(.96f);
     if (ImGui::Begin("##Measurement", nullptr, ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoDecoration |
         ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoSavedSettings))
@@ -590,7 +612,7 @@ void BistroInfoPanel::DrawMeasurement(const BistroBenchmark& benchmark) const
         }
         ImGui::TextUnformatted(clock);
         ImGui::Separator();
-        if (_count && _hudMeanMs > 0)
+        if (benchmark.HudShowsMeasurements() && _count && _hudMeanMs > 0)
         {
             ImGui::BeginGroup();
             ImGui::TextDisabled("Mean frame time");
@@ -601,7 +623,7 @@ void BistroInfoPanel::DrawMeasurement(const BistroBenchmark& benchmark) const
             ImGui::EndGroup();
             if (wide) ImGui::SameLine(0.f, 1.2f * em);
             ImGui::BeginGroup();
-            DrawPresentChart(std::min(8.5f * em, .25f * vp->Size.y));
+            DrawPresentChart(std::min(8.5f * em, .25f * visibleHeight));
             ImGui::EndGroup();
         }
     }

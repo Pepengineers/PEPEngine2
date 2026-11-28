@@ -64,6 +64,7 @@
     <ClCompile Include="src\Techniques\UI\BistroReportArchive.cpp" />
     <ClInclude Include="src\Techniques\UI\BistroInfoPanel.h" />
     <ClInclude Include="src\Techniques\UI\BistroLoadingScreen.h" />
+    <ClInclude Include="src\Techniques\UI\BistroWindowBounds.h" />
     <ClInclude Include="src\Techniques\UI\BistroComparePanel.h" />
     <ClInclude Include="src\Techniques\UI\BistroReportValues.h" />
     <ClInclude Include="src\Techniques\UI\BistroReportArchive.h" />

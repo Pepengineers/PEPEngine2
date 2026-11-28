@@ -3,6 +3,7 @@
 #include "BistroReportCsvReader.h"
 #include "BistroIniMigration.h"
 #include "BistroPlot.h"
+#include "BistroReportArchive.h"
 #include "BistroBenchmarkLaunch.h"
 #include "BistroPlacementSearch.h"
 #include "Techniques/CloudPictureQuality.h"
@@ -796,7 +797,7 @@ void BistroComparePanel::Refresh(bool force)
     _loadComparison = true;
     for (int i = 0; i < 2; ++i)
     {
-        int r = _runs.empty() ? -1 : std::min(i, int(_runs.size()) - 1);
+        int r = _runs.empty() || (i == 1 && _comparisonBChosen) ? -1 : std::min(i, int(_runs.size()) - 1);
         int p = r < 0 ? -1 : int(_runs[r].Passes.size()) - 1;
         if (i && r == 0 && p > 0) --p;
         for (int j = 0; j < int(_runs.size()); ++j)
@@ -951,7 +952,7 @@ namespace
 {
 constexpr float LineSampleWidthEm = 1.65f;
 
-enum class ChartIcon { Expand, ZoomIn, ZoomOut, Reset, Help, Close, History };
+enum class ChartIcon { Expand, ZoomIn, ZoomOut, Reset, Help, Close, History, Folder };
 
 bool ChartButton(const char* label, ChartIcon icon, float size = 0.f)
 {
@@ -1007,6 +1008,14 @@ bool ChartButton(const char* label, ChartIcon icon, float size = 0.f)
         draw->AddLine({center.x - radius, center.y - radius}, {center.x + radius, center.y + radius}, color, stroke);
         draw->AddLine({center.x - radius, center.y + radius}, {center.x + radius, center.y - radius}, color, stroke);
     }
+    else if (icon == ChartIcon::Folder)
+    {
+        const float x = center.x, y = center.y;
+        const ImVec2 outline[]{{x - .25f * size, y + .17f * size}, {x - .25f * size, y - .17f * size},
+            {x - .04f * size, y - .17f * size}, {x + .035f * size, y - .09f * size},
+            {x + .25f * size, y - .09f * size}, {x + .25f * size, y + .17f * size}};
+        draw->AddPolyline(outline, 6, color, ImDrawFlags_Closed, stroke);
+    }
     else
     {
         const ImVec2 left{center.x - .26f * size, center.y - .19f * size};
@@ -1058,6 +1067,7 @@ void DrawSeriesLabel(size_t index, const char* label)
 
 void BistroComparePanel::DrawSelection(Selection &s, size_t index)
 {
+    const auto previous = std::pair{s.RunIndex, s.PassIndex};
     ImGui::PushID(int(index));
     DrawSeriesLabel(index, index ? "Comparison" : "Reference");
     if (!s.Samples.empty() && s.Error.empty())
@@ -1067,7 +1077,7 @@ void BistroComparePanel::DrawSelection(Selection &s, size_t index)
     }
     int r = s.RunIndex;
     ImGui::SetNextItemWidth(-1);
-    if (ImGui::BeginCombo("##run", r >= 0 ? _runs[r].Label.c_str() : "Choose run"))
+    if (ImGui::BeginCombo("##run", r >= 0 ? _runs[r].Label.c_str() : index ? "Choose comparison run" : "Choose reference run"))
     {
         for (int i = 0; i < int(_runs.size()); ++i)
         {
@@ -1111,6 +1121,7 @@ void BistroComparePanel::DrawSelection(Selection &s, size_t index)
         }
     }
     if (!s.Error.empty()) ImGui::TextWrapped("%s", s.Error.c_str());
+    if (index == 1 && previous != std::pair{s.RunIndex, s.PassIndex}) _comparisonBChosen = true;
     ImGui::PopID();
 }
 
@@ -1199,6 +1210,31 @@ bool BistroComparePanel::ComparableFrames(const PlotLines& lines)
         !a.Range.Section.empty() && a.Range.Section == b.Range.Section &&
         a.Range.Begin >= 0 && a.Range.End > a.Range.Begin && a.Range.Begin == b.Range.Begin && a.Range.End == b.Range.End &&
         a.AfterRender == b.AfterRender && matches("MeasurementVersion") && a.Mode != "Unknown" && b.Mode != "Unknown";
+}
+
+BistroComparePanel::Selection BistroComparePanel::SuggestComparison(const Selection& reference)
+{
+    if (reference.RunIndex < 0 || reference.Samples.empty() || !reference.Error.empty()) return {};
+    for (int offset = 0; offset < int(_runs.size()); ++offset)
+    {
+        const int index = (reference.RunIndex + offset) % int(_runs.size());
+        const auto& run = _runs[index];
+        if (run.MapId != Value(reference.Settings, "MapId") || run.RouteId != Value(reference.Settings, "RouteId") ||
+            run.AfterRender != reference.AfterRender) continue;
+        for (int pass = int(run.Passes.size()) - 1; pass >= 0; --pass)
+        {
+            if (index == reference.RunIndex && pass == reference.PassIndex) continue;
+            const auto& range = run.Passes[pass].Range;
+            if (range.Begin != reference.Range.Begin || range.End != reference.Range.End || range.Section != reference.Range.Section)
+                continue;
+            Selection other;
+            Select(other, index, pass);
+            if (!other.Samples.empty() && other.Error.empty() &&
+                ComparableFrames({PlotLine{&reference, {}}, PlotLine{&other, {}}}))
+                return other;
+        }
+    }
+    return {};
 }
 
 void BistroComparePanel::DrawPlot(const PlotLines& lines, bool& fps, double target, bool comparable)
@@ -1895,21 +1931,78 @@ const char* BistroComparePanel::Run::TargetStatus(double fps, const Winner* winn
     return within ? "Within tolerance" : "Below target";
 }
 
+void BistroComparePanel::DrawExportStatus(const Run& run, const Winner* placement, const Selection& selection, bool requested)
+{
+    try
+    {
+        if (_exportJob.valid() && _exportJob.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+            _exportPath = _exportJob.get();
+        if (requested)
+        {
+            _exportPath.clear();
+            _exportError.clear();
+            _exportRun = run.Path;
+            std::vector<fs::path> measured, completed;
+            auto body = ReportBody(run, placement, selection, measured, completed);
+            _exportJob = std::async(std::launch::async, BistroReport::WriteArchive,
+                Engine::Core::GetExecutableDirectory() / "BenchmarkResults", run.Path, run.Modified,
+                std::move(body), std::move(measured), std::move(completed));
+        }
+    }
+    catch (const std::exception& e) { _exportError = e.what(); }
+    if (_exportRun != run.Path) return;
+    if (_exportJob.valid()) ImGui::TextDisabled("Exporting ZIP...");
+    if (!_exportError.empty()) ImGui::TextWrapped("Export: %s", _exportError.c_str());
+    if (!_exportPath.empty())
+    {
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextWrapped("Saved %s", _exportPath.filename().u8string().c_str());
+        ImGui::SetItemTooltip("%s", _exportPath.u8string().c_str());
+        BistroPlot::ContinueRowIfFits(ImGui::GetFrameHeight());
+        if (ChartButton("Open export folder", ChartIcon::Folder) &&
+            reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", _exportPath.parent_path().c_str(), nullptr, nullptr, SW_SHOWNORMAL)) <= 32)
+            _exportError = "Could not open the export folder.";
+    }
+}
+
 void BistroComparePanel::DrawRun(int index, fs::path& pendingPreset)
 {
     const Run& run = _runs[index];
     const float em = ImGui::GetFontSize();
+    const bool native = run.Winners[0].Available(), upscaled = run.Winners[1].Available();
+    if (_imageRun != run.Path)
+    {
+        _upscaled = run.SelectedImage == "Upscaled";
+        _imageRun = run.Path;
+    }
+    const auto activePlacement = [&]() -> const Winner* {
+        return native || upscaled ? &run.Winners[!native || (upscaled && _upscaled)] : nullptr;
+    };
+    const auto preset = [&]() -> fs::path {
+        const auto* candidate = activePlacement();
+        if (!candidate || !candidate->Confirmed()) return {};
+        const auto file = fs::u8path(Value(candidate->Fields, "PresetFile"));
+        const auto expected = run.Path.stem().wstring() + (candidate == &run.Winners[0] ? L"-native.ini" : L"-upscaled.ini");
+        return file == expected ? run.Path.parent_path() / file : fs::path{};
+    }();
     ImGui::PushFont(_headingFont, ImGui::GetStyle().FontSizeBase * 1.9f);
     ImGui::TextWrapped("%s", run.MapName.c_str());
     ImGui::PopFont();
     const float exportWidth = ImGui::CalcTextSize("Export ZIP").x + 2.f * ImGui::GetStyle().FramePadding.x;
-    const float actionWidth = ImGui::CalcTextSize("Compare passes").x + 2.f * ImGui::GetStyle().FramePadding.x +
-        ImGui::GetStyle().ItemSpacing.x + exportWidth;
+    const float compareWidth = ImGui::CalcTextSize("Compare passes").x + 2.f * ImGui::GetStyle().FramePadding.x;
+    const float applyWidth = ImGui::CalcTextSize("Apply preset").x + 2.f * ImGui::GetStyle().FramePadding.x;
+    const float actionWidth = compareWidth + ImGui::GetStyle().ItemSpacing.x + exportWidth +
+        (preset.empty() ? 0.f : applyWidth + ImGui::GetStyle().ItemSpacing.x);
     const float right = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
     if (ImGui::GetItemRectMax().x + em < right - actionWidth)
     {
         ImGui::SameLine();
         ImGui::SetCursorScreenPos({right - actionWidth, ImGui::GetCursorScreenPos().y});
+    }
+    if (!preset.empty())
+    {
+        if (ImGui::Button("Apply preset")) pendingPreset = preset;
+        BistroPlot::ContinueRowIfFits(compareWidth);
     }
     const bool compare = ImGui::Button("Compare passes");
     BistroPlot::ContinueRowIfFits(exportWidth);
@@ -1919,22 +2012,11 @@ void BistroComparePanel::DrawRun(int index, fs::path& pendingPreset)
     int measuredRun = index;
     int pass = int(run.Passes.size()) - 1;
     const Winner* winner = nullptr;
-    const bool native = run.Winners[0].Available(), upscaled = run.Winners[1].Available();
-    if (_imageRun != run.Path)
+    if (native && upscaled)
+        _upscaled = BistroPlot::Choice("Image mode", "Native", "Upscaled", _upscaled, false, true);
+    const Winner* placement = activePlacement();
+    if (placement)
     {
-        _upscaled = run.SelectedImage == "Upscaled";
-        _imageRun = run.Path;
-    }
-    const Winner* placement = nullptr;
-    if (native || upscaled)
-    {
-        bool useUpscaled = !native || (upscaled && _upscaled);
-        if (native && upscaled)
-        {
-            useUpscaled = BistroPlot::Choice("Image mode", "Native", "Upscaled", _upscaled);
-            _upscaled = useUpscaled;
-        }
-        placement = &run.Winners[useUpscaled];
         if (placement->Confirmed())
         {
             winner = placement;
@@ -1979,12 +2061,26 @@ void BistroComparePanel::DrawRun(int index, fs::path& pendingPreset)
     const auto& outcome = run.FinalStatus.empty() ? run.StopReason : run.FinalStatus;
     const auto& measuredOutput = winner ? Value(winner->Fields, "Output") : Value(selection.Settings, "Render.Display.OutputResolution");
     const auto& output = measuredOutput.empty() ? run.Output : measuredOutput;
-    ImGui::TextWrapped("%s%s%s", run.DisplayMode.c_str(), output.empty() ? "" : "   /   ", output.c_str());
+    bool first = true;
+    const auto metadata = [&](const std::string& text, ImGuiCol color = ImGuiCol_TextDisabled) {
+        if (text.empty()) return;
+        if (!first) BistroPlot::ContinueRowIfFits(ImGui::CalcTextSize(text.c_str()).x, em);
+        first = false;
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(color));
+        ImGui::TextWrapped("%s", text.c_str());
+        ImGui::PopStyleColor();
+    };
+    metadata(run.DisplayMode + (output.empty() ? "" : " / " + output), ImGuiCol_Text);
     if (!outcome.empty())
+        metadata(outcome == "completed" ? "Completed" : outcome, outcome == "completed" ? ImGuiCol_NavCursor : ImGuiCol_Text);
+    metadata(run.Timestamp);
+    if (run.Elapsed || run.Budget)
     {
-        const char* label = outcome == "completed" ? "Completed" : outcome.c_str();
-        BistroPlot::ContinueRowIfFits(ImGui::CalcTextSize(label).x);
-        ImGui::TextColored(ImGui::GetStyleColorVec4(outcome == "completed" ? ImGuiCol_NavCursor : ImGuiCol_Text), "%s", label);
+        char time[64];
+        if (run.Elapsed && run.Budget) std::snprintf(time, sizeof(time), "%.1f s elapsed / %.1f s budget", *run.Elapsed, *run.Budget);
+        else if (run.Elapsed) std::snprintf(time, sizeof(time), "%.1f s elapsed", *run.Elapsed);
+        else std::snprintf(time, sizeof(time), "%.1f s budget", *run.Budget);
+        metadata(time);
     }
     if (run.Mode == "Manual" && run.FinalStatus == "invalid measurement")
     {
@@ -1992,13 +2088,20 @@ void BistroComparePanel::DrawRun(int index, fs::path& pendingPreset)
         if (!run.ManualReconstructionFallback.empty())
             ImGui::TextWrapped("%s", run.ManualReconstructionFallback.c_str());
     }
-    ImGui::TextDisabled("%s", run.Timestamp.c_str());
-    if (run.BaseBudget && run.AddedRoutes && run.Budget)
-        ImGui::TextWrapped("Search budget %.1f s  /  base %.1f s  +  full reconstruction routes %.1f s",
-            *run.Budget, *run.BaseBudget, *run.AddedRoutes);
-    if (run.Elapsed) ImGui::TextDisabled("Elapsed %.1f s", *run.Elapsed);
+    DrawExportStatus(run, placement, selection, exportZip);
+    if (winner && preset.empty())
+        if (const auto& error = Value(winner->Fields, "PresetError"); !error.empty())
+            ImGui::TextWrapped("Could not save preset: %s", error.c_str());
+    if (!run.RouteId.empty() && !hasTrace) ImGui::TextDisabled("Route   %s", run.RouteId.c_str());
+    const auto timing = SummaryTiming(winner, selection);
+    if (timing.Fps > 0 || timing.P95 > 0) DrawRouteMetrics(timing, _headingFont);
+    if (target > 0 && timing.Fps > 0)
+        ImGui::Text("Target   %.0f FPS   /   %s", target, run.TargetStatus(timing.Fps, winner));
     if (run.BaseBudget && ImGui::TreeNode("Search phases"))
     {
+        if (run.AddedRoutes && run.Budget)
+            ImGui::TextWrapped("Search budget %.1f s  /  base %.1f s  +  full reconstruction routes %.1f s",
+                *run.Budget, *run.BaseBudget, *run.AddedRoutes);
         for (size_t i = 0; i < run.Phases.size(); ++i)
         {
             const auto& phase = run.Phases[i];
@@ -2008,24 +2111,6 @@ void BistroComparePanel::DrawRun(int index, fs::path& pendingPreset)
         }
         ImGui::TreePop();
     }
-    DrawExportStatus(run, placement, selection, exportZip);
-    ImGui::Spacing();
-    if (winner)
-    {
-        const auto file = fs::u8path(Value(winner->Fields, "PresetFile"));
-        const auto expected = run.Path.stem().wstring() + (winner == &run.Winners[0] ? L"-native.ini" : L"-upscaled.ini");
-        if (file == expected)
-        {
-            if (ImGui::Button("Apply preset")) pendingPreset = run.Path.parent_path() / file;
-        }
-        else if (const auto& error = Value(winner->Fields, "PresetError"); !error.empty())
-            ImGui::TextWrapped("Could not save preset: %s", error.c_str());
-    }
-    if (!run.RouteId.empty() && !hasTrace) ImGui::TextDisabled("Route   %s", run.RouteId.c_str());
-    const auto timing = SummaryTiming(winner, selection);
-    if (timing.Fps > 0 || timing.P95 > 0) DrawRouteMetrics(timing, _headingFont);
-    if (target > 0 && timing.Fps > 0)
-        ImGui::Text("Target   %.0f FPS   /   %s", target, run.TargetStatus(timing.Fps, winner));
 
     DrawPlacementComparison(placement ? *placement : run.Winners[0]);
     const auto drawReconstruction = [&](const auto& groups, const auto& columns, const char* heading)
@@ -2129,6 +2214,13 @@ void BistroComparePanel::DrawRun(int index, fs::path& pendingPreset)
     }
 }
 
+bool BistroComparePanel::MatchesHistoryFilters(const Run& run) const
+{
+    return (_filters[0].empty() || _filters[0] == run.MapName) &&
+        (_filters[1].empty() || _filters[1] == run.DisplayMode) &&
+        (_filters[2].empty() || _filters[2] == run.Output);
+}
+
 int BistroComparePanel::DrawRunList(bool compact)
 {
     ImGui::PushFont(_headingFont, ImGui::GetStyle().FontSizeBase * 1.45f);
@@ -2167,18 +2259,11 @@ int BistroComparePanel::DrawRunList(bool compact)
     for (int i = 0; i < int(_runs.size()); ++i)
     {
         const auto& run = _runs[i];
-        if ((!_filters[0].empty() && _filters[0] != run.MapName) ||
-            (!_filters[1].empty() && _filters[1] != run.DisplayMode) ||
-            (!_filters[2].empty() && _filters[2] != run.Output)) continue;
+        if (!MatchesHistoryFilters(run)) continue;
         visible.push_back(i);
         if (_historyPath == run.Path) selected = i;
     }
-    if (visible.empty())
-    {
-        ImGui::TextWrapped("No runs match these filters.");
-        if (ImGui::Button("Clear filters")) _filters = {};
-        return -1;
-    }
+    if (visible.empty()) return -1;
     if (selected < 0) selected = visible.front();
     if (compact)
     {
@@ -2218,16 +2303,8 @@ int BistroComparePanel::DrawRunList(bool compact)
                     ImGui::PopStyleColor(2);
                     ImGui::PopStyleVar();
                     const auto min = ImGui::GetItemRectMin(), max = ImGui::GetItemRectMax();
-                    const float x = min.x + (active ? 1.95f : .75f) * em, right = max.x - .7f * em;
+                    const float x = min.x + .75f * em, right = max.x - .7f * em;
                     auto* draw = ImGui::GetWindowDrawList();
-                    if (active)
-                    {
-                        const ImVec2 mark{min.x + .97f * em, min.y + 1.12f * em};
-                        draw->AddCircleFilled(mark, .46f * em, ImGui::GetColorU32(ImGuiCol_NavCursor));
-                        const ImVec2 check[]{{mark.x - .24f * em, mark.y}, {mark.x - .06f * em, mark.y + .15f * em},
-                            {mark.x + .24f * em, mark.y - .18f * em}};
-                        draw->AddPolyline(check, 3, ImGui::GetColorU32(ImGuiCol_WindowBg), 0, .11f * em);
-                    }
                     auto* font = ImGui::GetFont();
                     auto* heading = _headingFont ? _headingFont : font;
                     const auto text = [&](float y, float limit, const std::string& value, ImFont* face, float size, ImGuiCol color)
@@ -2257,7 +2334,18 @@ int BistroComparePanel::DrawRunList(bool compact)
                     }
                     text(.48f, titleRight, run.MapName, heading, 1.28f * em, ImGuiCol_Text);
                     text(1.99f, right, run.DisplayMode + (run.Output.empty() ? "" : "  /  " + run.Output), font, em, ImGuiCol_Text);
-                    text(3.25f, right, run.Timestamp, font, .93f * em, ImGuiCol_TextDisabled);
+                    const auto& status = run.FinalStatus.empty() ? run.StopReason : run.FinalStatus;
+                    const auto statusSize = .90f * em;
+                    const float statusWidth = font->CalcTextSizeA(statusSize, FLT_MAX, 0.f, status.c_str()).x;
+                    if (!status.empty() && statusWidth < (right - x) * .44f)
+                    {
+                        const auto color = status == "cancelled" || status == "error" || status == "invalid measurement"
+                            ? ComparisonColors[1] : ImGui::GetColorU32(ImGuiCol_Text);
+                        draw->AddText(font, statusSize, {right - statusWidth, min.y + 3.25f * em}, color, status.c_str());
+                        text(3.25f, right - statusWidth - .45f * em, run.Timestamp, font, .93f * em, ImGuiCol_TextDisabled);
+                    }
+                    else
+                        text(3.25f, right, status.empty() ? run.Timestamp : status, font, .93f * em, ImGuiCol_TextDisabled);
                     if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", run.Label.c_str());
                     ImGui::PopID();
                 }
@@ -2310,9 +2398,16 @@ void BistroComparePanel::DrawHistory(const fs::path& latestCompleted, fs::path& 
     int selected = -1;
     if (!_showHistory && !_runs.empty())
     {
-        const auto run = std::find_if(_runs.begin(), _runs.end(), [&](const Run& entry) { return entry.Path == _historyPath; });
-        if (run == _runs.end()) _historyPath = _runs.front().Path;
-        selected = run == _runs.end() ? 0 : int(run - _runs.begin());
+        auto run = std::find_if(_runs.begin(), _runs.end(), [&](const Run& entry) {
+            return entry.Path == _historyPath && MatchesHistoryFilters(entry);
+        });
+        if (run == _runs.end())
+            run = std::find_if(_runs.begin(), _runs.end(), [&](const Run& entry) { return MatchesHistoryFilters(entry); });
+        if (run != _runs.end())
+        {
+            _historyPath = run->Path;
+            selected = int(run - _runs.begin());
+        }
     }
     else if (compact)
         selected = DrawRunList(true);
@@ -2342,6 +2437,11 @@ void BistroComparePanel::DrawHistory(const fs::path& latestCompleted, fs::path& 
             ImGui::PopFont();
             ImGui::TextWrapped("Start a benchmark from Setup to record a run.");
         }
+        else
+        {
+            ImGui::TextUnformatted("No runs match these filters.");
+            if (ImGui::Button("Clear filters")) _filters = {};
+        }
     }
     ImGui::EndChild();
 }
@@ -2350,7 +2450,11 @@ void BistroComparePanel::DrawComparison()
 {
     if (_loadComparison)
     {
-        for (auto& s : _selected) Select(s, s.RunIndex, s.PassIndex);
+        auto& reference = _selected[0];
+        auto& comparison = _selected[1];
+        Select(reference, reference.RunIndex, reference.PassIndex);
+        if (_comparisonBChosen) Select(comparison, comparison.RunIndex, comparison.PassIndex);
+        else comparison = SuggestComparison(reference);
         _loadComparison = false;
     }
     const int columns = ImGui::GetContentRegionAvail().x >= 36.f * ImGui::GetFontSize() ? 2 : 1;

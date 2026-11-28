@@ -1,4 +1,5 @@
 #include "BistroLoadingScreen.h"
+#include "BistroWindowBounds.h"
 #include "../../../Resources/Resource.h"
 #include <objidl.h>
 #include <gdiplus.h>
@@ -105,7 +106,7 @@ struct BistroLoadingScreen::Impl
         size_t Completed = 0, Total = 0;
     };
 
-    Impl(HWND owner, const std::wstring& map) : Owner(owner), Title(L"Loading " + map)
+    Impl(HWND owner, const std::wstring& map, HMONITOR monitor) : Owner(owner), Monitor(monitor), Title(L"Loading " + map)
     {
         HANDLE ready = CreateEventW(nullptr, TRUE, FALSE, nullptr);
         try { Worker = std::thread([this, ready] { Run(ready); }); }
@@ -307,14 +308,12 @@ struct BistroLoadingScreen::Impl
 
     void Follow(HWND window)
     {
-        RECT bounds{};
-        GetClientRect(Owner, &bounds);
+        const RECT bounds = VisibleClientOnMonitor(Owner, Monitor);
         if (!IsWindowVisible(Owner) || IsIconic(Owner) || IsRectEmpty(&bounds))
         {
             if (IsWindowVisible(window)) ShowWindow(window, SW_HIDE);
             return;
         }
-        MapWindowPoints(Owner, nullptr, reinterpret_cast<POINT*>(&bounds), 2);
         RECT previous{};
         GetWindowRect(window, &previous);
         if (!EqualRect(&bounds, &previous) || !IsWindowVisible(window))
@@ -370,6 +369,7 @@ struct BistroLoadingScreen::Impl
     }
 
     HWND Owner;
+    const HMONITOR Monitor;
     const std::wstring Title;
     const ULONGLONG Started = GetTickCount64();
     std::mutex Mutex;
@@ -382,8 +382,8 @@ struct BistroLoadingScreen::Impl
     std::thread Worker;
 };
 
-BistroLoadingScreen::BistroLoadingScreen(HWND owner, const std::wstring& mapName)
-    : _impl(std::make_unique<Impl>(owner, mapName)) {}
+BistroLoadingScreen::BistroLoadingScreen(HWND owner, const std::wstring& mapName, HMONITOR monitor)
+    : _impl(std::make_unique<Impl>(owner, mapName, monitor)) {}
 
 BistroLoadingScreen::~BistroLoadingScreen() = default;
 

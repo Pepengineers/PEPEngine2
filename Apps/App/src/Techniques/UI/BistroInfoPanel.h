@@ -9,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <windef.h>
 
 class BistroBenchmark;
 class RenderModule;
@@ -24,8 +25,10 @@ public:
     const BistroRun::Map* TakeDebugMap() { return std::exchange(_requestedDebugMap, nullptr); }
 #endif
     void DrawSettings(RenderModule&, BistroBenchmark&);
-    void DrawMeasurement(const BistroBenchmark&) const;
-    void RecordPresent(std::chrono::steady_clock::time_point now, BistroRender::QueueSubmission&, bool manualGpuTimings);
+    void DrawMeasurement(const BistroBenchmark&, RECT visibleClient) const;
+    void ResetMeasurementSeries();
+    void RecordPresent(std::chrono::steady_clock::time_point begin, std::chrono::steady_clock::time_point end,
+                       BistroRender::QueueSubmission&, bool manualGpuTimings);
     void ShowSettings(bool openResults, const std::string& error = {});
 
 private:
@@ -59,5 +62,5 @@ private:
     size_t _count = 0, _next = 0;
     float _hudMeanMs = 0.f, _hudP95Ms = 0.f;
     std::chrono::steady_clock::time_point _hudStatsDue{};
-    std::optional<std::chrono::steady_clock::time_point> _lastPresent;
+    double _measurementBeginMs = 0;
 };

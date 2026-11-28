@@ -12,6 +12,7 @@
 #include "Common/Logger.h"
 
 #include <filesystem>
+#include <algorithm>
 #include <chrono>
 #include <cwchar>
 #include <string>
@@ -36,6 +37,52 @@ namespace Private
     static LRESULT CALLBACK MainWndProc(const HWND hwnd, const UINT msg, const WPARAM wParam, const LPARAM lParam)
     {
         return App::GetInstance()->MsgProc(hwnd, msg, wParam, lParam);
+    }
+
+    void PaintLoading(HWND hwnd, HDC dc, const wchar_t* title, const std::wstring& stage,
+        size_t completed, size_t total, ULONGLONG elapsed, bool cancelling)
+    {
+        RECT client{};
+        if (!GetClientRect(hwnd, &client) || IsRectEmpty(&client)) return;
+        const auto fill = [&](RECT rect, COLORREF color) {
+            SetDCBrushColor(dc, color);
+            FillRect(dc, &rect, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
+        };
+        fill(client, RGB(16, 27, 25));
+        const LONG width = (std::min)(client.right * 9 / 10, 720L);
+        const LONG unit = (std::clamp)(client.bottom / 28, 12L, 30L);
+        const LONG height = 7 * unit;
+        const LONG left = (client.right - width) / 2;
+        const LONG top = (std::max)(0L, (client.bottom - height) / 2);
+        const RECT panel{left, top, left + width, top + height};
+        fill(panel, RGB(22, 38, 32));
+        fill({panel.left, panel.top, panel.right, panel.top + 2}, RGB(102, 219, 178));
+        SetBkMode(dc, TRANSPARENT);
+        const auto text = [&](const wchar_t* value, LONG y, LONG size, int weight, COLORREF color) {
+            const auto font = CreateFontW(-size, 0, 0, 0, weight, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+            const auto previous = font ? SelectObject(dc, font) : nullptr;
+            SetTextColor(dc, color);
+            RECT line{panel.left + unit, y, panel.right - unit, y + 2 * unit};
+            DrawTextW(dc, value, -1, &line, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+            if (previous) SelectObject(dc, previous);
+            if (font) DeleteObject(font);
+        };
+        text(title, top + unit / 3, unit, FW_SEMIBOLD, RGB(185, 239, 123));
+        text(stage.c_str(), top + 2 * unit, 5 * unit / 4, FW_SEMIBOLD, RGB(243, 244, 234));
+        const LONG trackTop = top + 9 * unit / 2;
+        const RECT track{panel.left + unit, trackTop, panel.right - unit, trackTop + (std::max)(2L, unit / 7)};
+        fill(track, RGB(56, 77, 67));
+        if (total)
+        {
+            RECT progress = track;
+            progress.right = progress.left + LONG((progress.right - progress.left) * (std::min)(1., double(completed) / total));
+            fill(progress, RGB(102, 219, 178));
+        }
+        auto status = std::to_wstring(elapsed / 1000) + L" s elapsed";
+        if (total) status += L"   /   " + std::to_wstring(completed) + L" of " + std::to_wstring(total);
+        if (!cancelling) status += L"   /   Esc to cancel";
+        text(status.c_str(), top + 5 * unit, 2 * unit / 3, FW_NORMAL, RGB(180, 199, 187));
     }
 }
 
@@ -332,16 +379,8 @@ LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         {
             PAINTSTRUCT paint{};
             const auto dc = BeginPaint(hwnd, &paint);
-            RECT rect{};
-            GetClientRect(hwnd, &rect);
-            FillRect(dc, &rect, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
-            SetBkMode(dc, TRANSPARENT);
-            SetTextColor(dc, RGB(230, 230, 230));
-            const auto count = _loadingTotal ? L"  " + std::to_wstring(_loadingCompleted) + L"/" + std::to_wstring(_loadingTotal) : L"";
-            const auto text = _loadingStage + count + L"\n" +
-                std::to_wstring((GetTickCount64() - _loadingStarted) / 1000) + L" s - Esc to cancel";
-            rect.top += 40;
-            DrawTextW(dc, text.c_str(), -1, &rect, DT_CENTER | DT_TOP | DT_NOPREFIX);
+            Private::PaintLoading(hwnd, dc, _window ? _window->GetWindowTitle().c_str() : L"Pepengine2",
+                _loadingStage, _loadingCompleted, _loadingTotal, GetTickCount64() - _loadingStarted, _loadingCancelled);
             EndPaint(hwnd, &paint);
             return 0;
         }
