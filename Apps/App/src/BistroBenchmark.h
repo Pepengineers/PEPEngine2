@@ -164,7 +164,8 @@ public:
     void Launch(BistroRun::Launch launch, ConsoleModule& console);
     const BistroRun::Launch* PendingLaunch() const { return !_active && _action != Action::None ? &_launch : nullptr; }
     double HudRemainingSeconds() const;
-    const char* HudPhase() const;
+    std::optional<double> HudPhaseRemainingSeconds() const;
+    std::string HudPhase() const;
     bool ManualGpuTimings() const { return _stage == Stage::Placement && _manualPlacement && _manualGpuTimings; }
     enum class Outcome { Completed, Failed, Cancelled };
     void AbortLaunch(std::string message, Outcome outcome);
@@ -253,6 +254,10 @@ private:
     void ReportPlacementEvidence(BistroRenderPipeline& pipeline);
     void CompletePlacementTrial(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline);
     void WritePlacementTrialReport(BistroRenderPipeline& pipeline, std::string_view status);
+    bool StartPlacementConfirmation(World&, ConsoleModule&, BistroRenderPipeline&, BistroPlacement::Trial);
+    void ExtendPlacementBudget(double seconds);
+    void SettleComparisonPass(bool interrupted = false);
+    void WritePlacementBudget();
     double PlacementFullCost() const { return _warmup + Duration() + _placementSetupReserve; }
     double PlacementProbeCost() const { return _placementPhysics.size() * (_warmup + 1 + 2) + 3 + _placementSetupReserve; }
 
@@ -374,6 +379,11 @@ private:
     unsigned _placementPhase = 0;
     size_t _placementWindowIndex = 0, _trialWindowCount = 0;
     Clock::time_point _trialStarted, _placementLegStarted, _placementDeadline, _singleDeadline, _phaseDeadline;
+    double _basePlacementBudget = 0, _comparisonEstimate = 0, _activeComparisonEstimate = 0;
+    double _phaseBaseBudget = 0;
+    size_t _plannedComparisonPasses = 0;
+    std::array<double, 4> _addedPlacementBudget{};
+    BistroRender::Id _trialPostDevice = 0;
     double _placementSetupReserve = 2;
     std::array<std::function<void()>, 8> _placementPhysics;
     std::function<void()> _replayScene;

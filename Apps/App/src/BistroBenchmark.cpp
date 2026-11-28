@@ -130,10 +130,24 @@ double BistroBenchmark::HudRemainingSeconds() const
     return std::max(0., LegWarmup() + _window.End - _preroll - _elapsed);
 }
 
-const char* BistroBenchmark::HudPhase() const
+std::optional<double> BistroBenchmark::HudPhaseRemainingSeconds() const
+{
+    if (_stage != Stage::Placement || _manualPlacement) return {};
+    return std::max(0., Seconds(Clock::now(), _phaseDeadline));
+}
+
+std::string BistroBenchmark::HudPhase() const
 {
     if (_stage != Stage::Placement) return StageName();
     if (_trial.InspectImage) return "Checking reconstruction modes";
+    if (_trial.Comparison)
+    {
+        ConsoleModule console;
+        return std::string(_placementSearch.RemotePhase() ? "Multi-GPU" : "Single GPU") + " / " +
+            std::string(console.FindConsoleVariable(L"Render.Upscaler.Quality").GetEnumValueName(_trial.Settings.Preset)) + " / " +
+            std::string(console.FindConsoleVariable(L"Render.Upscaler.Provider").GetEnumValueName(_trial.Settings.Provider)) +
+            "   |   Pass " + std::to_string(_trial.Pass) + " of " + std::to_string(_trial.PassCount);
+    }
     if (!_placementInitialProbesReady) return "Preparing scene";
     if (_manualPlacement) return Measuring() ? "Manual route" : "Route warmup";
     if (_calibrating) return "Single GPU / baseline and route checkpoints";
@@ -336,11 +350,28 @@ void BistroBenchmark::FrameRendered(World& world, ConsoleModule& console, Render
         if (_stage == Stage::Placement && _trial.InspectImage)
         {
             ObservePlacementImage(render, pipeline);
+            if (_trialReason.empty())
+            {
+                const auto fence = pipeline.BenchmarkReconstructionFence();
+                if (!fence) _trialReason = "reconstruction submission missing";
+                else pipeline.BenchmarkSubmissions().Wait(fence);
+            }
             _legDone = true;
             return;
         }
         if (_stage == Stage::Placement && !_placementInitialProbesReady)
         {
+            if (!_manualPlacement)
+            {
+                ObservePlacementImage(render, pipeline);
+                if (!_trialReason.empty() && !_calibrating)
+                {
+                    _frameConfigPending = true;
+                    _legDone = true;
+                    return;
+                }
+                _trialConfig.clear();
+            }
             const auto [published, expected] = pipeline.GetWorldProbeReadiness();
             if (published == expected && (_manualPlacement || (_calibrating && !_trialReason.empty()) ||
                 expected == size_t(_trial.Settings.Levels[BistroPlacement::ProbeQuality])) && pipeline.BenchmarkPublicationsReady())
@@ -1555,7 +1586,10 @@ void BistroBenchmark::Finish(World& world, ConsoleModule& console, BistroRenderP
             WriteLeg(status);
             if (_trialPending) WritePlacementTrialReport(pipeline, status);
             if (!_manualPlacement)
+            {
+                SettleComparisonPass(true);
                 _placementSearch.Report(_csv, status, console, _path);
+            }
             const auto* winner = _manualPlacement ? nullptr : _placementSearch.Winner();
             const char* finalStatus = "no confirmed result";
             if (outcome == Outcome::Cancelled) finalStatus = "cancelled";

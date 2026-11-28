@@ -27,7 +27,10 @@ class ScenePostUI
 	std::array<uint64_t, 4> BenchmarkTransferBytes() const;
 	std::pair<bool, bool> BenchmarkPostEffects() const;
 	std::pair<Id, Id> BenchmarkPublication() const;
-	const std::string& BenchmarkNISFailure() const;
+	const std::string& ReconstructionFailure() const;
+	Id PostDevice() const;
+	CompletionToken ReconstructionFence(CompletionToken local) const;
+	bool ReconstructionRecorded() const;
 	void DrainPost();
 	void AddPostExchange(const Schedule&, std::vector<Executor::PacketExchange>&);
 	void PostPresented();
@@ -143,7 +146,8 @@ class ScenePostUI
 	std::unique_ptr<RemotePost> _remotePost;
 	Id _requestedPost = Invalid;
 	GDX12ReconstructionSettings _postRequest{};
-	std::string _postNISFailure, _nisFrameFailure;
+	std::string _postFallback, _reconstructionFailure;
+	bool _reconstructionRecorded = false;
 	int _postFgRequest = -1;
 	NativeWork _work;
 	std::vector<std::array<GDX12ResourceHandle, 2>> _exports;

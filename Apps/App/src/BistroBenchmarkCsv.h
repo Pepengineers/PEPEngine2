@@ -92,7 +92,11 @@ public:
                 if (field == "FPS" || field == "P95ms" || field == "Status" ||
                     field == "Source" || field == "Scope" || field == "Render.Display.OutputResolution" ||
                     field == "Render.Display.InternalResolution" || field == "LastPassCSV" ||
-                    field == "Partial" || field == "CompletedPasses")
+                    field == "Partial" || field == "CompletedPasses" || field == "ReconstructionApplied" ||
+                    field == "ReconstructionComparison" || field == "RequestedPostDevice" || field == "EffectivePostDevice" ||
+                    field == "Render.Upscaler.Provider" || field == "Render.Upscaler.EffectiveProvider" ||
+                    field == "Render.Upscaler.EffectiveQuality" || field == "InternalScale" ||
+                    field == "ReconstructionFallback" || field == "ComparisonEligibility")
                     Write(_file, row);
                 if (field == "LastPassCSV" || (field.size() >= 13 && field.substr(field.size() - 13) == "ReusedPassCSV"))
                 {

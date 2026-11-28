@@ -92,7 +92,10 @@ class BistroRenderPipeline final : public IRenderPipeline
 		return _lighting->Water().BenchmarkReady() && _lighting->Particles().BenchmarkReady() && _environment->BenchmarkReady();
 	}
 	const auto& BenchmarkSimulations() const { return _benchmarkSimulations; }
-	const auto& BenchmarkNISFailure() const { return _post->BenchmarkNISFailure(); }
+	const auto& BenchmarkReconstructionFailure() const { return _post->ReconstructionFailure(); }
+	BistroRender::Id BenchmarkPostDevice() const { return _post->PostDevice(); }
+	bool BenchmarkReconstructionRecorded() const { return _post->ReconstructionRecorded(); }
+	BistroRender::CompletionToken BenchmarkReconstructionFence() const { return _post->ReconstructionFence(BenchmarkFrameFence()); }
 	std::vector<std::pair<std::string, std::string>> PanelAdapters() const;
 	uint64_t PresentedFrames() const { return _presentedFrames; }
 	void SetBenchmarkTime(std::optional<double> routeTime, double warmup = 0, bool localSkinning = true, bool observePlacement = false)

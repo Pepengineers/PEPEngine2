@@ -84,6 +84,22 @@ std::string BistroComparePanel::ReportBody(const Run& run, const Winner* selecte
     html << std::setprecision(12);
     html << "<header><div><h1>" << Escape(run.MapName) << "</h1><p class=\"muted\">" << Escape(run.Timestamp)
          << "</p></div><a class=\"action\" href=\"#sources\">Source files &darr;</a></header>";
+    if (run.BaseBudget && run.AddedRoutes && run.Budget)
+        html << "<p>Search budget " << Decimal(*run.Budget) << " s / base " << Decimal(*run.BaseBudget)
+             << " s + full reconstruction routes " << Decimal(*run.AddedRoutes) << " s</p>";
+    if (run.Elapsed) html << "<p>Elapsed " << Decimal(*run.Elapsed) << " s</p>";
+    if (run.BaseBudget)
+    {
+        html << "<details><summary>Search phases</summary><ul>";
+        for (size_t i = 0; i < run.Phases.size(); ++i)
+        {
+            const auto& phase = run.Phases[i];
+            if (phase.Base && phase.Total)
+                html << "<li>" << SearchPhaseLabels[i] << " / " << Decimal(*phase.Total) << " s total / "
+                     << Decimal(*phase.Base) << " s base + " << Decimal(phase.Added.value_or(0.)) << " s full routes</li>";
+        }
+        html << "</ul></details>";
+    }
     const bool both = run.Winners[0].Available() && run.Winners[1].Available();
     if (both)
     {
@@ -241,6 +257,21 @@ std::string BistroComparePanel::ReportBody(const Run& run, const Winner* selecte
         for (const auto& pass : run.Passes)
             html << "<tr><th>" << Escape(pass.Label) << "</th><td>" << (pass.Timing.Fps > 0 ? Decimal(pass.Timing.Fps) : "&mdash;")
                  << "</td><td>" << (pass.Timing.P95 > 0 ? Decimal(pass.Timing.P95) : "&mdash;") << "</td></tr>";
+        html << "</tbody></table></div></details>";
+    }
+    if (!run.Reconstructions.empty()) html << "<h2>Reconstruction comparisons</h2>";
+    for (const auto& [id, group] : run.Reconstructions)
+    {
+        html << "<details><summary>" << Escape(group.Mode) << " / " << Escape(group.Status)
+             << "</summary><div class=\"scroll\"><table><thead><tr>";
+        for (const auto* column : ReconstructionColumns) html << "<th scope=\"col\">" << column << "</th>";
+        html << "</tr></thead><tbody>";
+        for (const auto& trial : group.Participants)
+        {
+            html << "<tr>";
+            for (const auto& cell : ReconstructionRow(run, group, trial)) html << "<td>" << Escape(cell) << "</td>";
+            html << "</tr>";
+        }
         html << "</tbody></table></div></details>";
     }
     return html.str();

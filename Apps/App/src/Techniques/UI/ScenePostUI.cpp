@@ -14,7 +14,6 @@
 #include "Engine.RendererDX12/GDX12SwapChain.h"
 #include "Engine.RendererDX12/GDX12FrameGeneration.h"
 #include "Engine.RendererDX12/GDX12MotionBlurSettings.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12NISUpscalePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12TAAPass.h"
 #include <filesystem>
 #include <unordered_set>
@@ -317,10 +316,25 @@ GDX12ReconstructionPass& ScenePostUI::Reconstruction()
 	return _remotePost ? _remotePost->Stack->_reconstruction : _reconstruction;
 }
 
-const std::string& ScenePostUI::BenchmarkNISFailure() const
+const std::string& ScenePostUI::ReconstructionFailure() const
 {
-	if (!_postNISFailure.empty()) return _postNISFailure;
-	return _remotePost ? _remotePost->Stack->_nisFrameFailure : _nisFrameFailure;
+	if (!_postFallback.empty()) return _postFallback;
+	return _remotePost ? _remotePost->Stack->_reconstructionFailure : _reconstructionFailure;
+}
+
+Id ScenePostUI::PostDevice() const
+{
+	return _remotePost ? _remotePost->Owner : 0;
+}
+
+CompletionToken ScenePostUI::ReconstructionFence(CompletionToken local) const
+{
+	return _remotePost ? _remotePost->Frames.at(_resources.CurrFrameConstantsIndex).Produced : local;
+}
+
+bool ScenePostUI::ReconstructionRecorded() const
+{
+	return _remotePost ? _remotePost->Stack->_reconstructionRecorded : _reconstructionRecorded;
 }
 
 ScenePostUI::Devices ScenePostUI::ExecutionDevices() const
@@ -395,7 +409,7 @@ bool ScenePostUI::UpdatePostOwner(RenderPipelineContext& c, const std::shared_pt
 	_requestedPost = owner;
 	_postRequest = settings;
 	_postFgRequest = int(fg);
-	_postNISFailure.clear();
+	_postFallback.clear();
 	DrainHud();
 	c.Runtime.DrainFrameWork();
 	auto retired = std::move(_remotePost);
@@ -406,7 +420,6 @@ bool ScenePostUI::UpdatePostOwner(RenderPipelineContext& c, const std::shared_pt
 		if (reconstruction.Effective != settings.Provider)
 		{
 			reason = "requested SR on post adapter: " + reconstruction.FallbackReason;
-			if (settings.Provider == GDX12UpscalerProvider::NIS) _postNISFailure = reason;
 		}
 		else
 		{
@@ -439,6 +452,7 @@ bool ScenePostUI::UpdatePostOwner(RenderPipelineContext& c, const std::shared_pt
 	}
 	if (!_remotePost)
 	{
+		_postFallback = reason;
 		c.SetPresentationDevice(*c.Primary.Device);
 		_reconstruction.ApplySettings();
 		_reconstruction.QueryRenderTargetResolution();
@@ -667,18 +681,26 @@ Id ScenePostUI::AppendReconstruction(Graph& graph, std::vector<ID3D12Resource*>&
 	auto* completeMotion = _blur.GetOutput(1)->GetTexture();
 	const bool temporal = _reconstruction.GetFlags() & RENDER_PASS_FLAG_USE_JITTER;
 	_reconstruction.SetInputs({temporal ? depth : color, temporal ? completeMotion : color, color});
-	if (_reconstruction._needsInitialize)
+	_reconstructionRecorded = false;
+	_reconstructionFailure.clear();
+	const auto provider = _reconstruction.GetStatus().Effective;
+	const bool native = provider == GDX12UpscalerProvider::Native;
+	const bool sdk = !native && provider != GDX12UpscalerProvider::TAA;
+	try
 	{
-		_reconstruction.Initialize();
+		if (_reconstruction._needsInitialize) _reconstruction.Initialize();
+		else if (_resize) _reconstruction.Resize();
+		_reconstruction.PrepareRecording();
+		_reconstruction.LinkOutput();
+		_resize = false;
 	}
-	else if (_resize)
+	catch (const std::exception& error)
 	{
-		_reconstruction.Resize();
+		if (!sdk) throw;
+		_reconstructionFailure = error.what();
 	}
-	_reconstruction.PrepareRecording();
-	_reconstruction.LinkOutput();
-	_resize = false;
-	_output.SetInputs({_reconstruction.GetOutput(0), target});
+	auto* image = _reconstructionFailure.empty() ? _reconstruction.GetOutput(0) : _blur.GetOutput(0);
+	_output.SetInputs({image, target});
 	if (!_outputInitialized)
 	{
 		_output.Initialize();
@@ -709,11 +731,8 @@ Id ScenePostUI::AppendReconstruction(Graph& graph, std::vector<ID3D12Resource*>&
 		    [this, featureMotion](auto* cmd) { _blur.RecordCommands(cmd, featureMotion); }, std::move(dependencies));
 		dependencies = {blur};
 	}
-	auto* reconstructed = _reconstruction.GetOutput(0)->GetTexture();
-	const bool native = _reconstruction.GetStatus().Effective == GDX12UpscalerProvider::Native;
-	const bool nis = _reconstruction.GetStatus().Effective == GDX12UpscalerProvider::NIS;
-	_nisFrameFailure.clear();
-	if (!native)
+	auto* reconstructed = image->GetTexture();
+	if (!native && _reconstructionFailure.empty())
 	{
 		auto* taa = _reconstruction.TAA();
 		if (taa)
@@ -729,7 +748,11 @@ Id ScenePostUI::AppendReconstruction(Graph& graph, std::vector<ID3D12Resource*>&
 			accesses.emplace_back(frame.Camera, Mode::Read);
 			const auto reconstruction = Packet(
 			    graph, bindings, "TAA resolve DIRECT boundary", std::move(accesses),
-			    [taa, frame](auto* cmd) { taa->RecordCommands(cmd, frame); }, std::move(dependencies));
+			    [this, taa, frame](auto* cmd)
+			    {
+				    taa->RecordCommands(cmd, frame);
+				    _reconstructionRecorded = true;
+			    }, std::move(dependencies));
 			dependencies = {reconstruction};
 		}
 		else
@@ -745,20 +768,24 @@ Id ScenePostUI::AppendReconstruction(Graph& graph, std::vector<ID3D12Resource*>&
 			    graph, bindings, "reconstruction provider DIRECT SDK boundary", std::move(accesses),
 			    [this](auto* cmd)
 			    {
-				    try { _reconstruction.Execute(cmd); }
-				    catch (const GDX12NISUpscalePass::Failure& error) { _nisFrameFailure = error.what(); }
+				    try
+				    {
+					    _reconstruction.Execute(cmd);
+					    _reconstructionRecorded = true;
+				    }
+				    catch (const std::exception& error) { _reconstructionFailure = error.what(); }
 			    }, std::move(dependencies));
 			dependencies = {reconstruction};
 		}
 	}
 	std::vector<std::pair<GDX12Resource*, Mode>> outputAccesses{
 	    {resource(reconstructed), Mode::Read}, {resource(target), Mode::Write}};
-	if (nis) outputAccesses.emplace_back(resource(color), Mode::Read);
+	if (sdk && reconstructed != color) outputAccesses.emplace_back(resource(color), Mode::Read);
 	return Packet(
 	    graph, bindings, "output HDR display transform", std::move(outputAccesses),
 	    [this, native, color](auto* cmd)
 	    {
-		    if (_nisFrameFailure.empty()) _output.Execute(cmd);
+		    if (_reconstructionFailure.empty()) _output.Execute(cmd);
 		    else _output.ExecuteWithInput(cmd, color);
 		    if (native)
 		    {

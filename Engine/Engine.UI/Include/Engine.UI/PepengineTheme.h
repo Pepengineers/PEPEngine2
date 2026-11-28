@@ -11,7 +11,8 @@ namespace Engine::UI::PepengineTheme
     inline constexpr ImVec4 Mint  {0.400f, 0.859f, 0.698f, 1.f};
     inline constexpr ImVec4 Lime  {0.725f, 0.937f, 0.482f, 1.f};
 
-    void Initialize(ImFontAtlas& atlas, int iconResource);
+    ImFontAtlasRectId LoadResourceImage(ImFontAtlas& atlas, int id);
+void Initialize(ImFontAtlas& atlas, int iconResource);
     void Reset();
     ImFont* BodyFont();
     ImFont* HeadingFont();

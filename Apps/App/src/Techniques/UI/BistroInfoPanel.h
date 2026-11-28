@@ -30,6 +30,7 @@ public:
 
 private:
     enum class Tab { Setup, Results };
+    std::map<int, int> _backgrounds;
     void DrawLaunchControls(BistroBenchmark& benchmark);
     void DrawPresentChart(float height) const;
     void ApplyPreset(const std::filesystem::path& path);

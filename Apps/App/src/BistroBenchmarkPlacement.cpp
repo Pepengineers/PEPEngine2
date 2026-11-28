@@ -43,8 +43,25 @@ void BistroBenchmark::StartPlacement(World& world, ConsoleModule& console, const
             fixedWaterSubsteps &= fluid.GetSettings().MaxSubsteps != 0;
         });
         auto& submissions = pipeline.BenchmarkSubmissions();
+        std::map<int, int> preferredProviders;
+        const auto vendorProvider = [&](BistroRender::Id id)
+        {
+            using Provider = GDX12UpscalerProvider;
+            switch (submissions.AdapterVendor(id))
+            {
+            case 0x10de: return int(Provider::DLSS);
+            case 0x1002: return int(Provider::FSR);
+            case 0x8086: return int(Provider::XeSS);
+            default: return int(Provider::Native);
+            }
+        };
+        if (_launch.AllowUpscalers)
+        {
+            preferredProviders.emplace(-1, vendorProvider(0));
+            for (int index : adapters) preferredProviders.emplace(index, vendorProvider(index + 1));
+        }
         _placementSearch.Start(console, _launch.Output, adapters, _multiGPU, fixedWaterSubsteps,
-            render.UsesSkinningPoseRatePreset(), shadowNames, _csv, _launch.AllowUpscalers);
+            render.UsesSkinningPoseRatePreset(), shadowNames, _csv, _launch.AllowUpscalers, std::move(preferredProviders));
         const auto local = LocalAdapters(console);
         patch.insert(patch.end(), local.begin(), local.end());
         const auto controlled = _placementSearch.ControlledSettings();
@@ -53,7 +70,7 @@ void BistroBenchmark::StartPlacement(World& world, ConsoleModule& console, const
         if (!exeLength || exeLength == std::size(executable))
             throw std::runtime_error("Cannot identify benchmark executable");
         std::ostringstream conditions;
-        conditions << "fixed-output-v1 measurement-" << BistroBenchmarkData::MeasurementVersion << ' ' <<
+        conditions << "fixed-output-named-reconstruction-v2 measurement-" << BistroBenchmarkData::MeasurementVersion << ' ' <<
             std::quoted(_launch.Level->Id) << ' ' << std::quoted(_launch.Level->Route) << ' ' <<
             _launch.Output.first << 'x' << _launch.Output.second << ' ' << _launch.AllowUpscalers << ' ' <<
             std::setprecision(17) << Duration() << ' ' << _paintingHold << ' ' << _warmup << ' ' <<
@@ -102,12 +119,18 @@ void BistroBenchmark::StartPlacement(World& world, ConsoleModule& console, const
         const double budget = PlacementBudget(_multiGPU ? adapters.size() : 0);
         _placementDeadline = _started + std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(budget - FinishReserve));
         _singleDeadline = _started + std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(singleBudget - FinishReserve));
-        _csv.Config("BudgetSeconds", Csv::Number(budget));
+        _basePlacementBudget = budget;
+        _phaseBaseBudget = singleBudget;
+        _phaseDeadline = _singleDeadline;
+        _addedPlacementBudget = {};
+        _comparisonEstimate = _activeComparisonEstimate = 0;
+        _plannedComparisonPasses = 0;
+        WritePlacementBudget();
         _csv.Config("SingleGPUBudgetSeconds", Csv::Number(singleBudget));
         _csv.Config("PlacementSeed", "20261122");
         _csv.Config("SkinningOwnerRestriction", "Remote skinning selection is startup-only; search uses scene GPU");
         _csv.Config("SceneOwnerRestriction", "The scene adapter is fixed at application startup");
-        if (Seconds(Clock::now(), _singleDeadline) < _warmup + Duration())
+        if (!_trial.Settings.Provider && Seconds(Clock::now(), _singleDeadline) < _warmup + Duration())
         {
             Finish(world, console, pipeline, "full route does not fit in budget", {}, 0, Outcome::Failed);
             return;
@@ -124,6 +147,17 @@ void BistroBenchmark::BeginPlacementTrial(World& world, ConsoleModule& console, 
 {
     _trial = std::move(trial);
     _trialStarted = Clock::now();
+    if (first && !_manualPlacement && _trial.Settings.Provider)
+    {
+        _activeComparisonEstimate = PlacementFullCost();
+        ExtendPlacementBudget(_activeComparisonEstimate);
+    }
+    else if (_trial.Comparison)
+    {
+        _activeComparisonEstimate = _comparisonEstimate;
+        --_plannedComparisonPasses;
+    }
+    _trialPostDevice = 0;
     _trialResult = {};
     _trialResult.Id = _trial.Id;
     _trialResult.Settings = _trial.Settings;
@@ -151,6 +185,15 @@ void BistroBenchmark::BeginPlacementTrial(World& world, ConsoleModule& console, 
     _csv.Config(_trialPrefix + "RequestedLocalShadowCeiling", std::to_string(shadowCeiling));
     if (!_manualPlacement)
     {
+        if (_trial.Comparison)
+        {
+            _csv.Config(_trialPrefix + "ReconstructionComparison", std::to_string(_trial.Comparison));
+            _csv.Config(_trialPrefix + "ComparisonPass", std::to_string(_trial.Pass));
+        }
+        const auto owner = _trial.Settings.Owners[BistroPlacement::Post];
+        _csv.Config(_trialPrefix + "RequestedPostDevice", pipeline.BenchmarkSubmissions().AdapterLabel(owner < 0 ? 0 : owner + 1));
+        if (_activeComparisonEstimate > 0)
+            _csv.Config(_trialPrefix + "AddedRouteEstimateSeconds", Csv::Number(_activeComparisonEstimate));
         if (!first) Apply(console, _placementSearch.Patch(_trial.Settings));
         if (_trial.InspectImage)
         {
@@ -359,11 +402,20 @@ void BistroBenchmark::ObservePlacementImage(RenderModule& render, BistroRenderPi
     _trialProvider = status.Effective;
     _trialFrameGeneration = render.GetFrameGenerationStatus().Effective;
     _trialFallback = status.FallbackReason;
+    _trialPostDevice = pipeline.BenchmarkPostDevice();
     if (_trialResult.Output != _launch.Output)
         _trialReason = "requested output size unavailable";
     else if (!_manualPlacement)
     {
-        if (int(status.Requested.Provider) != _trial.Settings.Provider ||
+        const auto owner = _trial.Settings.Owners[BistroPlacement::Post];
+        const auto requestedPost = owner < 0 ? 0 : BistroRender::Id(owner + 1);
+        if (_trialPostDevice != requestedPost)
+        {
+            _trialReason = "requested post adapter unavailable";
+            _trialFallback = pipeline.BenchmarkReconstructionFailure();
+            if (_trialFallback.empty()) _trialFallback = "post processing executed on another adapter";
+        }
+        else if (int(status.Requested.Provider) != _trial.Settings.Provider ||
             int(status.Requested.Quality) != _trial.Settings.Preset ||
             int(status.Effective) != _trial.Settings.Provider ||
             (status.Effective == GDX12UpscalerProvider::Native ? _trialResult.Render != _launch.Output :
@@ -375,10 +427,16 @@ void BistroBenchmark::ObservePlacementImage(RenderModule& render, BistroRenderPi
         else if (_trialFrameGeneration != GDX12FrameGenerationProvider::Off)
             _trialReason = "frame generation is active";
     }
-    if (const auto& failure = pipeline.BenchmarkNISFailure(); !failure.empty())
+    if (const auto& failure = pipeline.BenchmarkReconstructionFailure(); !failure.empty())
     {
         _trialFallback = failure;
-        _trialReason = "NIS reconstruction failed";
+        if (_trialReason.empty() && !_manualPlacement)
+            _trialReason = "reconstruction failed";
+    }
+    if (status.Effective != GDX12UpscalerProvider::Native && !pipeline.BenchmarkReconstructionRecorded())
+    {
+        _trialConfig.emplace_back("ReconstructionApplied", "Display transform fallback");
+        if (!_manualPlacement && _trialReason.empty()) _trialReason = "no successful reconstruction frame";
     }
 }
 
@@ -393,7 +451,7 @@ void BistroBenchmark::RecordPlacementFrame(RenderModule& render, BistroRenderPip
             ObservePlacementImage(render, pipeline);
             _frameConfigPending = true;
         }
-        else if (_trialConfig != EffectiveConfig(render))
+        else if (_trialReason.empty() && _trialConfig != EffectiveConfig(render))
             _trialReason = "effective display or reconstruction changed";
         if (!_trialReason.empty() && !_calibrating)
         {
@@ -408,10 +466,15 @@ void BistroBenchmark::RecordPlacementFrame(RenderModule& render, BistroRenderPip
         _trialResult.Output != BistroPlacement::Size{common.WindowWidth, common.WindowHeight} ||
         _trialResult.Render != BistroPlacement::Size{common.DownscaledWidth, common.DownscaledHeight})
         _trialReason = "effective display, reconstruction or frame generation changed";
-    if (const auto& failure = pipeline.BenchmarkNISFailure(); !failure.empty())
+    if (!_manualPlacement && pipeline.BenchmarkPostDevice() != _trialPostDevice)
+        _trialReason = "post adapter changed during measurement";
+    if (const auto& failure = pipeline.BenchmarkReconstructionFailure(); !failure.empty())
     {
         _trialFallback = failure;
-        _trialReason = "NIS reconstruction failed";
+        if (!pipeline.BenchmarkReconstructionRecorded())
+            _csv.Config(_trialPrefix + "ReconstructionApplied", "Display transform fallback");
+        if (_trialReason.empty() && !_manualPlacement)
+            _trialReason = "reconstruction failed";
     }
     if (!_trialReason.empty() && !_calibrating)
     {
@@ -447,7 +510,14 @@ void BistroBenchmark::CompletePlacementLeg(World& world, ConsoleModule& console,
 {
     if (_trial.InspectImage)
     {
-        _placementSearch.RecordImageMode(_trial, _trialResult.Render, _trialReason.empty());
+        _placementSearch.RecordImageMode(_trial, _trialReason.empty());
+        const auto owner = _trial.Settings.Owners[BistroPlacement::Post];
+        const auto requested = owner < 0 ? 0 : BistroRender::Id(owner + 1);
+        const auto& submissions = pipeline.BenchmarkSubmissions();
+        _csv.Config(_trialPrefix + "EffectivePostDevice", submissions.AdapterLabel(_trialPostDevice));
+        _csv.Config(_trialPrefix + "SdkAcceptedOnRequestedDevice", _trialPostDevice == requested &&
+            int(_trialProvider) == _trial.Settings.Provider ? "true" : "false");
+        _csv.Config(_trialPrefix + "ReconstructionFrameVerified", _trialReason.empty() ? "true" : "false");
         for (const auto& [name, value] : _trialConfig) _csv.Config(_trialPrefix + name, value);
         if (!_trialFallback.empty()) _csv.Config(_trialPrefix + "ReconstructionFallback", _trialFallback);
         _csv.Config(_trialPrefix + "Status", _trialReason.empty() ? "available" : _trialReason);
@@ -677,7 +747,11 @@ void BistroBenchmark::CompletePlacementTrial(World& world, ConsoleModule& consol
     if (_trialReason.empty() && !_manualPlacement && measurements.Freshness.Missed[_placementProfile])
         _trialReason = "reflection face deadline missed";
     if (!_manualPlacement) ReportPlacementEvidence(pipeline);
+    if (_trial.Comparison && _trialReason.empty() &&
+        (_trial.Settings.Owners != _trialResult.Settings.Owners || _trial.Settings.Sync != _trialResult.Settings.Sync))
+        _csv.Config(_trialPrefix + "ComparisonEligibility", "effective placement differs from requested layout");
     _trialResult.Valid = _trialReason.empty();
+    SettleComparisonPass();
     _csv.Config(_trialPrefix + "FPS", Csv::Number(_trialResult.Fps));
     if (_trialWindowCount > _windows.size())
         _csv.Config(_trialPrefix + "FPSWithThresholdRecheck", Csv::Number(_trialResult.ThresholdFps));
@@ -714,6 +788,13 @@ void BistroBenchmark::WritePlacementTrialReport(BistroRenderPipeline& pipeline, 
 {
     auto& measurements = _trialMeasurements;
     const auto& submissions = pipeline.BenchmarkSubmissions();
+    if (!_trialConfig.empty())
+    {
+        _csv.Config(_trialPrefix + "EffectivePostDevice", submissions.AdapterLabel(_trialPostDevice));
+        if (_trialResult.Output.first && _trialResult.Output.second)
+            _csv.Config(_trialPrefix + "InternalScale", Csv::Number(double(_trialResult.Render.first) / _trialResult.Output.first) +
+                " x " + Csv::Number(double(_trialResult.Render.second) / _trialResult.Output.second));
+    }
     if (_manualPlacement && _trialCompletedPasses)
     {
         _csv.Config(_trialPrefix + "PlacementEvidenceScope", "measured route frames");
@@ -759,16 +840,27 @@ void BistroBenchmark::WritePlacementTrialReport(BistroRenderPipeline& pipeline, 
 bool BistroBenchmark::CheckPlacementDeadline(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline, Clock::time_point now)
 {
     if (_stage != Stage::Placement || _manualPlacement) return false;
+    if (_activeComparisonEstimate > 0 && !_calibrating)
+    {
+        if (!_placementInitialProbesReady && Seconds(_placementLegStarted, now) >= _activeComparisonEstimate)
+        {
+            _trialReason = "initial publications did not become ready";
+            CompletePlacementLeg(world, console, pipeline);
+            return true;
+        }
+        return false;
+    }
     if (now >= _placementDeadline)
     {
         Finish(world, console, pipeline, "placement budget exhausted");
         return true;
     }
-    if (_placementSearch.RemotePhase())
+    if (_placementSearch.RemotePhase() && !_trial.InspectImage)
     {
         // Bound a stalled publication independently of the time spent measuring valid windows.
         const bool stalled = !_placementInitialProbesReady && Seconds(_placementLegStarted, now) >= PlacementProbeCost();
-        const bool reserveFullRoute = !_trial.Full && Seconds(now, _phaseDeadline) <= PlacementFullCost() + FinishReserve;
+        const bool reserveFullRoute = !_trial.Full && Seconds(now, _phaseDeadline) <=
+            (_placementSearch.Upscaled() ? FinishReserve : PlacementFullCost() + FinishReserve);
         if (stalled || reserveFullRoute)
         {
             _trialReason = stalled ? "remote publication did not become ready" : "time reserved for full route";
@@ -806,8 +898,13 @@ void BistroBenchmark::BeginNextPlacementPhase(World& world, ConsoleModule& conso
             phases += _placementSearch.NeedsPhase(next);
         const auto now = Clock::now();
         const double budget = std::max(Seconds(now, deadline) / phases, probeAndFull);
+        _phaseBaseBudget = std::min(Seconds(now, deadline), budget);
+        if (_placementPhase == 0)
+            _phaseBaseBudget += std::max(0., Seconds(_started, now) - _addedPlacementBudget[0]);
+        _csv.Config("SearchPhase." + std::to_string(_placementPhase) + ".BaseSeconds", Csv::Number(_phaseBaseBudget));
         _phaseDeadline = std::min(deadline,
             now + std::chrono::ceil<Clock::duration>(std::chrono::duration<double>(budget)));
+        WritePlacementBudget();
         NextPlacementTrial(world, console, pipeline, now);
         return;
     }
@@ -815,42 +912,104 @@ void BistroBenchmark::BeginNextPlacementPhase(World& world, ConsoleModule& conso
         "placement budget cannot fit another probe and full route" : "placement search finished");
 }
 
+void BistroBenchmark::ExtendPlacementBudget(double seconds)
+{
+    const auto delta = std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(seconds));
+    _addedPlacementBudget[_placementPhase] += seconds;
+    _placementDeadline += delta;
+    _phaseDeadline += delta;
+    if (_placementPhase < 2) _singleDeadline += delta;
+    WritePlacementBudget();
+}
+
+void BistroBenchmark::WritePlacementBudget()
+{
+    const double added = std::accumulate(_addedPlacementBudget.begin(), _addedPlacementBudget.end(), 0.);
+    _csv.Config("BaseBudgetSeconds", Csv::Number(_basePlacementBudget));
+    _csv.Config("AddedFullRouteSeconds", Csv::Number(added));
+    _csv.Config("BudgetSeconds", Csv::Number(_basePlacementBudget + added));
+    if (_placementPhase < _addedPlacementBudget.size())
+    {
+        const auto prefix = "SearchPhase." + std::to_string(_placementPhase) + ".";
+        _csv.Config(prefix + "AddedFullRouteSeconds", Csv::Number(_addedPlacementBudget[_placementPhase]));
+        _csv.Config(prefix + "BudgetSeconds", Csv::Number(_phaseBaseBudget + _addedPlacementBudget[_placementPhase]));
+    }
+}
+
+void BistroBenchmark::SettleComparisonPass(bool interrupted)
+{
+    if (_activeComparisonEstimate > 0)
+    {
+        const double elapsed = SecondsSince(_trialStarted);
+        ExtendPlacementBudget(elapsed - std::exchange(_activeComparisonEstimate, 0.));
+        _csv.Config(_trialPrefix + "AddedRouteActualSeconds", Csv::Number(elapsed));
+    }
+    if (interrupted && _plannedComparisonPasses)
+    {
+        ExtendPlacementBudget(-_comparisonEstimate * _plannedComparisonPasses);
+        _plannedComparisonPasses = 0;
+    }
+    if (interrupted) _placementSearch.InterruptComparison(_csv);
+}
+
+bool BistroBenchmark::StartPlacementConfirmation(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline,
+    BistroPlacement::Trial trial)
+{
+    trial = _placementSearch.CompareImageMode(std::move(trial), _csv);
+    if (!trial.Id)
+    {
+        _plannedComparisonPasses = _placementSearch.PendingComparisonPasses();
+        if (_plannedComparisonPasses)
+        {
+            _comparisonEstimate = PlacementFullCost();
+            ExtendPlacementBudget(_comparisonEstimate * _plannedComparisonPasses);
+        }
+        const auto next = _placementSearch.NextComparisonTrial();
+        if (!next) return false;
+        trial = *next;
+    }
+    BeginPlacementTrial(world, console, pipeline, std::move(trial));
+    return true;
+}
+
 void BistroBenchmark::NextPlacementTrial(World& world, ConsoleModule& console, BistroRenderPipeline& pipeline,
     Clock::time_point now)
 {
+    if (auto trial = _placementSearch.NextComparisonTrial())
+    {
+        BeginPlacementTrial(world, console, pipeline, std::move(*trial));
+        return;
+    }
+    if (auto saved = _placementSearch.SavedComparison())
+        if (StartPlacementConfirmation(world, console, pipeline, std::move(*saved))) return;
     if (_placementSearch.RemotePhase() && RenderConfig(console) != _trialRequested)
         _placementSearch.RetryChangedEstimates();
-    const double fullCost = PlacementFullCost();
+    const double fullCost = _placementSearch.Upscaled() ? 0. : PlacementFullCost();
     const double remaining = Seconds(now, _phaseDeadline);
+    const bool canProbe = remaining >= PlacementProbeCost() + fullCost;
+    const auto start = [&](BistroPlacement::Trial trial)
+    {
+        if (trial.Full) return StartPlacementConfirmation(world, console, pipeline, std::move(trial));
+        BeginPlacementTrial(world, console, pipeline, std::move(trial));
+        return true;
+    };
     if (_placementSearch.HighFirst())
     {
         if (remaining >= fullCost)
-            if (auto trial = _placementSearch.NextQualityTrial(_csv, remaining >= PlacementProbeCost() + fullCost))
-            {
-                BeginPlacementTrial(world, console, pipeline, std::move(*trial));
-                return;
-            }
-        ++_placementPhase;
-        BeginNextPlacementPhase(world, console, pipeline);
-        return;
+            while (auto trial = _placementSearch.NextQualityTrial(_csv, canProbe))
+                if (start(std::move(*trial))) return;
     }
-    if (remaining >= fullCost)
-        if (auto confirmation = _placementSearch.PerformanceConfirmation(_csv))
-        {
-            BeginPlacementTrial(world, console, pipeline, std::move(*confirmation));
-            return;
-        }
-    const auto* finalist = _placementSearch.Finalist();
-    if (remaining >= PlacementProbeCost() + fullCost)
-        if (auto probe = _placementSearch.NextProbe(_csv))
-        {
-            BeginPlacementTrial(world, console, pipeline, std::move(*probe));
-            return;
-        }
-    if (finalist && remaining >= fullCost)
+    else
     {
-        BeginPlacementTrial(world, console, pipeline, _placementSearch.Confirm(*finalist));
-        return;
+        if (remaining >= fullCost)
+            while (auto confirmation = _placementSearch.PerformanceConfirmation(_csv))
+                if (start(std::move(*confirmation))) return;
+        if (canProbe)
+            if (auto probe = _placementSearch.NextProbe(_csv))
+                if (start(std::move(*probe))) return;
+        if (remaining >= fullCost)
+            while (const auto* finalist = _placementSearch.Finalist())
+                if (start(_placementSearch.Confirm(*finalist))) return;
     }
     ++_placementPhase;
     BeginNextPlacementPhase(world, console, pipeline);

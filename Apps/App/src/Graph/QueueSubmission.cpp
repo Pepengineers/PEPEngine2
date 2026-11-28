@@ -126,6 +126,13 @@ LUID QueueSubmission::AdapterLuid(Id id) const
     return _adapters.at(id == 0 ? _primaryIndex : id - 1).AdapterLuid;
 }
 
+UINT QueueSubmission::AdapterVendor(Id id) const
+{
+    DXGI_ADAPTER_DESC3 desc{};
+    if (FAILED(_adapters.at(id == 0 ? _primaryIndex : id - 1).Adapter->GetDesc3(&desc))) return 0;
+    return desc.VendorId;
+}
+
 void QueueSubmission::BeginBenchmarkWaits()
 {
     std::lock_guard<std::mutex> lock(_mutex);

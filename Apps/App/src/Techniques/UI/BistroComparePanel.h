@@ -53,6 +53,11 @@ class BistroComparePanel
         std::vector<std::string> Improvements;
         std::array<PlacementResult, 2> Placements;
     };
+    struct ReconstructionComparison
+    {
+        std::vector<std::string> Participants;
+        std::string Mode, Status, Winner;
+    };
     struct Run
     {
         std::filesystem::path Path;
@@ -60,6 +65,14 @@ class BistroComparePanel
         std::string Label, Mode, Profile, MapId, RouteId, FinalStatus, SelectedImage;
         std::string MapName, DisplayMode, Output, Timestamp;
         std::optional<double> SummaryFps, MinimumFps;
+        std::optional<double> BaseBudget, AddedRoutes, Budget, Elapsed;
+        struct PhaseBudget
+        {
+            std::optional<double> Base, Added, Total;
+        };
+        std::array<PhaseBudget, 4> Phases;
+        std::map<unsigned, ReconstructionComparison> Reconstructions;
+        std::map<std::string, Values> ReconstructionTrials;
         double Target() const { return Profile == "Performance" ? 60. : Profile == "Quality" ? 30. : 0.; }
         const char* TargetStatus(double fps, const Winner* winner) const;
         bool AfterRender = false;
@@ -110,6 +123,11 @@ class BistroComparePanel
     static void DrawPlot(const PlotLines& lines, bool fps, double target = 0);
     static void DrawRouteMetrics(const FrameTiming& timing, ImFont* headingFont);
     static void DrawComparedTimings(const FrameTiming& a, const FrameTiming& b, const char* left, const char* right, bool comparable);
+    static std::array<std::string, 8> ReconstructionRow(const Run&, const ReconstructionComparison&, const std::string&);
+    static constexpr std::array SearchPhaseLabels{"Single GPU / Native", "Single GPU / Upscaled",
+        "Multi-GPU / Native", "Multi-GPU / Upscaled"};
+    static constexpr std::array ReconstructionColumns{"Trial", "Requested upscaler", "Effective upscaler", "Post device",
+        "Internal resolution", "FPS", "P95 (ms)", "Result"};
     static void DrawPlacementComparison(const Winner& winner);
     static void DrawTechniques(const PlacementResult& before, const PlacementResult& after,
         const char* title, const char* left, const char* right);

@@ -553,6 +553,38 @@ void BistroComparePanel::Refresh(bool force)
                     if (!value.empty() && value.front() == '[' && end != value.npos)
                         adapterLabels[value.substr(1, end - 1)] = value;
                 }
+                else if (key == "BaseBudgetSeconds") run.BaseBudget = Number(value);
+                else if (key == "AddedFullRouteSeconds") run.AddedRoutes = Number(value);
+                else if (key == "BudgetSeconds") run.Budget = Number(value);
+                else if (key == "ElapsedSeconds") run.Elapsed = Number(value);
+                else if (key.size() > 14 && key.rfind("SearchPhase.", 0) == 0 && key[12] >= '0' && key[12] <= '3' && key[13] == '.')
+                {
+                    auto& budget = run.Phases[key[12] - '0'];
+                    const auto field = key.substr(14);
+                    if (field == "BaseSeconds") budget.Base = Number(value);
+                    else if (field == "AddedFullRouteSeconds") budget.Added = Number(value);
+                    else if (field == "BudgetSeconds") budget.Total = Number(value);
+                }
+                else if (key.rfind("ReconstructionComparison.", 0) == 0)
+                {
+                    constexpr auto start = std::string_view("ReconstructionComparison.").size();
+                    const auto dot = key.find('.', start);
+                    if (dot == key.npos) continue;
+                    const auto id = Number(key.substr(start, dot - start));
+                    if (!id || *id < 1 || *id > UINT32_MAX || *id != std::floor(*id)) continue;
+                    auto& group = run.Reconstructions[unsigned(*id)];
+                    const auto name = key.substr(dot + 1);
+                    if (name == "Mode") group.Mode = value;
+                    else if (name == "Status") group.Status = value;
+                    else if (name == "Participant")
+                    {
+                        const auto split = value.find(' ');
+                        const auto trial = value.substr(0, split);
+                        group.Participants.push_back(trial);
+                        if (split != value.npos) run.ReconstructionTrials[trial]["Render.Upscaler.Provider"] = value.substr(split + 1);
+                    }
+                    else if (name == "WinningTrial") group.Winner = value;
+                }
                 else if (key == "MinimumFps") run.MinimumFps = Number(value);
                 else if (key == "RouteId") run.RouteId = value;
                 else if (key == "FinalStatus") run.FinalStatus = value;
@@ -569,8 +601,13 @@ void BistroComparePanel::Refresh(bool force)
                 else if (key.rfind("Trial.", 0) == 0)
                 {
                     auto dot = key.find('.', 6);
-                    if (dot != key.npos && key.substr(dot + 1) == "LastPassCSV")
-                        run.TrialPasses[key.substr(6, dot - 6)] = value;
+                    if (dot == key.npos) continue;
+                    const auto id = key.substr(6, dot - 6);
+                    const auto field = key.substr(dot + 1);
+                    if (field == "LastPassCSV") run.TrialPasses[id] = value;
+                    if (field == "ReconstructionComparison") run.ReconstructionTrials.try_emplace(id);
+                    if (const auto trial = run.ReconstructionTrials.find(id); trial != run.ReconstructionTrials.end())
+                        trial->second[field] = value;
                 }
                 else if (key.rfind("Native.", 0) == 0 || key.rfind("Upscaled.", 0) == 0)
                 {
@@ -1209,6 +1246,31 @@ std::string BistroReport::ImageSummary(const Settings& settings)
     return summary;
 }
 
+std::array<std::string, 8> BistroComparePanel::ReconstructionRow(const Run& run, const ReconstructionComparison& group,
+    const std::string& id)
+{
+    const auto it = run.ReconstructionTrials.find(id);
+    if (it == run.ReconstructionTrials.end()) return {id, {}, {}, {}, {}, {}, {}, "pending"};
+    const auto& fields = it->second;
+    const auto device = Value(fields, "EffectivePostDevice");
+    const auto requested = Value(fields, "RequestedPostDevice");
+    auto status = id == group.Winner ? std::string("Winner") : Value(fields, "Status");
+    if (status.empty()) status = "pending";
+    if (const auto& eligibility = Value(fields, "ComparisonEligibility"); !eligibility.empty()) status = eligibility;
+    if (const auto& fallback = Value(fields, "ReconstructionFallback"); !fallback.empty()) status += " / " + fallback;
+    const auto provider = [&](const char* key) {
+        const auto& value = Value(fields, key);
+        return value.empty() ? std::string{} : DisplayValue("Render.Upscaler.EffectiveProvider", value);
+    };
+    auto resolution = Value(fields, "Render.Display.InternalResolution");
+    if (const auto& scale = Value(fields, "InternalScale"); !scale.empty()) resolution += " (" + scale + ")";
+    const auto& applied = Value(fields, "ReconstructionApplied");
+    return {id, provider("Render.Upscaler.Provider"),
+        applied.empty() ? provider("Render.Upscaler.EffectiveProvider") : applied,
+        device.empty() || device == requested ? requested : requested + " -> " + device,
+        std::move(resolution), Value(fields, "FPS"), Value(fields, "P95ms"), std::move(status)};
+}
+
 void BistroComparePanel::DrawPlacementComparison(const Winner& winner)
 {
     const auto& single = winner.Placements[0];
@@ -1406,6 +1468,21 @@ void BistroComparePanel::DrawRun(int index, fs::path& pendingPreset)
         ImGui::TextColored(ImGui::GetStyleColorVec4(outcome == "completed" ? ImGuiCol_NavCursor : ImGuiCol_Text), "%s", label);
     }
     ImGui::TextDisabled("%s", run.Timestamp.c_str());
+    if (run.BaseBudget && run.AddedRoutes && run.Budget)
+        ImGui::TextWrapped("Search budget %.1f s  /  base %.1f s  +  full reconstruction routes %.1f s",
+            *run.Budget, *run.BaseBudget, *run.AddedRoutes);
+    if (run.Elapsed) ImGui::TextDisabled("Elapsed %.1f s", *run.Elapsed);
+    if (run.BaseBudget && ImGui::TreeNode("Search phases"))
+    {
+        for (size_t i = 0; i < run.Phases.size(); ++i)
+        {
+            const auto& phase = run.Phases[i];
+            if (phase.Base && phase.Total)
+                ImGui::TextWrapped("%s   %.1f s total  /  %.1f s base + %.1f s full routes",
+                    SearchPhaseLabels[i], *phase.Total, *phase.Base, phase.Added.value_or(0.));
+        }
+        ImGui::TreePop();
+    }
     DrawExportStatus(run, placement, selection, exportZip);
     ImGui::Spacing();
     if (winner)
@@ -1426,6 +1503,29 @@ void BistroComparePanel::DrawRun(int index, fs::path& pendingPreset)
         ImGui::Text("Target   %.0f FPS   /   %s", target, run.TargetStatus(timing.Fps, winner));
 
     DrawPlacementComparison(placement ? *placement : run.Winners[0]);
+    if (!run.Reconstructions.empty() && ImGui::CollapsingHeader("Reconstruction comparisons"))
+        for (const auto& [id, group] : run.Reconstructions)
+        {
+            const auto title = group.Mode + " / " + group.Status + "##Reconstruction" + std::to_string(id);
+            if (!ImGui::TreeNode(title.c_str())) continue;
+            if (ImGui::BeginTable("Participants", int(ReconstructionColumns.size()), ImGuiTableFlags_BordersInnerH |
+                ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp))
+            {
+                for (const auto* column : ReconstructionColumns) ImGui::TableSetupColumn(column);
+                ImGui::TableHeadersRow();
+                for (const auto& trial : group.Participants)
+                {
+                    ImGui::TableNextRow();
+                    for (const auto& cell : ReconstructionRow(run, group, trial))
+                    {
+                        ImGui::TableNextColumn();
+                        ImGui::TextWrapped("%s", cell.c_str());
+                    }
+                }
+                ImGui::EndTable();
+            }
+            ImGui::TreePop();
+        }
 
     if (hasTrace || (placement && (!placement->Placements[0].Fields.empty() || !placement->Placements[1].Fields.empty())))
     {

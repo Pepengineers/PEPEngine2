@@ -46,19 +46,8 @@ constexpr std::pair<ImGuiCol, ImVec4> Palette[] = {
     {ImGuiCol_ResizeGripActive, Lime},
 };
 
-// The app's icon group contains transparent PNGs. Keep the header mark in the UI atlas
-// so the launcher can draw it before initializing the world renderer.
-ImFontAtlasRectId LoadEngineMark(ImFontAtlas& atlas, int iconResource)
+ImFontAtlasRectId AddImage(ImFontAtlas& atlas, const uint8_t* data, DWORD size)
 {
-    const auto module = GetModuleHandleW(nullptr);
-    const auto group = FindResourceW(module, MAKEINTRESOURCEW(iconResource), RT_GROUP_ICON);
-    if (!group) return ImFontAtlasRectId_Invalid;
-    auto* directory = static_cast<PBYTE>(LockResource(LoadResource(module, group)));
-    if (!directory) return ImFontAtlasRectId_Invalid;
-    const int id = LookupIconIdFromDirectoryEx(directory, TRUE, 128, 128, LR_DEFAULTCOLOR);
-    const auto icon = FindResourceW(module, MAKEINTRESOURCEW(id), RT_ICON);
-    if (!icon) return ImFontAtlasRectId_Invalid;
-    const auto* data = static_cast<const uint8_t*>(LockResource(LoadResource(module, icon)));
     struct Apartment
     {
         HRESULT Status = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
@@ -66,7 +55,7 @@ ImFontAtlasRectId LoadEngineMark(ImFontAtlas& atlas, int iconResource)
     } apartment;
     if (FAILED(apartment.Status) && apartment.Status != RPC_E_CHANGED_MODE) return ImFontAtlasRectId_Invalid;
     DirectX::ScratchImage decoded;
-    if (!data || FAILED(DirectX::LoadFromWICMemory(data, SizeofResource(module, icon), DirectX::WIC_FLAGS_FORCE_RGB,
+    if (!data || FAILED(DirectX::LoadFromWICMemory(data, size, DirectX::WIC_FLAGS_FORCE_RGB,
         nullptr, decoded))) return ImFontAtlasRectId_Invalid;
     const auto* bitmap = decoded.GetImage(0, 0, 0);
     if (!bitmap || (bitmap->format != DXGI_FORMAT_R8G8B8A8_UNORM && bitmap->format != DXGI_FORMAT_R8G8B8A8_UNORM_SRGB))
@@ -84,6 +73,31 @@ ImFontAtlasRectId LoadEngineMark(ImFontAtlas& atlas, int iconResource)
         std::memcpy(atlas.TexData->GetPixelsAt(rect.x, rect.y + y), bitmap->pixels + y * bitmap->rowPitch, rect.w * 4);
     return rectId;
 }
+
+// The app's icon group contains transparent PNGs. Keep the header mark in the UI atlas
+// so the launcher can draw it before initializing the world renderer.
+ImFontAtlasRectId LoadEngineMark(ImFontAtlas& atlas, int iconResource)
+{
+    const auto module = GetModuleHandleW(nullptr);
+    const auto group = FindResourceW(module, MAKEINTRESOURCEW(iconResource), RT_GROUP_ICON);
+    if (!group) return ImFontAtlasRectId_Invalid;
+    auto* directory = static_cast<PBYTE>(LockResource(LoadResource(module, group)));
+    if (!directory) return ImFontAtlasRectId_Invalid;
+    const int id = LookupIconIdFromDirectoryEx(directory, TRUE, 128, 128, LR_DEFAULTCOLOR);
+    const auto icon = FindResourceW(module, MAKEINTRESOURCEW(id), RT_ICON);
+    if (!icon) return ImFontAtlasRectId_Invalid;
+    const auto* data = static_cast<const uint8_t*>(LockResource(LoadResource(module, icon)));
+    return AddImage(atlas, data, SizeofResource(module, icon));
+}
+}
+
+ImFontAtlasRectId LoadResourceImage(ImFontAtlas& atlas, int id)
+{
+    const auto module = GetModuleHandleW(nullptr);
+    const auto image = FindResourceW(module, MAKEINTRESOURCEW(id), RT_RCDATA);
+    if (!image) return ImFontAtlasRectId_Invalid;
+    const auto* data = static_cast<const uint8_t*>(LockResource(LoadResource(module, image)));
+    return AddImage(atlas, data, SizeofResource(module, image));
 }
 
 void Initialize(ImFontAtlas& atlas, int iconResource)

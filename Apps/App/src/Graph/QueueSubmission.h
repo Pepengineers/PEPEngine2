@@ -30,6 +30,7 @@ public:
     Id SelectAdapter(int hardwareIndex);
     const std::string& AdapterLabel(Id) const;
     LUID AdapterLuid(Id) const;
+    UINT AdapterVendor(Id) const;
     void LogFirstImport(const char* technique, CompletionToken source, CompletionToken imported) const;
     struct BenchmarkWait { Id From, To; Queue SourceQueue, TargetQueue; uint64_t FirstFence, Count; };
     struct BenchmarkPacket

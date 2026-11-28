@@ -41,6 +41,8 @@ void BistroInfoPanel::InitializeFont()
     Theme::Initialize(*ImGui::GetIO().Fonts, IDI_PEPENGINE2);
     _fullFont = Theme::BodyFont();
     _headingFont = Theme::HeadingFont();
+    for (const auto& map : BistroRun::Maps)
+        _backgrounds.emplace(map.Background, Theme::LoadResourceImage(*ImGui::GetIO().Fonts, map.Background));
 }
 
 void BistroInfoPanel::ShowSettings(bool openResults, const std::string& error)
@@ -331,6 +333,39 @@ void BistroInfoPanel::DrawSettings(RenderModule& render, BistroBenchmark& benchm
     if (ImGui::Begin("Benchmark", nullptr, ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoDecoration |
         ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings))
     {
+        auto* atlas = ImGui::GetIO().Fonts;
+        ImFontAtlasRect photo;
+        if (atlas->GetCustomRect(_backgrounds.at(_launch.Level->Background), &photo))
+        {
+            const auto min = ImGui::GetWindowPos(), size = ImGui::GetWindowSize();
+            const ImVec2 max{min.x + size.x, min.y + size.y};
+            const auto& uv0 = photo.uv0;
+            const auto& uv1 = photo.uv1;
+            float left = 0, top = .14f, right = 1, bottom = 1;
+            const float imageAspect = photo.w / (photo.h * (bottom - top));
+            const float targetAspect = size.x / std::max(1.f, size.y);
+            if (targetAspect < imageAspect)
+            {
+                left = .5f * (1 - targetAspect / imageAspect);
+                right = 1 - left;
+            }
+            else
+            {
+                const float inset = (bottom - top) * (1 - imageAspect / targetAspect) * .5f;
+                top += inset;
+                bottom -= inset;
+            }
+            auto* draw = ImGui::GetWindowDrawList();
+            draw->PushClipRectFullScreen();
+            const auto uv = [&](float x, float y) {
+                return ImVec2{uv0.x + x * (uv1.x - uv0.x), uv0.y + y * (uv1.y - uv0.y)};
+            };
+            draw->AddImage(atlas->TexRef, min, max, uv(left, top), uv(right, bottom), IM_COL32(150, 161, 151, 255));
+            const auto shade = IM_COL32(10, 23, 19, _tab == Tab::Results ? 236 : 215);
+            const auto highlight = IM_COL32(10, 23, 19, _tab == Tab::Results ? 229 : 165);
+            draw->AddRectFilledMultiColor(min, max, shade, highlight, highlight, shade);
+            draw->PopClipRect();
+        }
         const float width = ImGui::GetContentRegionAvail().x;
         const ImVec2 start = ImGui::GetCursorPos();
         const float navHeight = 2.60f * em;
@@ -524,16 +559,22 @@ void BistroInfoPanel::DrawMeasurement(const BistroBenchmark& benchmark) const
         const auto top = ImGui::GetCursorScreenPos().y;
         const bool wide = right - left >= 37.f * em;
         Theme::DrawBrand(1.65f * em);
-        const char* phase = benchmark.HudPhase();
-        if (wide && ImGui::GetItemRectMax().x + ImGui::CalcTextSize(phase).x + em < right)
+        const auto phase = benchmark.HudPhase();
+        if (wide && ImGui::GetItemRectMax().x + ImGui::CalcTextSize(phase.c_str()).x + em < right)
         {
             ImGui::SameLine();
             ImGui::SetCursorScreenPos({ImGui::GetCursorScreenPos().x, top + .30f * em});
         }
-        ImGui::TextWrapped("%s", phase);
+        ImGui::TextWrapped("%s", phase.c_str());
         const int seconds = int(std::ceil(std::max(0., benchmark.HudRemainingSeconds())));
         char clock[64];
-        std::snprintf(clock, sizeof(clock), "%d:%02d remaining    |    Esc to cancel", seconds / 60, seconds % 60);
+        if (const auto phaseTime = benchmark.HudPhaseRemainingSeconds())
+        {
+            const int phaseSeconds = int(std::ceil(*phaseTime));
+            std::snprintf(clock, sizeof(clock), "%d:%02d phase  /  %d:%02d search  |  Esc to cancel",
+                phaseSeconds / 60, phaseSeconds % 60, seconds / 60, seconds % 60);
+        }
+        else std::snprintf(clock, sizeof(clock), "%d:%02d remaining    |    Esc to cancel", seconds / 60, seconds % 60);
         const float clockWidth = ImGui::CalcTextSize(clock).x;
         if (ImGui::GetItemRectMax().x + clockWidth + em < right)
         {

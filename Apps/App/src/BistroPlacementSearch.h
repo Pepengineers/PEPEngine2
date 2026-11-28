@@ -135,6 +135,7 @@ struct Trial
     bool Full = false;
     bool RequireLive = false;
     bool InspectImage = false;
+    size_t Comparison = 0, Pass = 0, PassCount = 0;
 };
 
 class Search
@@ -146,11 +147,16 @@ public:
     void LinkBaseline(const std::filesystem::path& output, std::string conditions);
     void Start(ConsoleModule& console, Size output, std::vector<int> adapters, bool remote,
         bool fixedWaterSubsteps, bool usesSkinningPreset, const std::set<std::wstring>& shadowFixtures, BistroBenchmarkData::Csv& csv,
-        bool allowUpscalers);
+        bool allowUpscalers, std::map<int, int> preferredProviders);
 
     Size Output() const { return _output; }
     const Result* Winner() const;
-    void RecordImageMode(const Trial& trial, Size render, bool available);
+    void RecordImageMode(const Trial& trial, bool available);
+    Trial CompareImageMode(Trial trial, BistroBenchmarkData::Csv& csv);
+    std::optional<Trial> SavedComparison();
+    std::optional<Trial> NextComparisonTrial();
+    size_t PendingComparisonPasses() const { return _comparisonTrials.size(); }
+    void InterruptComparison(BistroBenchmarkData::Csv& csv) const;
     const auto& Candidates() const { return _placements; }
     Config EffectiveConfig(Config config) const { return Canonical(std::move(config)); }
     int QualityValue(size_t technique, Level level) const { return _values[technique][level]; }
@@ -206,9 +212,16 @@ private:
         std::deque<std::pair<Config, std::string>> Full;
     };
 
-    using ImageMode = std::pair<int, int>;
+    using ImageMode = std::tuple<int, int, int>;
+    using ImageSteps = std::vector<std::pair<int, std::vector<int>>>;
     std::optional<Trial> InspectNextImage();
-    size_t StepCount() const { return Upscaled() ? _steps.size() : 1; }
+    void QueueDiscovery(int owner);
+    void SeedRemotePhase();
+    const ImageSteps& Steps(int owner) const;
+    bool SupportsImage(const Config& config) const;
+    size_t StepCount(int owner = -1) const { return Upscaled() ? Steps(owner).size() : 1; }
+    static Config ComparisonKey(Config config);
+    void RecordComparison(const Trial& trial, const Result& result, BistroBenchmarkData::Csv& csv);
     size_t Step(const Config& settings) const;
     std::vector<Config> AtStep(const Config& base, size_t step) const;
     const Result* SavedPreset(bool upscaled) const;
@@ -281,7 +294,14 @@ private:
     bool _allowUpscalers = false;
     Size _output{};
     std::deque<ImageMode> _inspect;
-    std::map<Size, std::vector<ImageMode>> _steps;
+    std::map<int, int> _preferredProviders;
+    std::map<int, ImageSteps> _images;
+    std::deque<Trial> _comparisonTrials;
+    std::set<Config> _compared;
+    std::optional<Result> _savedCalibration, _comparisonWinner;
+    size_t _nextComparison = 0;
+    bool _comparisonOpen = false;
+    bool _seedRemoteAfterDiscovery = false, _comparedSavedCalibration = false;
     std::string _windAlgorithm;
     std::mt19937 _random{20261122};
     Config _high, _minimum;
@@ -316,7 +336,7 @@ private:
     std::map<Config, Result> _short;
     std::set<Config> _failedProbes;
     std::set<Config> _fullSettings, _retryFull;
-    std::vector<Result> _confirmed;
+    std::vector<Result> _confirmed, _comparedResults;
     std::vector<Result> _references;
     std::filesystem::path _baselineFile;
     std::string _conditions;
