@@ -184,17 +184,29 @@ std::string BistroComparePanel::ReportBody(const Run& run, const Winner* selecte
         html << "<h2>Frame timing</h2>";
         const auto lines = RunLines(placement, measurement, cache);
         const bool hasTrace = lines[0].Data || lines[1].Data;
-        html << "<figure data-target=\"" << run.Target() << "\">";
+        const bool pair = lines[0].Data && lines[1].Data;
+        const bool comparable = ComparableFrames(lines);
+        html << "<figure data-target=\"" << run.Target() << "\" data-comparable=\"" << (comparable ? "true" : "false") << "\">";
         if (hasTrace)
-            html << "<div class=\"plot-controls\"><div class=\"switch\"><button aria-pressed=\"true\">Frame time (ms)</button><button aria-pressed=\"false\">FPS</button></div>"
-                 << "<div class=\"plot-zoom\" role=\"group\" aria-label=\"Chart zoom\" hidden>"
-                 << "<button class=\"zoom-button plus\" data-scale=\"0.8\" title=\"Zoom in\" aria-label=\"Zoom in\"><span aria-hidden=\"true\"></span></button>"
-                 << "<button class=\"zoom-button\" data-scale=\"1.25\" title=\"Zoom out\" aria-label=\"Zoom out\"><span aria-hidden=\"true\"></span></button>"
-                 << "<button data-scale=\"1\">Reset view</button></div>"
-                 << "<button class=\"expand-chart\" title=\"Expand chart\" aria-label=\"Expand chart\" aria-haspopup=\"dialog\" aria-expanded=\"false\"></button></div>"
-                 << "<small class=\"plot-help\" hidden>Drag to zoom · Wheel to zoom in or out · Right-drag or Shift-drag to pan · Double-click to reset</small>"
+        {
+            html << "<div class=\"plot-controls\"><div class=\"plot-tools\"><strong class=\"plot-title\">Frame timing";
+            if (placement) html << " &middot; " << mode;
+            html << "</strong><div class=\"switch\"><button aria-pressed=\"true\">Frame time (ms)</button><button aria-pressed=\"false\">FPS</button></div>"
+                 << "<div class=\"plot-zoom\" role=\"group\" aria-label=\"Chart tools\" hidden>"
+                 << "<button class=\"chart-icon zoom-button plus\" data-scale=\"0.8\" aria-label=\"Zoom in\"><span aria-hidden=\"true\"></span></button>"
+                 << "<button class=\"chart-icon zoom-button\" data-scale=\"1.25\" aria-label=\"Zoom out\"><span aria-hidden=\"true\"></span></button>"
+                 << "<button class=\"chart-icon reset-chart\" data-scale=\"1\" aria-label=\"Reset view\"><span aria-hidden=\"true\"></span></button>"
+                 << "<button class=\"chart-icon help-chart\" aria-label=\"Chart help\" aria-expanded=\"false\"><span aria-hidden=\"true\">?</span></button></div>"
+                 << "<div class=\"plot-pan\" role=\"group\" aria-label=\"Move time window\" hidden>"
+                 << "<button class=\"chart-icon pan-earlier\" data-pan=\"-0.5\" aria-label=\"Pan earlier\"></button>"
+                 << "<button class=\"chart-icon pan-later\" data-pan=\"0.5\" aria-label=\"Pan later\"></button></div></div>"
+                 << "<button class=\"chart-icon expand-chart\" aria-label=\"Expand chart\" aria-haspopup=\"dialog\" aria-expanded=\"false\"></button>"
+                 << "<div class=\"plot-help\" hidden><strong>Chart gestures</strong><ul><li>Drag a box to zoom</li><li>Click a point to pin its frames</li><li>Wheel to zoom at the pointer</li>"
+                 << "<li>Right-drag or Shift-drag to pan</li><li>Use the pan arrows to move the time window</li><li>Double-click to reset</li>"
+                 << "<li>On the plot, arrow keys step through frames</li></ul></div></div>"
                  << "<svg tabindex=\"0\" role=\"group\" aria-label=\"Frame timing along the route. Use arrow keys to inspect frames.\"></svg>"
                  << "<div class=\"route-axis\">Route time (s)</div>";
+        }
         html << "<figcaption><div class=\"plot-legend\">";
         for (size_t i = 0; i < lines.size(); ++i)
         {
@@ -218,8 +230,9 @@ std::string BistroComparePanel::ReportBody(const Run& run, const Winner* selecte
             }
             html << "\" title=\"" << Escape(pass.Label)
                  << " &middot; " << data.Samples.size() << " frames &middot; Interval measured "
-                 << (data.AfterRender ? "after Render / Present" : "before Present") << "\"><span class=\"series-label\" data-fps=\""
-                 << Escape(line.Caption(true)) << "\">" << Escape(line.Caption(false)) << "</span>";
+                 << (data.AfterRender ? "after Render / Present" : "before Present") << "\"><span class=\"series-label\" data-fps=\"";
+            const auto role = pair ? (i == 0 ? "A / " : "B / ") : "";
+            html << role << Escape(line.Caption(true)) << "\">" << role << Escape(line.Caption(false)) << "</span>";
             for (const auto& [name, index] : sections) html << "<span hidden data-section=\"" << index << "\">" << Escape(name) << "</span>";
             html << "</div>";
         }
@@ -227,7 +240,13 @@ std::string BistroComparePanel::ReportBody(const Run& run, const Winner* selecte
             html << "<span class=\"target-key\">Target " << Decimal(1000. / run.Target()) << " ms</span>";
         html << "</div>";
         if (hasTrace)
-            html << "<div class=\"frame-readout\">Point at the chart or use the arrow keys to inspect a frame.</div>";
+        {
+            html << "<div class=\"frame-readout\"><dl class=\"frame-values\"></dl><div class=\"frame-actions\">";
+            html << "<details class=\"frame-details\"><summary>Frame details</summary><div class=\"frame-samples\"></div></details>"
+                 << "<button class=\"frame-unpin\" disabled>Follow pointer</button>";
+            if (pair && !comparable) html << "<p class=\"frame-note\">" << FrameDeltaNote << "</p>";
+            html << "</div></div>";
+        }
         else if (lines[0].Label.empty() && lines[1].Label.empty())
             html << "<p class=\"muted\">" << (measurement.Error.empty() ? "Full-route frame trace unavailable." : Escape(measurement.Error)) << "</p>";
         html << "</figcaption></figure>";

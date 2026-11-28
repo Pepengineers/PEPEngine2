@@ -57,12 +57,20 @@ thead { color:var(--muted); background:#16251f }
 .delta.Raised { color:var(--mint) }
 .delta.Reduced { color:#f8c36e }
 figure { margin:1em 0; padding:16px; border:1px solid var(--border); border-radius:5px; background:var(--ink) }
-figure .switch { font-size:.88rem }
-.plot-controls, .plot-zoom { display:flex; flex-wrap:wrap; gap:6px; align-items:center; font-size:.92rem }
-.plot-zoom[hidden] { display:none }
-.expand-chart, .zoom-button { display:grid; place-items:center; align-self:stretch;
-  width:2.35rem; min-height:2.2rem; padding:0; color:var(--lime) }
-.expand-chart { margin-inline-start:auto }
+.plot-controls { --control-height:2.2rem; display:grid; grid-template-columns:minmax(0,1fr) auto; gap:6px;
+  align-items:start; position:relative; z-index:1; font-size:.88rem }
+.plot-tools, .plot-zoom, .plot-pan { display:flex; gap:6px; align-items:center }
+.plot-tools { flex-wrap:wrap }
+.plot-zoom[hidden], .plot-pan[hidden], .plot-title { display:none }
+.plot-controls .switch { flex:none }
+.plot-controls .switch button { height:var(--control-height); padding-block:0 }
+.chart-icon { position:relative; display:grid; place-items:center; height:var(--control-height);
+  width:2.2rem; padding:0; color:var(--lime) }
+.chart-icon:disabled { opacity:.38; cursor:default }
+.chart-icon:not(:disabled):is(:hover,:focus-visible)::after { content:attr(aria-label); white-space:nowrap;
+  position:absolute; top:calc(100% + 4px); left:50%; translate:-50% 0;
+  padding:2px 6px; background:var(--panel); color:var(--paper); border:1px solid var(--border); border-radius:4px }
+.chart-icon.expand-chart:not(:disabled):is(:hover,:focus-visible)::after { left:auto; right:0; translate:none }
 .expand-chart::before {
   content:""; width:16px; height:16px;
   background:
@@ -78,13 +86,24 @@ figure .switch { font-size:.88rem }
 .zoom-button.plus span { background:linear-gradient(currentColor,currentColor) center / 1.6px 6px no-repeat }
 .zoom-button span::after { content:""; width:6px; height:1.7px; background:currentColor;
   position:absolute; top:calc(100% - 1px); left:calc(100% - 1px); transform:rotate(45deg); transform-origin:left center }
-.plot-help { margin-top:.4em }
-.plot-help:not([hidden]) { display:block }
+.reset-chart span { width:15px; height:15px; position:relative; border:1.7px solid; border-top-color:transparent; border-radius:50% }
+.reset-chart span::before { content:""; position:absolute; top:-2px; left:-1px; width:5px; height:5px;
+  border-top:1.7px solid; border-right:1.7px solid; rotate:12deg }
+.help-chart span { width:17px; height:17px; border:1.7px solid; border-radius:50%; font-weight:600; font-size:12px; line-height:14px }
+.pan-earlier::before, .pan-later::before { content:""; width:8px; height:8px; border-top:1.7px solid; border-left:1.7px solid; rotate:-45deg }
+.pan-later::before { rotate:135deg }
+.plot-help { position:absolute; z-index:2; inset:calc(100% + 5px) 0 auto auto; max-width:100%;
+  padding:10px 14px; border:1px solid var(--border); border-radius:5px; background:var(--panel); color:var(--paper) }
+.plot-help ul { margin:.35em 0 0; padding-inline-start:1.3em }
 .plot-dialog { color:inherit; background:var(--ink); padding:0; border:1px solid var(--border); border-radius:7px;
   width:calc(100% - 24px); max-width:none; height:calc(100% - 24px); max-height:none }
 .plot-dialog::backdrop { background:#000b }
-.plot-dialog figure { display:grid; grid-template-rows:auto auto minmax(180px,1fr) auto auto;
+.plot-dialog figure { display:grid; grid-template-rows:auto minmax(90px,1fr) auto auto; row-gap:4px;
   height:100%; margin:0; border:none }
+.plot-dialog .plot-controls { position:sticky; top:0; background:var(--ink) }
+@media (min-width:780px) {
+  .plot-dialog .plot-title { display:block; margin-inline-end:.5em }
+}
 body:has(.plot-dialog[open]) { overflow:hidden }
 .plot-legend { display:flex; flex-wrap:wrap; align-items:center; gap:.25em 1.1em }
 .series, .target-key { display:flex; align-items:center; gap:.45em }
@@ -94,9 +113,22 @@ body:has(.plot-dialog[open]) { overflow:hidden }
 figure svg { cursor:crosshair; touch-action:pan-y; height:clamp(150px,22vw,245px) }
 .plot-dialog svg { height:100%; min-height:0; margin:0; touch-action:none }
 figure svg:focus-visible { outline:1px solid var(--lime) }
-.frame-readout { margin-top:.8em; padding-top:.6em; border-top:1px solid var(--border); font-size:.9rem; font-variant-numeric:tabular-nums }
-.frame-readout p { margin:.2em 0 }
-.plot-dialog .frame-readout { height:6.5em; overflow:auto }
+.frame-readout { margin-top:.55em; padding-top:.45em; border-top:1px solid var(--border); font-size:.86rem; font-variant-numeric:tabular-nums }
+.frame-values { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,8.5rem),1fr)); gap:.25em .75em; margin:0 0 .35em }
+.frame-values div { display:flex; align-items:baseline; gap:.55em }
+.frame-values dt, .frame-note { color:var(--muted) }
+.frame-values dd { margin:0; white-space:nowrap }
+.frame-values .first dt { color:var(--mint) }
+.frame-values .second dt { color:#f8c36e }
+.frame-actions { display:flex; flex-wrap:wrap; gap:.3em .8em; align-items:baseline }
+.frame-note { margin:0 }
+.frame-details { flex:none; margin:0 }
+.frame-details[open] { flex-basis:100% }
+.frame-details summary { padding:.12em .65em }
+.frame-unpin { padding:.12em .65em }
+.frame-unpin:disabled { opacity:.38; cursor:default }
+.frame-samples { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,15rem),1fr)); gap:.4em 1em; padding:.4em .65em }
+.frame-samples p { margin:0 }
 svg polyline.second { stroke:#f8c36e; stroke-dasharray:6 4 }
 svg .cursor { stroke:var(--paper); stroke-dasharray:2 3 }
 svg circle { fill:var(--mint); stroke:var(--ink) }
@@ -118,9 +150,6 @@ figcaption { margin-top:.6em; font-size:.92rem }
   .metric dd { font-size:2.2rem; margin:0 }
   .brand { padding:14px 2px }
   figure { padding:8px }
-  .plot-controls .expand-chart { order:1 }
-  .plot-zoom { order:2; flex-basis:100% }
-  .plot-dialog .frame-readout { height:9em }
 }
 </style>
 </head>
@@ -173,16 +202,25 @@ for (const [chartIndex, chart] of [...document.querySelectorAll("figure[data-tar
   const buttons = [...chart.querySelectorAll(".switch button")];
   const expand = chart.querySelector(".expand-chart");
   const toolbar = chart.querySelector(".plot-zoom");
+  const pan = chart.querySelector(".plot-pan");
   const help = chart.querySelector(".plot-help");
-  const readout = chart.querySelector(".frame-readout");
+  const helpButton = chart.querySelector(".help-chart");
+  const readout = chart.querySelector(".frame-values");
+  const details = chart.querySelector(".frame-details");
+  const unpin = chart.querySelector(".frame-unpin");
+  const samples = chart.querySelector(".frame-samples");
+  const pair = lines.length === 2;
+  const comparable = chart.dataset.comparable === "true";
+  const chartTitle = chart.querySelector(".plot-title").textContent;
   const dialog = document.createElement("dialog");
   dialog.className = "plot-dialog";
-  dialog.setAttribute("aria-label", "Frame timing");
+  dialog.setAttribute("aria-label", chartTitle);
   chart.after(dialog);
   const xAxis = [0, 1], yAxis = [0, 1];
   const clipId = "plot-clip-" + chartIndex;
   const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
-  let fps = false, cursorTime = null, markers, selection, drag;
+  let fps = false, pinned = false, cursorTime = null, markers, selection, drag;
+  let inspected = [];
   let left, right, bottom, begin, end, low, range;
   const top = 12;
   const fullPeak = [false, true].map(rate => {
@@ -199,6 +237,26 @@ for (const [chartIndex, chart] of [...document.querySelectorAll("figure[data-tar
   const yFraction = px => clamp((bottom - px) / (bottom - top), 0, 1);
   const timeAt = px => begin + (end - begin) * xFraction(px);
 
+  function field(label, role = "") {
+    const cell = document.createElement("div");
+    const term = document.createElement("dt");
+    const result = document.createElement("dd");
+    cell.className = role;
+    term.textContent = label;
+    result.textContent = "—";
+    cell.append(term, result);
+    readout.append(cell);
+    return {term, result};
+  }
+  const routeField = field("Route");
+  const lineFields = lines.map((line, i) => field(pair ? (i === 0 ? "A" : "B") : "Interval", line.role));
+  const deltaField = pair ? field("B − A") : null;
+
+  function setPinned(state) {
+    pinned = state;
+    routeField.term.textContent = pinned ? "Pinned" : "Route";
+    unpin.disabled = !pinned;
+  }
   function setAxis(axis, min, max) {
     const span = clamp(max - min, .000001, 1);
     axis[0] = clamp(min, 0, 1 - span);
@@ -218,7 +276,27 @@ for (const [chartIndex, chart] of [...document.querySelectorAll("figure[data-tar
   function reset() {
     setAxis(xAxis, 0, 1);
     setAxis(yAxis, 0, 1);
+    setPinned(false);
+    details.open = false;
     draw();
+  }
+  function fitY() {
+    setAxis(yAxis, 0, 1);
+    if (xAxis[0] === 0 && xAxis[1] === 1) return;
+    const peak = fullPeak[Number(fps)];
+    const first = start + duration * xAxis[0], last = start + duration * xAxis[1];
+    let min = peak, max = 0;
+    for (const {frames} of lines) {
+      for (let i = lowerBound(frames, first); i < frames.length && frames[i][0] <= last; ++i) {
+        const sample = value(frames[i]);
+        min = Math.min(min, sample);
+        max = Math.max(max, sample);
+      }
+    }
+    if (max > 0) {
+      const pad = Math.max(.05 * (max - min), .03 * max);
+      setAxis(yAxis, Math.max(0, (min - pad) / peak), Math.min(1, (max + pad) / peak));
+    }
   }
   function node(name, attrs, parent = svg) {
     const el = document.createElementNS("http://www.w3.org/2000/svg", name);
@@ -257,38 +335,51 @@ for (const [chartIndex, chart] of [...document.querySelectorAll("figure[data-tar
     if (i < frames.length) points.push(i);
     return points;
   }
-  function inspect(t) {
-    cursorTime = clamp(t, begin, end);
-    markers.replaceChildren();
-    node("line", {class:"cursor", x1:x(cursorTime), x2:x(cursorTime), y1:top, y2:bottom}, markers);
-    readout.replaceChildren();
-    const values = [];
-    for (const line of lines) {
-      const row = document.createElement("p");
-      const title = document.createElement("b");
-      const role = dialog.open && lines.length === 2 ? (line.role === "first" ? "A / " : "B / ") : "";
-      title.textContent = role + line.label.textContent;
-      row.append(title);
-      if (cursorTime < line.frames[0][0] || cursorTime > line.frames.at(-1)[0]) {
-        row.append(" · Outside measured interval");
-      } else {
-        const frame = line.frames[nearest(line.frames, cursorTime)];
+  function renderDetails() {
+    if (!details.open) return;
+    samples.replaceChildren();
+    for (const [i, frame] of inspected.entries()) {
+      const block = document.createElement("div");
+      const title = document.createElement("strong");
+      const extra = document.createElement("p");
+      const source = pair ? (i === 0 ? "A · " : "B · ") : "";
+      if (frame) {
         const [time, interval, cpu, number, section] = frame;
-        values.push(value(frame));
-        node("circle", {class:line.role, cx:x(time), cy:y(value(frame)), r:4}, markers);
-        const details = ["Frame #" + number, time.toFixed(3) + " s", line.sections[section],
-          fps ? "Frame rate " + value(frame).toFixed(1) + " FPS" : "Application frame interval " + interval.toFixed(3) + " ms"];
-        if (cpu >= 0) details.push("Timed CPU scope " + cpu.toFixed(3) + " ms");
-        row.append(" · " + details.filter(Boolean).join(" · "));
+        title.textContent = source + "Frame #" + number + " · " + time.toFixed(3) + " s";
+        const context = [lines[i].sections[section], "Interval " + interval.toFixed(3) + " ms"];
+        if (cpu >= 0) context.push("CPU scope " + cpu.toFixed(3) + " ms");
+        extra.textContent = context.filter(Boolean).join(" · ");
+      } else {
+        title.textContent = source + "Outside measured interval";
       }
-      readout.append(row);
+      block.append(title, extra);
+      samples.append(block);
     }
-    if (dialog.open && values.length === 2) {
-      const row = document.createElement("p");
-      const delta = values[1] - values[0];
-      row.textContent = "B − A  " + (delta > 0 ? "+" : "") + delta.toFixed(3) + (fps ? " FPS" : " ms");
-      readout.append(row);
+  }
+  function inspect(t) {
+    cursorTime = pinned ? t : clamp(t, begin, end);
+    markers.replaceChildren();
+    const showMarkers = cursorTime >= begin && cursorTime <= end;
+    if (showMarkers) node("line", {class:"cursor", x1:x(cursorTime), x2:x(cursorTime), y1:top, y2:bottom}, markers);
+    const unit = fps ? " FPS" : " ms";
+    routeField.result.textContent = cursorTime.toFixed(3) + " s";
+    inspected = lines.map((line, i) => {
+      const frame = cursorTime < line.frames[0][0] || cursorTime > line.frames.at(-1)[0] ?
+        null : line.frames[nearest(line.frames, cursorTime)];
+      if (!pair) lineFields[i].term.textContent = fps ? "Rate" : "Interval";
+      if (frame) {
+        lineFields[i].result.textContent = value(frame).toFixed(3) + unit;
+        if (showMarkers) node("circle", {class:line.role, cx:x(frame[0]), cy:y(value(frame)), r:4}, markers);
+      } else {
+        lineFields[i].result.textContent = "—";
+      }
+      return frame;
+    });
+    if (deltaField) {
+      const delta = comparable && inspected.every(Boolean) ? value(inspected[1]) - value(inspected[0]) : null;
+      deltaField.result.textContent = delta === null ? "—" : (delta >= 0 ? "+" : "") + delta.toFixed(3) + unit;
     }
+    if (pinned) renderDetails();
   }
   function draw() {
     if (!svg.clientWidth || !svg.clientHeight) return;
@@ -337,8 +428,10 @@ for (const [chartIndex, chart] of [...document.querySelectorAll("figure[data-tar
     }
     markers = node("g", {}, bounds);
     selection = node("rect", {class:"zoom-box", width:0, height:0, visibility:"hidden"}, bounds);
-    if (cursorTime !== null) inspect(cursorTime);
+    inspect(cursorTime ?? (begin + end) / 2);
     buttons.forEach((button, i) => button.setAttribute("aria-pressed", String(Boolean(i) === fps)));
+    pan.firstElementChild.disabled = xAxis[0] <= 0;
+    pan.lastElementChild.disabled = xAxis[1] >= 1 - 1e-9;
   }
   function position(event) {
     const rect = svg.getBoundingClientRect();
@@ -349,7 +442,13 @@ for (const [chartIndex, chart] of [...document.querySelectorAll("figure[data-tar
     if (drag) return;
     const p = position(event);
     if (!inside(p) || (event.button !== 0 && event.button !== 2)) return;
-    if (!dialog.open) { inspect(timeAt(p.x)); return; }
+    if (!dialog.open) {
+      if (event.button === 0) {
+        setPinned(true);
+        inspect(timeAt(p.x));
+      }
+      return;
+    }
     drag = {...p, id:event.pointerId, pan:event.button === 2 || event.shiftKey};
     svg.setPointerCapture(event.pointerId);
     svg.focus({preventScroll:true});
@@ -357,7 +456,7 @@ for (const [chartIndex, chart] of [...document.querySelectorAll("figure[data-tar
   svg.onpointermove = event => {
     const p = position(event);
     if (!drag) {
-      if (!dialog.open || inside(p)) inspect(timeAt(p.x));
+      if (!pinned && (!dialog.open || inside(p))) inspect(timeAt(p.x));
       return;
     }
     if (drag.id !== event.pointerId) return;
@@ -388,12 +487,13 @@ for (const [chartIndex, chart] of [...document.querySelectorAll("figure[data-tar
     const zoomY = !drag.pan && Math.abs(drag.y - p.y) > 5;
     if (zoomX) select(xAxis, xFraction(drag.x), xFraction(p.x));
     if (zoomY) select(yAxis, yFraction(drag.y), yFraction(p.y));
+    const click = !drag.pan && !zoomX && !zoomY;
     drag = null;
     if (zoomX || zoomY) {
-      cursorTime = null;
       draw();
     }
-    inspect(timeAt(p.x));
+    if (click) setPinned(true);
+    if (click || !pinned) inspect(timeAt(p.x));
   };
   svg.onlostpointercapture = () => {
     drag = null;
@@ -424,39 +524,76 @@ for (const [chartIndex, chart] of [...document.querySelectorAll("figure[data-tar
         i += right ? 1 : -1;
       if (i >= 0 && i < frames.length) next = right ? Math.min(next, frames[i][0]) : Math.max(next, frames[i][0]);
     }
-    inspect(next);
+    inspect(clamp(next, begin, end));
   };
   buttons.forEach((button, i) => button.onclick = () => {
     if (fps === Boolean(i)) return;
     fps = Boolean(i);
-    reset();
+    drag = null;
+    fitY();
+    draw();
   });
-  for (const button of toolbar.querySelectorAll("button")) {
+  for (const button of toolbar.querySelectorAll("[data-scale]")) {
     const factor = Number(button.dataset.scale);
-    button.onclick = () => factor === 1 ? reset() : zoom(factor);
+    button.onclick = () => {
+      if (factor === 1) { reset(); return; }
+      zoomAxis(xAxis, .5, factor);
+      fitY();
+      draw();
+    };
   }
+  for (const button of pan.querySelectorAll("button")) {
+    button.onclick = () => {
+      const step = Number(button.dataset.pan) * (xAxis[1] - xAxis[0]);
+      setAxis(xAxis, xAxis[0] + step, xAxis[1] + step);
+      fitY();
+      draw();
+    };
+  }
+  function setHelp(open) {
+    help.hidden = !open;
+    helpButton.setAttribute("aria-expanded", String(open));
+  }
+  helpButton.onclick = () => setHelp(help.hidden);
+  details.ontoggle = () => {
+    if (details.open) {
+      setPinned(true);
+      renderDetails();
+    }
+  };
+  unpin.onclick = () => {
+    setPinned(false);
+    details.open = false;
+  };
   expand.onclick = () => {
     if (dialog.open) { dialog.close(); return; }
     dialog.append(chart);
-    toolbar.hidden = help.hidden = false;
-    expand.title = "Close chart";
-    expand.setAttribute("aria-label", expand.title);
+    toolbar.hidden = pan.hidden = false;
+    expand.setAttribute("aria-label", "Close chart");
     expand.setAttribute("aria-expanded", "true");
     dialog.showModal();
     expand.focus();
     reset();
   };
+  dialog.oncancel = event => {
+    if (help.hidden) return;
+    event.preventDefault();
+    setHelp(false);
+    helpButton.focus();
+  };
   dialog.onclose = () => {
     dialog.before(chart);
-    toolbar.hidden = help.hidden = true;
-    expand.title = "Expand chart";
-    expand.setAttribute("aria-label", expand.title);
+    toolbar.hidden = pan.hidden = true;
+    setHelp(false);
+    details.open = false;
+    expand.setAttribute("aria-label", "Expand chart");
     expand.setAttribute("aria-expanded", "false");
     drag = null;
     expand.focus({preventScroll:true});
     reset();
   };
   new ResizeObserver(draw).observe(svg);
+  draw();
 }
 </script>
 </body>

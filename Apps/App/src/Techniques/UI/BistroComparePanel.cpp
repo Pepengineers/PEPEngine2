@@ -951,12 +951,12 @@ namespace
 {
 constexpr float LineSampleWidthEm = 1.65f;
 
-enum class ChartIcon { Expand, ZoomIn, ZoomOut };
+enum class ChartIcon { Expand, ZoomIn, ZoomOut, Reset, Help, Close, History };
 
-bool ChartButton(const char* label, ChartIcon icon)
+bool ChartButton(const char* label, ChartIcon icon, float size = 0.f)
 {
-    const float size = ImGui::GetFrameHeight();
-    ImGui::PushID(label);
+    if (size == 0.f) size = ImGui::GetFrameHeight();
+    ImGui::PushID(static_cast<int>(icon));
     const bool pressed = ImGui::Button("##chart tool", {size, size});
     const auto min = ImGui::GetItemRectMin();
     const ImVec2 center{min.x + .5f * size, min.y + .5f * size};
@@ -974,7 +974,7 @@ bool ChartButton(const char* label, ChartIcon icon)
                 draw->AddPolyline(path, 3, color, ImDrawFlags_None, stroke);
             }
     }
-    else
+    else if (icon == ChartIcon::ZoomIn || icon == ChartIcon::ZoomOut)
     {
         const ImVec2 lens{center.x - .05f * size, center.y - .05f * size};
         const float arm = .075f * size;
@@ -984,7 +984,39 @@ bool ChartButton(const char* label, ChartIcon icon)
         if (icon == ChartIcon::ZoomIn)
             draw->AddLine({lens.x, lens.y - arm}, {lens.x, lens.y + arm}, color, stroke);
     }
-    ImGui::SetItemTooltip("%s", label);
+    else if (icon == ChartIcon::Reset)
+    {
+        const float r = .19f * size;
+        draw->PathArcTo(center, r, -.7f, 4.43f);
+        draw->PathStroke(color, 0, stroke);
+        const ImVec2 tip{center.x + r * std::cos(4.43f), center.y + r * std::sin(4.43f)};
+        const ImVec2 arrow[]{{tip.x - .11f * size, tip.y - .07f * size}, tip, {tip.x - .025f * size, tip.y + .12f * size}};
+        draw->AddPolyline(arrow, 3, color, 0, stroke);
+    }
+    else if (icon == ChartIcon::Help)
+    {
+        draw->AddCircle(center, .23f * size, color, 0, stroke);
+        const ImVec2 hook{center.x, center.y - .08f * size};
+        draw->PathArcTo(hook, .075f * size, 3.3f, 7.85f, 12);
+        draw->PathStroke(color, 0, stroke);
+        draw->AddCircleFilled({center.x, center.y + .115f * size}, .028f * size, color);
+    }
+    else if (icon == ChartIcon::Close)
+    {
+        const float radius = .15f * size;
+        draw->AddLine({center.x - radius, center.y - radius}, {center.x + radius, center.y + radius}, color, stroke);
+        draw->AddLine({center.x - radius, center.y + radius}, {center.x + radius, center.y - radius}, color, stroke);
+    }
+    else
+    {
+        const ImVec2 left{center.x - .26f * size, center.y - .19f * size};
+        const ImVec2 right{center.x + .26f * size, center.y + .19f * size};
+        const float divider = center.x - .09f * size;
+        draw->AddRect(left, right, color, .04f * size, 0, stroke);
+        draw->AddLine({divider, left.y}, {divider, right.y}, color, stroke);
+    }
+    if (ImGui::IsItemFocused() && ImGui::GetIO().NavVisible) ImGui::SetTooltip("%s", label);
+    else ImGui::SetItemTooltip("%s", label);
     ImGui::PopID();
     return pressed;
 }
@@ -1121,7 +1153,7 @@ std::string BistroComparePanel::PlotLine::Caption(bool fps) const
 {
     if (!Data) return Label;
     char value[48];
-    std::snprintf(value, sizeof(value), fps ? "%.1f FPS" : "%.1f ms", fps ? Data->Timing.Fps : Data->Timing.MeanMs());
+    std::snprintf(value, sizeof(value), fps ? "%.1f FPS average" : "%.1f ms mean", fps ? Data->Timing.Fps : Data->Timing.MeanMs());
     return Label.empty() ? std::string(value) : Label + " / " + value;
 }
 
@@ -1145,7 +1177,31 @@ void BistroComparePanel::PlotView::Zoom(double x, double y, double factor)
     Y.Zoom(y, factor);
 }
 
-void BistroComparePanel::DrawPlot(const PlotLines& lines, bool& fps, double target)
+void BistroComparePanel::PlotView::ZoomTime(double factor)
+{
+    X.Zoom(.5, factor);
+    FitY = true;
+}
+
+bool BistroComparePanel::ComparableFrames(const PlotLines& lines)
+{
+    if (!lines[0].Data || !lines[1].Data) return false;
+    const auto& a = *lines[0].Data;
+    const auto& b = *lines[1].Data;
+    const auto matches = [&](const char* key) {
+        const auto& value = Value(a.Settings, key);
+        return !value.empty() && value == Value(b.Settings, key);
+    };
+    return matches("MapId") && matches("RouteId") && matches("RouteVersion") &&
+        Number(Value(a.Settings, "RouteSeconds")).value_or(-1) > 0 &&
+        Number(Value(a.Settings, "RouteSeconds")) == Number(Value(b.Settings, "RouteSeconds")) &&
+        Value(a.Settings, "PaintingHoldSeconds") == Value(b.Settings, "PaintingHoldSeconds") &&
+        !a.Range.Section.empty() && a.Range.Section == b.Range.Section &&
+        a.Range.Begin >= 0 && a.Range.End > a.Range.Begin && a.Range.Begin == b.Range.Begin && a.Range.End == b.Range.End &&
+        a.AfterRender == b.AfterRender && matches("MeasurementVersion") && a.Mode != "Unknown" && b.Mode != "Unknown";
+}
+
+void BistroComparePanel::DrawPlot(const PlotLines& lines, bool& fps, double target, bool comparable)
 {
     const bool hasTrace = lines[0].Data || lines[1].Data;
     if (!hasTrace)
@@ -1168,23 +1224,70 @@ void BistroComparePanel::DrawPlot(const PlotLines& lines, bool& fps, double targ
     const float margin = ImGui::GetFontSize();
     ImGui::SetNextWindowPos(viewport->GetWorkCenter(), ImGuiCond_Always, {.5f, .5f});
     ImGui::SetNextWindowSize({viewport->WorkSize.x - margin, viewport->WorkSize.y - margin});
-    bool open = true;
-    if (ImGui::BeginPopupModal(title, &open, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+    if (ImGui::BeginPopupModal(title, nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollWithMouse))
     {
-        const bool nextFps = BistroPlot::Choice("", "Frame time (ms)", "FPS", fps);
-        if (nextFps != fps) _plotView = {};
+        constexpr auto timeUnit = "Frame time (ms)", rateUnit = "FPS", caption = "Frame timing";
+        const auto& style = ImGui::GetStyle();
+        const float size = ImGui::GetFrameHeight();
+        const float toolsWidth = 4.f * size + 3.f * style.ItemSpacing.x;
+        const float unitsWidth = ImGui::CalcTextSize(timeUnit).x + ImGui::CalcTextSize(rateUnit).x + 4.f * style.FramePadding.x + 1.f;
+        const bool singleRow = ImGui::GetContentRegionAvail().x >= ImGui::CalcTextSize(caption).x + unitsWidth +
+            toolsWidth + size + 3.f * style.ItemSpacing.x;
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(caption);
+        bool close = false;
+        if (singleRow) ImGui::SameLine();
+        else
+        {
+            RightAlignAfterItem(size);
+            close = ChartButton("Close chart", ChartIcon::Close);
+        }
+        const bool nextFps = BistroPlot::Choice("", timeUnit, rateUnit, fps);
+        if (nextFps != fps)
+        {
+            _plotView.FitY = true;
+            _plotView.DragButton = -1;
+        }
         fps = nextFps;
-        BistroPlot::ContinueRowIfFits(ImGui::GetFrameHeight());
-        if (ChartButton("Zoom in", ChartIcon::ZoomIn)) _plotView.Zoom(.5, .5, .8);
-        BistroPlot::ContinueRowIfFits(ImGui::GetFrameHeight());
-        if (ChartButton("Zoom out", ChartIcon::ZoomOut)) _plotView.Zoom(.5, .5, 1.25);
-        BistroPlot::ContinueRowIfFits(ImGui::CalcTextSize("Reset view").x + 2.f * ImGui::GetStyle().FramePadding.x);
-        if (ImGui::Button("Reset view")) _plotView = {};
-        ImGui::TextWrapped("Drag to zoom  |  Wheel to zoom in or out  |  Right-drag to pan  |  Double-click to reset");
-        DrawFrameTraces(lines, fps, target, &_plotView);
-        DrawPlotLegend(lines, fps, target);
-        if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) ImGui::CloseCurrentPopup();
+        BistroPlot::ContinueRowIfFits(toolsWidth);
+        ImGui::BeginGroup();
+        if (ChartButton("Zoom in", ChartIcon::ZoomIn)) _plotView.ZoomTime(.8);
+        ImGui::SameLine();
+        if (ChartButton("Zoom out", ChartIcon::ZoomOut)) _plotView.ZoomTime(1.25);
+        ImGui::SameLine();
+        if (ChartButton("Reset view", ChartIcon::Reset)) _plotView = {};
+        ImGui::SameLine();
+        if (ChartButton("Chart help", ChartIcon::Help)) ImGui::OpenPopup("Chart gestures");
+        if (ImGui::BeginPopup("Chart gestures"))
+        {
+            ImGui::TextUnformatted("Drag a box to zoom");
+            ImGui::TextUnformatted("Click a point to pin its frames");
+            ImGui::TextUnformatted("Wheel to zoom at the pointer");
+            ImGui::TextUnformatted("Right-drag to pan");
+            ImGui::TextUnformatted("Double-click to reset");
+            ImGui::EndPopup();
+        }
+        ImGui::EndGroup();
+        if (singleRow)
+        {
+            RightAlignAfterItem(size);
+            close = ChartButton("Close chart", ChartIcon::Close);
+        }
+        ImGui::Separator();
+        const bool subPopup = ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId);
+        if (ImGui::BeginChild("Expanded chart"))
+        {
+            const bool pair = lines[0].Data && lines[1].Data;
+            const bool narrow = ImGui::GetContentRegionAvail().x < 30.f * margin;
+            const int columns = pair && !narrow ? 4 : 2;
+            const float reserve = (narrow ? 11.f : 9.f) * margin + (pair && !comparable ? 2.f * margin : 0.f);
+            const auto samples = DrawFrameTraces(lines, fps, target, &_plotView, reserve);
+            DrawPlotInspector(lines, samples, _plotView, fps, comparable, columns);
+            DrawPlotLegend(lines, fps, target);
+        }
+        ImGui::EndChild();
+        if (close || (!subPopup && ImGui::IsKeyPressed(ImGuiKey_Escape, false))) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
 }
@@ -1192,6 +1295,7 @@ void BistroComparePanel::DrawPlot(const PlotLines& lines, bool& fps, double targ
 void BistroComparePanel::DrawPlotLegend(const PlotLines& lines, bool fps, double target)
 {
     const float em = ImGui::GetFontSize();
+    const bool pair = lines[0].Data && lines[1].Data;
     bool first = true;
     const auto legendItem = [&](const char* label, std::optional<ImU32> color, bool dashed) {
         const float sampleWidth = color ? LineSampleWidthEm * em + ImGui::GetStyle().ItemSpacing.x : 0.f;
@@ -1207,7 +1311,7 @@ void BistroComparePanel::DrawPlotLegend(const PlotLines& lines, bool fps, double
     for (size_t i = 0; i < lines.size(); ++i)
     {
         const auto& line = lines[i];
-        const auto caption = line.Caption(fps);
+        const auto caption = (pair ? (i == 0 ? "A / " : "B / ") : "") + line.Caption(fps);
         if (caption.empty()) continue;
         legendItem(caption.c_str(), line.Data ? std::optional{ComparisonColors[i]} : std::nullopt, i == 1);
     }
@@ -1219,7 +1323,8 @@ void BistroComparePanel::DrawPlotLegend(const PlotLines& lines, bool fps, double
     }
 }
 
-void BistroComparePanel::DrawFrameTraces(const PlotLines& lines, bool fps, double target, PlotView* view)
+BistroComparePanel::PlotSamples BistroComparePanel::DrawFrameTraces(
+    const PlotLines& lines, bool fps, double target, PlotView* view, float reservedHeight)
 {
     const auto& a = *(lines[0].Data ? lines[0].Data : lines[1].Data);
     const auto& b = lines[1].Data ? *lines[1].Data : a;
@@ -1243,7 +1348,7 @@ void BistroComparePanel::DrawFrameTraces(const PlotLines& lines, bool fps, doubl
     const float left = std::max(yLabelWidth + .75f * em, .5f * timeLabelWidth);
     const float width = std::max(1.f, available.x - left - .5f * timeLabelWidth);
     // Keep the three A/B metrics visible below the plot at typical window sizes.
-    const float height = view ? std::max(5.5f * em, available.y - 5.f * em) :
+    const float height = view ? std::max(3.5f * em, available.y - reservedHeight) :
         lines[0].Data && lines[1].Data ? std::clamp(available.y - 10.f * em, 5.5f * em, 19.f * em)
                                     : std::clamp(available.y * .65f, 7.f * em, 19.f * em);
     const ImVec2 top{origin.x + left, origin.y + .6f * em};
@@ -1257,7 +1362,11 @@ void BistroComparePanel::DrawFrameTraces(const PlotLines& lines, bool fps, doubl
     const auto fractionY = [&](float y) { return std::clamp(double((bottom.y - y) / height), 0., 1.); };
     if (view)
     {
-        auto& [x, y, dragStart, dragLast, button] = *view;
+        auto& x = view->X;
+        auto& y = view->Y;
+        auto& dragStart = view->DragStart;
+        auto& dragLast = view->DragLast;
+        auto& button = view->DragButton;
         const bool mouseValid = ImGui::IsMousePosValid(&mouse);
         if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) *view = {};
         else if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
@@ -1286,8 +1395,15 @@ void BistroComparePanel::DrawFrameTraces(const PlotLines& lines, bool fps, doubl
                     const auto [min, max] = std::minmax(a, b);
                     axis.Set(axis.Min + min * axis.Span(), axis.Min + max * axis.Span());
                 };
-                if (std::abs(dragLast.x - dragStart.x) > 5) select(x, fractionX(dragStart.x), fractionX(dragLast.x));
-                if (std::abs(dragLast.y - dragStart.y) > 5) select(y, fractionY(dragStart.y), fractionY(dragLast.y));
+                const bool zoomX = std::abs(dragLast.x - dragStart.x) > 5;
+                const bool zoomY = std::abs(dragLast.y - dragStart.y) > 5;
+                if (zoomX) select(x, fractionX(dragStart.x), fractionX(dragLast.x));
+                if (zoomY) select(y, fractionY(dragStart.y), fractionY(dragLast.y));
+                if (!zoomX && !zoomY)
+                {
+                    view->CursorTime = start + (x.Min + fractionX(dragLast.x) * x.Span()) * duration;
+                    view->Pinned = true;
+                }
             }
             button = -1;
         }
@@ -1299,10 +1415,36 @@ void BistroComparePanel::DrawFrameTraces(const PlotLines& lines, bool fps, doubl
     }
     const double begin = start + (view ? view->X.Min * duration : 0.);
     const double span = duration * (view ? view->X.Span() : 1.);
+    const auto sampleValue = [fps](const Selection::Sample& sample) { return fps ? 1000. / sample.IntervalMs : sample.IntervalMs; };
+    if (view && std::exchange(view->FitY, false))
+    {
+        view->Y = {};
+        if (view->X.Span() < 1.)
+        {
+            double min = peak, max = 0.;
+            for (const auto& line : lines)
+            {
+                if (!line.Data) continue;
+                const auto& samples = line.Data->Samples;
+                const auto first = std::lower_bound(samples.begin(), samples.end(), begin,
+                    [](const auto& sample, double t) { return sample.RouteSeconds < t; });
+                for (auto it = first; it != samples.end() && it->RouteSeconds <= begin + span; ++it)
+                {
+                    const double value = sampleValue(*it);
+                    min = std::min(min, value);
+                    max = std::max(max, value);
+                }
+            }
+            if (max > 0.)
+            {
+                const double padding = std::max(.05 * (max - min), .03 * max);
+                view->Y.Set(std::max(0., (min - padding) / peak), std::min(1., (max + padding) / peak));
+            }
+        }
+    }
     const double low = view ? view->Y.Min * peak : 0.;
     const double range = peak * (view ? view->Y.Span() : 1.);
     const auto valueY = [&](double value) { return bottom.y - height * float((value - low) / range); };
-    const auto sampleValue = [fps](const Selection::Sample& sample) { return fps ? 1000. / sample.IntervalMs : sample.IntervalMs; };
     const float stroke = std::max(1.f, .12f * em);
     const float dashLength = std::round(.5f * em);
     const float dashPeriod = dashLength + std::max(1.f, std::round(.3f * em));
@@ -1392,6 +1534,13 @@ void BistroComparePanel::DrawFrameTraces(const PlotLines& lines, bool fps, doubl
         ForEachBucketExtrema(first, last, column, [&](auto it) { drawSample(*it); });
         if (last != s.Samples.end()) drawSample(*last);
     }
+    PlotSamples samples{};
+    if (view && !view->Pinned)
+    {
+        const double time = hovered && view->DragButton == -1 ? begin + fractionX(mouse.x) * span :
+            view->CursorTime.value_or(begin + .5 * span);
+        view->CursorTime = std::clamp(time, begin, begin + span);
+    }
     if (view && view->DragButton == ImGuiMouseButton_Left)
     {
         const ImVec2 min{std::min(view->DragStart.x, view->DragLast.x), std::min(view->DragStart.y, view->DragLast.y)};
@@ -1399,44 +1548,116 @@ void BistroComparePanel::DrawFrameTraces(const PlotLines& lines, bool fps, doubl
         draw->AddRectFilled(min, max, ImGui::GetColorU32(ImGuiCol_Button, .55f));
         draw->AddRect(min, max, muted);
     }
-    else if (hovered && (!view || view->DragButton == -1))
+    if (view || hovered)
     {
-        const float x = std::clamp(mouse.x, top.x, bottom.x);
-        const double t = begin + (x - top.x) / width * span;
-        draw->AddLine({x, top.y}, {x, top.y + height}, muted, stroke);
-        ImGui::BeginTooltip();
-        ImGui::Text("Route %.3f s", t);
-        std::array<const Selection::Sample*, 2> samples{};
+        const double time = view ? *view->CursorTime : begin + fractionX(mouse.x) * span;
+        const float x = top.x + width * float((time - begin) / span);
+        const bool markers = !view || (view->DragButton == -1 && time >= begin && time <= begin + span);
+        if (markers) draw->AddLine({x, top.y}, {x, top.y + height}, muted, stroke);
+        if (!view)
+        {
+            ImGui::BeginTooltip();
+            ImGui::Text("Route %.3f s", time);
+        }
+        const bool pair = lines[0].Data && lines[1].Data;
         for (size_t iSeries = 0; iSeries < lines.size(); ++iSeries)
         {
             if (!lines[iSeries].Data) continue;
             const auto& s = *lines[iSeries].Data;
             const char id = iSeries == 0 ? 'A' : 'B';
-            if (t < s.Samples.front().RouteSeconds || t > s.Samples.back().RouteSeconds)
+            const auto color = ComparisonColors[iSeries];
+            if (time < s.Samples.front().RouteSeconds || time > s.Samples.back().RouteSeconds)
             {
-                ImGui::Text("%c   --", id);
+                if (!view)
+                {
+                    ImGui::Separator();
+                    if (pair) ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(color), "%c   --", id);
+                    ImGui::TextDisabled("Outside measured interval");
+                }
                 continue;
             }
-            const auto& sample = s.Samples[BistroPlot::NearestFrame(s.Samples, t)];
+            const auto& sample = s.Samples[BistroPlot::NearestFrame(s.Samples, time)];
             samples[iSeries] = &sample;
             const auto pos = point(sample);
-            const auto color = ComparisonColors[iSeries];
-            draw->AddCircleFilled(pos, .3f * em, color);
-            draw->AddCircle(pos, .3f * em, muted);
-            ImGui::Separator();
-            ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(color), "%c   %s", id, lines[iSeries].Caption(fps).c_str());
-            BistroPlot::DrawFrameDetails(sample.Number, sample.RouteSeconds, sample.Section.c_str(), sample.FrameMs,
-                                         sample.IntervalMs, fps);
+            if (markers)
+            {
+                draw->AddCircleFilled(pos, .3f * em, color);
+                draw->AddCircle(pos, .3f * em, muted);
+            }
+            if (!view)
+            {
+                ImGui::Separator();
+                if (pair) ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(color), "%c", id);
+                BistroPlot::DrawFrameDetails(sample.Number, sample.RouteSeconds, sample.Section.c_str(), sample.FrameMs,
+                                             sample.IntervalMs, fps);
+            }
         }
-        if (view && samples[0] && samples[1])
-        {
-            ImGui::Separator();
-            ImGui::Text(fps ? "B - A   %+.3f FPS" : "B - A   %+.3f ms", sampleValue(*samples[1]) - sampleValue(*samples[0]));
-        }
-        ImGui::EndTooltip();
+        if (!view) ImGui::EndTooltip();
     }
     draw->PopClipRect();
     ImGui::Dummy({0, 1.4f * em});
+    return samples;
+}
+
+void BistroComparePanel::DrawPlotInspector(const PlotLines& lines, const PlotSamples& samples, PlotView& view,
+    bool fps, bool comparable, int columns)
+{
+    const bool pair = lines[0].Data && lines[1].Data;
+    const auto value = [fps](const Selection::Sample& sample) { return fps ? 1000. / sample.IntervalMs : sample.IntervalMs; };
+    const char* unit = fps ? "FPS" : "ms";
+    ImGui::Separator();
+    if (ImGui::BeginTable("Frame readout", columns, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_NoSavedSettings))
+    {
+        ImGui::TableNextColumn();
+        ImGui::Text("%s   %.3f s", view.Pinned ? "Pinned" : "Route", *view.CursorTime);
+        for (size_t i = 0; i < lines.size(); ++i)
+        {
+            if (!lines[i].Data) continue;
+            ImGui::TableNextColumn();
+            const auto color = ImGui::ColorConvertU32ToFloat4(ComparisonColors[i]);
+            const char* label = pair ? (i == 0 ? "A" : "B") : (fps ? "Rate" : "Interval");
+            if (samples[i]) ImGui::TextColored(color, "%s   %.3f %s", label, value(*samples[i]), unit);
+            else ImGui::TextColored(color, "%s   --", label);
+        }
+        if (pair)
+        {
+            ImGui::TableNextColumn();
+            if (comparable && samples[0] && samples[1])
+                ImGui::Text("B - A   %+.3f %s", value(*samples[1]) - value(*samples[0]), unit);
+            else ImGui::TextDisabled("B - A   --");
+        }
+        ImGui::EndTable();
+    }
+    if (ImGui::Button("Frame details"))
+    {
+        view.Pinned = true;
+        ImGui::OpenPopup("Frame samples");
+    }
+    if (ImGui::BeginPopup("Frame samples"))
+    {
+        const bool samePass = pair && lines[0].Data->RunIndex == lines[1].Data->RunIndex &&
+            lines[0].Data->PassIndex == lines[1].Data->PassIndex;
+        for (size_t i = 0; i < (samePass ? 1 : lines.size()); ++i)
+        {
+            if (!lines[i].Data) continue;
+            if (pair) ImGui::SeparatorText(samePass ? "A / B" : i == 0 ? "A" : "B");
+            if (const auto* sample = samples[i])
+                BistroPlot::DrawFrameDetails(sample->Number, sample->RouteSeconds, sample->Section.c_str(),
+                                             sample->FrameMs, sample->IntervalMs, false);
+            else ImGui::TextUnformatted("Outside measured interval");
+        }
+        ImGui::EndPopup();
+    }
+    BistroPlot::ContinueRowIfFits(ImGui::CalcTextSize("Follow pointer").x + 2.f * ImGui::GetStyle().FramePadding.x);
+    ImGui::BeginDisabled(!view.Pinned);
+    if (ImGui::Button("Follow pointer")) view.Pinned = false;
+    ImGui::EndDisabled();
+    if (pair && !comparable)
+    {
+        BistroPlot::ContinueRowIfFits(ImGui::CalcTextSize(FrameDeltaNote).x);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextWrapped("%s", FrameDeltaNote);
+    }
 }
 
 void BistroComparePanel::UpdateHistory(const fs::path& latestCompleted, bool force)
@@ -1846,7 +2067,8 @@ void BistroComparePanel::DrawRun(int index, fs::path& pendingPreset)
         if (ImGui::CollapsingHeader("Frame timing", ImGuiTreeNodeFlags_DefaultOpen))
         {
             _runFps = BistroPlot::Choice("", "Frame time (ms)", "FPS", _runFps);
-            DrawPlot(RunLines(placement, selection, _placementPasses), _runFps, target);
+            const auto lines = RunLines(placement, selection, _placementPasses);
+            DrawPlot(lines, _runFps, target, ComparableFrames(lines));
         }
     }
     else if (!placement || winner)
@@ -2047,6 +2269,14 @@ int BistroComparePanel::DrawRunList(bool compact)
     return selected;
 }
 
+void BistroComparePanel::DrawHistoryToggle(float size)
+{
+    if (_showHistory) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+    const bool pressed = ChartButton(_showHistory ? "Hide history" : "Show history", ChartIcon::History, size);
+    if (_showHistory) ImGui::PopStyleColor();
+    if (pressed) _showHistory = !_showHistory;
+}
+
 void BistroComparePanel::DrawHistory(const fs::path& latestCompleted, fs::path& pendingPreset, ImFont* headingFont)
 {
     _headingFont = headingFont;
@@ -2074,8 +2304,6 @@ void BistroComparePanel::DrawHistory(const fs::path& latestCompleted, fs::path& 
         ImGui::EndChild();
         return;
     }
-    if (!_runs.empty() && ImGui::Button(_showHistory ? "Hide history###toggle history" : "Show history###toggle history"))
-        _showHistory = !_showHistory;
     const float em = ImGui::GetFontSize();
     const auto room = ImGui::GetContentRegionAvail();
     const bool compact = room.x < 48.f * em || room.y < 19.f * em;
@@ -2144,20 +2372,9 @@ void BistroComparePanel::DrawComparison()
     _fps = BistroPlot::Choice("", "Frame time (ms)", "FPS", _fps);
     const auto& a = _selected[0];
     const auto& b = _selected[1];
-    DrawPlot({PlotLine{&a, a.Mode}, PlotLine{&b, b.Mode}}, _fps);
-    const auto version = Value(a.Settings, "RouteVersion");
-    const bool sameRoute = Value(a.Settings, "MapId") == Value(b.Settings, "MapId") &&
-        Value(a.Settings, "RouteId") == Value(b.Settings, "RouteId") &&
-        !version.empty() && version == Value(b.Settings, "RouteVersion") &&
-        Number(Value(a.Settings, "RouteSeconds")).value_or(-1) > 0 &&
-        Number(Value(a.Settings, "RouteSeconds")) == Number(Value(b.Settings, "RouteSeconds")) &&
-        Value(a.Settings, "PaintingHoldSeconds") == Value(b.Settings, "PaintingHoldSeconds");
-    const bool sameWindow = !a.Range.Section.empty() && a.Range.Section == b.Range.Section &&
-        a.Range.Begin >= 0 && a.Range.End > a.Range.Begin && a.Range.Begin == b.Range.Begin && a.Range.End == b.Range.End;
-    const bool comparable = sameRoute && sameWindow && a.AfterRender == b.AfterRender &&
-        !Value(a.Settings, "MeasurementVersion").empty() &&
-        Value(a.Settings, "MeasurementVersion") == Value(b.Settings, "MeasurementVersion") &&
-        a.Mode != "Unknown" && b.Mode != "Unknown";
+    const PlotLines lines{PlotLine{&a, a.Mode}, PlotLine{&b, b.Mode}};
+    const bool comparable = ComparableFrames(lines);
+    DrawPlot(lines, _fps, 0., comparable);
     ImGui::SeparatorText("Run differences");
     if (!comparable)
         ImGui::TextWrapped("A/B deltas require matching routes, measured windows, timing boundaries and measurement versions.");

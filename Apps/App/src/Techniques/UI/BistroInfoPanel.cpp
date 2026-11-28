@@ -387,9 +387,16 @@ void BistroInfoPanel::DrawSettings(RenderModule& render, BistroBenchmark& benchm
         const ImVec2 titleSize = ImGui::GetItemRectSize();
         const float navWidth = std::clamp(width * .125f, 5.1f * em, 8.f * em);
         const float navGap = ImGui::GetStyle().ItemSpacing.x * .35f;
-        if (titleSize.x + 2.f * navWidth + 2.f * navGap < width)
-            ImGui::SetCursorPos({start.x + width - 2.f * navWidth - navGap, start.y + (titleSize.y - navHeight) * .5f});
+        const bool historyToggle = _tab == Tab::Results && _compare.CanToggleHistory();
+        const float navSpan = 2.f * navWidth + navGap + (historyToggle ? navHeight + navGap : 0.f);
+        if (titleSize.x + navSpan + navGap < width)
+            ImGui::SetCursorPos({start.x + width - navSpan, start.y + (titleSize.y - navHeight) * .5f});
         ImGui::PushFont(_headingFont, 1.12f * baseSize);
+        if (historyToggle)
+        {
+            _compare.DrawHistoryToggle(navHeight);
+            ImGui::SameLine(0.f, navGap);
+        }
         if (PageButton("Setup", _tab == Tab::Setup, {navWidth, navHeight})) _tab = Tab::Setup;
         ImGui::SameLine(0.f, navGap);
         if (PageButton("Results", _tab == Tab::Results, {navWidth, navHeight})) _tab = Tab::Results;

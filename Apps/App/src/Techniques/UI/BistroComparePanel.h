@@ -19,6 +19,8 @@ class BistroComparePanel
   public:
     void UpdateHistory(const std::filesystem::path& latestCompleted, bool force = false);
     void DrawHistory(const std::filesystem::path& latestCompleted, std::filesystem::path& pendingPreset, ImFont* headingFont);
+    bool CanToggleHistory() const { return !_runs.empty() && !_showComparison; }
+    void DrawHistoryToggle(float size);
 
   private:
     struct Window
@@ -110,6 +112,9 @@ class BistroComparePanel
         std::string Caption(bool fps) const;
     };
     using PlotLines = std::array<PlotLine, 2>;
+    using PlotSamples = std::array<const Selection::Sample*, 2>;
+    static bool ComparableFrames(const PlotLines& lines);
+    static constexpr auto FrameDeltaNote = "Delta requires matching route, measured window and timing method.";
     PlotLines RunLines(const Winner* placement, const Selection& current, std::array<Selection, 2>& cache);
     FrameTiming SummaryTiming(const Winner* winner, const Selection& selection) const;
     std::string ReportBody(const Run& run, const Winner* placement, const Selection& selection,
@@ -135,12 +140,16 @@ class BistroComparePanel
         Axis X, Y;
         ImVec2 DragStart, DragLast;
         int DragButton = -1;
+        bool FitY = false, Pinned = false;
+        std::optional<double> CursorTime;
         void Zoom(double x, double y, double factor);
+        void ZoomTime(double factor);
     };
     PlotView _plotView;
-    void DrawPlot(const PlotLines& lines, bool& fps, double target = 0);
+    void DrawPlot(const PlotLines& lines, bool& fps, double target, bool comparable);
     static void DrawPlotLegend(const PlotLines& lines, bool fps, double target);
-    static void DrawFrameTraces(const PlotLines& lines, bool fps, double target, PlotView* view = nullptr);
+    static PlotSamples DrawFrameTraces(const PlotLines& lines, bool fps, double target, PlotView* view = nullptr, float reservedHeight = 0);
+    static void DrawPlotInspector(const PlotLines& lines, const PlotSamples& samples, PlotView& view, bool fps, bool comparable, int columns);
     static void DrawRouteMetrics(const FrameTiming& timing, ImFont* headingFont);
     static void DrawComparedTimings(const FrameTiming& a, const FrameTiming& b, const char* left, const char* right, bool comparable);
     static std::array<std::string, 8> ReconstructionRow(const Run&, const ReconstructionComparison&, const std::string&);
