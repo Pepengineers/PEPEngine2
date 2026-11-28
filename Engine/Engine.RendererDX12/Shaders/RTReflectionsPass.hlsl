@@ -10,6 +10,7 @@ cbuffer Parameters : register(b0)
     uint SamplesPerPixel, FrameIndex, HasDirectionalShadows, HasPointSpotShadows;
     uint HasAmbientOcclusion, HasPrefiltered, HasBRDF, LightCount;
     float3 HitDistanceParameters;
+    uint CheckerboardTracing;
 };
 ConstantBuffer<CameraCB> Camera : register(b1);
 
@@ -265,13 +266,24 @@ void RayGeneration()
     float viewDepth = Camera.NearPlane * Camera.FarPlane / (Camera.NearPlane + depth * (Camera.FarPlane - Camera.NearPlane));
     float3 normal = SafeNormalize(NormalRoughness[pixel].xyz);
     float roughness = clamp(NormalRoughness[pixel].w, 0.045f, 1.0f);
-    PackedNormals[pixel] = NRD_FrontEnd_PackNormalAndRoughness(weight > 0 ? normal : float3(0, 0, 1), roughness, 0);
-    ViewDepth[pixel] = weight > 0 ? viewDepth : Camera.FarPlane + 1;
-    if (weight <= 0) { ReflectionOutput[pixel] = 0; return; }
     float3 position = ReconstructPosition(pixel, size, depth);
     float3 view = SafeNormalize(Camera.CameraLocation - position);
     float nDotV = saturate(dot(normal, view));
-    if (nDotV <= 0) { ViewDepth[pixel] = Camera.FarPlane + 1; ReflectionOutput[pixel] = 0; return; }
+    bool valid = weight > 0 && nDotV > 0;
+    PackedNormals[pixel] = NRD_FrontEnd_PackNormalAndRoughness(valid ? normal : float3(0, 0, 1), roughness, 0);
+    ViewDepth[pixel] = valid ? viewDepth : Camera.FarPlane + 1;
+    uint2 signalPixel = pixel;
+    if (CheckerboardTracing)
+    {
+        signalPixel.x >>= 1;
+        if ((pixel.x ^ pixel.y ^ FrameIndex) & 1)
+        {
+            // Odd widths leave one packed cell without a sample on alternating rows.
+            if ((size.x & 1) && pixel.x == size.x - 1) ReflectionOutput[signalPixel] = 0;
+            return;
+        }
+    }
+    if (!valid) { ReflectionOutput[signalPixel] = 0; return; }
     float3 f0 = F0Baked[pixel].rgb;
     float footprint = max(length(ReconstructPosition(pixel + uint2(1, 0), size, depth) - position),
         length(ReconstructPosition(pixel + uint2(0, 1), size, depth) - position));
@@ -304,7 +316,7 @@ void RayGeneration()
     float3 diffuseFactor, specularFactor;
     NRD_MaterialFactors(normal, view, 0, f0, roughness, diffuseFactor, specularFactor);
     float normHitDistance = REBLUR_FrontEnd_GetNormHitDist(hitDistance, viewDepth, HitDistanceParameters, roughness);
-    ReflectionOutput[pixel] = REBLUR_FrontEnd_PackRadianceAndNormHitDist(contribution / specularFactor, normHitDistance, true);
+    ReflectionOutput[signalPixel] = REBLUR_FrontEnd_PackRadianceAndNormHitDist(contribution / specularFactor, normHitDistance, true);
 }
 
 [shader("compute")]

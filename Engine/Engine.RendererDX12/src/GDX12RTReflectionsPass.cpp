@@ -47,6 +47,7 @@ GDX12RTReflectionsPass::~GDX12RTReflectionsPass()
 void GDX12RTReflectionsPass::Describe(PassDescription& description) const
 {
     description.AddParameter("SamplesPerPixel", 1);
+    description.AddParameter("CheckerboardTracing", true);
     description.AddParameter("MaxDistance", 10000.0f);
     description.AddParameter("MaxRoughness", 0.6f);
     description.AddParameter("RoughnessFade", 0.1f);
@@ -121,6 +122,7 @@ void GDX12RTReflectionsPass::Describe(PassDescription& description) const
 void GDX12RTReflectionsPass::Initialize(PassInitContext& context)
 {
     const auto samplesPerPixel = context.GetParameter<int>("SamplesPerPixel");
+    _checkerboardTracing = context.GetParameter<bool>("CheckerboardTracing");
     _maxDistance = context.GetParameter<float>("MaxDistance");
     _maxRoughness = context.GetParameter<float>("MaxRoughness");
     _roughnessFade = context.GetParameter<float>("RoughnessFade");
@@ -135,7 +137,7 @@ void GDX12RTReflectionsPass::Initialize(PassInitContext& context)
 
     auto* resources = context.GetDeviceResources();
     GDX12RootSignatureDesc root;
-    root.Constants = {16};
+    root.Constants = {17};
     root.NumSingleCBVSlots = 1;
     root.NumSingleSRVSlots = 22;
     root.NumSingleUAVSlots = 5;
@@ -154,14 +156,13 @@ void GDX12RTReflectionsPass::Initialize(PassInitContext& context)
     const auto library = shaderCompiler.CompileRayTracingLibrary(resources->Device, SHADERS_FOLDER "RTReflectionsPass.hlsl");
     GDX12RayTracingPipelineStateDesc pipeline;
     pipeline.Library = {library->GetBufferPointer(), library->GetBufferSize()};
-    pipeline.Exports = {L"RayGeneration", L"ClosestHit", L"AnyHit", L"Miss"};
+    pipeline.ShaderFunctionsNames = {L"RayGeneration", L"ClosestHit", L"AnyHit", L"Miss"};
     pipeline.GlobalRootSignature = _rootSignature.get();
     pipeline.MaxPayloadSize = 6 * sizeof(float);
-    D3D12_HIT_GROUP_DESC hitGroup{};
-    hitGroup.HitGroupExport = L"ReflectionHitGroup";
-    hitGroup.Type = D3D12_HIT_GROUP_TYPE_TRIANGLES;
-    hitGroup.ClosestHitShaderImport = L"ClosestHit";
-    hitGroup.AnyHitShaderImport = L"AnyHit";
+    GDX12RayTracingHitGroupDesc hitGroup;
+    hitGroup.Name = L"ReflectionHitGroup";
+    hitGroup.ClosestHitFunctionName = L"ClosestHit";
+    hitGroup.AnyHitFunctionName = L"AnyHit";
     pipeline.HitGroups = {hitGroup};
     _reflectionPipeline = std::make_unique<GDX12RayTracingPipelineState>(resources->Device, pipeline);
     GDX12ShaderTableDesc table;
@@ -200,6 +201,8 @@ void GDX12RTReflectionsPass::InitializeDenoiser(PassInitContext& context)
     settings.maxFastAccumulatedFrameNum = (std::min)(6u, UINT(historyFrames));
     settings.historyFixFrameNum = (std::min)(3u, settings.maxFastAccumulatedFrameNum - 1);
     settings.maxBlurRadius = blurRadius;
+    // NRD's WHITE mode selects specular pixels with even (x ^ y ^ frameIndex) parity.
+    settings.checkerboardMode = _checkerboardTracing ? nrd::CheckerboardMode::WHITE : nrd::CheckerboardMode::OFF;
     CheckNRD(nrd::SetDenoiserSettings(*_denoiser, DenoiserId, &settings));
 
     const auto* description = nrd::GetInstanceDesc(*_denoiser);
@@ -422,9 +425,11 @@ void GDX12RTReflectionsPass::Execute(PassExecutionContext& context)
         float MaxDistance, MaxRoughness, RoughnessFade, Bias, Intensity;
         UINT SamplesPerPixel, FrameIndex, HasDirectionalShadows, HasPointSpotShadows, HasAmbientOcclusion, HasPrefiltered, HasBRDF, LightCount;
         XMFLOAT3 HitDistanceParameters;
+        UINT CheckerboardTracing;
     } parameters = {_maxDistance, _maxRoughness, _roughnessFade, _bias, _intensity, _samplesPerPixel, _denoisingSettings.frameIndex,
         directionalMaps ? 1u : 0u, pointSpotMaps ? 1u : 0u, occlusion ? 1u : 0u, prefiltered ? 1u : 0u, brdfLut ? 1u : 0u,
-        context.GetFrameData()->LightCount, {HitDistanceParameters.A, HitDistanceParameters.B, HitDistanceParameters.C}};
+        context.GetFrameData()->LightCount, {HitDistanceParameters.A, HitDistanceParameters.B, HitDistanceParameters.C},
+        _checkerboardTracing ? 1u : 0u};
 
     commands->BeginPixEvent("Ray Traced Reflections", Colors::SteelBlue);
     commands->SetComputeRootSignature(_rootSignature.get());

@@ -50,4 +50,5 @@ private:
     float _bias = 0;
     float _intensity = 0;
     UINT _samplesPerPixel = 0;
+    bool _checkerboardTracing = true;
 };

@@ -5,12 +5,21 @@
 class GDX12Device;
 class GDX12RootSignature;
 
+struct GDX12RayTracingHitGroupDesc
+{
+    std::wstring Name;
+    D3D12_HIT_GROUP_TYPE Type = D3D12_HIT_GROUP_TYPE_TRIANGLES;
+    std::wstring ClosestHitFunctionName;
+    std::wstring AnyHitFunctionName;
+    std::wstring IntersectionFunctionName;
+};
+
 struct GDX12RayTracingPipelineStateDesc
 {
     D3D12_SHADER_BYTECODE Library{};
-    // An empty list exports every shader in the library.
-    std::vector<std::wstring> Exports;
-    std::vector<D3D12_HIT_GROUP_DESC> HitGroups;
+    // An empty list makes all shader functions in the library available.
+    std::vector<std::wstring> ShaderFunctionsNames;
+    std::vector<GDX12RayTracingHitGroupDesc> HitGroups;
     GDX12RootSignature* GlobalRootSignature = nullptr;
     UINT MaxPayloadSize = 0;
     UINT MaxAttributeSize = sizeof(float) * 2;

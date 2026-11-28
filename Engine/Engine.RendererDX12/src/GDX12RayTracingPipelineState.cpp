@@ -20,15 +20,15 @@ GDX12RayTracingPipelineState::GDX12RayTracingPipelineState(GDX12Device* device, 
     CD3DX12_STATE_OBJECT_DESC state(D3D12_STATE_OBJECT_TYPE_RAYTRACING_PIPELINE);
     auto* library = state.CreateSubobject<CD3DX12_DXIL_LIBRARY_SUBOBJECT>();
     library->SetDXILLibrary(&description.Library);
-    for (const auto& name : description.Exports) { library->DefineExport(name.c_str()); }
+    for (const auto& name : description.ShaderFunctionsNames) { library->DefineExport(name.c_str()); }
     for (const auto& group : description.HitGroups)
     {
         auto* hitGroup = state.CreateSubobject<CD3DX12_HIT_GROUP_SUBOBJECT>();
-        hitGroup->SetHitGroupExport(group.HitGroupExport);
+        hitGroup->SetHitGroupExport(group.Name.c_str());
         hitGroup->SetHitGroupType(group.Type);
-        hitGroup->SetClosestHitShaderImport(group.ClosestHitShaderImport);
-        hitGroup->SetAnyHitShaderImport(group.AnyHitShaderImport);
-        hitGroup->SetIntersectionShaderImport(group.IntersectionShaderImport);
+        hitGroup->SetClosestHitShaderImport(group.ClosestHitFunctionName.empty() ? nullptr : group.ClosestHitFunctionName.c_str());
+        hitGroup->SetAnyHitShaderImport(group.AnyHitFunctionName.empty() ? nullptr : group.AnyHitFunctionName.c_str());
+        hitGroup->SetIntersectionShaderImport(group.IntersectionFunctionName.empty() ? nullptr : group.IntersectionFunctionName.c_str());
     }
     state.CreateSubobject<CD3DX12_GLOBAL_ROOT_SIGNATURE_SUBOBJECT>()->SetRootSignature(
         description.GlobalRootSignature->GetRootSignature().Get());
@@ -42,6 +42,6 @@ GDX12RayTracingPipelineState::GDX12RayTracingPipelineState(GDX12Device* device, 
 const void* GDX12RayTracingPipelineState::GetShaderIdentifier(const std::wstring& name) const
 {
     const auto* identifier = _properties->GetShaderIdentifier(name.c_str());
-    if (!identifier) { throw std::invalid_argument("ERROR: Shader table export is missing from the ray tracing pipeline."); }
+    if (!identifier) { throw std::invalid_argument("ERROR: Shader table entry is missing from the ray tracing pipeline."); }
     return identifier;
 }
