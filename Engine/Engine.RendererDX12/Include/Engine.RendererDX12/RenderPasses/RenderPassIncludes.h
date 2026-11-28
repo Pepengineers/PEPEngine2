@@ -12,6 +12,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12SSAOPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12RTAOPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12RTReflectionsPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12FFXSSSRPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12HBAOPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12HBAOPlusPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12XeGTAOPass.h"

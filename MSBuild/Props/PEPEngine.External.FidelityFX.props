@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <PEPFidelityFXRoot>$(PEPRepoRoot)Build\Dependencies\FidelityFX-SSSR-c6efa6bf7f2027b3ec94f28578bb5965eabb9e55\sdk\</PEPFidelityFXRoot>
+    <PEPFidelityFXPostfix Condition="'$(Configuration)'=='Debug'">d</PEPFidelityFXPostfix>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Platform)'=='x64'">
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(PEPFidelityFXRoot)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <AdditionalLibraryDirectories>$(PEPFidelityFXRoot)bin\ffx_sdk;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>ffx_sssr_x64$(PEPFidelityFXPostfix).lib;ffx_denoiser_x64$(PEPFidelityFXPostfix).lib;ffx_backend_dx12_x64$(PEPFidelityFXPostfix).lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <Target Name="BuildFidelityFX" BeforeTargets="ClCompile" Condition="'$(Platform)'=='x64' and '$(MSBuildProjectName)'=='Engine.RendererDX12'"
+          Inputs="$(PEPRepoRoot)MSBuild\BuildFidelityFX.ps1;$(MSBuildThisFileFullPath);$(PEPExternalRoot)FidelityFX\cold-history.patch;$(PEPExternalRoot)FidelityFX\sssr-spd-counter.patch;$(PEPExternalRoot)FidelityFX\environment-fallback.patch;$(PEPExternalRoot)FidelityFX\depth-pyramid.patch"
+          Outputs="$(PEPFidelityFXRoot)bin\ffx_sdk\ffx_sssr_x64$(PEPFidelityFXPostfix).lib;$(PEPFidelityFXRoot)bin\ffx_sdk\ffx_denoiser_x64$(PEPFidelityFXPostfix).lib;$(PEPFidelityFXRoot)bin\ffx_sdk\ffx_backend_dx12_x64$(PEPFidelityFXPostfix).lib;$(PEPRepoRoot)Build\External\FidelityFXSSSR\$(VCToolsVersion)-$(Configuration).stamp">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(PEPRepoRoot)MSBuild\BuildFidelityFX.ps1&quot; -Configuration &quot;$(Configuration)&quot; -VSInstallDir &quot;$(VSInstallDir).&quot; -VCToolsVersion &quot;$(VCToolsVersion)&quot; -PlatformToolset &quot;$(PlatformToolset)&quot;" />
+  </Target>
+</Project>

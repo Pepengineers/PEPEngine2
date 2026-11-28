@@ -1,0 +1,24 @@
+--- a/src/components/sssr/ffx_sssr.cpp
++++ b/src/components/sssr/ffx_sssr.cpp
+@@ -266,7 +266,7 @@
+ 
+     const uint32_t elementSize = 4;
+     const uint32_t numPixels = contextDescription->renderSize.width * contextDescription->renderSize.height;
+-    uint32_t depthHierarchyMipCount = (uint32_t)ceil(log2(max(contextDescription->renderSize.width, contextDescription->renderSize.height)));
++    uint32_t depthHierarchyMipCount = 1u + (uint32_t)floor(log2(max(contextDescription->renderSize.width, contextDescription->renderSize.height)));
+     depthHierarchyMipCount = min(7u, depthHierarchyMipCount);  // We generate 6 mips from the input depth buffer and keep a copy of it at mip 0 
+ 
+     const FfxInternalResourceDescription internalSurfaceDesc[] = {
+--- a/include/FidelityFX/gpu/sssr/ffx_sssr_depth_downsample.h
++++ b/include/FidelityFX/gpu/sssr/ffx_sssr_depth_downsample.h
+@@ -103,7 +103,9 @@
+ 
+     FfxFloat32x2 image_size = FfxFloat32x2(0.0f, 0.0f);
+     FFX_SSSR_GetDepthHierarchyMipDimensions(0, image_size);
+-    FfxFloat32 mips_count = GetMipsCount(image_size);
++    // SPD generates additional levels, mip 0 already contains the input depth.
++    FfxFloat32 mips_count = min(6.0f, GetMipsCount(image_size) - 1.0f);
++    if (mips_count < 1.0f) return;
+     FfxUInt32 threadgroup_count = GetThreadgroupCount(FfxInt32x2(image_size));
+ 
+     SpdDownsample(

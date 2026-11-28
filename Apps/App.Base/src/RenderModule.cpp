@@ -23,7 +23,7 @@ namespace
         auto ibl = graph.AddPrimaryGPUPass<GDX12IBLPrecomputePass>("IBL Precompute");
         auto cacao = graph.AddPrimaryGPUPass<GDX12FFXCACAOPass>("FidelityFX CACAO");
         auto lighting = graph.AddPrimaryGPUPass<GDX12DeferredLightingPass>("Deferred Lighting");
-        auto reflections = graph.AddPrimaryGPUPass<GDX12RTReflectionsPass>("Ray Traced Reflections");
+        auto reflections = graph.AddPrimaryGPUPass<GDX12FFXSSSRPass>("FidelityFX SSSR");
         auto skyBox = graph.AddPrimaryGPUPass<GDX12SkyBoxPass>("SkyBox");
         auto transparency = graph.AddPrimaryGPUPass<GDX12WBOITTransparencyPass>("Transparency");
         auto composition = graph.AddPrimaryGPUPass<GDX12WBOITCompositionPass>("Composition");
@@ -47,12 +47,8 @@ namespace
         graph.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), reflections.GetInput("InDepthBuffer"));
         graph.ConnectNodes(opaque.GetOutput("OutNormalRoughness"), reflections.GetInput("InNormalRoughness"));
         graph.ConnectNodes(opaque.GetOutput("OutF0Baked"), reflections.GetInput("InF0Baked"));
-        graph.ConnectNodes(inputs.SkyBoxMap, reflections.GetInput("InSkyBoxMap"));
-        graph.ConnectNodes(ibl.GetOutput("OutIrradiance"), reflections.GetInput("InIrradiance"));
         graph.ConnectNodes(ibl.GetOutput("OutPrefilteredEnvironment"), reflections.GetInput("InPrefilteredEnvironment"));
         graph.ConnectNodes(ibl.GetOutput("OutBRDFLut"), reflections.GetInput("InBRDFLut"));
-        graph.ConnectNodes(shadows.GetOutput("OutDirectionalMaps"), reflections.GetInput("InDirectionalMaps"));
-        graph.ConnectNodes(shadows.GetOutput("OutPointSpotMaps"), reflections.GetInput("InPointSpotMaps"));
         graph.ConnectNodes(cacao.GetOutput("OutAmbientOcclusion"), reflections.GetInput("InAmbientOcclusion"));
         graph.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), skyBox.GetInput("InDepthBuffer"));
         graph.ConnectNodes(opaque.GetOutput("OutVelocityBuffer"), skyBox.GetInput("InVelocityBuffer"));
