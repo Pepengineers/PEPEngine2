@@ -1032,7 +1032,7 @@ BistroComparePanel::PlotLines BistroComparePanel::RunLines(const Winner* placeme
     PlotLines lines{};
     if (!placement || (placement->Placements[0].Fields.empty() && placement->Placements[1].Fields.empty()))
     {
-        if (!current.Samples.empty() && current.Error.empty()) lines[0].Data = &current;
+        if (!current.Samples.empty() && current.Error.empty()) lines[0] = {&current, current.Mode};
         return lines;
     }
     for (size_t i = 0; i < lines.size(); ++i)
@@ -1056,14 +1056,17 @@ BistroComparePanel::PlotLines BistroComparePanel::RunLines(const Winner* placeme
         if (data->Samples.empty() || !data->Error.empty())
             line.Label += " / " + (data->Error.empty() ? std::string("frame trace unavailable") : data->Error);
         else
-        {
             line.Data = data;
-            char fps[40];
-            std::snprintf(fps, sizeof(fps), " / %.1f FPS", data->Timing.Fps);
-            line.Label += fps;
-        }
     }
     return lines;
+}
+
+std::string BistroComparePanel::PlotLine::Caption(bool fps) const
+{
+    if (!Data) return Label;
+    char value[48];
+    std::snprintf(value, sizeof(value), fps ? "%.1f FPS" : "%.1f ms", fps ? Data->Timing.Fps : Data->Timing.MeanMs());
+    return Label.empty() ? std::string(value) : Label + " / " + value;
 }
 
 void BistroComparePanel::DrawPlot(const PlotLines& lines, bool fps, double target)
@@ -1087,8 +1090,9 @@ void BistroComparePanel::DrawPlot(const PlotLines& lines, bool fps, double targe
     for (size_t i = 0; i < lines.size(); ++i)
     {
         const auto& line = lines[i];
-        if (line.Label.empty()) continue;
-        legendItem(line.Label.c_str(), line.Data ? std::optional{ComparisonColors[i]} : std::nullopt, i == 1);
+        const auto caption = line.Caption(fps);
+        if (caption.empty()) continue;
+        legendItem(caption.c_str(), line.Data ? std::optional{ComparisonColors[i]} : std::nullopt, i == 1);
     }
     if (hasTrace && target > 0)
     {
@@ -1205,9 +1209,9 @@ void BistroComparePanel::DrawFrameTraces(const PlotLines& lines, bool fps, doubl
             draw->AddCircleFilled(pos, .3f * em, color);
             draw->AddCircle(pos, .3f * em, muted);
             ImGui::Separator();
-            if (!lines[iSeries].Label.empty()) ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(color), "%c   %s", id, lines[iSeries].Label.c_str());
+            ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(color), "%c   %s", id, lines[iSeries].Caption(fps).c_str());
             BistroPlot::DrawFrameDetails(sample.Number, sample.RouteSeconds, sample.Section.c_str(), sample.FrameMs,
-                                         sample.IntervalMs);
+                                         sample.IntervalMs, fps);
         }
         ImGui::EndTooltip();
     }

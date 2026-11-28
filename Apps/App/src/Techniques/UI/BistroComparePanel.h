@@ -106,6 +106,7 @@ class BistroComparePanel
     {
         const Selection* Data = nullptr;
         std::string Label;
+        std::string Caption(bool fps) const;
     };
     using PlotLines = std::array<PlotLine, 2>;
     PlotLines RunLines(const Winner* placement, const Selection& current, std::array<Selection, 2>& cache);

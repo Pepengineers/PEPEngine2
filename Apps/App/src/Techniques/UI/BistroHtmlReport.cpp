@@ -212,8 +212,8 @@ std::string BistroComparePanel::ReportBody(const Run& run, const Winner* selecte
             }
             html << "\" title=\"" << Escape(pass.Label)
                  << " &middot; " << data.Samples.size() << " frames &middot; Interval measured "
-                 << (data.AfterRender ? "after Render / Present" : "before Present") << "\"><span class=\"series-label\">"
-                 << Escape(line.Label.empty() ? data.Mode : line.Label) << "</span>";
+                 << (data.AfterRender ? "after Render / Present" : "before Present") << "\"><span class=\"series-label\" data-fps=\""
+                 << Escape(line.Caption(true)) << "\">" << Escape(line.Caption(false)) << "</span>";
             for (const auto& [name, index] : sections) html << "<span hidden data-section=\"" << index << "\">" << Escape(name) << "</span>";
             html << "</div>";
         }

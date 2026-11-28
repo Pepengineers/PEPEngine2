@@ -56,11 +56,12 @@ size_t NearestFrame(const Samples& samples, double time)
     return size_t(it - samples.begin());
 }
 
-inline void DrawFrameDetails(size_t number, double time, const char* section, double frameMs, double intervalMs)
+inline void DrawFrameDetails(size_t number, double time, const char* section, double frameMs, double intervalMs, bool fps)
 {
     ImGui::Text("Frame #%zu   |   %.3f s", number, time);
     if (*section) ImGui::TextUnformatted(section);
     if (frameMs >= 0) ImGui::Text("Timed CPU scope   %.3f ms", frameMs);
-    if (intervalMs > 0) ImGui::Text("Application frame interval   %.3f ms   (%.1f FPS)", intervalMs, 1000 / intervalMs);
+    if (intervalMs > 0)
+        ImGui::Text(fps ? "Frame rate   %.1f FPS" : "Application frame interval   %.3f ms", fps ? 1000. / intervalMs : intervalMs);
 }
 }

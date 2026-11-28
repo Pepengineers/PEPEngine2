@@ -124,12 +124,13 @@ for (const chart of document.querySelectorAll("figure[data-target]")) {
   if (!svg) continue;
   const lines = [...chart.querySelectorAll(".series")].map(el => {
     const sections = [];
+    const label = el.querySelector(".series-label");
     for (const section of el.querySelectorAll("[data-section]")) sections[Number(section.dataset.section)] = section.textContent;
     return {
       frames: el.dataset.frames.trim().split(/\s+/).map(row => row.split(",").map(Number)),
       trace: el.dataset.trace.trim().split(/\s+/).map(Number),
       role: el.classList.contains("second") ? "second" : "first",
-      label: el.querySelector(".series-label").textContent, sections
+      label, msCaption: label.textContent, sections
     };
   });
   const start = Math.min(...lines.map(l => l.frames[0][0]));
@@ -162,7 +163,7 @@ for (const chart of document.querySelectorAll("figure[data-target]")) {
     for (const line of lines) {
       const row = document.createElement("p");
       const title = document.createElement("b");
-      title.textContent = line.label;
+      title.textContent = line.label.textContent;
       row.append(title);
       if (cursorTime < line.frames[0][0] || cursorTime > line.frames.at(-1)[0]) {
         row.append(" · Outside measured interval");
@@ -171,7 +172,7 @@ for (const chart of document.querySelectorAll("figure[data-target]")) {
         const [time, interval, cpu, number, section] = frame;
         node("circle", {class:line.role, cx:x(time), cy:y(value(frame)), r:4}, markers);
         const details = ["Frame #" + number, time.toFixed(3) + " s", line.sections[section],
-          "Application frame interval " + interval.toFixed(3) + " ms (" + (1000 / interval).toFixed(1) + " FPS)"];
+          fps ? "Frame rate " + value(frame).toFixed(1) + " FPS" : "Application frame interval " + interval.toFixed(3) + " ms"];
         if (cpu >= 0) details.push("Timed CPU scope " + cpu.toFixed(3) + " ms");
         row.append(" · " + details.filter(Boolean).join(" · "));
       }
@@ -196,6 +197,7 @@ for (const chart of document.querySelectorAll("figure[data-target]")) {
       chart.querySelector(".target-key").textContent = "Target " + (fps ? limit + " FPS" : target.toFixed(1) + " ms");
     }
     for (const line of lines) {
+      line.label.textContent = fps ? line.label.dataset.fps : line.msCaption;
       const points = line.trace.map(index => {
         const frame = line.frames[index];
         return x(frame[0]) + "," + y(value(frame));
