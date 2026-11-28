@@ -940,14 +940,13 @@ void BistroComparePanel::Select(Selection &s, int run, int pass)
 
 namespace
 {
-void DrawSeriesLabel(size_t index, const char* label)
+void DrawLineSample(ImU32 color, bool dashed)
 {
     const float em = ImGui::GetFontSize();
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     const float y = origin.y + ImGui::GetTextLineHeight() * .5f;
-    const auto color = ComparisonColors[index];
     auto* draw = ImGui::GetWindowDrawList();
-    if (index == 1)
+    if (dashed)
     {
         draw->AddLine({origin.x, y}, {origin.x + .65f * em, y}, color, .16f * em);
         draw->AddLine({origin.x + em, y}, {origin.x + 1.65f * em, y}, color, .16f * em);
@@ -956,6 +955,12 @@ void DrawSeriesLabel(size_t index, const char* label)
         draw->AddLine({origin.x, y}, {origin.x + 1.65f * em, y}, color, .16f * em);
     ImGui::Dummy({1.65f * em, ImGui::GetTextLineHeight()});
     ImGui::SameLine();
+}
+
+void DrawSeriesLabel(size_t index, const char* label)
+{
+    const auto color = ComparisonColors[index];
+    DrawLineSample(color, index == 1);
     ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(color), "%c   %s", index ? 'B' : 'A', label);
 }
 }
@@ -1060,15 +1065,27 @@ BistroComparePanel::PlotLines BistroComparePanel::RunLines(const Winner* placeme
 
 void BistroComparePanel::DrawPlot(const PlotLines& lines, bool fps, double target)
 {
+    const bool hasTrace = lines[0].Data || lines[1].Data;
+    if (hasTrace) DrawFrameTraces(lines, fps, target);
+
+    ImGui::PushTextWrapPos(0.f);
     for (size_t i = 0; i < lines.size(); ++i)
     {
         const auto& line = lines[i];
         if (line.Label.empty()) continue;
-        if (!line.Data) { ImGui::TextDisabled("%s", line.Label.c_str()); continue; }
-        BistroPlot::ContinueRowIfFits(5.f * ImGui::GetFontSize() + ImGui::CalcTextSize(line.Label.c_str()).x);
-        DrawSeriesLabel(i, line.Label.c_str());
+        if (line.Data) DrawSeriesLabel(i, line.Label.c_str());
+        else ImGui::TextDisabled("%s", line.Label.c_str());
     }
-    if (!lines[0].Data && !lines[1].Data) return;
+    if (hasTrace && target > 0)
+    {
+        DrawLineSample(ImGui::GetColorU32(ImGuiCol_TextDisabled), true);
+        ImGui::TextDisabled("Target   %.0f FPS / %.1f ms", target, 1000. / target);
+    }
+    ImGui::PopTextWrapPos();
+}
+
+void BistroComparePanel::DrawFrameTraces(const PlotLines& lines, bool fps, double target)
+{
     const auto& a = *(lines[0].Data ? lines[0].Data : lines[1].Data);
     const auto& b = lines[1].Data ? *lines[1].Data : a;
     const double begin = std::min(a.Samples.front().RouteSeconds, b.Samples.front().RouteSeconds);
@@ -1590,12 +1607,6 @@ void BistroComparePanel::DrawRun(int index, fs::path& pendingPreset)
         if (ImGui::CollapsingHeader("Frame timing", ImGuiTreeNodeFlags_DefaultOpen))
         {
             _runFps = BistroPlot::Choice("", "Frame time (ms)", "FPS", _runFps);
-            if (target > 0)
-            {
-                const float labelWidth = ImGui::CalcTextSize("Dashed target   60 FPS / 33.3 ms").x;
-                BistroPlot::ContinueRowIfFits(labelWidth);
-                ImGui::TextDisabled("Dashed target   %.0f FPS / %.1f ms", target, 1000. / target);
-            }
             DrawPlot(RunLines(placement, selection, _placementPasses), _runFps, target);
         }
     }

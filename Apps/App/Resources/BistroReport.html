@@ -57,11 +57,13 @@ thead { color:var(--muted); background:#16251f }
 .delta.Raised { color:var(--mint) }
 .delta.Reduced { color:#f8c36e }
 figure { margin:1em 0; padding:16px; border:1px solid var(--border); border-radius:5px; background:var(--ink) }
-figure .switch { font-size:.88rem; margin-top:.6em }
-.series { padding:.16em 0 }
-.series::before { content:""; display:inline-block; vertical-align:middle; width:1.6em; margin-right:.5em; border-top:3px solid var(--mint) }
+figure .switch { font-size:.88rem }
+.series, .target-key { display:grid; grid-template-columns:1.6em minmax(0,1fr); column-gap:.6em; align-items:baseline; padding:.2em 0 }
+.series::before, .target-key::before { content:""; align-self:start; margin-top:.7em; border-top:3px solid var(--mint) }
 .series.second::before { border-top:3px dashed #f8c36e }
-.series small { margin-left:.4em }
+.series b { color:var(--paper) }
+.series small { grid-column:2 }
+.target-key::before { border-top:2px dashed var(--muted) }
 figure svg { cursor:crosshair; touch-action:pan-y }
 figure svg:focus-visible { outline:1px solid var(--lime) }
 .frame-readout { margin-top:.8em; padding-top:.6em; border-top:1px solid var(--border); font-size:.9rem; font-variant-numeric:tabular-nums }
@@ -73,9 +75,10 @@ svg circle.second { fill:#f8c36e }
 svg { width:100%; display:block; margin:.5em 0; overflow:visible }
 svg text { fill:var(--muted); font-size:13px }
 svg line { stroke:var(--border) }
-svg .target { stroke:var(--lime); stroke-dasharray:6 5 }
+svg .target { stroke:var(--muted); stroke-dasharray:6 5 }
 svg polyline { fill:none; stroke:var(--mint); stroke-width:1.6; vector-effect:non-scaling-stroke }
-figcaption { font-size:.85rem; text-align:center }
+.route-axis { font-size:.85rem; color:var(--muted); text-align:center }
+figcaption { margin-top:.6em; font-size:.92rem }
 .files { list-style:none; padding:0 1em; line-height:1.8; overflow-wrap:anywhere }
 .files a { color:var(--mint) }
 @media (max-width:600px) {

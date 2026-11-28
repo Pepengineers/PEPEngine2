@@ -183,7 +183,13 @@ std::string BistroComparePanel::ReportBody(const Run& run, const Winner* selecte
 
         html << "<h2>Frame timing</h2>";
         const auto lines = RunLines(placement, measurement, cache);
+        const bool hasTrace = lines[0].Data || lines[1].Data;
         html << "<figure data-target=\"" << run.Target() << "\">";
+        if (hasTrace)
+            html << "<div class=\"switch\"><button aria-pressed=\"true\">Frame time (ms)</button><button aria-pressed=\"false\">FPS</button></div>"
+                 << "<svg viewBox=\"0 0 800 196\" tabindex=\"0\" role=\"group\" aria-label=\"Frame timing along the route. Use arrow keys to inspect frames.\"></svg>"
+                 << "<div class=\"route-axis\">Route time (s)</div>";
+        html << "<figcaption>";
         for (size_t i = 0; i < lines.size(); ++i)
         {
             const auto& line = lines[i];
@@ -210,17 +216,14 @@ std::string BistroComparePanel::ReportBody(const Run& run, const Winner* selecte
             for (const auto& [name, index] : sections) html << "<span hidden data-section=\"" << index << "\">" << Escape(name) << "</span>";
             html << "</div>";
         }
-        if (lines[0].Data || lines[1].Data)
+        if (hasTrace)
         {
-            html << "<div class=\"switch\"><button aria-pressed=\"true\">Frame time (ms)</button><button aria-pressed=\"false\">FPS</button></div>"
-                 << "<svg viewBox=\"0 0 800 196\" tabindex=\"0\" role=\"group\" aria-label=\"Frame timing along the route. Use arrow keys to inspect frames.\"></svg>"
-                 << "<figcaption>Route time (s)";
-            if (run.Target() > 0) html << " &middot; Dashed target " << run.Target() << " FPS / " << Decimal(1000. / run.Target()) << " ms";
-            html << "</figcaption><div class=\"frame-readout\">Point at the chart or use the arrow keys to inspect a frame.</div>";
+            if (run.Target() > 0) html << "<div class=\"target-key\">Target &nbsp; " << run.Target() << " FPS / " << Decimal(1000. / run.Target()) << " ms</div>";
+            html << "<div class=\"frame-readout\">Point at the chart or use the arrow keys to inspect a frame.</div>";
         }
         else if (lines[0].Label.empty() && lines[1].Label.empty())
             html << "<p class=\"muted\">" << (measurement.Error.empty() ? "Full-route frame trace unavailable." : Escape(measurement.Error)) << "</p>";
-        html << "</figure>";
+        html << "</figcaption></figure>";
         if (measurement.Mode == "Async" && measurement.ScopeMeanMs > 0 && measurement.ScopeP95Ms > 0)
             html << "<p>Timed CPU scope &nbsp; " << Decimal(measurement.ScopeMeanMs) << " ms mean &nbsp;/&nbsp; "
                  << Decimal(measurement.ScopeP95Ms) << " ms P95</p>";

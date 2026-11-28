@@ -122,6 +122,7 @@ class BistroComparePanel
     void Select(Selection &, int run, int pass);
     void DrawSelection(Selection &, size_t index);
     static void DrawPlot(const PlotLines& lines, bool fps, double target = 0);
+    static void DrawFrameTraces(const PlotLines& lines, bool fps, double target);
     static void DrawRouteMetrics(const FrameTiming& timing, ImFont* headingFont);
     static void DrawComparedTimings(const FrameTiming& a, const FrameTiming& b, const char* left, const char* right, bool comparable);
     static std::array<std::string, 8> ReconstructionRow(const Run&, const ReconstructionComparison&, const std::string&);
