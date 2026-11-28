@@ -186,8 +186,14 @@ std::string BistroComparePanel::ReportBody(const Run& run, const Winner* selecte
         const bool hasTrace = lines[0].Data || lines[1].Data;
         html << "<figure data-target=\"" << run.Target() << "\">";
         if (hasTrace)
-            html << "<div class=\"switch\"><button aria-pressed=\"true\">Frame time (ms)</button><button aria-pressed=\"false\">FPS</button></div>"
-                 << "<svg viewBox=\"0 0 800 196\" tabindex=\"0\" role=\"group\" aria-label=\"Frame timing along the route. Use arrow keys to inspect frames.\"></svg>"
+            html << "<div class=\"plot-controls\"><div class=\"switch\"><button aria-pressed=\"true\">Frame time (ms)</button><button aria-pressed=\"false\">FPS</button></div>"
+                 << "<div class=\"plot-zoom\" role=\"group\" aria-label=\"Chart zoom\" hidden>"
+                 << "<button class=\"zoom-button plus\" data-scale=\"0.8\" title=\"Zoom in\" aria-label=\"Zoom in\"><span aria-hidden=\"true\"></span></button>"
+                 << "<button class=\"zoom-button\" data-scale=\"1.25\" title=\"Zoom out\" aria-label=\"Zoom out\"><span aria-hidden=\"true\"></span></button>"
+                 << "<button data-scale=\"1\">Reset view</button></div>"
+                 << "<button class=\"expand-chart\" title=\"Expand chart\" aria-label=\"Expand chart\" aria-haspopup=\"dialog\" aria-expanded=\"false\"></button></div>"
+                 << "<small class=\"plot-help\" hidden>Drag to zoom · Wheel to zoom in or out · Right-drag or Shift-drag to pan · Double-click to reset</small>"
+                 << "<svg tabindex=\"0\" role=\"group\" aria-label=\"Frame timing along the route. Use arrow keys to inspect frames.\"></svg>"
                  << "<div class=\"route-axis\">Route time (s)</div>";
         html << "<figcaption><div class=\"plot-legend\">";
         for (size_t i = 0; i < lines.size(); ++i)

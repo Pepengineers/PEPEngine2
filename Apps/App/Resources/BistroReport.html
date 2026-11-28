@@ -58,21 +58,52 @@ thead { color:var(--muted); background:#16251f }
 .delta.Reduced { color:#f8c36e }
 figure { margin:1em 0; padding:16px; border:1px solid var(--border); border-radius:5px; background:var(--ink) }
 figure .switch { font-size:.88rem }
+.plot-controls, .plot-zoom { display:flex; flex-wrap:wrap; gap:6px; align-items:center; font-size:.92rem }
+.plot-zoom[hidden] { display:none }
+.expand-chart, .zoom-button { display:grid; place-items:center; align-self:stretch;
+  width:2.35rem; min-height:2.2rem; padding:0; color:var(--lime) }
+.expand-chart { margin-inline-start:auto }
+.expand-chart::before {
+  content:""; width:16px; height:16px;
+  background:
+    linear-gradient(90deg,currentColor 5px,transparent 5px 11px,currentColor 11px) top / 100% 2px no-repeat,
+    linear-gradient(90deg,currentColor 5px,transparent 5px 11px,currentColor 11px) bottom / 100% 2px no-repeat,
+    linear-gradient(currentColor 5px,transparent 5px 11px,currentColor 11px) left / 2px 100% no-repeat,
+    linear-gradient(currentColor 5px,transparent 5px 11px,currentColor 11px) right / 2px 100% no-repeat;
+}
+.expand-chart[aria-expanded="true"]::before { content:"×"; background:none; font-size:22px; line-height:16px; text-align:center }
+.zoom-button span { width:13px; height:13px; display:grid; place-items:center; border:1.7px solid;
+  border-radius:50%; position:relative; transform:translate(-2px,-2px) }
+.zoom-button span::before { content:""; width:6px; height:1.6px; background:currentColor }
+.zoom-button.plus span { background:linear-gradient(currentColor,currentColor) center / 1.6px 6px no-repeat }
+.zoom-button span::after { content:""; width:6px; height:1.7px; background:currentColor;
+  position:absolute; top:calc(100% - 1px); left:calc(100% - 1px); transform:rotate(45deg); transform-origin:left center }
+.plot-help { margin-top:.4em }
+.plot-help:not([hidden]) { display:block }
+.plot-dialog { color:inherit; background:var(--ink); padding:0; border:1px solid var(--border); border-radius:7px;
+  width:calc(100% - 24px); max-width:none; height:calc(100% - 24px); max-height:none }
+.plot-dialog::backdrop { background:#000b }
+.plot-dialog figure { display:grid; grid-template-rows:auto auto minmax(180px,1fr) auto auto;
+  height:100%; margin:0; border:none }
+body:has(.plot-dialog[open]) { overflow:hidden }
 .plot-legend { display:flex; flex-wrap:wrap; align-items:center; gap:.25em 1.1em }
 .series, .target-key { display:flex; align-items:center; gap:.45em }
 .series::before, .target-key::before { content:""; flex:none; width:1.6em; border-top:2px solid var(--mint) }
 .series.second::before { border-top:2px dashed #f8c36e }
 .target-key::before { border-top:2px dashed var(--muted) }
-figure svg { cursor:crosshair; touch-action:pan-y }
+figure svg { cursor:crosshair; touch-action:pan-y; height:clamp(150px,22vw,245px) }
+.plot-dialog svg { height:100%; min-height:0; margin:0; touch-action:none }
 figure svg:focus-visible { outline:1px solid var(--lime) }
 .frame-readout { margin-top:.8em; padding-top:.6em; border-top:1px solid var(--border); font-size:.9rem; font-variant-numeric:tabular-nums }
 .frame-readout p { margin:.2em 0 }
+.plot-dialog .frame-readout { height:6.5em; overflow:auto }
 svg polyline.second { stroke:#f8c36e; stroke-dasharray:6 4 }
 svg .cursor { stroke:var(--paper); stroke-dasharray:2 3 }
 svg circle { fill:var(--mint); stroke:var(--ink) }
 svg circle.second { fill:#f8c36e }
-svg { width:100%; display:block; margin:.5em 0; overflow:visible }
-svg text { fill:var(--muted); font-size:13px }
+svg { width:100%; display:block; margin:.5em 0 }
+svg text { fill:var(--muted); font-size:12px; font-variant-numeric:tabular-nums }
+svg .zoom-box { fill:#66dbb238; stroke:var(--mint) }
 svg line { stroke:var(--border) }
 svg .target { stroke:var(--muted); stroke-dasharray:6 5 }
 svg polyline { fill:none; stroke:var(--mint); stroke-width:1.6; vector-effect:non-scaling-stroke }
@@ -87,6 +118,9 @@ figcaption { margin-top:.6em; font-size:.92rem }
   .metric dd { font-size:2.2rem; margin:0 }
   .brand { padding:14px 2px }
   figure { padding:8px }
+  .plot-controls .expand-chart { order:1 }
+  .plot-zoom { order:2; flex-basis:100% }
+  .plot-dialog .frame-readout { height:9em }
 }
 </style>
 </head>
@@ -119,7 +153,7 @@ for (const filter of document.querySelectorAll(".filter")) {
   });
 }
 
-for (const chart of document.querySelectorAll("figure[data-target]")) {
+for (const [chartIndex, chart] of [...document.querySelectorAll("figure[data-target]")].entries()) {
   const svg = chart.querySelector("svg");
   if (!svg) continue;
   const lines = [...chart.querySelectorAll(".series")].map(el => {
@@ -134,42 +168,113 @@ for (const chart of document.querySelectorAll("figure[data-target]")) {
     };
   });
   const start = Math.min(...lines.map(l => l.frames[0][0]));
-  const end = Math.max(...lines.map(l => l.frames.at(-1)[0]));
-  const buttons = [...chart.querySelectorAll("button")];
+  const duration = Math.max(.001, Math.max(...lines.map(l => l.frames.at(-1)[0])) - start);
+  const limit = Number(chart.dataset.target);
+  const buttons = [...chart.querySelectorAll(".switch button")];
+  const expand = chart.querySelector(".expand-chart");
+  const toolbar = chart.querySelector(".plot-zoom");
+  const help = chart.querySelector(".plot-help");
   const readout = chart.querySelector(".frame-readout");
-  const x = time => 54 + 730 * (time - start) / Math.max(.001, end - start);
-  let fps = false, peak = 1, cursorTime = null, markers;
+  const dialog = document.createElement("dialog");
+  dialog.className = "plot-dialog";
+  dialog.setAttribute("aria-label", "Frame timing");
+  chart.after(dialog);
+  const xAxis = [0, 1], yAxis = [0, 1];
+  const clipId = "plot-clip-" + chartIndex;
+  const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
+  let fps = false, cursorTime = null, markers, selection, drag;
+  let left, right, bottom, begin, end, low, range;
+  const top = 12;
+  const fullPeak = [false, true].map(rate => {
+    let peak = limit ? (rate ? limit : 1000 / limit) : 0;
+    for (const line of lines)
+      for (const index of line.trace)
+        peak = Math.max(peak, rate ? 1000 / line.frames[index][1] : line.frames[index][1]);
+    return peak;
+  });
   const value = frame => fps ? 1000 / frame[1] : frame[1];
-  const y = value => 164 - 150 * value / peak;
+  const x = time => left + (right - left) * (time - begin) / (end - begin);
+  const y = value => bottom - (bottom - top) * (value - low) / range;
+  const xFraction = px => clamp((px - left) / (right - left), 0, 1);
+  const yFraction = px => clamp((bottom - px) / (bottom - top), 0, 1);
+  const timeAt = px => begin + (end - begin) * xFraction(px);
+
+  function setAxis(axis, min, max) {
+    const span = clamp(max - min, .000001, 1);
+    axis[0] = clamp(min, 0, 1 - span);
+    axis[1] = axis[0] + span;
+  }
+  function zoomAxis(axis, anchor, factor) {
+    const span = axis[1] - axis[0];
+    const size = clamp(span * factor, .000001, 1);
+    const min = axis[0] + anchor * (span - size);
+    setAxis(axis, min, min + size);
+  }
+  function zoom(factor, fx = .5, fy = .5) {
+    zoomAxis(xAxis, fx, factor);
+    zoomAxis(yAxis, fy, factor);
+    draw();
+  }
+  function reset() {
+    setAxis(xAxis, 0, 1);
+    setAxis(yAxis, 0, 1);
+    draw();
+  }
   function node(name, attrs, parent = svg) {
     const el = document.createElementNS("http://www.w3.org/2000/svg", name);
     for (const [key, val] of Object.entries(attrs)) el.setAttribute(key, val);
     parent.append(el);
     return el;
   }
-  function nearest(frames, t) {
-    let lo = 0, hi = frames.length - 1;
+  function lowerBound(frames, t) {
+    let lo = 0, hi = frames.length;
     while (lo < hi) {
       const mid = Math.floor((lo + hi) / 2);
       if (frames[mid][0] < t) lo = mid + 1; else hi = mid;
     }
-    return lo && t - frames[lo - 1][0] < frames[lo][0] - t ? lo - 1 : lo;
+    return lo;
+  }
+  function nearest(frames, t) {
+    const i = lowerBound(frames, t);
+    return i === frames.length || (i && t - frames[i - 1][0] < frames[i][0] - t) ? i - 1 : i;
+  }
+  function visibleTrace(line) {
+    if (!dialog.open) return line.trace;
+    const {frames} = line;
+    const points = [];
+    let i = lowerBound(frames, begin);
+    if (i) points.push(i - 1);
+    while (i < frames.length && frames[i][0] <= end) {
+      let min = i, max = i;
+      const column = Math.floor(x(frames[i++][0]));
+      for (; i < frames.length && frames[i][0] <= end && Math.floor(x(frames[i][0])) === column; ++i) {
+        if (frames[i][1] < frames[min][1]) min = i;
+        if (frames[i][1] > frames[max][1]) max = i;
+      }
+      points.push(Math.min(min, max));
+      if (min !== max) points.push(Math.max(min, max));
+    }
+    if (i < frames.length) points.push(i);
+    return points;
   }
   function inspect(t) {
-    cursorTime = Math.max(start, Math.min(end, t));
+    cursorTime = clamp(t, begin, end);
     markers.replaceChildren();
-    node("line", {class:"cursor", x1:x(cursorTime), x2:x(cursorTime), y1:14, y2:164}, markers);
+    node("line", {class:"cursor", x1:x(cursorTime), x2:x(cursorTime), y1:top, y2:bottom}, markers);
     readout.replaceChildren();
+    const values = [];
     for (const line of lines) {
       const row = document.createElement("p");
       const title = document.createElement("b");
-      title.textContent = line.label.textContent;
+      const role = dialog.open && lines.length === 2 ? (line.role === "first" ? "A / " : "B / ") : "";
+      title.textContent = role + line.label.textContent;
       row.append(title);
       if (cursorTime < line.frames[0][0] || cursorTime > line.frames.at(-1)[0]) {
         row.append(" · Outside measured interval");
       } else {
         const frame = line.frames[nearest(line.frames, cursorTime)];
         const [time, interval, cpu, number, section] = frame;
+        values.push(value(frame));
         node("circle", {class:line.role, cx:x(time), cy:y(value(frame)), r:4}, markers);
         const details = ["Frame #" + number, time.toFixed(3) + " s", line.sections[section],
           fps ? "Frame rate " + value(frame).toFixed(1) + " FPS" : "Application frame interval " + interval.toFixed(3) + " ms"];
@@ -178,50 +283,139 @@ for (const chart of document.querySelectorAll("figure[data-target]")) {
       }
       readout.append(row);
     }
+    if (dialog.open && values.length === 2) {
+      const row = document.createElement("p");
+      const delta = values[1] - values[0];
+      row.textContent = "B − A  " + (delta > 0 ? "+" : "") + delta.toFixed(3) + (fps ? " FPS" : " ms");
+      readout.append(row);
+    }
   }
   function draw() {
-    const limit = Number(chart.dataset.target);
+    if (!svg.clientWidth || !svg.clientHeight) return;
     const target = limit && (fps ? limit : 1000 / limit);
-    peak = target;
-    for (const line of lines)
-      for (const index of line.trace) peak = Math.max(peak, value(line.frames[index]));
+    const peak = fullPeak[Number(fps)];
+    begin = start + duration * xAxis[0];
+    end = start + duration * xAxis[1];
+    low = peak * yAxis[0];
+    range = peak * (yAxis[1] - yAxis[0]);
+    const decimals = span => clamp(Math.ceil(-Math.log10(span / 4)) + 1, 1, 5);
+    left = dialog.open ? 73 : 54;
+    right = Math.max(left + 1, svg.clientWidth - (dialog.open ? 38 : 22));
+    bottom = Math.max(top + 1, svg.clientHeight - 24);
     svg.replaceChildren();
-    for (let i = 0; i <= 4; ++i) {
-      const tick = peak * i / 4, time = start + (end - start) * i / 4;
-      node("line", {x1:54, x2:784, y1:y(tick), y2:y(tick)});
-      node("text", {x:46, y:y(tick) + 4, "text-anchor":"end"}).textContent = tick.toFixed(1);
-      node("text", {x:x(time), y:187, "text-anchor":"middle"}).textContent = time.toFixed(1);
+    const ticks = Math.max(2, Math.min(dialog.open ? 8 : 4, Math.floor((right - left) / 78)));
+    for (let i = 0; i <= ticks; ++i) {
+      const time = begin + (end - begin) * i / ticks;
+      node("line", {x1:x(time), x2:x(time), y1:top, y2:bottom});
+      node("text", {x:x(time), y:bottom + 18, "text-anchor":"middle"}).textContent = time.toFixed(decimals(end - begin));
     }
+    for (let i = 0; i <= 4; ++i) {
+      const tick = low + range * i / 4;
+      node("line", {x1:left, x2:right, y1:y(tick), y2:y(tick)});
+      node("text", {x:left - 8, y:y(tick) + 4, "text-anchor":"end"}).textContent = tick.toFixed(decimals(range));
+    }
+    const clip = node("clipPath", {id:clipId});
+    node("rect", {x:left, y:top, width:right - left, height:bottom - top}, clip);
+    const bounds = node("g", {"clip-path":"url(#" + clipId + ")"});
     if (target) {
-      node("line", {class:"target", x1:54, x2:784, y1:y(target), y2:y(target)});
+      if (target >= low && target <= low + range)
+        node("line", {class:"target", x1:left, x2:right, y1:y(target), y2:y(target)}, bounds);
       chart.querySelector(".target-key").textContent = "Target " + (fps ? limit + " FPS" : target.toFixed(1) + " ms");
     }
     for (const line of lines) {
       line.label.textContent = fps ? line.label.dataset.fps : line.msCaption;
-      const points = line.trace.map(index => {
+      const points = visibleTrace(line).map(index => {
         const frame = line.frames[index];
         return x(frame[0]) + "," + y(value(frame));
       });
-      node("polyline", {class:line.role, points:points.join(" ")});
+      if (points.length === 1) {
+        const [cx, cy] = points[0].split(",");
+        node("circle", {class:line.role, cx, cy, r:2}, bounds);
+      } else if (points.length) {
+        node("polyline", {class:line.role, points:points.join(" ")}, bounds);
+      }
     }
-    markers = node("g", {});
+    markers = node("g", {}, bounds);
+    selection = node("rect", {class:"zoom-box", width:0, height:0, visibility:"hidden"}, bounds);
     if (cursorTime !== null) inspect(cursorTime);
     buttons.forEach((button, i) => button.setAttribute("aria-pressed", String(Boolean(i) === fps)));
   }
-  function pointer(event) {
-    const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(svg.getScreenCTM().inverse());
-    inspect(start + (end - start) * (point.x - 54) / 730);
+  function position(event) {
+    const rect = svg.getBoundingClientRect();
+    return {x:event.clientX - rect.left, y:event.clientY - rect.top};
   }
-  svg.onpointermove = pointer;
-  svg.onpointerdown = pointer;
+  const inside = p => p.x >= left && p.x <= right && p.y >= top && p.y <= bottom;
+  svg.onpointerdown = event => {
+    if (drag) return;
+    const p = position(event);
+    if (!inside(p) || (event.button !== 0 && event.button !== 2)) return;
+    if (!dialog.open) { inspect(timeAt(p.x)); return; }
+    drag = {...p, id:event.pointerId, pan:event.button === 2 || event.shiftKey};
+    svg.setPointerCapture(event.pointerId);
+    svg.focus({preventScroll:true});
+  };
+  svg.onpointermove = event => {
+    const p = position(event);
+    if (!drag) {
+      if (!dialog.open || inside(p)) inspect(timeAt(p.x));
+      return;
+    }
+    if (drag.id !== event.pointerId) return;
+    if (drag.pan) {
+      const dx = (drag.x - p.x) / (right - left) * (xAxis[1] - xAxis[0]);
+      const dy = (p.y - drag.y) / (bottom - top) * (yAxis[1] - yAxis[0]);
+      setAxis(xAxis, xAxis[0] + dx, xAxis[1] + dx);
+      setAxis(yAxis, yAxis[0] + dy, yAxis[1] + dy);
+      drag.x = p.x;
+      drag.y = p.y;
+      draw();
+    } else {
+      selection.setAttribute("x", Math.min(p.x, drag.x));
+      selection.setAttribute("y", Math.min(p.y, drag.y));
+      selection.setAttribute("width", Math.abs(p.x - drag.x));
+      selection.setAttribute("height", Math.abs(p.y - drag.y));
+      selection.setAttribute("visibility", "visible");
+    }
+  };
+  svg.onpointerup = event => {
+    if (drag?.id !== event.pointerId) return;
+    const p = position(event);
+    const select = (axis, a, b) => {
+      const span = axis[1] - axis[0];
+      setAxis(axis, axis[0] + Math.min(a, b) * span, axis[0] + Math.max(a, b) * span);
+    };
+    const zoomX = !drag.pan && Math.abs(drag.x - p.x) > 5;
+    const zoomY = !drag.pan && Math.abs(drag.y - p.y) > 5;
+    if (zoomX) select(xAxis, xFraction(drag.x), xFraction(p.x));
+    if (zoomY) select(yAxis, yFraction(drag.y), yFraction(p.y));
+    drag = null;
+    if (zoomX || zoomY) {
+      cursorTime = null;
+      draw();
+    }
+    inspect(timeAt(p.x));
+  };
+  svg.onlostpointercapture = () => {
+    drag = null;
+    selection?.setAttribute("visibility", "hidden");
+  };
+  svg.oncontextmenu = event => { if (dialog.open) event.preventDefault(); };
+  svg.ondblclick = () => { if (dialog.open) reset(); };
+  svg.addEventListener("wheel", event => {
+    if (!dialog.open || event.ctrlKey) return;
+    const p = position(event);
+    if (!inside(p)) return;
+    event.preventDefault();
+    if (!drag && event.deltaY) zoom(event.deltaY < 0 ? .8 : 1.25, xFraction(p.x), yFraction(p.y));
+  }, {passive:false});
   // Advance at least one displayed frame, even when the pointer is between samples.
   svg.onkeydown = event => {
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
     event.preventDefault();
     if (event.key === "End") { inspect(end); return; }
-    if (event.key === "Home" || cursorTime === null) { inspect(start); return; }
+    if (event.key === "Home" || cursorTime === null) { inspect(begin); return; }
     const right = event.key === "ArrowRight";
-    let next = right ? end : start;
+    let next = right ? end : begin;
     for (const {frames} of lines) {
       let i = nearest(frames, cursorTime) + (right ? 1 : -1);
       if (right && cursorTime < frames[0][0]) i = 0;
@@ -232,8 +426,37 @@ for (const chart of document.querySelectorAll("figure[data-target]")) {
     }
     inspect(next);
   };
-  buttons.forEach((button, i) => button.onclick = () => { fps = Boolean(i); draw(); });
-  draw();
+  buttons.forEach((button, i) => button.onclick = () => {
+    if (fps === Boolean(i)) return;
+    fps = Boolean(i);
+    reset();
+  });
+  for (const button of toolbar.querySelectorAll("button")) {
+    const factor = Number(button.dataset.scale);
+    button.onclick = () => factor === 1 ? reset() : zoom(factor);
+  }
+  expand.onclick = () => {
+    if (dialog.open) { dialog.close(); return; }
+    dialog.append(chart);
+    toolbar.hidden = help.hidden = false;
+    expand.title = "Close chart";
+    expand.setAttribute("aria-label", expand.title);
+    expand.setAttribute("aria-expanded", "true");
+    dialog.showModal();
+    expand.focus();
+    reset();
+  };
+  dialog.onclose = () => {
+    dialog.before(chart);
+    toolbar.hidden = help.hidden = true;
+    expand.title = "Expand chart";
+    expand.setAttribute("aria-label", expand.title);
+    expand.setAttribute("aria-expanded", "false");
+    drag = null;
+    expand.focus({preventScroll:true});
+    reset();
+  };
+  new ResizeObserver(draw).observe(svg);
 }
 </script>
 </body>

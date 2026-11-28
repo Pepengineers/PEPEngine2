@@ -812,6 +812,26 @@ void BistroComparePanel::Refresh(bool force)
     }
 }
 
+namespace
+{
+template<class Iterator, class Bucket, class Emit>
+void ForEachBucketExtrema(Iterator first, Iterator last, Bucket bucket, Emit emit)
+{
+    while (first != last)
+    {
+        auto lo = first, hi = first;
+        const int column = bucket(*first++);
+        for (; first != last && bucket(*first) == column; ++first)
+        {
+            if (first->IntervalMs < lo->IntervalMs) lo = first;
+            if (first->IntervalMs > hi->IntervalMs) hi = first;
+        }
+        emit(std::min(lo, hi));
+        if (lo != hi) emit(std::max(lo, hi));
+    }
+}
+}
+
 void BistroComparePanel::Select(Selection &s, int run, int pass)
 {
     s = {};
@@ -922,32 +942,67 @@ void BistroComparePanel::Select(Selection &s, int run, int pass)
     // Keep local extrema in chronological order for rendering, raw samples for the cursor.
     const double start = s.Samples.front().RouteSeconds;
     const double span = std::max(.001, s.Samples.back().RouteSeconds - start);
-    const auto bin = [&](size_t i) { return int(512 * (s.Samples[i].RouteSeconds - start) / span); };
-    for (size_t first = 0; first < s.Samples.size();)
-    {
-        size_t lo = first, hi = first, next = first + 1;
-        const int bucket = bin(first);
-        for (; next < s.Samples.size() && bin(next) == bucket; ++next)
-        {
-            if (s.Samples[next].IntervalMs < s.Samples[lo].IntervalMs) lo = next;
-            if (s.Samples[next].IntervalMs > s.Samples[hi].IntervalMs) hi = next;
-        }
-        s.Trace.push_back(std::min(lo, hi));
-        if (lo != hi) s.Trace.push_back(std::max(lo, hi));
-        first = next;
-    }
+    const auto bin = [&](const auto& sample) { return int(512 * (sample.RouteSeconds - start) / span); };
+    ForEachBucketExtrema(s.Samples.begin(), s.Samples.end(), bin,
+        [&](auto it) { s.Trace.push_back(size_t(it - s.Samples.begin())); });
 }
 
 namespace
 {
 constexpr float LineSampleWidthEm = 1.65f;
 
-void DrawLineSample(ImU32 color, bool dashed)
+enum class ChartIcon { Expand, ZoomIn, ZoomOut };
+
+bool ChartButton(const char* label, ChartIcon icon)
+{
+    const float size = ImGui::GetFrameHeight();
+    ImGui::PushID(label);
+    const bool pressed = ImGui::Button("##chart tool", {size, size});
+    const auto min = ImGui::GetItemRectMin();
+    const ImVec2 center{min.x + .5f * size, min.y + .5f * size};
+    const auto color = ImGui::GetColorU32(ImGuiCol_CheckMark);
+    const float stroke = std::max(1.f, .055f * size);
+    auto* draw = ImGui::GetWindowDrawList();
+    if (icon == ChartIcon::Expand)
+    {
+        const float radius = .23f * size, arm = .17f * size;
+        for (float dx : {-1.f, 1.f})
+            for (float dy : {-1.f, 1.f})
+            {
+                const ImVec2 corner{center.x + dx * radius, center.y + dy * radius};
+                const ImVec2 path[]{{corner.x - dx * arm, corner.y}, corner, {corner.x, corner.y - dy * arm}};
+                draw->AddPolyline(path, 3, color, ImDrawFlags_None, stroke);
+            }
+    }
+    else
+    {
+        const ImVec2 lens{center.x - .05f * size, center.y - .05f * size};
+        const float arm = .075f * size;
+        draw->AddCircle(lens, .16f * size, color, 0, stroke);
+        draw->AddLine({lens.x + .12f * size, lens.y + .12f * size}, {center.x + .23f * size, center.y + .23f * size}, color, stroke);
+        draw->AddLine({lens.x - arm, lens.y}, {lens.x + arm, lens.y}, color, stroke);
+        if (icon == ChartIcon::ZoomIn)
+            draw->AddLine({lens.x, lens.y - arm}, {lens.x, lens.y + arm}, color, stroke);
+    }
+    ImGui::SetItemTooltip("%s", label);
+    ImGui::PopID();
+    return pressed;
+}
+
+void RightAlignAfterItem(float width)
+{
+    const float right = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+    BistroPlot::ContinueRowIfFits(width);
+    const auto pos = ImGui::GetCursorScreenPos();
+    ImGui::SetCursorScreenPos({std::max(pos.x, right - width), pos.y});
+}
+
+void DrawLineSample(ImU32 color, bool dashed, float height)
 {
     const float em = ImGui::GetFontSize();
     const float width = LineSampleWidthEm * em;
     const ImVec2 origin = ImGui::GetCursorScreenPos();
-    const float y = origin.y + ImGui::GetTextLineHeight() * .5f;
+    const float y = origin.y + height * .5f;
     auto* draw = ImGui::GetWindowDrawList();
     if (dashed)
     {
@@ -956,14 +1011,15 @@ void DrawLineSample(ImU32 color, bool dashed)
     }
     else
         draw->AddLine({origin.x, y}, {origin.x + width, y}, color, .16f * em);
-    ImGui::Dummy({width, ImGui::GetTextLineHeight()});
+    ImGui::Dummy({width, height});
     ImGui::SameLine();
 }
 
 void DrawSeriesLabel(size_t index, const char* label)
 {
     const auto color = ComparisonColors[index];
-    DrawLineSample(color, index == 1);
+    DrawLineSample(color, index == 1, ImGui::GetFrameHeight());
+    ImGui::AlignTextToFramePadding();
     ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(color), "%c   %s", index ? 'B' : 'A', label);
 }
 }
@@ -974,8 +1030,8 @@ void BistroComparePanel::DrawSelection(Selection &s, size_t index)
     DrawSeriesLabel(index, index ? "Comparison" : "Reference");
     if (!s.Samples.empty() && s.Error.empty())
     {
-        BistroPlot::ContinueRowIfFits(ImGui::CalcTextSize("Details").x + 2.f * ImGui::GetStyle().FramePadding.x);
-        if (ImGui::SmallButton("Details")) ImGui::OpenPopup("Pass details");
+        RightAlignAfterItem(ImGui::CalcTextSize("Details").x + 2.f * ImGui::GetStyle().FramePadding.x);
+        if (ImGui::Button("Details")) ImGui::OpenPopup("Pass details");
     }
     int r = s.RunIndex;
     ImGui::SetNextItemWidth(-1);
@@ -1069,11 +1125,72 @@ std::string BistroComparePanel::PlotLine::Caption(bool fps) const
     return Label.empty() ? std::string(value) : Label + " / " + value;
 }
 
-void BistroComparePanel::DrawPlot(const PlotLines& lines, bool fps, double target)
+void BistroComparePanel::PlotView::Axis::Set(double min, double max)
+{
+    const double span = std::clamp(max - min, .000001, 1.);
+    Min = std::clamp(min, 0., 1. - span);
+    Max = Min + span;
+}
+
+void BistroComparePanel::PlotView::Axis::Zoom(double anchor, double factor)
+{
+    const double span = std::clamp(Span() * factor, .000001, 1.);
+    const double min = Min + anchor * (Span() - span);
+    Set(min, min + span);
+}
+
+void BistroComparePanel::PlotView::Zoom(double x, double y, double factor)
+{
+    X.Zoom(x, factor);
+    Y.Zoom(y, factor);
+}
+
+void BistroComparePanel::DrawPlot(const PlotLines& lines, bool& fps, double target)
 {
     const bool hasTrace = lines[0].Data || lines[1].Data;
-    if (hasTrace) DrawFrameTraces(lines, fps, target);
+    if (!hasTrace)
+    {
+        DrawPlotLegend(lines, fps, target);
+        return;
+    }
 
+    constexpr auto title = "Frame timing##expanded chart";
+    RightAlignAfterItem(ImGui::GetFrameHeight());
+    if (ChartButton("Expand chart", ChartIcon::Expand))
+    {
+        _plotView = {};
+        ImGui::OpenPopup(title);
+    }
+    DrawFrameTraces(lines, fps, target);
+    DrawPlotLegend(lines, fps, target);
+
+    const auto* viewport = ImGui::GetMainViewport();
+    const float margin = ImGui::GetFontSize();
+    ImGui::SetNextWindowPos(viewport->GetWorkCenter(), ImGuiCond_Always, {.5f, .5f});
+    ImGui::SetNextWindowSize({viewport->WorkSize.x - margin, viewport->WorkSize.y - margin});
+    bool open = true;
+    if (ImGui::BeginPopupModal(title, &open, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollWithMouse))
+    {
+        const bool nextFps = BistroPlot::Choice("", "Frame time (ms)", "FPS", fps);
+        if (nextFps != fps) _plotView = {};
+        fps = nextFps;
+        BistroPlot::ContinueRowIfFits(ImGui::GetFrameHeight());
+        if (ChartButton("Zoom in", ChartIcon::ZoomIn)) _plotView.Zoom(.5, .5, .8);
+        BistroPlot::ContinueRowIfFits(ImGui::GetFrameHeight());
+        if (ChartButton("Zoom out", ChartIcon::ZoomOut)) _plotView.Zoom(.5, .5, 1.25);
+        BistroPlot::ContinueRowIfFits(ImGui::CalcTextSize("Reset view").x + 2.f * ImGui::GetStyle().FramePadding.x);
+        if (ImGui::Button("Reset view")) _plotView = {};
+        ImGui::TextWrapped("Drag to zoom  |  Wheel to zoom in or out  |  Right-drag to pan  |  Double-click to reset");
+        DrawFrameTraces(lines, fps, target, &_plotView);
+        DrawPlotLegend(lines, fps, target);
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+}
+
+void BistroComparePanel::DrawPlotLegend(const PlotLines& lines, bool fps, double target)
+{
     const float em = ImGui::GetFontSize();
     bool first = true;
     const auto legendItem = [&](const char* label, std::optional<ImU32> color, bool dashed) {
@@ -1081,7 +1198,7 @@ void BistroComparePanel::DrawPlot(const PlotLines& lines, bool fps, double targe
         if (!first) BistroPlot::ContinueRowIfFits(sampleWidth + ImGui::CalcTextSize(label).x, em);
         first = false;
         ImGui::BeginGroup();
-        if (color) DrawLineSample(*color, dashed);
+        if (color) DrawLineSample(*color, dashed, ImGui::GetTextLineHeight());
         ImGui::PushTextWrapPos(0.f);
         ImGui::TextDisabled("%s", label);
         ImGui::PopTextWrapPos();
@@ -1094,7 +1211,7 @@ void BistroComparePanel::DrawPlot(const PlotLines& lines, bool fps, double targe
         if (caption.empty()) continue;
         legendItem(caption.c_str(), line.Data ? std::optional{ComparisonColors[i]} : std::nullopt, i == 1);
     }
-    if (hasTrace && target > 0)
+    if ((lines[0].Data || lines[1].Data) && target > 0)
     {
         char label[48];
         std::snprintf(label, sizeof(label), fps ? "Target %.0f FPS" : "Target %.1f ms", fps ? target : 1000. / target);
@@ -1102,56 +1219,117 @@ void BistroComparePanel::DrawPlot(const PlotLines& lines, bool fps, double targe
     }
 }
 
-void BistroComparePanel::DrawFrameTraces(const PlotLines& lines, bool fps, double target)
+void BistroComparePanel::DrawFrameTraces(const PlotLines& lines, bool fps, double target, PlotView* view)
 {
     const auto& a = *(lines[0].Data ? lines[0].Data : lines[1].Data);
     const auto& b = lines[1].Data ? *lines[1].Data : a;
-    const double begin = std::min(a.Samples.front().RouteSeconds, b.Samples.front().RouteSeconds);
+    const double start = std::min(a.Samples.front().RouteSeconds, b.Samples.front().RouteSeconds);
     const double end = std::max(a.Samples.back().RouteSeconds, b.Samples.back().RouteSeconds);
-    const double span = std::max(.001, end - begin);
-    const double peak = std::max(target > 0 ? (fps ? target : 1000. / target) : 0., fps ? std::max(a.MaxFps, b.MaxFps) : std::max(a.MaxMs, b.MaxMs));
-    const auto format = [](double value, const char *fmt) {
+    const double duration = std::max(.001, end - start);
+    const double targetValue = target > 0 ? (fps ? target : 1000. / target) : 0.;
+    const double peak = std::max(targetValue, fps ? std::max(a.MaxFps, b.MaxFps) : std::max(a.MaxMs, b.MaxMs));
+    const auto format = [](double value, double span, const char* suffix) {
+        const int digits = std::clamp(int(std::ceil(-std::log10(span / 4.))) + 1, 1, 5);
         char buf[64];
-        std::snprintf(buf, sizeof(buf), fmt, value);
+        std::snprintf(buf, sizeof(buf), "%.*f%s", digits, value, suffix);
         return std::string(buf);
     };
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     const float em = ImGui::GetFontSize();
     const ImVec2 available = ImGui::GetContentRegionAvail();
-    const float yLabelWidth = ImGui::CalcTextSize(format(peak, "%.1f").c_str()).x;
-    const float timeLabelWidth = ImGui::CalcTextSize(format(end, "%.1fs").c_str()).x;
+    // Reserve room before handling mouse input so the axis does not shift while dragging.
+    const float yLabelWidth = ImGui::CalcTextSize(format(peak, peak * (view ? .000001 : 1.), "").c_str()).x;
+    const float timeLabelWidth = ImGui::CalcTextSize(format(end, duration * (view ? .000001 : 1.), "s").c_str()).x;
     const float left = std::max(yLabelWidth + .75f * em, .5f * timeLabelWidth);
     const float width = std::max(1.f, available.x - left - .5f * timeLabelWidth);
     // Keep the three A/B metrics visible below the plot at typical window sizes.
-    const float height = lines[0].Data && lines[1].Data ? std::clamp(available.y - 10.f * em, 5.5f * em, 19.f * em)
+    const float height = view ? std::max(5.5f * em, available.y - 5.f * em) :
+        lines[0].Data && lines[1].Data ? std::clamp(available.y - 10.f * em, 5.5f * em, 19.f * em)
                                     : std::clamp(available.y * .65f, 7.f * em, 19.f * em);
     const ImVec2 top{origin.x + left, origin.y + .6f * em};
+    const ImVec2 bottom{top.x + width, top.y + height};
+    ImGui::SetCursorScreenPos(top);
+    ImGui::InvisibleButton("##compare cursor", {width, height},
+        view ? ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight : ImGuiButtonFlags_MouseButtonLeft);
+    const bool hovered = ImGui::IsItemHovered();
+    const auto mouse = ImGui::GetMousePos();
+    const auto fractionX = [&](float x) { return std::clamp(double((x - top.x) / width), 0., 1.); };
+    const auto fractionY = [&](float y) { return std::clamp(double((bottom.y - y) / height), 0., 1.); };
+    if (view)
+    {
+        auto& [x, y, dragStart, dragLast, button] = *view;
+        const bool mouseValid = ImGui::IsMousePosValid(&mouse);
+        if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) *view = {};
+        else if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+        {
+            button = ImGuiMouseButton_Left;
+            dragStart = dragLast = mouse;
+        }
+        else if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+        {
+            button = ImGuiMouseButton_Right;
+            dragLast = mouse;
+        }
+        if (button == ImGuiMouseButton_Right && mouseValid)
+        {
+            const double dx = (dragLast.x - mouse.x) / width * x.Span();
+            const double dy = (mouse.y - dragLast.y) / height * y.Span();
+            x.Set(x.Min + dx, x.Max + dx);
+            y.Set(y.Min + dy, y.Max + dy);
+        }
+        if (button != -1 && mouseValid) dragLast = mouse;
+        if (button != -1 && !ImGui::IsMouseDown(button))
+        {
+            if (button == ImGuiMouseButton_Left)
+            {
+                const auto select = [](PlotView::Axis& axis, double a, double b) {
+                    const auto [min, max] = std::minmax(a, b);
+                    axis.Set(axis.Min + min * axis.Span(), axis.Min + max * axis.Span());
+                };
+                if (std::abs(dragLast.x - dragStart.x) > 5) select(x, fractionX(dragStart.x), fractionX(dragLast.x));
+                if (std::abs(dragLast.y - dragStart.y) > 5) select(y, fractionY(dragStart.y), fractionY(dragLast.y));
+            }
+            button = -1;
+        }
+        if (hovered && button == -1 && ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY))
+        {
+            const float wheel = ImGui::GetIO().MouseWheel;
+            if (wheel) view->Zoom(fractionX(mouse.x), fractionY(mouse.y), std::pow(.8, wheel));
+        }
+    }
+    const double begin = start + (view ? view->X.Min * duration : 0.);
+    const double span = duration * (view ? view->X.Span() : 1.);
+    const double low = view ? view->Y.Min * peak : 0.;
+    const double range = peak * (view ? view->Y.Span() : 1.);
+    const auto valueY = [&](double value) { return bottom.y - height * float((value - low) / range); };
+    const auto sampleValue = [fps](const Selection::Sample& sample) { return fps ? 1000. / sample.IntervalMs : sample.IntervalMs; };
     const float stroke = std::max(1.f, .12f * em);
     const float dashLength = std::round(.5f * em);
     const float dashPeriod = dashLength + std::max(1.f, std::round(.3f * em));
     auto *draw = ImGui::GetWindowDrawList();
     const auto muted = ImGui::GetColorU32(ImGuiCol_TextDisabled);
-    for (int i = 0; i <= 4; ++i)
+    const int ticks = view && width >= 8.f * (timeLabelWidth + .5f * em) ? 8 : 4;
+    for (int i = 0; i <= ticks; ++i)
     {
-        const float f = i * .25f, y = top.y + height * (1 - f);
+        const float f = float(i) / ticks, y = top.y + height * (1 - f);
         draw->AddLine({top.x, y}, {top.x + width, y}, ImGui::GetColorU32(ImGuiCol_Border));
         draw->AddLine({top.x + width * f, top.y}, {top.x + width * f, top.y + height}, ImGui::GetColorU32(ImGuiCol_Border));
-        draw->AddText({origin.x, y - .5f * em}, muted, format(peak * f, "%.1f").c_str());
-        const auto tick = format(begin + f * span, "%.1fs");
-        if ((i == 0 || i == 4) || width >= 4.f * (timeLabelWidth + .5f * em))
+        draw->AddText({origin.x, y - .5f * em}, muted, format(low + range * f, range, "").c_str());
+        const auto tick = format(begin + f * span, span, "s");
+        if (i == 0 || i == ticks || width >= ticks * (timeLabelWidth + .5f * em))
             draw->AddText({top.x + width * f - ImGui::CalcTextSize(tick.c_str()).x / 2, top.y + height + .25f * em},
                           muted, tick.c_str());
     }
-    if (target > 0)
+    draw->PushClipRect(top, bottom, true);
+    if (targetValue > 0 && targetValue >= low && targetValue <= low + range)
     {
-        const float y = top.y + height * float(1 - (fps ? target : 1000. / target) / peak);
+        const float y = valueY(targetValue);
         for (float x = 0; x < width; x += dashPeriod)
             draw->AddLine({top.x + x, y}, {top.x + std::min(x + dashLength, width), y}, muted, stroke);
     }
     const auto point = [&](const Selection::Sample &sample) {
-        const double value = fps ? 1000 / sample.IntervalMs : sample.IntervalMs;
         return ImVec2{top.x + width * float((sample.RouteSeconds - begin) / span),
-                      top.y + height * float(1 - value / peak)};
+                      valueY(sampleValue(sample))};
     };
     // Draw B's dashes over A so identical traces still expose both series.
     for (size_t iSeries = 0; iSeries < lines.size(); ++iSeries)
@@ -1159,40 +1337,76 @@ void BistroComparePanel::DrawFrameTraces(const PlotLines& lines, bool fps, doubl
         if (!lines[iSeries].Data) continue;
         const auto& s = *lines[iSeries].Data;
         const auto color = ComparisonColors[iSeries];
-        ImVec2 previous = point(s.Samples[s.Trace.front()]);
-        draw->AddCircleFilled(previous, .15f * em, color);
+        std::optional<ImVec2> previous;
         float phase = 0;
-        for (size_t i = 1; i < s.Trace.size(); ++i)
-        {
-            const auto p = point(s.Samples[s.Trace[i]]);
+        const auto drawSample = [&](const Selection::Sample& sample) {
+            const auto p = point(sample);
+            const auto last = std::exchange(previous, p);
+            if (!last)
+            {
+                draw->AddCircleFilled(p, .15f * em, color);
+                return;
+            }
             if (iSeries == 1)
             {
-                const float dx = p.x - previous.x, dy = p.y - previous.y, length = std::hypot(dx, dy);
+                // Clip before expanding dashes. A segment outside a deep zoom can span millions of pixels.
+                float first = 0, end = 1;
+                const auto clip = [&](float a, float b, float min, float max) {
+                    if (a == b) return a >= min && a <= max;
+                    const auto [lo, hi] = std::minmax({(min - a) / (b - a), (max - a) / (b - a)});
+                    first = std::max(first, lo);
+                    end = std::min(end, hi);
+                    return first < end;
+                };
+                if (!clip(last->x, p.x, top.x, bottom.x) || !clip(last->y, p.y, top.y, bottom.y)) return;
+                const auto at = [&](float t) {
+                    return ImVec2{last->x + (p.x - last->x) * t, last->y + (p.y - last->y) * t};
+                };
+                const ImVec2 from = at(first), to = at(end);
+                const float dx = to.x - from.x, dy = to.y - from.y, length = std::hypot(dx, dy);
                 for (float d = 0; d < length;)
                 {
                     const float step = std::min(length - d, (phase < dashLength ? dashLength : dashPeriod) - phase);
                     if (phase < dashLength)
-                        draw->AddLine({previous.x + dx * d / length, previous.y + dy * d / length},
-                                      {previous.x + dx * (d + step) / length, previous.y + dy * (d + step) / length},
+                        draw->AddLine({from.x + dx * d / length, from.y + dy * d / length},
+                                      {from.x + dx * (d + step) / length, from.y + dy * (d + step) / length},
                                       color, stroke);
                     d += step;
                     phase = std::fmod(phase + step, dashPeriod);
                 }
             }
             else
-                draw->AddLine(previous, p, color, stroke);
-            previous = p;
+                draw->AddLine(*last, p, color, stroke);
+        };
+        if (!view)
+        {
+            for (const auto index : s.Trace) drawSample(s.Samples[index]);
+            continue;
         }
+        const auto first = std::lower_bound(s.Samples.begin(), s.Samples.end(), begin,
+            [](const auto& sample, double t) { return sample.RouteSeconds < t; });
+        const auto last = std::upper_bound(first, s.Samples.end(), begin + span,
+            [](double t, const auto& sample) { return t < sample.RouteSeconds; });
+        if (first != s.Samples.begin()) drawSample(*(first - 1));
+        const auto column = [&](const auto& sample) { return int((sample.RouteSeconds - begin) / span * width); };
+        ForEachBucketExtrema(first, last, column, [&](auto it) { drawSample(*it); });
+        if (last != s.Samples.end()) drawSample(*last);
     }
-    ImGui::SetCursorScreenPos(top);
-    ImGui::InvisibleButton("##compare cursor", {width, height});
-    if (ImGui::IsItemHovered())
+    if (view && view->DragButton == ImGuiMouseButton_Left)
     {
-        const float x = std::clamp(ImGui::GetMousePos().x, top.x, top.x + width);
+        const ImVec2 min{std::min(view->DragStart.x, view->DragLast.x), std::min(view->DragStart.y, view->DragLast.y)};
+        const ImVec2 max{std::max(view->DragStart.x, view->DragLast.x), std::max(view->DragStart.y, view->DragLast.y)};
+        draw->AddRectFilled(min, max, ImGui::GetColorU32(ImGuiCol_Button, .55f));
+        draw->AddRect(min, max, muted);
+    }
+    else if (hovered && (!view || view->DragButton == -1))
+    {
+        const float x = std::clamp(mouse.x, top.x, bottom.x);
         const double t = begin + (x - top.x) / width * span;
         draw->AddLine({x, top.y}, {x, top.y + height}, muted, stroke);
         ImGui::BeginTooltip();
-        ImGui::Text("Route %.2f s", t);
+        ImGui::Text("Route %.3f s", t);
+        std::array<const Selection::Sample*, 2> samples{};
         for (size_t iSeries = 0; iSeries < lines.size(); ++iSeries)
         {
             if (!lines[iSeries].Data) continue;
@@ -1204,6 +1418,7 @@ void BistroComparePanel::DrawFrameTraces(const PlotLines& lines, bool fps, doubl
                 continue;
             }
             const auto& sample = s.Samples[BistroPlot::NearestFrame(s.Samples, t)];
+            samples[iSeries] = &sample;
             const auto pos = point(sample);
             const auto color = ComparisonColors[iSeries];
             draw->AddCircleFilled(pos, .3f * em, color);
@@ -1213,8 +1428,14 @@ void BistroComparePanel::DrawFrameTraces(const PlotLines& lines, bool fps, doubl
             BistroPlot::DrawFrameDetails(sample.Number, sample.RouteSeconds, sample.Section.c_str(), sample.FrameMs,
                                          sample.IntervalMs, fps);
         }
+        if (view && samples[0] && samples[1])
+        {
+            ImGui::Separator();
+            ImGui::Text(fps ? "B - A   %+.3f FPS" : "B - A   %+.3f ms", sampleValue(*samples[1]) - sampleValue(*samples[0]));
+        }
         ImGui::EndTooltip();
     }
+    draw->PopClipRect();
     ImGui::Dummy({0, 1.4f * em});
 }
 
@@ -1832,10 +2053,20 @@ void BistroComparePanel::DrawHistory(const fs::path& latestCompleted, fs::path& 
     UpdateHistory(latestCompleted);
     if (_showComparison)
     {
-        if (ImGui::Button("Back to run history")) _showComparison = false;
-        BistroPlot::ContinueRowIfFits(ImGui::CalcTextSize("Compare passes").x * 1.5f);
+        if (ImGui::Button("Back to results")) _showComparison = false;
+        const float buttonTop = ImGui::GetItemRectMin().y;
+        const float buttonHeight = ImGui::GetItemRectSize().y;
+        constexpr auto heading = "Compare passes";
         ImGui::PushFont(_headingFont, ImGui::GetStyle().FontSizeBase * 1.5f);
-        ImGui::TextUnformatted("Compare passes");
+        const auto label = ImGui::CalcTextSize(heading);
+        BistroPlot::ContinueRowIfFits(label.x);
+        const auto pos = ImGui::GetCursorScreenPos();
+        if (pos.y == buttonTop)
+        {
+            ImGui::GetWindowDrawList()->AddText({pos.x, pos.y + .5f * (buttonHeight - label.y)}, ImGui::GetColorU32(ImGuiCol_Text), heading);
+            ImGui::Dummy({label.x, std::max(label.y, buttonHeight)});
+        }
+        else ImGui::TextUnformatted(heading);
         ImGui::PopFont();
         ImGui::Spacing();
         if (ImGui::BeginChild("Pass comparison", {}, ImGuiChildFlags_Borders))
@@ -1843,11 +2074,19 @@ void BistroComparePanel::DrawHistory(const fs::path& latestCompleted, fs::path& 
         ImGui::EndChild();
         return;
     }
+    if (!_runs.empty() && ImGui::Button(_showHistory ? "Hide history###toggle history" : "Show history###toggle history"))
+        _showHistory = !_showHistory;
     const float em = ImGui::GetFontSize();
     const auto room = ImGui::GetContentRegionAvail();
     const bool compact = room.x < 48.f * em || room.y < 19.f * em;
     int selected = -1;
-    if (compact)
+    if (!_showHistory && !_runs.empty())
+    {
+        const auto run = std::find_if(_runs.begin(), _runs.end(), [&](const Run& entry) { return entry.Path == _historyPath; });
+        if (run == _runs.end()) _historyPath = _runs.front().Path;
+        selected = run == _runs.end() ? 0 : int(run - _runs.begin());
+    }
+    else if (compact)
         selected = DrawRunList(true);
     else
     {

@@ -10,6 +10,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <imgui/imgui.h>
 
 struct ImFont;
 
@@ -122,8 +123,24 @@ class BistroComparePanel
     ImFont* _headingFont = nullptr;
     void Select(Selection &, int run, int pass);
     void DrawSelection(Selection &, size_t index);
-    static void DrawPlot(const PlotLines& lines, bool fps, double target = 0);
-    static void DrawFrameTraces(const PlotLines& lines, bool fps, double target);
+    struct PlotView
+    {
+        struct Axis
+        {
+            double Min = 0, Max = 1;
+            double Span() const { return Max - Min; }
+            void Set(double min, double max);
+            void Zoom(double anchor, double factor);
+        };
+        Axis X, Y;
+        ImVec2 DragStart, DragLast;
+        int DragButton = -1;
+        void Zoom(double x, double y, double factor);
+    };
+    PlotView _plotView;
+    void DrawPlot(const PlotLines& lines, bool& fps, double target = 0);
+    static void DrawPlotLegend(const PlotLines& lines, bool fps, double target);
+    static void DrawFrameTraces(const PlotLines& lines, bool fps, double target, PlotView* view = nullptr);
     static void DrawRouteMetrics(const FrameTiming& timing, ImFont* headingFont);
     static void DrawComparedTimings(const FrameTiming& a, const FrameTiming& b, const char* left, const char* right, bool comparable);
     static std::array<std::string, 8> ReconstructionRow(const Run&, const ReconstructionComparison&, const std::string&);
@@ -142,7 +159,7 @@ class BistroComparePanel
     Selection _lastPass;
     std::array<Selection, 2> _placementPasses;
     std::filesystem::path _historyPath, _imageRun;
-    bool _showComparison = false, _runFps = false;
+    bool _showHistory = false, _showComparison = false, _runFps = false;
     bool _loadComparison = false;
     std::string _openError;
     std::vector<Run> _runs;
