@@ -189,13 +189,13 @@ std::string BistroComparePanel::ReportBody(const Run& run, const Winner* selecte
             html << "<div class=\"switch\"><button aria-pressed=\"true\">Frame time (ms)</button><button aria-pressed=\"false\">FPS</button></div>"
                  << "<svg viewBox=\"0 0 800 196\" tabindex=\"0\" role=\"group\" aria-label=\"Frame timing along the route. Use arrow keys to inspect frames.\"></svg>"
                  << "<div class=\"route-axis\">Route time (s)</div>";
-        html << "<figcaption>";
+        html << "<figcaption><div class=\"plot-legend\">";
         for (size_t i = 0; i < lines.size(); ++i)
         {
             const auto& line = lines[i];
             if (!line.Data)
             {
-                if (!line.Label.empty()) html << "<p class=\"muted\">" << Escape(line.Label) << "</p>";
+                if (!line.Label.empty()) html << "<span>" << Escape(line.Label) << "</span>";
                 continue;
             }
             const auto& data = *line.Data;
@@ -210,17 +210,18 @@ std::string BistroComparePanel::ReportBody(const Run& run, const Winner* selecte
                 const auto section = sections.try_emplace(frame.Section, sections.size()).first->second;
                 html << frame.RouteSeconds << ',' << frame.IntervalMs << ',' << frame.FrameMs << ',' << frame.Number << ',' << section << ' ';
             }
-            html << "\"><b>" << Escape(line.Label.empty() ? data.Mode : line.Label) << "</b> <small>" << Escape(pass.Label)
+            html << "\" title=\"" << Escape(pass.Label)
                  << " &middot; " << data.Samples.size() << " frames &middot; Interval measured "
-                 << (data.AfterRender ? "after Render / Present" : "before Present") << "</small>";
+                 << (data.AfterRender ? "after Render / Present" : "before Present") << "\"><span class=\"series-label\">"
+                 << Escape(line.Label.empty() ? data.Mode : line.Label) << "</span>";
             for (const auto& [name, index] : sections) html << "<span hidden data-section=\"" << index << "\">" << Escape(name) << "</span>";
             html << "</div>";
         }
+        if (hasTrace && run.Target() > 0)
+            html << "<span class=\"target-key\">Target " << Decimal(1000. / run.Target()) << " ms</span>";
+        html << "</div>";
         if (hasTrace)
-        {
-            if (run.Target() > 0) html << "<div class=\"target-key\">Target &nbsp; " << run.Target() << " FPS / " << Decimal(1000. / run.Target()) << " ms</div>";
             html << "<div class=\"frame-readout\">Point at the chart or use the arrow keys to inspect a frame.</div>";
-        }
         else if (lines[0].Label.empty() && lines[1].Label.empty())
             html << "<p class=\"muted\">" << (measurement.Error.empty() ? "Full-route frame trace unavailable." : Escape(measurement.Error)) << "</p>";
         html << "</figcaption></figure>";

@@ -940,20 +940,23 @@ void BistroComparePanel::Select(Selection &s, int run, int pass)
 
 namespace
 {
+constexpr float LineSampleWidthEm = 1.65f;
+
 void DrawLineSample(ImU32 color, bool dashed)
 {
     const float em = ImGui::GetFontSize();
+    const float width = LineSampleWidthEm * em;
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     const float y = origin.y + ImGui::GetTextLineHeight() * .5f;
     auto* draw = ImGui::GetWindowDrawList();
     if (dashed)
     {
         draw->AddLine({origin.x, y}, {origin.x + .65f * em, y}, color, .16f * em);
-        draw->AddLine({origin.x + em, y}, {origin.x + 1.65f * em, y}, color, .16f * em);
+        draw->AddLine({origin.x + em, y}, {origin.x + width, y}, color, .16f * em);
     }
     else
-        draw->AddLine({origin.x, y}, {origin.x + 1.65f * em, y}, color, .16f * em);
-    ImGui::Dummy({1.65f * em, ImGui::GetTextLineHeight()});
+        draw->AddLine({origin.x, y}, {origin.x + width, y}, color, .16f * em);
+    ImGui::Dummy({width, ImGui::GetTextLineHeight()});
     ImGui::SameLine();
 }
 
@@ -1068,20 +1071,31 @@ void BistroComparePanel::DrawPlot(const PlotLines& lines, bool fps, double targe
     const bool hasTrace = lines[0].Data || lines[1].Data;
     if (hasTrace) DrawFrameTraces(lines, fps, target);
 
-    ImGui::PushTextWrapPos(0.f);
+    const float em = ImGui::GetFontSize();
+    bool first = true;
+    const auto legendItem = [&](const char* label, std::optional<ImU32> color, bool dashed) {
+        const float sampleWidth = color ? LineSampleWidthEm * em + ImGui::GetStyle().ItemSpacing.x : 0.f;
+        if (!first) BistroPlot::ContinueRowIfFits(sampleWidth + ImGui::CalcTextSize(label).x, em);
+        first = false;
+        ImGui::BeginGroup();
+        if (color) DrawLineSample(*color, dashed);
+        ImGui::PushTextWrapPos(0.f);
+        ImGui::TextDisabled("%s", label);
+        ImGui::PopTextWrapPos();
+        ImGui::EndGroup();
+    };
     for (size_t i = 0; i < lines.size(); ++i)
     {
         const auto& line = lines[i];
         if (line.Label.empty()) continue;
-        if (line.Data) DrawSeriesLabel(i, line.Label.c_str());
-        else ImGui::TextDisabled("%s", line.Label.c_str());
+        legendItem(line.Label.c_str(), line.Data ? std::optional{ComparisonColors[i]} : std::nullopt, i == 1);
     }
     if (hasTrace && target > 0)
     {
-        DrawLineSample(ImGui::GetColorU32(ImGuiCol_TextDisabled), true);
-        ImGui::TextDisabled("Target   %.0f FPS / %.1f ms", target, 1000. / target);
+        char label[48];
+        std::snprintf(label, sizeof(label), fps ? "Target %.0f FPS" : "Target %.1f ms", fps ? target : 1000. / target);
+        legendItem(label, ImGui::GetColorU32(ImGuiCol_TextDisabled), true);
     }
-    ImGui::PopTextWrapPos();
 }
 
 void BistroComparePanel::DrawFrameTraces(const PlotLines& lines, bool fps, double target)

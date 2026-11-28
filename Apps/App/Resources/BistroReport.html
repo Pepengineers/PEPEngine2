@@ -58,11 +58,10 @@ thead { color:var(--muted); background:#16251f }
 .delta.Reduced { color:#f8c36e }
 figure { margin:1em 0; padding:16px; border:1px solid var(--border); border-radius:5px; background:var(--ink) }
 figure .switch { font-size:.88rem }
-.series, .target-key { display:grid; grid-template-columns:1.6em minmax(0,1fr); column-gap:.6em; align-items:baseline; padding:.2em 0 }
-.series::before, .target-key::before { content:""; align-self:start; margin-top:.7em; border-top:3px solid var(--mint) }
-.series.second::before { border-top:3px dashed #f8c36e }
-.series b { color:var(--paper) }
-.series small { grid-column:2 }
+.plot-legend { display:flex; flex-wrap:wrap; align-items:center; gap:.25em 1.1em }
+.series, .target-key { display:flex; align-items:center; gap:.45em }
+.series::before, .target-key::before { content:""; flex:none; width:1.6em; border-top:2px solid var(--mint) }
+.series.second::before { border-top:2px dashed #f8c36e }
 .target-key::before { border-top:2px dashed var(--muted) }
 figure svg { cursor:crosshair; touch-action:pan-y }
 figure svg:focus-visible { outline:1px solid var(--lime) }
@@ -130,7 +129,7 @@ for (const chart of document.querySelectorAll("figure[data-target]")) {
       frames: el.dataset.frames.trim().split(/\s+/).map(row => row.split(",").map(Number)),
       trace: el.dataset.trace.trim().split(/\s+/).map(Number),
       role: el.classList.contains("second") ? "second" : "first",
-      label: el.querySelector("b").textContent, sections
+      label: el.querySelector(".series-label").textContent, sections
     };
   });
   const start = Math.min(...lines.map(l => l.frames[0][0]));
@@ -192,7 +191,10 @@ for (const chart of document.querySelectorAll("figure[data-target]")) {
       node("text", {x:46, y:y(tick) + 4, "text-anchor":"end"}).textContent = tick.toFixed(1);
       node("text", {x:x(time), y:187, "text-anchor":"middle"}).textContent = time.toFixed(1);
     }
-    if (target) node("line", {class:"target", x1:54, x2:784, y1:y(target), y2:y(target)});
+    if (target) {
+      node("line", {class:"target", x1:54, x2:784, y1:y(target), y2:y(target)});
+      chart.querySelector(".target-key").textContent = "Target " + (fps ? limit + " FPS" : target.toFixed(1) + " ms");
+    }
     for (const line of lines) {
       const points = line.trace.map(index => {
         const frame = line.frames[index];
