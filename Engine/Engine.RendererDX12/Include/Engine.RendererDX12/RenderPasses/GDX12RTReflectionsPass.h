@@ -44,6 +44,7 @@ private:
     std::unique_ptr<GDX12UploadBuffer<BYTE>> _denoisingConstants;
     nrd::CommonSettings _denoisingSettings{};
     UINT _historyCameraIndex = UINT_MAX;
+    float _resolutionScale = 0.5f;
     float _maxDistance = 0;
     float _maxRoughness = 0;
     float _roughnessFade = 0;

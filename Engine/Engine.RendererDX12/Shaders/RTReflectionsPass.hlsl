@@ -46,11 +46,16 @@ SamplerState samLinearWrap : register(s2);
 SamplerState samLinearClamp : register(s3);
 SamplerComparisonState samShadow : register(s6);
 
-float3 ReconstructPosition(uint2 pixel, uint2 size, float depth)
+float3 ReconstructPosition(float2 pixel, uint2 size, float depth)
 {
     float2 ndc = (float2(pixel) + 0.5f) / size * float2(2, -2) + float2(-1, 1);
     float4 world = mul(float4(ndc, depth, 1), Camera.InvViewProj);
     return world.xyz / world.w;
+}
+
+uint2 GetSourcePixel(uint2 reflectionPixel, uint2 reflectionSize, uint2 sourceSize)
+{
+    return min(uint2((float2(reflectionPixel) + 0.5f) * sourceSize / reflectionSize), sourceSize - 1);
 }
 
 float ReflectionWeight(uint2 pixel)
@@ -259,8 +264,10 @@ void Miss(inout ReflectionPayload payload)
 [shader("raygeneration")]
 void RayGeneration()
 {
-    uint2 pixel = DispatchRaysIndex().xy, size = DispatchRaysDimensions().xy;
-    MotionVectors[pixel] = Velocity[pixel];
+    uint2 reflectionPixel = DispatchRaysIndex().xy, reflectionSize = DispatchRaysDimensions().xy, size;
+    Depth.GetDimensions(size.x, size.y);
+    uint2 pixel = GetSourcePixel(reflectionPixel, reflectionSize, size);
+    MotionVectors[reflectionPixel] = Velocity[pixel];
     float weight = ReflectionWeight(pixel);
     float depth = Depth[pixel];
     float viewDepth = Camera.NearPlane * Camera.FarPlane / (Camera.NearPlane + depth * (Camera.FarPlane - Camera.NearPlane));
@@ -270,23 +277,24 @@ void RayGeneration()
     float3 view = SafeNormalize(Camera.CameraLocation - position);
     float nDotV = saturate(dot(normal, view));
     bool valid = weight > 0 && nDotV > 0;
-    PackedNormals[pixel] = NRD_FrontEnd_PackNormalAndRoughness(valid ? normal : float3(0, 0, 1), roughness, 0);
-    ViewDepth[pixel] = valid ? viewDepth : Camera.FarPlane + 1;
-    uint2 signalPixel = pixel;
+    PackedNormals[reflectionPixel] = NRD_FrontEnd_PackNormalAndRoughness(valid ? normal : float3(0, 0, 1), roughness, 0);
+    ViewDepth[reflectionPixel] = valid ? viewDepth : Camera.FarPlane + 1;
+    uint2 signalPixel = reflectionPixel;
     if (CheckerboardTracing)
     {
         signalPixel.x >>= 1;
-        if ((pixel.x ^ pixel.y ^ FrameIndex) & 1)
+        if ((reflectionPixel.x ^ reflectionPixel.y ^ FrameIndex) & 1)
         {
             // Odd widths leave one packed cell without a sample on alternating rows.
-            if ((size.x & 1) && pixel.x == size.x - 1) ReflectionOutput[signalPixel] = 0;
+            if ((reflectionSize.x & 1) && reflectionPixel.x == reflectionSize.x - 1) ReflectionOutput[signalPixel] = 0;
             return;
         }
     }
     if (!valid) { ReflectionOutput[signalPixel] = 0; return; }
     float3 f0 = F0Baked[pixel].rgb;
-    float footprint = max(length(ReconstructPosition(pixel + uint2(1, 0), size, depth) - position),
-        length(ReconstructPosition(pixel + uint2(0, 1), size, depth) - position));
+    float2 footprintSize = float2(size) / reflectionSize;
+    float footprint = max(length(ReconstructPosition(float2(pixel) + float2(footprintSize.x, 0), size, depth) - position),
+        length(ReconstructPosition(float2(pixel) + float2(0, footprintSize.y), size, depth) - position));
     float3 contribution = 0;
     float hitDistance = NRD_FrontEnd_SpecHitDistAveraging_Begin();
     for (uint sampleIndex = 0; sampleIndex < SamplesPerPixel; ++sampleIndex)
@@ -319,6 +327,41 @@ void RayGeneration()
     ReflectionOutput[signalPixel] = REBLUR_FrontEnd_PackRadianceAndNormHitDist(contribution / specularFactor, normHitDistance, true);
 }
 
+bool ResolveReflection(uint2 pixel, uint2 size, float3 normal, float roughness, out float3 reflection)
+{
+    uint2 reflectionSize;
+    ReflectionInput.GetDimensions(reflectionSize.x, reflectionSize.y);
+    if (all(reflectionSize == size))
+    {
+        reflection = REBLUR_BackEnd_UnpackRadianceAndNormHitDist(ReflectionInput[pixel]).rgb;
+        return true;
+    }
+    float2 position = (float2(pixel) + 0.5f) * reflectionSize / size - 0.5f;
+    int2 origin = int2(floor(position));
+    float2 fraction = frac(position);
+    float viewDepth = Camera.NearPlane * Camera.FarPlane / (Camera.NearPlane + Depth[pixel] * (Camera.FarPlane - Camera.NearPlane));
+    float totalWeight = 0;
+    reflection = 0;
+    // Reject samples from other surfaces when restoring full-resolution reflections.
+    [unroll] for (int y = 0; y < 2; ++y)
+    [unroll] for (int x = 0; x < 2; ++x)
+    {
+        uint2 samplePixel = uint2(clamp(origin + int2(x, y), int2(0, 0), int2(reflectionSize) - 1));
+        uint2 sourcePixel = GetSourcePixel(samplePixel, reflectionSize, size);
+        if (ReflectionWeight(sourcePixel) <= 0) continue;
+        float sampleDepth = Camera.NearPlane * Camera.FarPlane / (Camera.NearPlane + Depth[sourcePixel] * (Camera.FarPlane - Camera.NearPlane));
+        float4 sampleSurface = NormalRoughness[sourcePixel];
+        float weight = (x ? fraction.x : 1 - fraction.x) * (y ? fraction.y : 1 - fraction.y);
+        weight *= exp2(-abs(viewDepth - sampleDepth) / max(viewDepth * 0.02f, 1e-3f));
+        weight *= pow(saturate(dot(normal, SafeNormalize(sampleSurface.xyz))), 32);
+        weight *= exp2(-32 * abs(roughness - sampleSurface.w));
+        reflection += weight * REBLUR_BackEnd_UnpackRadianceAndNormHitDist(ReflectionInput[samplePixel]).rgb;
+        totalWeight += weight;
+    }
+    reflection /= max(totalWeight, 1e-6f);
+    return totalWeight > 1e-4f;
+}
+
 [shader("compute")]
 [numthreads(8, 8, 1)]
 void ComposeCS(uint3 thread : SV_DispatchThreadID)
@@ -338,7 +381,9 @@ void ComposeCS(uint3 thread : SV_DispatchThreadID)
         if (nDotV <= 0) { SceneColor[pixel] = scene; return; }
         float3 diffuseFactor, specularFactor;
         NRD_MaterialFactors(normal, view, 0, F0Baked[pixel].rgb, clamp(roughness, 0.045f, 1.0f), diffuseFactor, specularFactor);
-        float3 reflection = REBLUR_BackEnd_UnpackRadianceAndNormHitDist(ReflectionInput[pixel]).rgb * specularFactor;
+        float3 reflection;
+        if (!ResolveReflection(pixel, size, normal, roughness, reflection)) { SceneColor[pixel] = scene; return; }
+        reflection *= specularFactor;
         float3 fallback = 0;
         if (HasPrefiltered && HasBRDF)
         {

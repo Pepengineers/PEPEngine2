@@ -48,6 +48,7 @@ void GDX12RTReflectionsPass::Describe(PassDescription& description) const
 {
     description.AddParameter("SamplesPerPixel", 1);
     description.AddParameter("CheckerboardTracing", true);
+    description.AddParameter("ResolutionScale", 0.5f);
     description.AddParameter("MaxDistance", 10000.0f);
     description.AddParameter("MaxRoughness", 0.6f);
     description.AddParameter("RoughnessFade", 0.1f);
@@ -123,11 +124,14 @@ void GDX12RTReflectionsPass::Initialize(PassInitContext& context)
 {
     const auto samplesPerPixel = context.GetParameter<int>("SamplesPerPixel");
     _checkerboardTracing = context.GetParameter<bool>("CheckerboardTracing");
+    _resolutionScale = context.GetParameter<float>("ResolutionScale");
     _maxDistance = context.GetParameter<float>("MaxDistance");
     _maxRoughness = context.GetParameter<float>("MaxRoughness");
     _roughnessFade = context.GetParameter<float>("RoughnessFade");
     _bias = context.GetParameter<float>("Bias");
     _intensity = context.GetParameter<float>("Intensity");
+    if (!std::isfinite(_resolutionScale) || _resolutionScale <= 0 || _resolutionScale > 1)
+    { throw std::invalid_argument("ERROR: RT reflections require ResolutionScale in (0,1]."); }
     if (samplesPerPixel < 1 || samplesPerPixel > 64 || !std::isfinite(_maxDistance) || _maxDistance <= 0
         || !std::isfinite(_maxRoughness) || _maxRoughness <= 0 || _maxRoughness > 1
         || !std::isfinite(_roughnessFade) || _roughnessFade < 0 || _roughnessFade > 1
@@ -262,7 +266,10 @@ void GDX12RTReflectionsPass::InitializeDenoiser(PassInitContext& context)
 
 void GDX12RTReflectionsPass::CreateDenoisingTextures(PassInitContext& context)
 {
-    const auto size = context.GetOutputResourceDescription("OutColorTexture").GetSize();
+    const auto outputSize = context.GetOutputResourceDescription("OutColorTexture").GetSize();
+    const UInt2 size{
+        (std::max)(1u, static_cast<UINT>(std::ceil(outputSize.x * _resolutionScale))),
+        (std::max)(1u, static_cast<UINT>(std::ceil(outputSize.y * _resolutionScale)))};
     if (size.x > UINT16_MAX || size.y > UINT16_MAX) { throw std::invalid_argument("ERROR: NRD texture dimensions exceed 65535."); }
     auto* resources = context.GetDeviceResources();
     auto create = [&](std::unique_ptr<GDX12Texture>& texture, DXGI_FORMAT format, UINT downsample = 1)
@@ -323,7 +330,8 @@ std::vector<ExternalResourceUse> GDX12RTReflectionsPass::GetExternalResources(Pa
 void GDX12RTReflectionsPass::Denoise(PassExecutionContext& context)
 {
     const auto* common = context.GetFrameData();
-    const auto size = context.GetOutputResourceDescription("OutColorTexture").GetSize();
+    const auto outputSize = context.GetOutputResourceDescription("OutColorTexture").GetSize();
+    const UInt2 size{_reflections->GetWidth(), _reflections->GetHeight()};
     nrd::CommonSettings settings{};
     // Row-vector SimpleMath matrices already have NRD's column-vector, column-major byte layout.
     memcpy(settings.viewToClipMatrix, &common->CameraViewToClip, sizeof(Matrix));
@@ -334,8 +342,8 @@ void GDX12RTReflectionsPass::Denoise(PassExecutionContext& context)
     memcpy(settings.worldToViewMatrixPrev, reset ? settings.worldToViewMatrix : _denoisingSettings.worldToViewMatrix, sizeof(Matrix));
     settings.motionVectorScale[0] = 0.5f;
     settings.motionVectorScale[1] = -0.5f;
-    settings.cameraJitter[0] = common->ActiveCameraJitterOffsetX;
-    settings.cameraJitter[1] = common->ActiveCameraJitterOffsetY;
+    settings.cameraJitter[0] = common->ActiveCameraJitterOffsetX * size.x / outputSize.x;
+    settings.cameraJitter[1] = common->ActiveCameraJitterOffsetY * size.y / outputSize.y;
     settings.cameraJitterPrev[0] = reset ? settings.cameraJitter[0] : _denoisingSettings.cameraJitter[0];
     settings.cameraJitterPrev[1] = reset ? settings.cameraJitter[1] : _denoisingSettings.cameraJitter[1];
     settings.resourceSize[0] = settings.resourceSizePrev[0] = settings.rectSize[0] = settings.rectSizePrev[0] = static_cast<uint16_t>(size.x);
@@ -466,7 +474,7 @@ void GDX12RTReflectionsPass::Execute(PassExecutionContext& context)
     const auto size = context.GetOutputResourceDescription("OutColorTexture").GetSize();
     commands->BeginPixEvent("Trace Reflections", Colors::SteelBlue);
     commands->SetRayTracingPipeline(*_reflectionPipeline);
-    commands->DispatchRays(*_shaderTable, size.x, size.y);
+    commands->DispatchRays(*_shaderTable, _reflections->GetWidth(), _reflections->GetHeight());
     commands->EndPixEvent();
 
     Denoise(context);
