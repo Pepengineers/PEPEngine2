@@ -56,6 +56,7 @@ namespace
         graph.ConnectNodes(cacao.GetOutput("OutAmbientOcclusion"), reflections.GetInput("InAmbientOcclusion"));
         graph.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), skyBox.GetInput("InDepthBuffer"));
         graph.ConnectNodes(opaque.GetOutput("OutVelocityBuffer"), skyBox.GetInput("InVelocityBuffer"));
+        graph.ConnectNodes(opaque.GetOutput("OutVelocityBuffer"), reflections.GetInput("InVelocityBuffer"));
         graph.ConnectNodes(ibl.GetOutput("OutIrradiance"), lighting.GetInput("InIrradiance"));
         graph.ConnectNodes(ibl.GetOutput("OutPrefilteredEnvironment"), lighting.GetInput("InPrefilteredEnvironment"));
         graph.ConnectNodes(ibl.GetOutput("OutBRDFLut"), lighting.GetInput("InBRDFLut"));

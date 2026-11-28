@@ -554,6 +554,15 @@ namespace
 		{
 			material->Type = MaterialType::Opaque;
 		}
+        //
+        // TEMPORARY CHECK FOR REFLECTIONS. DELETE LATER!!!
+        //
+        if (sourceMaterial.Name == "MASTER_Interior_01_Floor_Tile_Hexagonal_BLENDSHADER")
+        {
+            material->Roughness = 0.05f;
+            material->SpecularColor = Vector3(0.9f, 0.9f, 0.9f);
+            material->HasNormalMap = false;
+        } // END OF DELETE ME SECTION
 		material->DirtyFlag = true;
 		return material;
 	}

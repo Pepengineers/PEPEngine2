@@ -2,12 +2,14 @@
 #include "RayTracing.hlsli"
 #include "PBRMath.hlsli"
 #include "ShadowSampling.hlsli"
+#include "../../../External/External.Libraries/nrd/Shaders/NRD.hlsli"
 
 cbuffer Parameters : register(b0)
 {
     float MaxDistance, MaxRoughness, RoughnessFade, Bias, Intensity;
     uint SamplesPerPixel, FrameIndex, HasDirectionalShadows, HasPointSpotShadows;
     uint HasAmbientOcclusion, HasPrefiltered, HasBRDF, LightCount;
+    float3 HitDistanceParameters;
 };
 ConstantBuffer<CameraCB> Camera : register(b1);
 
@@ -32,9 +34,13 @@ Texture2DArray<float> PointSpotShadowMaps : register(t17);
 StructuredBuffer<ShadowView> ShadowViews : register(t18);
 Texture2D<float> AmbientOcclusion : register(t19);
 Texture2D<float4> ReflectionInput : register(t20);
-Texture2D<float4> Texture2DCache[TEXTURE2D_RANGE_LENGTH] : register(t21);
+Texture2D<float2> Velocity : register(t21);
+Texture2D<float4> Texture2DCache[TEXTURE2D_RANGE_LENGTH] : register(t22);
 RWTexture2D<float4> ReflectionOutput : register(u0);
 RWTexture2D<float4> SceneColor : register(u1);
+RWTexture2D<float4> PackedNormals : register(u2);
+RWTexture2D<float> ViewDepth : register(u3);
+RWTexture2D<float2> MotionVectors : register(u4);
 SamplerState samLinearWrap : register(s2);
 SamplerState samLinearClamp : register(s3);
 SamplerComparisonState samShadow : register(s6);
@@ -61,9 +67,10 @@ struct [raypayload] ReflectionPayload
     float3 Radiance : read(caller) : write(caller, closesthit, miss);
     float ConeWidth : read(closesthit, anyhit) : write(caller);
     float ConeSpread : read(closesthit, anyhit, miss) : write(caller);
+    float HitDistance : read(caller) : write(caller, closesthit, miss);
 };
 #else
-struct ReflectionPayload { float3 Radiance; float ConeWidth; float ConeSpread; };
+struct ReflectionPayload { float3 Radiance; float ConeWidth; float ConeSpread; float HitDistance; };
 #endif
 
 uint Hash(uint value)
@@ -195,6 +202,7 @@ void AnyHit(inout ReflectionPayload payload, BuiltInTriangleIntersectionAttribut
 void ClosestHit(inout ReflectionPayload payload, BuiltInTriangleIntersectionAttributes attributes)
 {
     payload.Radiance = 0;
+    payload.HitDistance = RayTCurrent();
     RayTracingHitSurface hit = LoadRayTracingHitSurface(Vertices, Indices, Draws, Instances, Transforms,
         InstanceID(), GeometryIndex(), PrimitiveIndex(), attributes.barycentrics);
     Material material = Materials[hit.MaterialIndex];
@@ -240,6 +248,7 @@ void ClosestHit(inout ReflectionPayload payload, BuiltInTriangleIntersectionAttr
 [shader("miss")]
 void Miss(inout ReflectionPayload payload)
 {
+    payload.HitDistance = 1e30f;
     uint width, height, levels;
     SkyBoxMap.GetDimensions(0, width, height, levels);
     float lod = clamp(log2(max(payload.ConeSpread * width * 0.5f, 1.0f)), 0, float(levels - 1));
@@ -250,19 +259,24 @@ void Miss(inout ReflectionPayload payload)
 void RayGeneration()
 {
     uint2 pixel = DispatchRaysIndex().xy, size = DispatchRaysDimensions().xy;
+    MotionVectors[pixel] = Velocity[pixel];
     float weight = ReflectionWeight(pixel);
-    if (weight <= 0) { ReflectionOutput[pixel] = 0; return; }
     float depth = Depth[pixel];
-    float3 position = ReconstructPosition(pixel, size, depth);
+    float viewDepth = Camera.NearPlane * Camera.FarPlane / (Camera.NearPlane + depth * (Camera.FarPlane - Camera.NearPlane));
     float3 normal = SafeNormalize(NormalRoughness[pixel].xyz);
     float roughness = clamp(NormalRoughness[pixel].w, 0.045f, 1.0f);
+    PackedNormals[pixel] = NRD_FrontEnd_PackNormalAndRoughness(weight > 0 ? normal : float3(0, 0, 1), roughness, 0);
+    ViewDepth[pixel] = weight > 0 ? viewDepth : Camera.FarPlane + 1;
+    if (weight <= 0) { ReflectionOutput[pixel] = 0; return; }
+    float3 position = ReconstructPosition(pixel, size, depth);
     float3 view = SafeNormalize(Camera.CameraLocation - position);
     float nDotV = saturate(dot(normal, view));
-    if (nDotV <= 0) { ReflectionOutput[pixel] = 0; return; }
+    if (nDotV <= 0) { ViewDepth[pixel] = Camera.FarPlane + 1; ReflectionOutput[pixel] = 0; return; }
     float3 f0 = F0Baked[pixel].rgb;
     float footprint = max(length(ReconstructPosition(pixel + uint2(1, 0), size, depth) - position),
         length(ReconstructPosition(pixel + uint2(0, 1), size, depth) - position));
     float3 contribution = 0;
+    float hitDistance = NRD_FrontEnd_SpecHitDistAveraging_Begin();
     for (uint sampleIndex = 0; sampleIndex < SamplesPerPixel; ++sampleIndex)
     {
         float3 halfVector;
@@ -278,13 +292,19 @@ void RayGeneration()
         payload.Radiance = 0;
         payload.ConeWidth = footprint;
         payload.ConeSpread = footprint / max(length(Camera.CameraLocation - position), 1e-4f);
+        payload.HitDistance = 0;
         TraceRay(Scene, RAY_FLAG_FORCE_NON_OPAQUE | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES, 0xff, 0, 0, 0, ray, payload);
+        NRD_FrontEnd_SpecHitDistAveraging_Add(hitDistance, payload.HitDistance);
         float3 fresnel = f0 + (1 - f0) * FresnelSchlickFactor(saturate(vDotH));
         contribution += payload.Radiance * fresnel * SplitSumVisibility(nDotV, nDotL,
             saturate(dot(normal, halfVector)), vDotH, roughness);
     }
     contribution /= SamplesPerPixel;
-    ReflectionOutput[pixel] = float4(min(max(contribution, 0), 65504.0f), weight);
+    NRD_FrontEnd_SpecHitDistAveraging_End(hitDistance);
+    float3 diffuseFactor, specularFactor;
+    NRD_MaterialFactors(normal, view, 0, f0, roughness, diffuseFactor, specularFactor);
+    float normHitDistance = REBLUR_FrontEnd_GetNormHitDist(hitDistance, viewDepth, HitDistanceParameters, roughness);
+    ReflectionOutput[pixel] = REBLUR_FrontEnd_PackRadianceAndNormHitDist(contribution / specularFactor, normHitDistance, true);
 }
 
 [shader("compute")]
@@ -294,14 +314,19 @@ void ComposeCS(uint3 thread : SV_DispatchThreadID)
     uint2 size, pixel = thread.xy;
     SceneColor.GetDimensions(size.x, size.y);
     if (any(pixel >= size)) return;
-    float4 scene = InputColor[pixel], reflection = ReflectionInput[pixel];
-    if (reflection.a > 0)
+    float4 scene = InputColor[pixel];
+    float weight = ReflectionWeight(pixel);
+    if (weight > 0)
     {
         float3 position = ReconstructPosition(pixel, size, Depth[pixel]);
         float3 view = SafeNormalize(Camera.CameraLocation - position);
         float3 normal = SafeNormalize(NormalRoughness[pixel].xyz);
         float roughness = NormalRoughness[pixel].w;
         float nDotV = saturate(dot(normal, view));
+        if (nDotV <= 0) { SceneColor[pixel] = scene; return; }
+        float3 diffuseFactor, specularFactor;
+        NRD_MaterialFactors(normal, view, 0, F0Baked[pixel].rgb, clamp(roughness, 0.045f, 1.0f), diffuseFactor, specularFactor);
+        float3 reflection = REBLUR_BackEnd_UnpackRadianceAndNormHitDist(ReflectionInput[pixel]).rgb * specularFactor;
         float3 fallback = 0;
         if (HasPrefiltered && HasBRDF)
         {
@@ -313,7 +338,7 @@ void ComposeCS(uint3 thread : SV_DispatchThreadID)
         float specularVisibility = saturate(pow(nDotV + ambientVisibility,
             exp2(-16 * roughness * roughness - 1)) - 1 + ambientVisibility);
 
-        scene.rgb = min(max(0, scene.rgb + Intensity * reflection.a * specularVisibility * (reflection.rgb - fallback)), 65504.0f);
+        scene.rgb = min(max(0, scene.rgb + Intensity * weight * specularVisibility * (reflection - fallback)), 65504.0f);
     }
     SceneColor[pixel] = scene;
 }
