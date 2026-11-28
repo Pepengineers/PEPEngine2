@@ -1218,17 +1218,17 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
     createLight("Paris_Ceiling_Light_04_Downlight", LightType::Spot, { 798.379f, 307.563f, 100.141f }, 1000.000f, 400.000f);
 
     // Seven Paris_Wall_Bulb_Light components, 2 units below the bulb surface.
-    createLight("Paris_Wall_Light_Interior_01", LightType::Point, { 191.903f, 249.558f, -811.007f }, 450.000f, 100.000f);
-    createLight("Paris_Wall_Light_Interior_02", LightType::Point, { 50.266f, 249.558f, -551.061f }, 450.000f, 100.000f);
-    createLight("Paris_Wall_Light_Interior_03", LightType::Point, { -94.535f, 249.558f, -284.018f }, 450.000f, 100.000f);
-    createLight("Paris_Wall_Light_Interior_04", LightType::Point, { 41.186f, 249.558f, 55.168f }, 450.000f, 100.000f);
-    createLight("Paris_Wall_Light_Interior_05", LightType::Point, { 335.848f, 249.558f, 194.410f }, 450.000f, 100.000f);
-    createLight("Paris_Wall_Light_Interior_06", LightType::Point, { 617.429f, 249.558f, 305.031f }, 450.000f, 100.000f);
-    createLight("Paris_Wall_Light_Interior_02A", LightType::Point, { 773.119f, 241.921f, -463.083f }, 450.000f, 100.000f);
+    createLight("Paris_Wall_Light_Interior_01", LightType::Point, { 187.437f, 229.332f, -813.197f }, 100.207f, 50.297f);
+    createLight("Paris_Wall_Light_Interior_02", LightType::Point, { 45.800f, 229.332f, -553.251f }, 100.207f, 50.297f);
+    createLight("Paris_Wall_Light_Interior_03", LightType::Point, { -99.001f, 229.332f, -286.208f }, 100.207f, 50.297f);
+    createLight("Paris_Wall_Light_Interior_04", LightType::Point, { 36.714f, 229.332f, 57.345f }, 100.207f, 50.297f);
+    createLight("Paris_Wall_Light_Interior_05", LightType::Point, { 334.293f, 229.332f, 199.135f }, 100.207f, 50.297f);
+    createLight("Paris_Wall_Light_Interior_06", LightType::Point, { 615.823f, 229.332f, 309.739f }, 100.207f, 50.297f);
+    createLight("Paris_Wall_Light_Interior_02A", LightType::Point, { 773.119f, 241.921f, -463.083f }, 100.207f, 50.297f);
 
     // Two ceiling fan bottom glass globes
-    createLight("Paris_CeilingFan_01A_Base_mesh_01__2_", LightType::Point, { 639.938f, 351.970f, 88.496f }, 450.000f, 120.000f);
-    createLight("Paris_CeilingFan_01A_Base_mesh_01", LightType::Point, { 340.091f, 351.970f, -97.993f }, 450.000f, 120.000f);
+    createLight("Paris_CeilingFan_01A_Base_mesh_01__2_", LightType::Point, { 639.938f, 343.190f, 88.496f }, 450.000f, 120.000f);
+    createLight("Paris_CeilingFan_01A_Base_mesh_01", LightType::Point, { 340.091f, 343.190f, -97.993f }, 450.000f, 120.000f);
 
     
     return true;
